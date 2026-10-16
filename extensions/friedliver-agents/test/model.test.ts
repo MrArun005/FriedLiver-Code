@@ -17,6 +17,10 @@ import {
 
 const chat = (over: Partial<ChatView> = {}): ChatView => ({
   id: 'chat-1',
+  depth: 0,
+  files: [],
+  lastActivity: 0,
+  turns: 0,
   agent: 'demo',
   label: 'Demo',
   title: 'New chat',

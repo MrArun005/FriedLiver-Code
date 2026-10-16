@@ -27,11 +27,32 @@ export type WebviewMessage =
   | { type: 'merge'; chatId: string }
   | { type: 'removeWorktree'; chatId: string }
   | { type: 'moveToCenter' }
-  | { type: 'openTasks' };
+  | { type: 'openTasks' }
+  // Connections between chats and agents.
+  /** Continue this chat with another agent, in a new chat that starts from its transcript. */
+  | { type: 'handoff'; chatId: string; agent: AgentKey }
+  /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. */
+  | { type: 'consult'; chatId: string; agent: AgentKey; text: string }
+  /** Forward each finished turn of `from` to the chat `to`. */
+  | { type: 'pipe'; from: string; to: string }
+  | { type: 'unlink'; linkId: string }
+  /** Send `fromChatId`'s last reply to `toChatId` as a message, e.g. a consultant's answer back to the main chat. */
+  | { type: 'forward'; fromChatId: string; toChatId: string }
+  /** The same task on several agents at once, each in its own worktree when asked, to compare. */
+  | { type: 'fanout'; agents: AgentKey[]; prompt: string; worktree: boolean }
+  /** Answer an agent's request to reach another chat or agent. */
+  | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'deny' }
+  | { type: 'archive'; chatId: string; archived: boolean }
+  /** Stop and forget a chat. */
+  | { type: 'removeChat'; chatId: string }
+  /** Show what a task changed: its worktree branch against the main checkout, or the files it touched. */
+  | { type: 'viewChanges'; chatId: string };
 
 export type HostMessage =
   | { type: 'snapshot'; state: AppState; selected?: string; now: number }
   | { type: 'action'; action: Action }
+  /** Several actions in order; the host batches them when agents stream fast. */
+  | { type: 'actions'; actions: Action[] }
   | { type: 'select'; chatId: string }
   | { type: 'attached'; images: Attachment[] }
   | { type: 'reveal'; chatId: string; id: string };
@@ -43,6 +64,8 @@ export const LIMITS = {
   imageData: 11_200_000,
   path: 4096,
   command: 4096,
+  /** Agents one fan-out may start: each vendor once, plus the demo. */
+  fanout: 4,
 };
 
 export const IMAGE_MIME = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -97,7 +120,34 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'openChat':
     case 'merge':
     case 'removeWorktree':
+    case 'removeChat':
+    case 'viewChanges':
       return id(m.chatId) ? { type: m.type, chatId: m.chatId } : null;
+    case 'handoff':
+      return id(m.chatId) && isAgentKey(m.agent) ? { type: 'handoff', chatId: m.chatId, agent: m.agent } : null;
+    case 'consult':
+      return id(m.chatId) && isAgentKey(m.agent) && str(m.text, LIMITS.text) && m.text.trim()
+        ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text }
+        : null;
+    case 'pipe':
+      return id(m.from) && id(m.to) && m.from !== m.to ? { type: 'pipe', from: m.from, to: m.to } : null;
+    case 'unlink':
+      return id(m.linkId) ? { type: 'unlink', linkId: m.linkId } : null;
+    case 'forward':
+      return id(m.fromChatId) && id(m.toChatId) && m.fromChatId !== m.toChatId ? { type: 'forward', fromChatId: m.fromChatId, toChatId: m.toChatId } : null;
+    case 'fanout': {
+      if (!Array.isArray(m.agents) || m.agents.length < 1 || m.agents.length > LIMITS.fanout || !m.agents.every(isAgentKey)) return null;
+      const agents = [...new Set(m.agents as AgentKey[])];
+      return str(m.prompt, LIMITS.text) && m.prompt.trim() && typeof m.worktree === 'boolean'
+        ? { type: 'fanout', agents, prompt: m.prompt, worktree: m.worktree }
+        : null;
+    }
+    case 'bridge':
+      return id(m.requestId) && (m.answer === 'allow' || m.answer === 'allowChat' || m.answer === 'deny')
+        ? { type: 'bridge', requestId: m.requestId, answer: m.answer }
+        : null;
+    case 'archive':
+      return id(m.chatId) && typeof m.archived === 'boolean' ? { type: 'archive', chatId: m.chatId, archived: m.archived } : null;
     case 'send': {
       if (!id(m.chatId) || !str(m.text, LIMITS.text) || !Array.isArray(m.images) || m.images.length > LIMITS.images) return null;
       const images = m.images.map(attachment);

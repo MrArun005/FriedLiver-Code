@@ -225,6 +225,10 @@ export class AgentCore {
       busy: false,
       changedFiles: 0,
       items: [],
+      depth: 0,
+      files: [],
+      lastActivity: Date.now(),
+      turns: 0,
     };
     this.dispatch({ t: 'created', chat: view });
     return view;

@@ -64,6 +64,67 @@ export interface ReviewItem {
   state: 'pending' | 'accepted' | 'rejected';
 }
 
+// ---- Connections between chats ----
+
+/**
+ * How two chats are joined:
+ * - handoff: `to` continues `from`'s work with another agent, starting from its transcript.
+ * - consult: `from` asked `to` a question; the reply comes back into `from`.
+ * - pipe: each finished turn of `from` goes to `to` as a message, while `active`.
+ */
+export type LinkKind = 'handoff' | 'consult' | 'pipe';
+
+export interface ChatLink {
+  id: string;
+  kind: LinkKind;
+  from: string;
+  to: string;
+  /** The user made it, or an agent did through the FriedLiver tools (after the user allowed it). */
+  by: 'user' | 'agent';
+  createdAt: number;
+  /** Pipes: forwarding is on. Others are always active. */
+  active: boolean;
+  /** Messages carried over this link so far. */
+  count: number;
+}
+
+/** Chats an agent may start through the FriedLiver tools, counted from a chat the user started. */
+export const MAX_LINK_DEPTH = 2;
+
+/** What an agent asked to do with another chat or agent through the FriedLiver tools. */
+export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat';
+
+export interface BridgeItem {
+  kind: 'bridge';
+  requestId: string;
+  tool: BridgeTool;
+  /** Another agent (a new consultation) or an existing chat. */
+  target: { agent: AgentKey } | { chatId: string };
+  /** The question or message; empty for read_chat. */
+  text: string;
+  state: 'awaiting' | 'allowed' | 'denied';
+}
+
+/**
+ * A message that crossed a link, shown in both chats:
+ * - asked / reply: this chat consulted `chatId`, and its answer.
+ * - consulted: this chat was started by `chatId` to answer a question.
+ * - handoff-from / handoff-to: this chat continues `chatId`, or was continued in it.
+ * - piped-in / piped-out: a turn forwarded from or to `chatId`.
+ */
+export interface LinkItem {
+  kind: 'link';
+  linkId: string;
+  role: 'asked' | 'reply' | 'consulted' | 'handoff-from' | 'handoff-to' | 'piped-in' | 'piped-out';
+  /** The other chat. */
+  chatId: string;
+  /** The other chat's agent and label, kept so the item reads right after that chat is gone. */
+  agent: AgentKey;
+  label: string;
+  text: string;
+  by: 'user' | 'agent';
+}
+
 export type Item =
   | { kind: 'user'; text: string; images: string[] }
   | { kind: 'agent'; text: string }
@@ -74,7 +135,9 @@ export type Item =
   | ReviewItem
   | CommandItem
   | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; actions?: NoticeAction[] }
-  | { kind: 'changes'; turnId: string; files: string[]; undone?: boolean };
+  | { kind: 'changes'; turnId: string; files: string[]; undone?: boolean }
+  | LinkItem
+  | BridgeItem;
 
 export interface ChatView {
   id: string;
@@ -91,21 +154,37 @@ export interface ChatView {
   busy: boolean;
   changedFiles: number;
   items: Item[];
+  /** Set when another chat started this one: a hand-off or a consultation. */
+  origin?: { kind: 'handoff' | 'consult'; chatId: string; by: 'user' | 'agent' };
+  /** Chats started together with the same task on several agents, to compare. */
+  group?: string;
+  /** Hops from a chat the user started; agents can't start chats past MAX_LINK_DEPTH. */
+  depth: number;
+  /** Files the agents proposed or made changes to, relative to `cwd`, with forward slashes. */
+  files: string[];
+  /** When the agent last sent anything, for "active 3s ago" and sorting. */
+  lastActivity: number;
+  /** Finished turns. */
+  turns: number;
+  /** Put away: kept for its history, hidden from the board and the tab bar. */
+  archived?: boolean;
 }
 
 export interface AppState {
   chats: ChatView[];
   images: ImageItem[];
+  links: ChatLink[];
 }
 
-export const EMPTY_STATE: AppState = { chats: [], images: [] };
+export const EMPTY_STATE: AppState = { chats: [], images: [], links: [] };
 
+/** `at` is the host's clock, so every webview folds the same state. */
 export type Action =
   | { t: 'created'; chat: ChatView }
   | { t: 'closed'; chatId: string }
-  | { t: 'items'; chatId: string; items: Item[] }
-  | { t: 'update'; chatId: string; update: acp.SessionUpdate }
-  | { t: 'busy'; chatId: string; busy: boolean }
+  | { t: 'items'; chatId: string; items: Item[]; at?: number }
+  | { t: 'update'; chatId: string; update: acp.SessionUpdate; at?: number }
+  | { t: 'busy'; chatId: string; busy: boolean; at?: number }
   | { t: 'title'; chatId: string; title: string }
   | { t: 'permissionAnswered'; requestId: string; answer: string }
   | { t: 'review'; reviewId: string; state: ReviewItem['state'] }
@@ -114,7 +193,16 @@ export type Action =
   | { t: 'changes'; chatId: string; turnId: string; files: string[] }
   | { t: 'undone'; chatId: string; turnId: string }
   | { t: 'worktree'; chatId: string; branch?: string; merged?: boolean }
-  | { t: 'image'; image: ImageItem };
+  | { t: 'image'; image: ImageItem }
+  | { t: 'link'; link: ChatLink }
+  | { t: 'linkPatch'; linkId: string; patch: Partial<Pick<ChatLink, 'active' | 'count'>> }
+  | { t: 'unlink'; linkId: string }
+  | { t: 'bridge'; requestId: string; state: BridgeItem['state'] }
+  /** Files a turn proposed or changed, relative to the chat's cwd; merged into `files`. */
+  | { t: 'files'; chatId: string; files: string[] }
+  | { t: 'archive'; chatId: string; archived: boolean }
+  /** The whole state at once: chats restored after a reload. */
+  | { t: 'restore'; state: AppState };
 
 /** Command output kept in the transcript; the agent still gets its full output through ACP. */
 export const MAX_COMMAND_OUTPUT = 64 * 1024;
@@ -125,13 +213,22 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'created':
       return { ...state, chats: [...state.chats, action.chat] };
     case 'closed':
-      return { ...state, chats: state.chats.filter((c) => c.id !== action.chatId) };
+      return {
+        ...state,
+        chats: state.chats.filter((c) => c.id !== action.chatId),
+        links: state.links.filter((l) => l.from !== action.chatId && l.to !== action.chatId),
+      };
     case 'items':
-      return editChat(state, action.chatId, (c) => ({ ...c, items: [...c.items, ...action.items] }));
+      return editChat(state, action.chatId, (c) => ({ ...c, items: [...c.items, ...action.items], lastActivity: action.at ?? c.lastActivity }));
     case 'update':
-      return editChat(state, action.chatId, (c) => ({ ...c, items: applyUpdate(c.items, action.update) }));
+      return editChat(state, action.chatId, (c) => ({ ...c, items: applyUpdate(c.items, action.update), lastActivity: action.at ?? c.lastActivity }));
     case 'busy':
-      return editChat(state, action.chatId, (c) => ({ ...c, busy: action.busy }));
+      return editChat(state, action.chatId, (c) => ({
+        ...c,
+        busy: action.busy,
+        turns: c.busy && !action.busy ? c.turns + 1 : c.turns,
+        lastActivity: action.at ?? c.lastActivity,
+      }));
     case 'title':
       return editChat(state, action.chatId, (c) => ({ ...c, title: action.title }));
     case 'permissionAnswered':
@@ -165,6 +262,24 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'image':
       if (state.images.some((i) => i.id === action.image.id)) return state;
       return { ...state, images: [...state.images, action.image].slice(-MAX_IMAGES) };
+    case 'link':
+      if (state.links.some((l) => l.id === action.link.id)) return state;
+      return { ...state, links: [...state.links, action.link] };
+    case 'linkPatch':
+      return { ...state, links: state.links.map((l) => (l.id === action.linkId ? { ...l, ...action.patch } : l)) };
+    case 'unlink':
+      return { ...state, links: state.links.filter((l) => l.id !== action.linkId) };
+    case 'bridge':
+      return editItems(state, (i) => (i.kind === 'bridge' && i.requestId === action.requestId ? { ...i, state: action.state } : i));
+    case 'files':
+      return editChat(state, action.chatId, (c) => {
+        const files = [...new Set([...c.files, ...action.files])];
+        return files.length === c.files.length ? c : { ...c, files };
+      });
+    case 'archive':
+      return editChat(state, action.chatId, (c) => ({ ...c, archived: action.archived || undefined }));
+    case 'restore':
+      return action.state;
   }
 }
 
@@ -243,27 +358,89 @@ export type ChatStatus = 'idle' | 'working' | 'needs-you' | 'done' | 'error';
 
 export interface Decision {
   chatId: string;
-  kind: 'permission' | 'review' | 'command';
+  kind: 'permission' | 'review' | 'command' | 'bridge';
   /** requestId, reviewId or commandId. */
   id: string;
   title: string;
 }
 
 /** Everything the agents are waiting on the user for, oldest chat first. */
-export function decisions(state: AppState): Decision[] {
+export function decisions(state: Pick<AppState, 'chats'>): Decision[] {
   const out: Decision[] = [];
   for (const chat of state.chats) {
     for (const i of chat.items) {
       if (i.kind === 'permission' && !i.answer) out.push({ chatId: chat.id, kind: 'permission', id: i.requestId, title: i.title });
       else if (i.kind === 'review' && i.state === 'pending') out.push({ chatId: chat.id, kind: 'review', id: i.reviewId, title: `Review edit to ${basename(i.path)}` });
       else if (i.kind === 'command' && i.state === 'awaiting') out.push({ chatId: chat.id, kind: 'command', id: i.commandId, title: `Run ${shortCommand(i.commandLine)}` });
+      else if (i.kind === 'bridge' && i.state === 'awaiting') out.push({ chatId: chat.id, kind: 'bridge', id: i.requestId, title: bridgeTitle(state, chat, i) });
     }
   }
   return out;
 }
 
+/** "Claude 2 wants to ask Gemini", "Claude 2 wants to read Codex 3". */
+export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item: BridgeItem): string {
+  const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : (state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId)?.label ?? 'another chat');
+  const verb = item.tool === 'ask_agent' ? 'ask' : item.tool === 'send_to_chat' ? 'message' : 'read';
+  return `${chat.label} wants to ${verb} ${target}`;
+}
+
+/** Links that start or end at a chat. */
+export function linksOf(state: Pick<AppState, 'links'>, chatId: string): ChatLink[] {
+  return state.links.filter((l) => l.from === chatId || l.to === chatId);
+}
+
+export interface FileConflict {
+  /** Relative to each chat's cwd. */
+  file: string;
+  chats: string[];
+}
+
+/**
+ * Files that more than one open chat proposed or made changes to. Paths are
+ * compared relative to each chat's folder, so two worktrees editing the same
+ * file count too: their branches will clash when merged.
+ */
+export function fileConflicts(state: Pick<AppState, 'chats'>): FileConflict[] {
+  const byFile = new Map<string, string[]>();
+  for (const chat of state.chats) {
+    if (chat.archived || chat.merged) continue;
+    for (const f of chat.files) byFile.set(f, [...(byFile.get(f) ?? []), chat.id]);
+  }
+  return [...byFile].filter(([, chats]) => chats.length > 1).map(([file, chats]) => ({ file, chats }));
+}
+
+/** Names people type after @ to reach an agent. */
+const MENTIONS: Record<string, AgentKey> = {
+  claude: 'claude',
+  codex: 'codex',
+  gpt: 'codex',
+  chatgpt: 'codex',
+  openai: 'codex',
+  gemini: 'gemini',
+  google: 'gemini',
+  demo: 'demo',
+};
+
+/** "@gemini review this" → ask Gemini "review this". Only a mention at the very start counts. */
+export function parseMention(text: string): { agent: AgentKey; text: string } | null {
+  const m = text.match(/^\s*@([a-z]+)\b[\s,:]*([\s\S]*)$/i);
+  const agent = m && MENTIONS[m[1].toLowerCase()];
+  return agent && m[2].trim() ? { agent, text: m[2].trim() } : null;
+}
+
+/** A chat's text from the agent's last turn: its message chunks after the last message it was given. */
+export function lastReply(chat: ChatView): string {
+  const given = chat.items.map((i) => i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from')));
+  return chat.items
+    .slice(given.lastIndexOf(true) + 1)
+    .flatMap((i) => (i.kind === 'agent' ? [i.text] : []))
+    .join('\n\n')
+    .trim();
+}
+
 export function chatStatus(chat: ChatView): ChatStatus {
-  if (decisions({ chats: [chat], images: [] }).length > 0) return 'needs-you';
+  if (decisions({ chats: [chat] }).length > 0) return 'needs-you';
   if (chat.busy) return 'working';
   const last = chat.items.at(-1);
   if (last?.kind === 'notice' && last.tone === 'error') return 'error';
@@ -288,7 +465,7 @@ export interface StateLine {
 
 /** What a task card says about where the task stands. */
 export function stateLine(chat: ChatView): StateLine {
-  const waiting = decisions({ chats: [chat], images: [] })[0];
+  const waiting = decisions({ chats: [chat] })[0];
   if (waiting) {
     const item = chat.items.find(
       (i) =>
