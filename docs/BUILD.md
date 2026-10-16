@@ -108,7 +108,7 @@ for both formats. Then copy them in `prepare.mjs`.
 | `npm run compile` (dev, 0 errors) | 3 min with Copilot, 2 min without | +0.6 GB |
 | Electron 43.7.7 + 3 marketplace built-ins | under 30 s | |
 | **Dev build total** | **about 12 min** | **6.2 GB** |
-| `--package` (`gulp vscode-linux-x64-min`) | not finished, see below | about 3-4 GB more (estimate) |
+| `--package` (`gulp vscode-linux-x64-min`), after a dev build | about 5 min | 1.1 GB app in `code/VSCode-linux-x64` |
 
 ## Memory
 
@@ -126,16 +126,27 @@ rendering, a fresh profile, `bench/fixture` open. Same container as
 | *For comparison:* FriedLiver 0.2 Electron app | 314 MB | 321 MB | 6 |
 | *For comparison:* VS Code 1.142, packaged, no extensions | 761 MB | 848 MB | 12 |
 
-These are **dev-build numbers**, so they are not comparable with the
-packaged apps. A dev build loads unbundled, unminified modules and runs in
-development mode. The renderer alone is about 600 MB, and the main process,
-extension host and shared process are all larger than in a minified build.
-They show the direction of each change: removing Copilot and the agent host
-cut about 240 MB (16 %) in dev mode. The packaged fork has to be measured
-before anyone quotes a number. It is a full VS Code workbench, so expect it to
-land near VS Code's 761 MB minus those savings, which is still well above the
-314 MB Electron app. It will not be lighter than VS Code by much without
-further cuts (see docs/fork/memory-plan.md items 3 to 10).
+The dev-build rows show the direction of each change: removing Copilot and
+the agent host cut about 240 MB (16 %). A dev build loads unminified modules,
+so its absolute numbers don't compare with packaged apps.
+
+### Packaged build
+
+Same method: a fresh profile and `bench/fixture`. The app opened on its own
+for 12 seconds, then memory was sampled every 5 seconds for 30 seconds. Both
+apps settle after about 20 seconds.
+
+| Build | Average | Peak | After it settles | Processes |
+| --- | --- | --- | --- | --- |
+| **FriedLiver fork 1.142.0, packaged** (Copilot removed, AI features off, Agents panel open) | 731 MB | 814 MB | about 580 MB | 11 |
+| Stock VS Code 1.105, packaged, no extensions | 702 MB | 745 MB | about 620 MB | 10 |
+| FriedLiver 0.2, the Electron app ([benchmarks](../benchmarks.md)) | 314 MB | 321 MB | | 6 |
+
+The fork weighs about what VS Code does. It settles about 40 MB lower than
+stock VS Code even with its Agents panel's webview open, and averages a bit
+more while it starts. It is more than twice the size of the FriedLiver
+Electron app, as expected for a full VS Code workbench. Further cuts are in
+[memory-plan.md](memory-plan.md), items 3 to 10.
 
 ## Extensions from Open VSX
 
@@ -157,6 +168,9 @@ editor hasn't been checked yet.
 
 ## Screenshots
 
+- [packaged-first-start.png](screenshots/packaged-first-start.png): the
+  packaged fork on a fresh profile. The Agents panel opens on the right by
+  itself, in the Black Blue theme, with no Copilot.
 - [dev-before-copilot-removal.png](screenshots/dev-before-copilot-removal.png):
   the first dev build, an empty window with upstream's Copilot "Sign In" and
   "Build with Agent" chat.
