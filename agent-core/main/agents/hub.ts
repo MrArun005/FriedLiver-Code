@@ -41,6 +41,8 @@ export interface HubOptions {
 export interface Chat {
   readonly id: string;
   readonly agentId: AgentId;
+  /** Folder the agent works in: the open folder, or a task's own git worktree. */
+  readonly cwd: string;
   busy: boolean;
 }
 
@@ -88,14 +90,18 @@ export class AgentHub {
     for (const agent of this.agents.values()) this.scheduleIdleStop(agent);
   }
 
-  createChat(agentId: AgentId): Chat {
-    const chat: ChatState = { id: `chat-${this.nextChat++}`, agentId, busy: false, loading: false };
+  createChat(agentId: AgentId, cwd = this.options.cwd): Chat {
+    const chat: ChatState = { id: `chat-${this.nextChat++}`, agentId, cwd, busy: false, loading: false };
     this.chats.set(chat.id, chat);
     return chat;
   }
 
   getChat(chatId: string): Chat | undefined {
     return this.chats.get(chatId);
+  }
+
+  chatIdForSession(sessionId: string): string | undefined {
+    return this.sessionToChat.get(sessionId);
   }
 
   async prompt(chatId: string, blocks: acp.ContentBlock[]): Promise<acp.PromptResponse> {
@@ -237,7 +243,7 @@ export class AgentHub {
   private async ensureSession(chat: ChatState, agent: RunningAgent): Promise<void> {
     if (chat.sessionId && chat.sessionGeneration === agent.generation) return;
     const previous = chat.sessionId;
-    const { cwd } = this.options;
+    const { cwd } = chat;
 
     if (previous && agent.conn.supportsLoadSession) {
       chat.loading = true;
