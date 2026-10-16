@@ -17,7 +17,19 @@ node code/scripts/prepare.mjs      # patches, product.json, icon, built-in exten
 node code/scripts/build.mjs        # deps + npm ci + compile + Electron (dev build)
 node code/scripts/dev.mjs [folder] # run from source; as root on Linux it adds --no-sandbox
 node code/scripts/build.mjs --package   # minified app in <VSCODE_DIR>/../VSCode-<os>-<arch>
+node code/scripts/build.mjs --package --installer   # plus the installer in <VSCODE_DIR>/../installers
 ```
+
+Installers, all unsigned:
+
+| OS | File | Made by |
+| --- | --- | --- |
+| Windows | `FriedLiverUserSetup-<arch>-<version>.exe`, installs per user | `gulp vscode-win32-<arch>-inno-updater` and `-user-setup` (Inno Setup from upstream's `innosetup` package) |
+| macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | an ad-hoc `codesign`, then `hdiutil` |
+| Linux | `friedliver_<version>_amd64.deb` | `gulp vscode-linux-<arch>-prepare-deb` and `-build-deb` |
+
+CI (`.github/workflows/code.yml`) builds all three with the portable apps on
+every change to the fork.
 
 Environment variables:
 
@@ -65,15 +77,20 @@ then run the same commands. `dev.mjs` runs `scripts/code.sh`. `--package` runs
 ad-hoc signed, not notarized, so macOS asks once under System Settings →
 Privacy & Security → Open Anyway.
 
-### Icons
+### Icons and branding
 
 `prepare.mjs` copies `build/icon.png` (1024 px, roasted liver) over
-`resources/linux/code.png`. Linux packaging renames it to `friedliver.png`.
-Windows (`resources/win32/code.ico`) and macOS (`resources/darwin/code.icns`)
-still use upstream's icons. To make them: on macOS use `iconutil` on an
-`.iconset`; anywhere, ImageMagick `magick build/icon.png -define
-icon:auto-resize=256,128,64,48,32,16 code.ico`, or the `png2icons` npm package
-for both formats. Then copy them in `prepare.mjs`.
+`resources/linux/code.png`, then copies `code/branding/overlay/` over the
+upstream tree. `code/branding/make-branding.py` (Pillow) generates that overlay
+from `build/icon.png` and `build/liver-art.svg`:
+
+- Windows `code.ico`, Start tiles and the Inno Setup wizard pictures for every
+  display scale.
+- macOS `code.icns`, plus the server icons.
+- The empty-editor watermark: the liver's silhouette, in upstream's letterpress style.
+
+The generated files are committed, so builds need no Pillow. Run the script
+again after changing the artwork.
 
 ## What prepare changes
 
@@ -185,17 +202,16 @@ editor hasn't been checked yet.
 
 ## Known gaps
 
-- **Packaged build not done.** `gulp vscode-linux-x64-min` was started and
-  then stopped when the Copilot removal came in. The patch removes the Copilot
-  steps from that task, but it hasn't been run since.
-- **Agents panel starts blank on a fresh profile.** The secondary side bar
-  opens the FriedLiver Agents container but doesn't render its views until one
-  is focused. For example, run *FriedLiver Agents: Focus on Agents View*,
-  which is how the screenshot was taken. Fix options: drop `isDefault` from
-  upstream's Chat container in patch 0020, or have the extension reveal its
-  view on startup.
+- **Unsigned builds.** Windows SmartScreen and macOS Gatekeeper warn on first
+  launch. Signing needs a Windows code-signing certificate and an Apple
+  Developer ID (for notarization), both bought in the publisher's name.
+- **No Windows 11 context-menu entry.** That package is built by Microsoft's
+  pipeline; the setup leaves it out (patch 0030), and the classic
+  "Open with FriedLiver" entry still works.
+- **No remote-tunnel CLI** (`friedliver-tunnel`). Microsoft builds it from
+  upstream's Rust `cli/`; FriedLiver doesn't need it.
 - The `@github/copilot-sdk` runtime is still packaged in the app's
   `node_modules`, because the agent-host code imports it. It no longer runs.
   The `github` built-in still activates on `*` (memory-plan item 3).
-- Running as root shows "It is not recommended to run FriedLiver Dev as root
+- Running as root shows "It is not recommended to run FriedLiver as root
   user". That message is expected in this container.
