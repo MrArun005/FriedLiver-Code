@@ -1,0 +1,67 @@
+{
+  "name": "friedliver-theme",
+  "displayName": "FriedLiver Themes",
+  "description": "The FriedLiver Control Room color themes and workbench defaults.",
+  "version": "1.0.0",
+  "publisher": "friedliver",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "FriedLiver Black Blue",
+        "label": "FriedLiver Black Blue",
+        "uiTheme": "vs-dark",
+        "path": "./themes/friedliver-black-blue-color-theme.json"
+      },
+      {
+        "id": "FriedLiver Light Blue",
+        "label": "FriedLiver Light Blue",
+        "uiTheme": "vs",
+        "path": "./themes/friedliver-light-blue-color-theme.json"
+      },
+      {
+        "id": "FriedLiver Midnight Blue",
+        "label": "FriedLiver Midnight Blue",
+        "uiTheme": "vs-dark",
+        "path": "./themes/friedliver-midnight-blue-color-theme.json"
+      },
+      {
+        "id": "FriedLiver Graphite",
+        "label": "FriedLiver Graphite",
+        "uiTheme": "vs-dark",
+        "path": "./themes/friedliver-graphite-color-theme.json"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.colorTheme": "FriedLiver Black Blue",
+      "workbench.preferredDarkColorTheme": "FriedLiver Black Blue",
+      "workbench.preferredLightColorTheme": "FriedLiver Light Blue",
+      "editor.fontFamily": "'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace",
+      "editor.fontSize": 13,
+      "editor.lineHeight": 1.55,
+      "editor.fontLigatures": false,
+      "terminal.integrated.fontFamily": "'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace",
+      "terminal.integrated.fontSize": 13,
+      "terminal.integrated.lineHeight": 1.2,
+      "terminal.integrated.fontLigatures.enabled": false,
+      "editor.minimap.enabled": false,
+      "editor.overviewRulerBorder": false,
+      "editor.guides.bracketPairs": false,
+      "editor.renderLineHighlight": "line",
+      "workbench.fontAliasing": "antialiased",
+      "workbench.layoutControl.enabled": false,
+      "workbench.tips.enabled": false,
+      "extensions.ignoreRecommendations": true,
+      "typescript.disableAutomaticTypeAcquisition": true,
+      "files.watcherExclude": {
+        "**/node_modules/*/**": true
+      }
+    }
+  }
+}
