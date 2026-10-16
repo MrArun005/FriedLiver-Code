@@ -3,6 +3,7 @@
 import type * as acp from '@agentclientprotocol/sdk';
 
 export type AgentKey = 'claude' | 'codex' | 'gemini' | 'demo';
+export type VendorAgentKey = Exclude<AgentKey, 'demo'>;
 
 export interface AgentOption {
   id: AgentKey;
@@ -38,6 +39,44 @@ export interface ImageItem {
 
 export type CommandState = 'awaiting' | 'running' | 'denied' | 'exited';
 
+export interface SearchMatch {
+  path: string;
+  line: number;
+  column: number;
+  text: string;
+}
+
+export interface GitFile {
+  path: string;
+  status: 'M' | 'A' | 'D' | 'R' | 'U' | 'C';
+  staged: boolean;
+}
+
+export interface GitStatus {
+  root: string;
+  branch: string | null;
+  files: GitFile[];
+}
+
+export interface ChatInfo {
+  chatId: string;
+  cwd: string;
+  /** Set when the task runs in its own git worktree. */
+  branch?: string;
+}
+
+export type ApiKeyName = 'ANTHROPIC_API_KEY' | 'OPENAI_API_KEY' | 'GEMINI_API_KEY';
+
+export interface SettingsView {
+  settings: {
+    idleStopMinutes: number;
+    maxRunningAgents: number;
+    agents: Partial<Record<VendorAgentKey, { command?: string; args?: string[] }>>;
+  };
+  defaults: Record<VendorAgentKey, { command: string; args: string[] }>;
+  keys: { protection: 'os' | 'basic' | 'none'; saved: Record<ApiKeyName, boolean> };
+}
+
 export type MainEvent =
   | { type: 'update'; chatId: string; update: acp.SessionUpdate }
   | { type: 'notice'; chatId: string; text: string }
@@ -52,11 +91,23 @@ export type MainEvent =
   | { type: 'permissionClosed'; requestId: string }
   | { type: 'writeReview'; reviewId: string; chatId?: string; path: string; before: string | null; after: string }
   | { type: 'writeReviewClosed'; reviewId: string }
-  | { type: 'command'; commandId: string; agent: string; commandLine: string; cwd: string; state: CommandState; exitCode?: number | null }
+  | {
+      type: 'command';
+      commandId: string;
+      chatId?: string;
+      agent: string;
+      commandLine: string;
+      cwd: string;
+      state: CommandState;
+      exitCode?: number | null;
+    }
   | { type: 'commandOutput'; commandId: string; data: string }
   | { type: 'agents'; running: { id: string; label: string; busy: boolean }[] }
   | { type: 'image'; image: ImageItem }
-  | { type: 'fileChanged'; path: string };
+  | { type: 'fileChanged'; path: string }
+  | { type: 'turnChanges'; chatId: string; turnId: string; files: string[] }
+  | { type: 'ptyData'; id: string; data: string }
+  | { type: 'ptyExit'; id: string; exitCode: number };
 
 export interface MemoryReport {
   kind: string;
@@ -64,42 +115,83 @@ export interface MemoryReport {
   agents: { label: string; mb: number }[];
 }
 
+export type Result<T = void> = { ok: true; value: T } | { ok: false; message: string };
+
 export interface FriedLiverApi {
   versions: { electron: string; chrome: string; node: string };
+  platform: string;
   initialFolder(): Promise<string | null>;
   openFolder(): Promise<string | null>;
   listDir(dir: string): Promise<DirEntry[]>;
+  listFiles(): Promise<{ files: string[]; truncated: boolean }>;
+  search(query: string, options: { caseSensitive?: boolean; regex?: boolean }): Promise<Result<{ matches: SearchMatch[]; truncated: boolean }>>;
   readFile(file: string): Promise<string>;
   writeFile(file: string, content: string): Promise<void>;
+
   agents(): Promise<AgentOption[]>;
-  createChat(agent: AgentKey): Promise<string>;
+  createChat(agent: AgentKey, options?: { worktree?: boolean; title?: string }): Promise<Result<ChatInfo>>;
   prompt(chatId: string, blocks: acp.ContentBlock[]): Promise<PromptOutcome>;
   cancel(chatId: string): Promise<void>;
   signIn(agent: AgentKey, methodId: string): Promise<{ ok: boolean; message?: string }>;
   respondPermission(requestId: string, optionId: string | null): Promise<void>;
   respondWrite(reviewId: string, accept: boolean, content?: string): Promise<void>;
   respondCommand(commandId: string, approve: boolean): Promise<void>;
+  undoTurn(chatId: string, turnId: string): Promise<Result<string[]>>;
+  mergeTask(chatId: string): Promise<Result>;
+  removeTask(chatId: string): Promise<Result>;
   stopAgents(): Promise<void>;
+
+  ptyCreate(cols: number, rows: number): Promise<{ id: string; title: string }>;
+  ptyWrite(id: string, data: string): Promise<void>;
+  ptyResize(id: string, cols: number, rows: number): Promise<void>;
+  ptyKill(id: string): Promise<void>;
+
+  gitStatus(): Promise<GitStatus | null>;
+  gitHead(file: string): Promise<string | null>;
+  gitCommit(message: string): Promise<Result<string>>;
+
+  getSettings(): Promise<SettingsView>;
+  updateSettings(change: Partial<SettingsView['settings']>): Promise<SettingsView>;
+  setApiKey(name: ApiKeyName, value: string | null): Promise<Result<SettingsView>>;
+
   memory(): Promise<MemoryReport>;
   onEvent(listener: (event: MainEvent) => void): () => void;
 }
 
-/** Channel names, shared so main and preload can't drift apart. */
-export const CHANNELS = {
-  initialFolder: 'fl:initialFolder',
-  openFolder: 'fl:openFolder',
-  listDir: 'fl:listDir',
-  readFile: 'fl:readFile',
-  writeFile: 'fl:writeFile',
-  agents: 'fl:agents',
-  createChat: 'fl:createChat',
-  prompt: 'fl:prompt',
-  cancel: 'fl:cancel',
-  signIn: 'fl:signIn',
-  respondPermission: 'fl:respondPermission',
-  respondWrite: 'fl:respondWrite',
-  respondCommand: 'fl:respondCommand',
-  stopAgents: 'fl:stopAgents',
-  memory: 'fl:memory',
-  event: 'fl:event',
-} as const;
+/** Every invokable method, mapped to its IPC channel so main and preload can't drift apart. */
+export const METHODS = [
+  'initialFolder',
+  'openFolder',
+  'listDir',
+  'listFiles',
+  'search',
+  'readFile',
+  'writeFile',
+  'agents',
+  'createChat',
+  'prompt',
+  'cancel',
+  'signIn',
+  'respondPermission',
+  'respondWrite',
+  'respondCommand',
+  'undoTurn',
+  'mergeTask',
+  'removeTask',
+  'stopAgents',
+  'ptyCreate',
+  'ptyWrite',
+  'ptyResize',
+  'ptyKill',
+  'gitStatus',
+  'gitHead',
+  'gitCommit',
+  'getSettings',
+  'updateSettings',
+  'setApiKey',
+  'memory',
+] as const satisfies readonly (keyof FriedLiverApi)[];
+
+export type Method = (typeof METHODS)[number];
+export const channel = (method: Method) => `fl:${method}`;
+export const EVENT_CHANNEL = 'fl:event';
