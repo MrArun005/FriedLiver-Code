@@ -1,0 +1,29 @@
+diff --git a/src/vs/platform/extensionManagement/node/extensionManagementService.ts b/src/vs/platform/extensionManagement/node/extensionManagementService.ts
+index 6eefd716..cb963f58 100644
+--- a/src/vs/platform/extensionManagement/node/extensionManagementService.ts
++++ b/src/vs/platform/extensionManagement/node/extensionManagementService.ts
+@@ -340,7 +340,9 @@ export class ExtensionManagementService extends AbstractExtensionManagementServi
+ 	private async downloadExtension(extension: IGalleryExtension, operation: InstallOperation, verifySignature: boolean, clientTargetPlatform?: TargetPlatform): Promise<{ readonly location: URI; readonly verificationStatus: ExtensionSignatureVerificationCode | undefined }> {
+ 		if (verifySignature) {
+ 			const value = this.configurationService.getValue(VerifyExtensionSignatureConfigKey);
+-			verifySignature = isBoolean(value) ? value : true;
++			// FriedLiver: signatures are checked with @vscode/vsce-sign, which only Microsoft's builds ship;
++			// without it every gallery install would fail. Downloads still come over HTTPS from Open VSX.
++			verifySignature = isBoolean(value) ? value : false;
+ 		}
+ 		const { location, verificationStatus } = await this.extensionsDownloader.download(extension, operation, verifySignature, clientTargetPlatform);
+ 		const shouldRequireSignature = shouldRequireRepositorySignatureFor(extension.private, await this.extensionGalleryManifestService.getExtensionGalleryManifest());
+diff --git a/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts b/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts
+index 695859ca..5413ec4f 100644
+--- a/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts
++++ b/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts
+@@ -331,7 +331,8 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
+ 			[VerifyExtensionSignatureConfigKey]: {
+ 				type: 'boolean',
+ 				description: localize('extensions.verifySignature', "When enabled, extensions are verified to be signed before getting installed."),
+-				default: true,
++				// FriedLiver: off by default; the verifier (@vscode/vsce-sign) is not available to forks.
++				default: false,
+ 				scope: ConfigurationScope.APPLICATION,
+ 				included: isNative
+ 			},
