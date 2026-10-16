@@ -18,8 +18,26 @@ let controller: Controller | undefined;
 export async function activate(context: vscode.ExtensionContext) {
   controller = new Controller(context);
   await controller.start();
+  void revealOnFirstStart(context);
   // Integration tests drive the same controller the views use.
   return context.extensionMode === vscode.ExtensionMode.Test ? controller : undefined;
+}
+
+/**
+ * In the FriedLiver fork, a folder opened for the first time restores the right side bar to
+ * upstream's chat container, which is empty there, so the bar shows blank. Open the Agents
+ * panel instead, once per folder; the editor remembers it after that. Other editors keep the
+ * panel in the activity bar: show it once after install so people find it.
+ */
+async function revealOnFirstStart(context: vscode.ExtensionContext): Promise<void> {
+  if (context.extensionMode === vscode.ExtensionMode.Test) return;
+  const fork = vscode.env.appName.startsWith('FriedLiver');
+  const store = fork && vscode.workspace.workspaceFolders ? context.workspaceState : context.globalState;
+  if (store.get<boolean>('friedliver.revealed')) return;
+  await store.update('friedliver.revealed', true);
+  await vscode.commands.executeCommand('workbench.view.extension.friedliver');
+  // Opening the container takes focus; give it back to the file being edited.
+  if (vscode.window.activeTextEditor) await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
 }
 
 export async function deactivate(): Promise<void> {

@@ -2,7 +2,7 @@
   "name": "friedliver-agents",
   "displayName": "FriedLiver Agents",
   "description": "Claude, Codex and Gemini coding agents over ACP: chat, reviewed edits, approved commands and a task board.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "friedliver",
   "license": "UNLICENSED",
   "private": true,
@@ -15,6 +15,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onStartupFinished",
     "onFileSystem:friedliver-proposed",
     "onWebviewPanel:friedliver.tasks",
     "onWebviewPanel:friedliver.chatPanel"
