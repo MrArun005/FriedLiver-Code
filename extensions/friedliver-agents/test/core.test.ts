@@ -116,7 +116,7 @@ describe('AgentCore with the demo agent', () => {
     await turn;
     const after = core.chat(long.id)!.items;
     expect(after.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('')).toContain('```ts\nexport function formatCents');
-    expect(after.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped (cancelled).' });
+    expect(after.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped.' });
   }, 30_000);
 
   it('holds writes and commands until the user decides, and lists them as decisions', async () => {

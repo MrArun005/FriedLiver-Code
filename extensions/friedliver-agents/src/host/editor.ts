@@ -278,8 +278,8 @@ export class EditorAgent implements vscode.Disposable {
         this.showStatus(session);
       }
     }
-    const asks = action.items.find((i) => i.kind === 'permission' || i.kind === 'bridge');
-    if (asks && (asks.kind === 'permission' || asks.kind === 'bridge')) void this.host.showChat(action.chatId, asks.requestId);
+    const asks = action.items.find((i) => i.kind === 'permission' || i.kind === 'bridge' || i.kind === 'question');
+    if (asks && (asks.kind === 'permission' || asks.kind === 'bridge' || asks.kind === 'question') && !(asks.kind === 'permission' && asks.answer)) void this.host.showChat(action.chatId, asks.requestId);
   }
 
   // ---- Ask About Selection, Add Selection to Chat ----

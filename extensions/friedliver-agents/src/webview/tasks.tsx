@@ -37,8 +37,11 @@ import {
   type Sort,
   type SortKey,
 } from '../shared/view';
-import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, scrollBehavior, send, useHost, useNow, usePersisted, useSettledOrder } from './common';
+import type { TaskChoices } from '../shared/messages';
+import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
+import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
+import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
 import { AgentMap } from './map';
 
 type View = 'board' | 'list' | 'map';
@@ -70,7 +73,11 @@ function reveal(chatId: string) {
 
 /** The Agent Manager: every chat as a task, by where it stands, in a list, or on a map of how they connect. */
 function Manager() {
-  const { state } = useHost();
+  const [defaults, setDefaults] = useState<Partial<Record<AgentKey, AgentDefaults>>>({});
+  const { state } = useHost((m) => {
+    if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
+    if (m.type === 'defaults') setDefaults(m.defaults);
+  });
   const now = useNow(15_000);
   const [view, setView] = usePersisted<View>('view', 'board');
   const [sort, setSort] = usePersisted<Sort>('sort', { key: 'status', dir: 'asc' });
@@ -227,7 +234,7 @@ function Manager() {
           </div>
         </header>
 
-        <NewTask />
+        <NewTask defaults={defaults} />
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
           {query && shown.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
@@ -248,10 +255,13 @@ function Manager() {
   );
 }
 
-function NewTask() {
+function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefaults>> }) {
   const [agents, setAgents] = usePersisted<AgentKey[]>('agents', ['claude']);
   const [worktree, setWorktree] = useState<boolean | null>(null);
   const [prompt, setPrompt] = useState('');
+  // Model and effort per agent, and how much the task may do without asking; Full auto is confirmed by the editor.
+  const [choices, setChoices] = useState<TaskChoices>({});
+  const [approval, setApproval] = useState<ApprovalLevel>('ask');
   const several = agents.length > 1;
   // On by default when several agents take the same task, so they can't clash.
   const own = worktree ?? several;
@@ -262,9 +272,12 @@ function NewTask() {
   const start = () => {
     const text = prompt.trim();
     if (!text) return;
-    send(several ? { type: 'fanout', agents, prompt: text, worktree: own } : { type: 'createTask', agent: agents[0], prompt: text, worktree: own });
+    const picked = Object.fromEntries(Object.entries(choices).filter(([a]) => agents.includes(a as AgentKey))) as TaskChoices;
+    const extras = { ...(Object.keys(picked).length ? { choices: picked } : {}), ...(approval !== 'ask' ? { approval } : {}) };
+    send(several ? { type: 'fanout', agents, prompt: text, worktree: own, ...extras } : { type: 'createTask', agent: agents[0], prompt: text, worktree: own, ...extras });
     setPrompt('');
     setWorktree(null);
+    setApproval('ask');
   };
   return (
     <section class="new-task" aria-label="New task">
@@ -275,7 +288,8 @@ function NewTask() {
         aria-label="Task description"
         onInput={(e) => setPrompt(e.currentTarget.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          // Enter starts it, as in a chat; Shift+Enter adds a line.
+          if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             start();
           }
@@ -290,12 +304,31 @@ function NewTask() {
           ))}
         </div>
         {several && <span class="hint">same task, {agents.length} agents</span>}
+        <TaskOptions agents={agents} defaults={defaults} choices={choices} onChange={(agent, key, value) => setChoices((c) => ({ ...c, [agent]: { ...c[agent], [key]: value } }))} />
         <span class="spacer" />
+        <div class="seg approval-seg" role="radiogroup" aria-label="Without asking" onKeyDown={radioKeys}>
+          {APPROVAL_LEVELS.map((l) => (
+            <button
+              key={l}
+              type="button"
+              role="radio"
+              class="seg-item"
+              data-level={l}
+              aria-checked={approval === l}
+              tabIndex={approval === l ? 0 : -1}
+              title={`${APPROVAL_NAMES[l]}: ${APPROVAL_HINTS[l]}${l === 'full' ? '. Asks once to confirm.' : ''}`}
+              onClick={() => setApproval(l)}
+            >
+              {l === 'full' && <Icon name="bolt" />}
+              {l === 'ask' ? 'Ask' : l === 'edits' ? 'Edits' : 'Full auto'}
+            </button>
+          ))}
+        </div>
         <label class="check" title="A separate git checkout on its own branch, so agents can't clash">
           <input type="checkbox" checked={own} onChange={(e) => setWorktree(e.currentTarget.checked)} /> Own worktree
         </label>
         <button class="primary" disabled={!prompt.trim()} onClick={start}>
-          Start <Kbd>Ctrl ⏎</Kbd>
+          Start <Kbd>⏎</Kbd>
         </button>
       </div>
     </section>
@@ -371,6 +404,15 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
       </div>
     );
   }
+  if (d.kind === 'question') {
+    return (
+      <div class="actions">
+        <button class="decide sm" onClick={() => open(chat.id)}>
+          Answer
+        </button>
+      </div>
+    );
+  }
   if (d.kind === 'bridge') {
     return (
       <div class="actions">
@@ -388,18 +430,16 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
   }
   const item = chat.items.find((i) => i.kind === 'permission' && i.requestId === d.id);
   if (item?.kind !== 'permission') return null;
-  const loud = item.options.find((o) => o.kind.startsWith('allow'));
+  // A diff or a plan needs reading: the chat shows it in full.
+  const read = !!item.detail?.plan || (item.detail?.files?.length ?? 0) > 0;
   return (
     <div class="actions">
-      {item.options.map((o) => (
-        <button
-          key={o.optionId}
-          class={`sm ${o === loud ? 'decide' : o.kind.startsWith('reject') ? 'ghost danger' : ''}`}
-          onClick={() => send({ type: 'permission', requestId: item.requestId, optionId: o.optionId })}
-        >
-          {o.name}
+      {read && (
+        <button class="sm" onClick={() => open(chat.id)}>
+          {item.detail?.plan ? 'Read the plan' : 'See the diff'}
         </button>
-      ))}
+      )}
+      <PermissionOptions item={item} compact />
     </div>
   );
 }
@@ -470,6 +510,8 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <span class="sep">·</span>
         <span title="Started">{model.age}</span>
         <span class="spacer" />
+        <AutoBadge chat={chat} short />
+        {(reportedMode(chat.session)?.tone === 'full' || reportedMode(chat.session)?.tone === 'auto') && chat.approval !== 'full' && <ModeBadge session={chat.session} agent={chat.agent} />}
         {chat.merged && <span class="tag">merged</span>}
         {chat.branch && (
           <span class="chip" title={chat.cwd}>

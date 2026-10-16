@@ -407,7 +407,7 @@ export interface MentionOption {
 
 export const MENTION_OPTIONS: MentionOption[] = [
   { agent: 'claude', name: 'Claude', insert: 'claude', words: ['claude'] },
-  { agent: 'codex', name: 'GPT (Codex)', insert: 'gpt', words: ['gpt', 'codex', 'chatgpt', 'openai'] },
+  { agent: 'codex', name: 'Codex', insert: 'codex', words: ['gpt', 'codex', 'chatgpt', 'openai'] },
   { agent: 'gemini', name: 'Gemini', insert: 'gemini', words: ['gemini', 'google'] },
   { agent: 'demo', name: 'Demo', insert: 'demo', words: ['demo'] },
 ];

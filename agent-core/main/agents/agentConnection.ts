@@ -11,10 +11,25 @@ export interface ClientHost {
   requestPermission(req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse>;
   readTextFile(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse>;
   writeTextFile(req: acp.WriteTextFileRequest): Promise<void>;
+  /** A question for the user as a small form (ACP form elicitation). Without it, every one is declined. */
+  createElicitation?(req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse>;
   terminalListener?: TerminalListener;
 }
 
 export type AgentStartFailure = 'not_installed' | 'crashed';
+
+/** Gemini's unstable model list, which SDK 1.8 has no type for. */
+export interface SessionModels {
+  currentModelId: string;
+  availableModels: { modelId: string; name: string; description?: string | null }[];
+}
+
+/** What `session/new` and `session/load` answer besides the session id. */
+export interface SessionSetup {
+  configOptions?: acp.SessionConfigOption[] | null;
+  modes?: acp.SessionModeState | null;
+  models?: SessionModels | null;
+}
 
 export class AgentStartError extends Error {
   constructor(
@@ -133,6 +148,7 @@ export class AgentConnection {
       .onNotification(lib.methods.client.session.update, ({ params }) => host.sessionUpdate(params))
       .onRequest(lib.methods.client.session.requestPermission, ({ params, signal }) => host.requestPermission(params, signal))
       .onRequest(lib.methods.client.fs.readTextFile, ({ params }) => host.readTextFile(params))
+      .onRequest(lib.methods.client.elicitation.create, ({ params, signal }) => host.createElicitation?.(params, signal) ?? Promise.resolve({ action: 'decline' as const }))
       .onRequest(lib.methods.client.fs.writeTextFile, async ({ params }) => {
         await host.writeTextFile(params);
         return {};
@@ -158,6 +174,10 @@ export class AgentConnection {
             fs: { readTextFile: true, writeTextFile: true },
             terminal: true,
             auth: { terminal: true },
+            // On/off options (Fast mode) as toggles, and short notices ("Auto mode unavailable") as notices.
+            session: { configOptions: { boolean: {} }, notices: {} },
+            // Questions as small forms: Claude's AskUserQuestion needs this, or it turns the tool off.
+            elicitation: { form: {} },
           },
           clientInfo: { name: 'friedliver', version: options.clientVersion },
         }),
@@ -195,13 +215,54 @@ export class AgentConnection {
     return this.info.authMethods ?? [];
   }
 
+  /** A message can join the running turn (`_session/steering`, Claude's adapter and the Demo). */
+  get supportsSteering(): boolean {
+    const meta = this.info._meta as { steering?: { supported?: unknown } } | null | undefined;
+    return meta?.steering?.supported === true;
+  }
+
+  get supportsCloseSession(): boolean {
+    return this.info.agentCapabilities?.sessionCapabilities?.close != null;
+  }
+
   /** `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own. */
-  newSession(cwd: string, mcpServers: acp.McpServer[] = []): Promise<acp.NewSessionResponse> {
+  newSession(cwd: string, mcpServers: acp.McpServer[] = []): Promise<SessionSetup & { sessionId: string }> {
     return this.connection.agent.request(sdk!.methods.agent.session.new, { cwd, mcpServers });
   }
 
-  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = []): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers });
+  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = []): Promise<SessionSetup> {
+    return ((await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers })) as SessionSetup | undefined) ?? {};
+  }
+
+  /** Returns the agent's whole list of options afterwards: changing the model can change the effort levels. */
+  async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<acp.SessionConfigOption[]> {
+    const params: acp.SetSessionConfigOptionRequest =
+      typeof value === 'boolean' ? { sessionId, configId, type: 'boolean', value } : { sessionId, configId, value };
+    const r = await this.connection.agent.request(sdk!.methods.agent.session.setConfigOption, params);
+    return r.configOptions ?? [];
+  }
+
+  async setMode(sessionId: string, modeId: string): Promise<void> {
+    await this.connection.agent.request(sdk!.methods.agent.session.setMode, { sessionId, modeId });
+  }
+
+  /** Gemini's unstable `session/set_model`, which SDK 1.8 has no type for. */
+  async setModel(sessionId: string, modelId: string): Promise<void> {
+    await this.connection.agent.request<unknown>('session/set_model', { sessionId, modelId });
+  }
+
+  /** Adds a message to the running turn. False when no turn is running, so it must go as a prompt. */
+  async steer(sessionId: string, prompt: acp.ContentBlock[]): Promise<boolean> {
+    const r = await this.connection.agent.request<{ outcome?: string }>('_session/steering', {
+      sessionId,
+      prompt,
+      _meta: { steering: { idleBehavior: 'promptRequired' } },
+    });
+    return r?.outcome !== 'promptRequired';
+  }
+
+  async closeSession(sessionId: string): Promise<void> {
+    await this.connection.agent.request(sdk!.methods.agent.session.close, { sessionId });
   }
 
   prompt(sessionId: string, prompt: acp.ContentBlock[]): Promise<acp.PromptResponse> {

@@ -1,7 +1,7 @@
 {
   "name": "friedliver-agents",
   "displayName": "FriedLiver Agents",
-  "description": "Claude, Codex and Gemini coding agents over ACP: chat, reviewed edits, approved commands and a task board.",
+  "description": "Claude, Codex and Gemini coding agents over ACP: chat, model and effort pickers, approvals, reviewed edits and a task board.",
   "version": "0.1.2",
   "publisher": "friedliver",
   "license": "UNLICENSED",
@@ -85,7 +85,7 @@
       },
       {
         "command": "friedliver.openTasks",
-        "title": "Agent Manager (Tasks)",
+        "title": "Agent Manager",
         "category": "FriedLiver",
         "icon": "$(checklist)"
       },
@@ -173,6 +173,28 @@
         "command": "friedliver.edit.stop",
         "title": "Stop Editing with Agent",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.review.acceptAll",
+        "title": "Accept All Agent Edits",
+        "category": "FriedLiver",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "friedliver.review.rejectAll",
+        "title": "Reject All Agent Edits",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.approvals.rules",
+        "title": "Always-Allowed Commands",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.otherAgents",
+        "title": "Get Another Agent Extension…",
+        "category": "FriedLiver",
+        "icon": "$(extensions)"
       }
     ],
     "menus": {
@@ -191,6 +213,11 @@
           "command": "friedliver.moveToCenter",
           "when": "view == friedliver.agents",
           "group": "navigation@3"
+        },
+        {
+          "command": "friedliver.otherAgents",
+          "when": "view == friedliver.accounts",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -208,13 +235,18 @@
       "editor/title": [
         {
           "command": "friedliver.review.accept",
-          "when": "resourceScheme == friedliver-proposed",
+          "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
           "group": "navigation@1"
         },
         {
           "command": "friedliver.review.reject",
-          "when": "resourceScheme == friedliver-proposed",
+          "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
           "group": "navigation@2"
+        },
+        {
+          "command": "friedliver.review.acceptAll",
+          "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
+          "group": "navigation@3"
         }
       ],
       "commandPalette": [
@@ -283,6 +315,24 @@
         "command": "friedliver.moveToCenter",
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.review.acceptAll",
+        "key": "ctrl+alt+shift+y",
+        "mac": "cmd+alt+shift+y",
+        "when": "friedliver.reviewActive"
+      },
+      {
+        "command": "friedliver.review.rejectAll",
+        "key": "ctrl+alt+shift+n",
+        "mac": "cmd+alt+shift+n",
+        "when": "friedliver.reviewActive"
+      },
+      {
+        "command": "friedliver.nextDecision",
+        "key": "ctrl+alt+d",
+        "mac": "ctrl+alt+d",
         "when": "!terminalFocus"
       }
     ],
@@ -434,6 +484,30 @@
           "scope": "machine",
           "description": "Whether agents can reach other agents and chats through FriedLiver's tools. Applies to agent sessions started after the change."
         },
+        "friedliver.approvals.default": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "edits"
+          ],
+          "enumDescriptions": [
+            "Edits and commands wait for you.",
+            "Edits go through without asking (each turn can be undone); commands wait for you."
+          ],
+          "default": "ask",
+          "scope": "machine",
+          "description": "The approval level new chats start at. Full auto is chosen per chat, never here. Read from user settings only, so a repository can't make agents run without asking."
+        },
+        "friedliver.notify.decisions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification with buttons when an agent waits for you and its chat isn't on screen or the window isn't focused."
+        },
+        "friedliver.notify.finished": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when an agent finishes a task and its chat isn't on screen or the window isn't focused."
+        },
         "friedliver.restoreChats": {
           "type": "boolean",
           "default": true,
@@ -449,13 +523,13 @@
           ],
           "enumItemLabels": [
             "Claude",
-            "Codex (GPT)",
+            "Codex",
             "Gemini",
             "Demo"
           ],
           "default": "claude",
           "scope": "machine",
-          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @gpt, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
+          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
         }
       }
     },
@@ -463,7 +537,7 @@
       {
         "id": "friedliver.gettingStarted",
         "title": "Get Started with Agents",
-        "description": "Agents propose, you decide. Every file an agent writes is a diff you accept, and every command waits for you.",
+        "description": "Agents propose, you decide. Pick how much an agent may do on its own; edits show as diffs, commands wait for you, and every turn can be undone.",
         "steps": [
           {
             "id": "openFolder",
@@ -481,7 +555,7 @@
           {
             "id": "demoAgent",
             "title": "Try the Demo agent",
-            "description": "The Demo agent runs offline and needs no sign-in. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
+            "description": "The Demo agent runs offline and needs no sign-in. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Under the message box pick the model, the effort and how much it may do without asking (Shift+Tab switches). Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
             "media": {
               "svg": "media/walkthrough/demo-agent.svg",
               "altText": "A Demo agent chat with a plan and an edit waiting for review, with Accept and Reject buttons."
@@ -492,14 +566,15 @@
           },
           {
             "id": "signIn",
-            "title": "Sign in to Claude, GPT or Gemini",
-            "description": "Each agent signs in through its own official CLI, so your logins stay with the company that runs it. FriedLiver never sees your credentials.\n[Check Sign-in](command:friedliver.accounts)",
+            "title": "Sign in to Claude, Codex or Gemini",
+            "description": "Install an agent once (`npm install -g @agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp` or `@google/gemini-cli`). Each signs in through its own official CLI, so your logins stay with the company that runs it. FriedLiver never sees your credentials. Prefer another agent extension, such as Claude Code or Cline? Get it from the gallery as it is.\n[Check Sign-in](command:friedliver.accounts)\n[Get Another Agent Extension](command:friedliver.otherAgents)",
             "media": {
               "svg": "media/walkthrough/sign-in.svg",
               "altText": "The Agents accounts list: one agent signed in, one not installed, one waiting for sign-in."
             },
             "completionEvents": [
-              "onCommand:friedliver.accounts"
+              "onCommand:friedliver.accounts",
+              "onCommand:friedliver.otherAgents"
             ]
           },
           {

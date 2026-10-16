@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { EMPTY_STATE, isAgentKey, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
+import type { ChatSession, SessionOption } from '../shared/session';
 
 /** What the next window needs to bring a chat back. Never API keys or bridge tokens. */
 export interface SavedChat {
@@ -11,6 +12,8 @@ export interface SavedChat {
   worktree?: { path: string; branch: string; repo: string; title: string };
   /** A hand-off's context that no message has carried yet. */
   preamble?: string;
+  /** Session settings the user chose in the chat (optionKey → value), applied again when it continues. */
+  choices?: Record<string, string | boolean>;
 }
 
 export interface SavedState {
@@ -132,6 +135,10 @@ export function settleRestored(state: AppState): AppState {
         stopped = true;
         return { ...i, state: 'exited', exitCode: null };
       }
+      if (i.kind === 'question' && i.state === 'awaiting') {
+        stopped = true;
+        return { ...i, state: 'declined' };
+      }
       if (i.kind === 'bridge' && i.state === 'awaiting') {
         stopped = true;
         return { ...i, state: 'denied' };
@@ -139,7 +146,15 @@ export function settleRestored(state: AppState): AppState {
       return i;
     });
     if (stopped) items.push({ kind: 'notice', tone: 'info', text: `${STOPPED}.` });
-    return { ...chat, busy: false, items };
+    // The agent process is gone; queued messages went with the window; Full auto asks again.
+    return {
+      ...chat,
+      busy: false,
+      items,
+      session: chat.session && { ...chat.session, live: false, usage: undefined },
+      approval: chat.approval === 'full' ? undefined : chat.approval,
+      queue: undefined,
+    };
   });
   return { ...state, chats };
 }
@@ -148,7 +163,7 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const ID = /^[\w.:-]{1,128}$/;
 const str = (v: unknown): v is string => typeof v === 'string';
-const ITEM_KINDS = new Set(['user', 'agent', 'thought', 'tool', 'plan', 'permission', 'review', 'command', 'notice', 'changes', 'link', 'bridge']);
+const ITEM_KINDS = new Set(['user', 'agent', 'thought', 'tool', 'plan', 'permission', 'review', 'command', 'notice', 'changes', 'link', 'bridge', 'question']);
 
 /** A saved file read back, or null when it isn't one. Chats that don't make sense are left out. */
 export function parseSaved(raw: unknown): SavedState | null {
@@ -183,6 +198,9 @@ export function parseSaved(raw: unknown): SavedState | null {
       lastActivity: num(c.lastActivity, createdAt),
       turns: num(c.turns, 0),
       archived: c.archived === true || undefined,
+      session: savedSession(c.session),
+      // Full auto is never restored: a reopened chat asks again.
+      approval: c.approval === 'edits' ? 'edits' : undefined,
     });
     const wt = h.worktree;
     saved[c.id] = {
@@ -191,6 +209,7 @@ export function parseSaved(raw: unknown): SavedState | null {
       sessionId: str(h.sessionId) ? h.sessionId : undefined,
       worktree: isObj(wt) && str(wt.path) && str(wt.branch) && str(wt.repo) && str(wt.title) ? { path: wt.path, branch: wt.branch, repo: wt.repo, title: wt.title } : undefined,
       preamble: str(h.preamble) ? h.preamble : undefined,
+      choices: savedChoices(h.choices),
     };
   }
   const ids = new Set(chats.map((c) => c.id));
@@ -200,6 +219,23 @@ export function parseSaved(raw: unknown): SavedState | null {
   const count: SavedState['chatCount'] = {};
   if (isObj(raw.chatCount)) for (const [k, v] of Object.entries(raw.chatCount)) if (isAgentKey(k)) count[k] = num(v, 0);
   return { version: 1, state: { ...EMPTY_STATE, chats, links }, chats: saved, nextId: num(raw.nextId, 1), chatCount: count };
+}
+
+function savedChoices(v: unknown): Record<string, string | boolean> | undefined {
+  if (!isObj(v)) return undefined;
+  const entries = Object.entries(v).filter(([k, x]) => k.length <= 128 && (typeof x === 'boolean' || (typeof x === 'string' && x.length <= 256)));
+  return entries.length ? (Object.fromEntries(entries.slice(0, 16)) as Record<string, string | boolean>) : undefined;
+}
+
+/** A saved session's settings, shown until the agent starts again; the rest is dropped. */
+function savedSession(v: unknown): ChatSession | undefined {
+  if (!isObj(v) || !Array.isArray(v.options)) return undefined;
+  const options = (v.options as unknown[]).filter(
+    (o): o is SessionOption =>
+      isObj(o) && str(o.id) && str(o.name) && (o.type === 'select' || o.type === 'boolean') && (typeof o.current === 'string' || typeof o.current === 'boolean') && Array.isArray(o.choices) && (o.via === 'option' || o.via === 'mode' || o.via === 'model'),
+  );
+  const commands = (Array.isArray(v.commands) ? v.commands : []).filter((c): c is ChatSession['commands'][number] => isObj(c) && str(c.name) && str(c.description));
+  return { options: options.slice(0, 32), commands: commands.slice(0, 200), live: false };
 }
 
 function num(v: unknown, fallback: number): number {

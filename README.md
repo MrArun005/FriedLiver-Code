@@ -1,9 +1,11 @@
 # FriedLiver Code
 
 FriedLiver built on VS Code 1.142 (Code - OSS). You get VS Code's editor and
-extensions from Open VSX, plus Claude, GPT (Codex) and Gemini coding agents in a
-panel on the right. Every file an agent wants to write opens as a diff you
-accept or reject, and every command waits for your approval.
+extensions from Open VSX, plus Claude, Codex and Gemini coding agents in a
+panel on the right. Under each message box you pick the agent's model, its
+effort, and how much it may do on its own: **Ask** (edits and commands wait for
+you), **Auto-accept edits**, or **Full auto**. What an agent asks to do shows
+with its diff, its command or its plan, and every turn can be undone.
 
 ![An agent asks another agent, and waits for your Allow](docs/screenshots/app/03-agent-asks-agent.png)
 
@@ -41,10 +43,12 @@ What changes from stock VS Code:
   extension asks GitHub whether a newer FriedLiver release is out and tells
   you (`friedliver.updates.check` turns that off). It has its own
   `.friedliver` settings folder, so it doesn't touch an installed VS Code.
-- **Agents ask first.** Writes are reviewed, commands approved, files outside
-  the workspace (symlinks included) are off limits, and a repository's
-  settings can't change which program runs as an agent. What that does and
-  doesn't protect: [SECURITY.md](SECURITY.md).
+- **Agents ask first.** In Ask, each edit and command waits for you, shown as a
+  diff or a command line; Full auto is a per-chat choice you confirm. Files
+  outside the workspace (symlinks included) are off limits to FriedLiver's
+  file access, and a repository's settings can't change which program runs as
+  an agent or let it run without asking. What that does and doesn't protect,
+  per agent: [SECURITY.md](SECURITY.md).
 
 The Electron app, a separate and lighter editor (about 370 MB against about
 840 MB here), lives in [FriedLiver](https://github.com/MrArun005/FriedLiver).
@@ -82,23 +86,60 @@ check from install to two agents talking to each other.
 
 | Agent | Install | Sign-in |
 |---|---|---|
-| Claude | `npm install -g @zed-industries/claude-agent-acp` | Claude Code's own login in a terminal: `/login`, approve on claude.ai, `/exit` |
-| GPT (Codex) | `npm install -g @zed-industries/codex-acp` | Your browser opens OpenAI's sign-in page |
+| Claude | `npm install -g @agentclientprotocol/claude-agent-acp` | Claude Code's own login in a terminal: `/login`, approve on claude.ai, `/exit` |
+| Codex | `npm install -g @agentclientprotocol/codex-acp` | Your browser opens OpenAI's sign-in page |
 | Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page |
 
-4. Connect them. In a chat, start a message with `@gemini` (or `@gpt`,
+   The older `@zed-industries/*` packages are deprecated and lack the effort
+   and plan options; Accounts says when an installed adapter is too old.
+
+4. Choose how the agent works, under the message box: the **approval** chip
+   (Ask, Auto-accept edits, Full auto, Plan first, and the agent's own modes;
+   Shift+Tab switches), the **model** (with switches such as Fast mode) and
+   the **effort**, all as the agent offers them. Your last choices for each
+   agent apply to its next chats. `/` lists the agent's commands, `#` names a
+   file for it, and the bar shows how full its context is. Messages you send
+   while it works wait in a queue (Send now adds one to the running turn
+   where the agent allows it).
+5. Connect them. In a chat, start a message with `@gemini` (or `@gpt`,
    `@claude`, `@demo`) to ask that agent; the answer comes back as a card you
    can send on. **Hand off**, **Ask** and **Pipe to** in the chat's header and
    on Agent Manager cards do the rest. With the Demo agent, `ask demo <question>`
    shows an agent asking another agent: you get Allow, Allow for this chat, or
    Deny.
 
-The command palette has the rest under "FriedLiver": Agent Manager (Tasks), Run
-a Task on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a
-Chat's Replies to Another Chat, Go to Next Decision, Move Agents to the Center
-(Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents, and the editor commands below.
-`friedliver.connections.agentToAgent` (ask, allow or off; user settings only)
-decides whether agents may reach each other.
+The command palette has the rest under "FriedLiver": Agent Manager, Run a Task
+on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a Chat's
+Replies to Another Chat, Go to Next Decision (Ctrl+Alt+D), Accept All Agent
+Edits, Always-Allowed Commands, Get Another Agent Extension…, Move Agents to
+the Center (Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents, and the editor
+commands below. `friedliver.connections.agentToAgent` (ask, allow or off) and
+`friedliver.approvals.default` (ask or edits) are read from your user settings
+only. `friedliver.notify.decisions` and `.finished` choose the notifications.
+
+### What FriedLiver controls for each agent
+
+Claude and Codex edit files and run commands themselves; Gemini and the Demo
+agent write through FriedLiver. So the review looks different per agent, and
+FriedLiver sets each agent's own mode to match the chat's level instead of
+taking the agent's default:
+
+| | Claude | Codex | Gemini | Demo |
+|---|---|---|---|---|
+| Edits | Claude writes the file. In Ask, its request shows the diff first (**Open diff** shows the whole file) | Codex writes the file. In Ask (Read-only), its request shows the diff first | Through FriedLiver: in Ask each write opens as a diff you accept or change | Through FriedLiver, like Gemini |
+| Commands | Claude runs them. In Ask and Auto-accept edits its request shows the command and folder | Codex runs them in its sandbox; Read-only asks before anything that writes, Workspace access runs workspace commands without asking | Gemini runs them after its own request, shown with the command | FriedLiver runs them after Run |
+| Ask / Auto-accept edits / Full auto | Manual / Accept edits / Bypass permissions (Auto when Bypass isn't offered) | Read-only / Workspace access / Full access | Auto Edit (FriedLiver reviews each write) / Auto Edit / YOLO | Ask / Accept edits / Full access |
+| Undo and "Changed N files" | A git snapshot at the start of each turn, for every agent; outside git, from the content FriedLiver saw before each edit | same | same, plus FriedLiver's own record of its writes | same |
+
+"Always allow" on a command adds a rule (that exact command, or a program and
+its subcommand) for this workspace, kept in your profile, never in the
+repository. Lines that chain, redirect, substitute or set variables never
+match a rule.
+
+Prefer another agent extension? **FriedLiver: Get Another Agent Extension…**
+offers Claude Code, Cline, Roo Code, Kilo Code and Continue from Open VSX as
+their publishers ship them. They work on their own, outside FriedLiver's
+reviews.
 
 The program each agent runs (`friedliver.agents.<agent>.command` and `.args`)
 is read from your user settings only, never from a workspace's

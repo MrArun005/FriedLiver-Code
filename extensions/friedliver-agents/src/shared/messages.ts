@@ -1,6 +1,11 @@
 // Messages between the webviews and the extension host. Webview content is
 // treated as untrusted: every message is checked here before it is acted on.
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
+import { isRule, type CommandRule } from './rules';
+import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
+
+/** Choices for a new task's agents, per agent: optionKey → value (see session.ts). */
+export type TaskChoices = Partial<Record<AgentKey, Record<string, string | boolean>>>;
 
 export interface Attachment {
   name: string;
@@ -21,10 +26,12 @@ export type WebviewMessage =
   | { type: 'command'; commandId: string; approve: boolean }
   | { type: 'undo'; chatId: string; turnId: string }
   | { type: 'notice'; chatId: string; action: NoticeAction }
-  | { type: 'attach' }
+  /** `chatId` (optional): the composer the images go to. */
+  | { type: 'attach'; chatId?: string }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
-  | { type: 'createTask'; agent: AgentKey; prompt: string; worktree: boolean }
+  /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
+  | { type: 'createTask'; agent: AgentKey; prompt: string; worktree: boolean; choices?: TaskChoices; approval?: ApprovalLevel }
   | { type: 'openChat'; chatId: string }
   | { type: 'merge'; chatId: string }
   | { type: 'removeWorktree'; chatId: string }
@@ -41,22 +48,49 @@ export type WebviewMessage =
   /** Send `fromChatId`'s last reply to `toChatId` as a message, e.g. a consultant's answer back to the main chat. */
   | { type: 'forward'; fromChatId: string; toChatId: string }
   /** The same task on several agents at once, each in its own worktree when asked, to compare. */
-  | { type: 'fanout'; agents: AgentKey[]; prompt: string; worktree: boolean }
+  | { type: 'fanout'; agents: AgentKey[]; prompt: string; worktree: boolean; choices?: TaskChoices; approval?: ApprovalLevel }
   /** Answer an agent's request to reach another chat or agent. */
   | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'deny' }
   | { type: 'archive'; chatId: string; archived: boolean }
   /** Stop and forget a chat. */
   | { type: 'removeChat'; chatId: string }
   /** Show what a task changed: its worktree branch against the main checkout, or the files it touched. */
-  | { type: 'viewChanges'; chatId: string };
+  | { type: 'viewChanges'; chatId: string }
+  // Session settings and approvals.
+  /** Set one of the chat's session settings (model, effort, mode, Fast…) to a value its agent offers. */
+  | { type: 'setOption'; chatId: string; optionId: string; value: string | boolean }
+  /** FriedLiver's approval level for the chat. Full auto asks once to confirm. */
+  | { type: 'approval'; chatId: string; level: ApprovalLevel }
+  | { type: 'plan'; chatId: string; on: boolean }
+  /** A read-only diff of what a permission request would write to `path`. */
+  | { type: 'permissionDiff'; requestId: string; path: string }
+  /** Always allow a command from now on (after a confirmation), and allow this one. */
+  | { type: 'allowAlways'; requestId?: string; commandId?: string; rule: CommandRule }
+  | { type: 'reviewAll'; chatId: string; action: 'accept' | 'reject' }
+  /** A queued message: drop it, or send it now into the running turn. */
+  | { type: 'unqueue'; chatId: string; id: string }
+  | { type: 'steer'; chatId: string; id: string }
+  | { type: 'copy'; text: string }
+  /** Puts code from a reply into the active editor at the cursor. */
+  | { type: 'insert'; text: string }
+  /** An answer to an agent's form, or declining it; the host checks it against what was asked. */
+  | { type: 'answerQuestion'; requestId: string; action: 'accept' | 'decline'; values?: Record<string, string | number | boolean | string[]> }
+  /** Files matching what follows "#" in the composer, for the picker. */
+  | { type: 'findFiles'; chatId: string; query: string }
+  /** Claude Code, Cline, Roo Code, Kilo Code or Continue, from the extension gallery. */
+  | { type: 'otherAgents' };
 
 export type HostMessage =
-  | { type: 'snapshot'; state: AppState; selected?: string; now: number }
+  /** `defaults` (optional): each agent's last known options and the user's last choices. */
+  | { type: 'snapshot'; state: AppState; selected?: string; now: number; defaults?: Partial<Record<AgentKey, AgentDefaults>> }
+  | { type: 'defaults'; defaults: Partial<Record<AgentKey, AgentDefaults>> }
   | { type: 'action'; action: Action }
   /** Several actions in order; the host batches them when agents stream fast. */
   | { type: 'actions'; actions: Action[] }
   | { type: 'select'; chatId: string }
-  | { type: 'attached'; images: Attachment[] }
+  | { type: 'attached'; images: Attachment[]; chatId?: string }
+  /** Workspace files for the "#" picker, relative to the chat's folder. */
+  | { type: 'foundFiles'; chatId: string; query: string; files: string[] }
   | { type: 'reveal'; chatId: string; id: string }
   /** Put a code reference into that chat's composer, to go with the next message. */
   | { type: 'addRef'; chatId: string; ref: CodeRef };
@@ -74,6 +108,10 @@ export const LIMITS = {
   refs: 10,
   /** Highest line number a reference may name. */
   line: 10_000_000,
+  /** Text one Copy button may put on the clipboard. */
+  copy: 1_000_000,
+  /** Session settings one new task may set per agent. */
+  choices: 16,
 };
 
 export const IMAGE_MIME = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -119,16 +157,76 @@ function noticeAction(v: unknown): NoticeAction | null {
   }
 }
 
+const optionValue = (v: unknown): v is string | boolean => typeof v === 'boolean' || (typeof v === 'string' && v.length > 0 && v.length <= 256);
+
+/** Per-agent choices for a new task; the host checks each value against what the agent offers. */
+function taskChoices(v: unknown): TaskChoices | null | undefined {
+  if (v === undefined) return undefined;
+  if (!isObj(v)) return null;
+  const out: TaskChoices = {};
+  for (const [agent, values] of Object.entries(v)) {
+    if (!isAgentKey(agent) || !isObj(values)) return null;
+    const entries = Object.entries(values);
+    if (entries.length > LIMITS.choices || !entries.every(([k, val]) => str(k, 128) && k && optionValue(val))) return null;
+    out[agent] = Object.fromEntries(entries) as Record<string, string | boolean>;
+  }
+  return out;
+}
+
+function taskExtras(m: Obj): { choices?: TaskChoices; approval?: ApprovalLevel } | null {
+  const choices = taskChoices(m.choices);
+  if (choices === null || (m.approval !== undefined && !isApprovalLevel(m.approval))) return null;
+  return { ...(choices ? { choices } : {}), ...(m.approval !== undefined ? { approval: m.approval as ApprovalLevel } : {}) };
+}
+
 /** Returns the message if it is well formed, otherwise null. */
 export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
   if (!isObj(raw) || typeof raw.type !== 'string') return null;
   const m = raw;
   switch (m.type) {
     case 'ready':
-    case 'attach':
     case 'moveToCenter':
     case 'openTasks':
+    case 'otherAgents':
       return { type: m.type };
+    case 'attach':
+      if (m.chatId === undefined) return { type: 'attach' };
+      return id(m.chatId) ? { type: 'attach', chatId: m.chatId } : null;
+    case 'setOption':
+      return id(m.chatId) && str(m.optionId, 128) && m.optionId && optionValue(m.value) ? { type: 'setOption', chatId: m.chatId, optionId: m.optionId, value: m.value } : null;
+    case 'approval':
+      return id(m.chatId) && isApprovalLevel(m.level) ? { type: 'approval', chatId: m.chatId, level: m.level } : null;
+    case 'plan':
+      return id(m.chatId) && typeof m.on === 'boolean' ? { type: 'plan', chatId: m.chatId, on: m.on } : null;
+    case 'permissionDiff':
+      return id(m.requestId) && str(m.path, LIMITS.path) && m.path ? { type: 'permissionDiff', requestId: m.requestId, path: m.path } : null;
+    case 'allowAlways': {
+      if (!isRule(m.rule) || (m.requestId !== undefined && !id(m.requestId)) || (m.commandId !== undefined && !id(m.commandId))) return null;
+      if ((m.requestId === undefined) === (m.commandId === undefined)) return null;
+      const rule = { kind: m.rule.kind, command: m.rule.command };
+      return m.requestId !== undefined ? { type: 'allowAlways', requestId: m.requestId as string, rule } : { type: 'allowAlways', commandId: m.commandId as string, rule };
+    }
+    case 'reviewAll':
+      return id(m.chatId) && (m.action === 'accept' || m.action === 'reject') ? { type: 'reviewAll', chatId: m.chatId, action: m.action } : null;
+    case 'unqueue':
+    case 'steer':
+      return id(m.chatId) && id(m.id) ? { type: m.type, chatId: m.chatId, id: m.id } : null;
+    case 'copy':
+    case 'insert':
+      return str(m.text, LIMITS.copy) && m.text ? { type: m.type, text: m.text } : null;
+    case 'findFiles':
+      return id(m.chatId) && str(m.query, 200) ? { type: 'findFiles', chatId: m.chatId, query: m.query } : null;
+    case 'answerQuestion': {
+      if (!id(m.requestId) || (m.action !== 'accept' && m.action !== 'decline')) return null;
+      if (m.values === undefined) return { type: 'answerQuestion', requestId: m.requestId, action: m.action };
+      if (!isObj(m.values) || Object.keys(m.values).length > 12) return null;
+      const ok = Object.entries(m.values).every(
+        ([k, v]) =>
+          str(k, 128) &&
+          (typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v)) || str(v, 10_000) || (Array.isArray(v) && v.length <= 50 && v.every((x) => str(x, 500)))),
+      );
+      return ok ? { type: 'answerQuestion', requestId: m.requestId, action: m.action, values: m.values as Record<string, string | number | boolean | string[]> } : null;
+    }
     case 'newChat':
       return isAgentKey(m.agent) ? { type: 'newChat', agent: m.agent } : null;
     case 'select':
@@ -154,8 +252,9 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'fanout': {
       if (!Array.isArray(m.agents) || m.agents.length < 1 || m.agents.length > LIMITS.fanout || !m.agents.every(isAgentKey)) return null;
       const agents = [...new Set(m.agents as AgentKey[])];
-      return str(m.prompt, LIMITS.text) && m.prompt.trim() && typeof m.worktree === 'boolean'
-        ? { type: 'fanout', agents, prompt: m.prompt, worktree: m.worktree }
+      const extras = taskExtras(m);
+      return extras && str(m.prompt, LIMITS.text) && m.prompt.trim() && typeof m.worktree === 'boolean'
+        ? { type: 'fanout', agents, prompt: m.prompt, worktree: m.worktree, ...extras }
         : null;
     }
     case 'bridge':
@@ -193,10 +292,12 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       if (m.line === undefined) return { type: 'openFile', path: m.path };
       if (!line(m.line) || (m.endLine !== undefined && (!line(m.endLine) || m.endLine < m.line))) return null;
       return { type: 'openFile', path: m.path, line: m.line, ...(m.endLine !== undefined ? { endLine: m.endLine } : {}) };
-    case 'createTask':
-      return isAgentKey(m.agent) && str(m.prompt, LIMITS.text) && m.prompt.trim() && typeof m.worktree === 'boolean'
-        ? { type: 'createTask', agent: m.agent, prompt: m.prompt, worktree: m.worktree }
+    case 'createTask': {
+      const extras = taskExtras(m);
+      return extras && isAgentKey(m.agent) && str(m.prompt, LIMITS.text) && m.prompt.trim() && typeof m.worktree === 'boolean'
+        ? { type: 'createTask', agent: m.agent, prompt: m.prompt, worktree: m.worktree, ...extras }
         : null;
+    }
     default:
       return null;
   }

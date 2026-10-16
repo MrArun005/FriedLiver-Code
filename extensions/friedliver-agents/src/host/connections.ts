@@ -1,6 +1,7 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import type { Attachment } from '../shared/messages';
 import { MAX_LINK_DEPTH, lastReply, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
+import type { ApprovalLevel } from '../shared/session';
 import { consultBrief, forwardText, handoffContext, handoffSummary } from './transcript';
 
 /** Forwards one pipe makes before it pauses, so two agents can't keep each other busy forever. */
@@ -18,6 +19,10 @@ export interface NewChat {
   origin?: ChatView['origin'];
   depth?: number;
   group?: string;
+  /** Session settings to apply once the agent's session starts: optionKey → value (see shared/session.ts). */
+  choices?: Record<string, string | boolean>;
+  /** The chat's approval level; the user's default when not given. Full auto must already be confirmed. */
+  approval?: ApprovalLevel;
 }
 
 /** How a turn ended, and what the agent said in it. */

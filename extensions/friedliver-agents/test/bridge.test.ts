@@ -102,8 +102,8 @@ describe('the FriedLiver tools, used by the demo agent', () => {
     await core.cancel(a.id);
     await turn;
     await waitFor(() => !core.snapshot.chats[1].busy);
-    expect(core.snapshot.chats[1].items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped (cancelled).' });
-    expect(core.chat(a.id)!.items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Stopped (cancelled).' }));
+    expect(core.snapshot.chats[1].items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped.' });
+    expect(core.chat(a.id)!.items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Stopped.' }));
   });
 
   it('refuses the caller itself, busy chats and unknown ones, and messages idle ones', async () => {

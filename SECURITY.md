@@ -17,7 +17,9 @@ FriedLiver is VS Code (Code - OSS) with an Agents extension that runs coding
 agents (Claude, Codex, Gemini, and an offline Demo) over the Agent Client
 Protocol. Who is trusted:
 
-- **You.** Every edit an agent proposes and every command it asks to run waits for you.
+- **You.** You choose per chat how much an agent may do without asking (Ask,
+  Auto-accept edits, Full auto). In Ask, every edit and command that reaches
+  FriedLiver, or that the agent asks permission for, waits for you.
 - **The editor and the extensions you install.** They run with your rights.
 - **The agent programs you install** (`claude-agent-acp`, `codex-acp`, `gemini`)
   are trusted code with untrusted input: they act on what they read, and a file
@@ -33,14 +35,28 @@ An agent can:
 
 - Read files in the open workspace folders and its task worktree. It sees
   unsaved editor text the way you do.
-- Propose a write. It opens as a diff and is written only if you accept, with
-  the content you leave in the diff. You can undo the latest turn. Edits you
-  ask for from the editor (Edit with Agent, Fix with Agent; docs/EDITOR.md)
-  are ordinary chat turns and go through the same review.
-- Ask to run a command. It runs only after you approve it. You see the whole
-  command line, including any environment variables the agent sets, with
-  invisible and direction-changing characters spelled out.
-- Ask you a question, send images, and start a sign-in for its own vendor.
+- Propose a write through FriedLiver (Gemini, the Demo agent). In Ask it opens
+  as a diff and is written only if you accept, with the content you leave in
+  the diff. Edits you ask for from the editor (Edit with Agent, Fix with
+  Agent; docs/EDITOR.md) are ordinary chat turns and go through the same review.
+- Ask to run a command in a FriedLiver terminal (the Demo agent). In Ask it
+  runs only after you approve it. You see the whole command line, including
+  any environment variables the agent sets, with invisible and
+  direction-changing characters spelled out.
+- Ask permission for something it does itself (Claude and Codex edit files and
+  run commands in their own process). The card shows what the request carries,
+  merged with the tool call it names: the diff (and the whole proposed file,
+  read-only, through **Open diff**), the command and its folder with invisible
+  characters spelled out, or the plan. FriedLiver can only answer the request;
+  the agent does the work.
+- Ask you a question as a form, send images, and start a sign-in for its own vendor.
+
+Every turn starts with a checkpoint: a git snapshot of the working tree, made
+in a temporary index (your index, stash and branches stay as they are), so
+"Changed N files" and Undo cover edits an agent made itself. Outside git,
+Undo covers FriedLiver's own writes and the files an agent asked to edit, from
+the content seen before the request. A file changed again after the turn is
+left as it is.
 
 Through FriedLiver an agent can't:
 
@@ -49,8 +65,9 @@ Through FriedLiver an agent can't:
   don't exist yet). Paths are checked by real location, and checked again just
   before writing.
 - Write into a `.git` folder, whose config and hooks run programs.
-- Run a command without your approval, or get a Run button for a command the
-  notification doesn't show in full.
+- Run a command in a FriedLiver terminal without your approval (or the chat's
+  Full auto or a rule you added), or get a Run or Allow button for a command
+  the notification doesn't show in full.
 - Put a link that runs editor commands into a notification.
 - Read another chat, post into it, or ask another agent without your OK
   (see "Agents reaching other agents" below), or pose as another agent's chat.
@@ -65,9 +82,47 @@ Through FriedLiver an agent can't:
 
 **Agents aren't sandboxed.** An agent is a program running as you. FriedLiver
 controls what an agent asks FriedLiver to do (ACP file reads, writes and
-terminals). It can't stop the agent's own process from reading files,
-writing files or using the network directly. Install only agents you trust,
-and treat their vendors' own permission settings as part of your setup.
+terminals) and answers the permission requests the agent sends. It can't stop
+the agent's own process from reading files, writing files or using the
+network directly, and an agent's own settings can let it act without asking
+(Claude honours allow rules in a project's `.claude/settings.json`; Codex's
+"Workspace access" runs sandboxed commands without asking). FriedLiver sets
+each agent's mode at session start from the chat's level, so a vendor default
+(Codex's "Auto review", a `defaultMode` in `~/.claude/settings.json`) doesn't
+carry over, and the chat header always shows the mode the agent reports, in
+color when it doesn't ask. Install only agents you trust, and treat their
+vendors' own permission settings as part of your setup.
+
+### Approval levels and "Always allow"
+
+- **Ask** (the default): FriedLiver's reviews and Run/Deny cards, and every
+  permission request, wait for you.
+- **Auto-accept edits**: writes through FriedLiver are accepted without a diff
+  and permission requests for edits get the agent's one-time "yes". Commands
+  still wait. Every such edit is recorded for Undo and listed in the turn's
+  changes.
+- **Full auto**: edits and commands go through. It is chosen per chat, never
+  as a default, and confirmed once per chat in a modal. The chat, its tab, its
+  Agent Manager card, the map and the status bar show it in red while it is
+  on. A reopened window brings the chat back in Ask (or your default), never
+  Full auto. FriedLiver still asks for commands in folders outside the
+  workspace and for plans (and other mode switches) that reach it, but the
+  agent's own full-access mode means the agent itself may not ask at all.
+- FriedLiver answers for you only with an agent's one-time allow option whose
+  name doesn't change the agent's mode or keep allowing ("bypass", "don't ask
+  again", "always"…). Those options are never the highlighted button and say
+  what they do.
+- **Rules**: "Always allow" on a command adds a rule for the exact command, or
+  for a program and its subcommand (`npm test` covers `npm test -- --watch`).
+  A line with `;`, `&`, `|`, `<`, `>`, backticks, `$`, parentheses, braces, a
+  backslash, a line break, a spelled-out invisible character or a leading
+  `NAME=value` never matches any rule, and none is offered for it. Rules live
+  in this workspace's storage in your profile, never in the repository, and
+  **FriedLiver: Always-Allowed Commands** lists and removes them. A prefix rule
+  allows any arguments after it, which can change what the program does; prefer
+  exact rules for anything that writes.
+- `friedliver.approvals.default` (ask or edits) is machine-scoped and read from
+  your user settings only; a workspace value is ignored and logged.
 
 ### What a malicious repository can and can't do
 
@@ -99,6 +154,9 @@ It can't:
 - Choose which agent gets your code from Edit with Agent.
   `friedliver.edit.defaultAgent` is machine-scoped and read from your user
   settings only.
+- Make agents run without asking. `friedliver.approvals.default` is
+  machine-scoped and read from your user settings only, it can't be Full
+  auto, and "Always allow" rules aren't settings at all.
 
 ### What a malicious agent can and can't do
 
@@ -125,10 +183,18 @@ arguments are checked, and its images and output are bounded.
   deletes the file. Anything that was waiting when the window closed comes
   back closed, never approved.
 - **Pending reviews and undo checkpoints** live in memory and are gone after a
-  reload. Task worktrees are git checkouts next to the repository.
+  reload. A turn's git snapshot writes blob and tree objects into the
+  repository's object store (unreachable, so `git gc` prunes them in time); it
+  never touches the index, the stash or a branch. Task worktrees are git
+  checkouts next to the repository.
+- **Chats** also keep each session's settings (model, effort, mode) and the
+  choices you made, so the next session applies them. Full auto is never saved.
+- **globalState** keeps, per agent, the options its last session offered and
+  your last choices (never Full auto). **workspaceState** keeps this
+  workspace's "Always allow" rules.
 - **The output channel** (FriedLiver Agents) logs agent commands, agent stderr
   and errors. It never logs keys.
-- **globalState** holds the update check's last-check time and the last
+- **globalState** also holds the update check's last-check time and the last
   version it announced.
 
 ### Network
@@ -237,3 +303,7 @@ for a typical single-user desktop.
 | FL-21 | Info | Platform defaults | Checked: workspace trust stays on by default, and no patch touches the renderer sandbox or context isolation. Telemetry is off, the update service is absent, and product.json uses HTTPS only with a minimal link-protection list. `--no-sandbox` appears only in `dev.mjs` (as root) and test tooling. `webviewContentExternalBaseUrlTemplate` (Microsoft's CDN) only matters for web and server builds, which FriedLiver doesn't ship. | No change needed. |
 | FL-22 | Accepted | Residual | There is a short gap between the path check and the write, which a process you approved could use to swap a link. On Windows, terminal commands you approve still find programs in their folder, as cmd.exe always does. The extension host's environment reaches agents. | Accepted. These need a process you already allowed, or they are standard platform behaviour. |
 | FL-23 | Low | Agent-to-agent bridge | Reviewed at merge: per-chat tokens, socket permissions, request checks, approval, loop and depth limits hold. Under "ask", an agent could leave any number of requests waiting in its chat. | Fixed. At most 3 waiting per chat; more are refused with a message to the agent. |
+| FL-24 | High | Approvals (APR-2) | FriedLiver's diff review, command cards, "Changed N files" and Undo ran only for writes and commands routed through ACP `fs/write_text_file` and `terminal/create`. Claude and Codex use neither: their edits and commands happened in their own process, after a permission card that showed only a title (or no card, in Codex's default "Auto review" mode). The docs promised a diff for every write. | Fixed. A permission request is merged with the tool call it names and shows the diff (with the whole proposed file, read-only), the command and its folder, or the plan. Every turn gets a git checkpoint in a temporary index (outside git, the content seen before each request), so changes and Undo cover every agent. FriedLiver sets each agent's mode from the chat's level at session start and shows the mode the agent reports. The docs now say per agent what FriedLiver controls. |
+| FL-25 | Medium | Auto-approve | New approval levels and "Always allow" rules let agents act without asking. A repository could try to turn them on, a rule could be stretched with chained commands, and an auto-answer could pick an option that changes the agent's mode for good. | Contained. The default level is machine-scoped, user settings only, and can't be Full auto. Full auto is per chat, confirmed once, shown in red everywhere, and never restored after a reload; FriedLiver still asks for outside-workspace commands and plans that reach it. Rules match only plain lines (no chaining, redirection, substitution, variables or invisible characters), live in your profile's workspace storage, and can be listed and removed. Auto-answers use only one-time allow options that don't escalate. Auto-accepted edits stay undoable. |
+| FL-26 | Low | Notifications | Command approvals were progress notifications whose only button, Cancel, denied the command, and that showed even with the card on screen; questions from a chat in another view got none. | Fixed. Real buttons (Run only for a command shown in full, Deny, Show), only when that chat isn't on screen or the window isn't focused; dismissing decides nothing; a late button press after the decision was made elsewhere does nothing; several waiting decisions collapse into one "N decisions waiting". |
+| FL-27 | Low | Setup | The install lines pointed at the deprecated `@zed-industries/*` adapters, frozen at old versions (Claude's lists "Yes, and bypass permissions" first after a plan). | Fixed. `@agentclientprotocol/claude-agent-acp` and `@agentclientprotocol/codex-acp`; Accounts shows the adapter version and says when to update. |

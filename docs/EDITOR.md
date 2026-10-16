@@ -1,10 +1,12 @@
 # Agents in the editor
 
 You can work with an agent from the file you're editing, not just from the
-chat panel. These commands still use ordinary chats. Every write is a diff you
-accept or reject, and every command waits for your approval, the same as in
-the panel. They need only the stable VS Code API, so they also work when the
-extension is installed in VS Code or Antigravity.
+chat panel. These commands still use ordinary chats, with the chat's
+approval level: in Ask (the default) every write through FriedLiver is a diff
+you accept or reject, and every command or edit an agent asks permission for
+waits for you, the same as in the panel (README: "What FriedLiver controls for
+each agent"). They need only the stable VS Code API, so they also work when
+the extension is installed in VS Code or Antigravity.
 
 | Command | Where | What happens |
 |---|---|---|

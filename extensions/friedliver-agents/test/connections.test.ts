@@ -194,7 +194,7 @@ describe('chat housekeeping', () => {
       await new Promise((r) => setTimeout(r, delay));
       await core.cancel(a.id);
       await turn;
-      expect(core.chat(a.id)!.items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped (cancelled).' });
+      expect(core.chat(a.id)!.items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped.' });
     }
     await core.send(a.id, 'after');
     expect(lastReply(core.chat(a.id)!)).toBe('You said: after');
@@ -214,7 +214,7 @@ describe('chat housekeeping', () => {
     await core.send(a.id, `edit ${file}`);
     expect(core.chat(a.id)!.files).toEqual(['src/new.txt']);
     expect(core.touchedFiles(a.id)).toEqual([file]);
-    expect(core.beforeChat(a.id, file)).toBeNull();
+    expect(await core.beforeChat(a.id, file)).toBeNull();
 
     core.archive(a.id, true);
     expect(core.chat(a.id)!.archived).toBe(true);

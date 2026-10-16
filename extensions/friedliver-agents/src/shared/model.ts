@@ -1,6 +1,9 @@
 // State shared by the extension host and its webviews. The host owns it and
 // sends every action to the webviews, which fold it with the same reducer.
 import type * as acp from '@agentclientprotocol/sdk';
+import { applySessionUpdate, isSessionUpdate, type ApprovalLevel, type ChatSession } from './session';
+import type { QuestionField } from './questions';
+import { appendOutput, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
 
 export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'demo'] as const;
 export type AgentKey = (typeof AGENT_KEYS)[number];
@@ -53,6 +56,8 @@ export interface CommandItem {
   exitCode?: number | null;
   startedAt?: number;
   durationMs?: number;
+  /** Ran without asking, and why: "Full auto", or the "Always allow" rule that covers it. */
+  auto?: string;
 }
 
 export interface ReviewItem {
@@ -63,6 +68,8 @@ export interface ReviewItem {
   removed: number;
   isNew: boolean;
   state: 'pending' | 'accepted' | 'rejected';
+  /** Decided without the diff editor, and why: "Auto-accept edits", "Approved above". */
+  auto?: string;
 }
 
 // ---- Connections between chats ----
@@ -141,15 +148,32 @@ export type Item =
   | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[] }
   | { kind: 'agent'; text: string }
   | { kind: 'thought'; text: string }
-  | { kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[] }
+  /** `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short. */
+  | { kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[]; out?: ToolOut[]; input?: string }
   | { kind: 'plan'; entries: { content: string; status: string }[] }
-  | { kind: 'permission'; requestId: string; toolCallId?: string; title: string; options: PermissionOption[]; answer?: string }
+  /**
+   * `toolKind` and `detail` (optional) say what is being approved: the diff, the command, the plan.
+   * `auto` says FriedLiver answered it under the chat's approval level or a rule.
+   */
+  | { kind: 'permission'; requestId: string; toolCallId?: string; title: string; options: PermissionOption[]; answer?: string; toolKind?: string; detail?: PermissionDetail; auto?: string }
   | ReviewItem
   | CommandItem
   | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; actions?: NoticeAction[] }
   | { kind: 'changes'; turnId: string; files: string[]; undone?: boolean }
   | LinkItem
-  | BridgeItem;
+  | BridgeItem
+  | QuestionItem;
+
+/** A question the agent asks as a small form (ACP elicitation), e.g. Claude's AskUserQuestion. */
+export interface QuestionItem {
+  kind: 'question';
+  requestId: string;
+  message: string;
+  fields: QuestionField[];
+  state: 'awaiting' | 'answered' | 'declined';
+  /** The answer, in one line, once given. */
+  summary?: string;
+}
 
 export interface ChatView {
   id: string;
@@ -180,6 +204,19 @@ export interface ChatView {
   turns: number;
   /** Put away: kept for its history, hidden from the board and the tab bar. */
   archived?: boolean;
+  /** What the agent's session offers (model, effort, modes, commands) and reports (mode, usage). */
+  session?: ChatSession;
+  /** FriedLiver's approval level for the chat; Ask when unset. */
+  approval?: ApprovalLevel;
+  /** Messages sent while the agent worked, in order: each goes when the turn before it ends. */
+  queue?: QueuedMessage[];
+}
+
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  images: number;
+  refs?: number;
 }
 
 export interface AppState {
@@ -198,8 +235,8 @@ export type Action =
   | { t: 'update'; chatId: string; update: acp.SessionUpdate; at?: number }
   | { t: 'busy'; chatId: string; busy: boolean; at?: number }
   | { t: 'title'; chatId: string; title: string }
-  | { t: 'permissionAnswered'; requestId: string; answer: string }
-  | { t: 'review'; reviewId: string; state: ReviewItem['state'] }
+  | { t: 'permissionAnswered'; requestId: string; answer: string; auto?: string }
+  | { t: 'review'; reviewId: string; state: ReviewItem['state']; auto?: string }
   | { t: 'command'; commandId: string; patch: Partial<Omit<CommandItem, 'kind' | 'commandId' | 'output'>> }
   | { t: 'commandOutput'; commandId: string; data: string }
   | { t: 'changes'; chatId: string; turnId: string; files: string[] }
@@ -210,9 +247,14 @@ export type Action =
   | { t: 'linkPatch'; linkId: string; patch: Partial<Pick<ChatLink, 'active' | 'count'>> }
   | { t: 'unlink'; linkId: string }
   | { t: 'bridge'; requestId: string; state: BridgeItem['state'] }
+  | { t: 'question'; requestId: string; state: QuestionItem['state']; summary?: string }
   /** Files a turn proposed or changed, relative to the chat's cwd; merged into `files`. */
   | { t: 'files'; chatId: string; files: string[] }
   | { t: 'archive'; chatId: string; archived: boolean }
+  /** The chat's session as the agent started or reloaded it; undefined forgets it. */
+  | { t: 'session'; chatId: string; session: ChatSession | undefined }
+  | { t: 'approval'; chatId: string; level: ApprovalLevel }
+  | { t: 'queue'; chatId: string; queue: QueuedMessage[] }
   /** The whole state at once: chats restored after a reload. */
   | { t: 'restore'; state: AppState };
 
@@ -239,6 +281,10 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'items':
       return editChat(state, action.chatId, (c) => ({ ...c, items: capItems([...c.items, ...action.items]), lastActivity: action.at ?? c.lastActivity }));
     case 'update':
+      if (isSessionUpdate(action.update)) {
+        const update = action.update;
+        return editChat(state, action.chatId, (c) => ({ ...c, session: applySessionUpdate(c.session, update) }));
+      }
       return editChat(state, action.chatId, (c) => ({ ...c, items: capItems(applyUpdate(c.items, action.update)), lastActivity: action.at ?? c.lastActivity }));
     case 'busy':
       return editChat(state, action.chatId, (c) => ({
@@ -250,9 +296,11 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'title':
       return editChat(state, action.chatId, (c) => ({ ...c, title: action.title }));
     case 'permissionAnswered':
-      return editItems(state, (i) => (i.kind === 'permission' && i.requestId === action.requestId ? { ...i, answer: action.answer } : i));
+      return editItems(state, (i) =>
+        i.kind === 'permission' && i.requestId === action.requestId ? { ...i, answer: action.answer, ...(action.auto ? { auto: action.auto } : {}) } : i,
+      );
     case 'review':
-      return editItems(state, (i) => (i.kind === 'review' && i.reviewId === action.reviewId ? { ...i, state: action.state } : i));
+      return editItems(state, (i) => (i.kind === 'review' && i.reviewId === action.reviewId ? { ...i, state: action.state, ...(action.auto ? { auto: action.auto } : {}) } : i));
     case 'command':
       return editItems(state, (i) => (i.kind === 'command' && i.commandId === action.commandId ? { ...i, ...action.patch } : i));
     case 'commandOutput':
@@ -289,6 +337,8 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, links: state.links.filter((l) => l.id !== action.linkId) };
     case 'bridge':
       return editItems(state, (i) => (i.kind === 'bridge' && i.requestId === action.requestId ? { ...i, state: action.state } : i));
+    case 'question':
+      return editItems(state, (i) => (i.kind === 'question' && i.requestId === action.requestId ? { ...i, state: action.state, ...(action.summary ? { summary: action.summary } : {}) } : i));
     case 'files':
       return editChat(state, action.chatId, (c) => {
         const files = [...new Set([...c.files, ...action.files])];
@@ -296,6 +346,12 @@ export function reduce(state: AppState, action: Action): AppState {
       });
     case 'archive':
       return editChat(state, action.chatId, (c) => ({ ...c, archived: action.archived || undefined }));
+    case 'session':
+      return editChat(state, action.chatId, (c) => ({ ...c, session: action.session }));
+    case 'approval':
+      return editChat(state, action.chatId, (c) => ({ ...c, approval: action.level === 'ask' ? undefined : action.level }));
+    case 'queue':
+      return editChat(state, action.chatId, (c) => ({ ...c, queue: action.queue.length ? action.queue : undefined }));
     case 'restore':
       return action.state;
   }
@@ -371,6 +427,9 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
       return [...items, { kind, text: capText(update.content.text) }];
     }
     case 'tool_call': {
+      const streamed = streamedOutput(update._meta);
+      const out = toolOut(update.content);
+      const input = toolInput(update.rawInput);
       const tool: Item = {
         kind: 'tool',
         id: update.toolCallId,
@@ -378,21 +437,40 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
         toolKind: update.kind,
         status: update.status,
         locations: (update.locations ?? []).map((l) => l.path),
+        ...(out || streamed ? { out: streamed ? appendOutput(out, streamed) : out } : {}),
+        ...(input ? { input } : {}),
       };
       const at = items.findIndex((i) => i.kind === 'tool' && i.id === update.toolCallId);
       return at < 0 ? [...items, tool] : items.map((i, n) => (n === at ? tool : i));
     }
-    case 'tool_call_update':
-      return items.map((i) =>
-        i.kind === 'tool' && i.id === update.toolCallId
-          ? {
-              ...i,
-              title: update.title ?? i.title,
-              status: update.status ?? i.status,
-              locations: update.locations ? update.locations.map((l) => l.path) : i.locations,
-            }
-          : i,
-      );
+    case 'tool_call_update': {
+      // Content replaces what the tool showed; output streamed in _meta adds to it.
+      const out = update.content ? toolOut(update.content) : undefined;
+      const streamed = streamedOutput(update._meta);
+      const input = update.rawInput !== undefined ? toolInput(update.rawInput) : undefined;
+      return items.map((i) => {
+        if (i.kind !== 'tool' || i.id !== update.toolCallId) return i;
+        let next = update.content ? out : i.out;
+        if (streamed) next = appendOutput(next, streamed);
+        return {
+          ...i,
+          title: update.title ?? i.title,
+          toolKind: update.kind ?? i.toolKind,
+          status: update.status ?? i.status,
+          locations: update.locations ? update.locations.map((l) => l.path) : i.locations,
+          out: next,
+          input: input ?? i.input,
+        };
+      });
+    }
+    case 'notice': {
+      // An agent's short notice, e.g. "Auto mode unavailable".
+      const severity = update.severity === 'error' ? 'error' : 'info';
+      const title = typeof update.title === 'string' ? update.title.slice(0, 500) : '';
+      if (!title) return items;
+      const description = typeof update.description === 'string' ? update.description.slice(0, 2000) : undefined;
+      return [...items, { kind: 'notice', tone: severity, text: description ? `${title}: ${description}` : title }];
+    }
     case 'plan': {
       const plan: Item = { kind: 'plan', entries: update.entries.map((e) => ({ content: e.content, status: e.status })) };
       // One live plan per turn: replace it in place until the user speaks again.
@@ -415,7 +493,7 @@ export type ChatStatus = 'idle' | 'working' | 'needs-you' | 'done' | 'error';
 
 export interface Decision {
   chatId: string;
-  kind: 'permission' | 'review' | 'command' | 'bridge';
+  kind: 'permission' | 'review' | 'command' | 'bridge' | 'question';
   /** requestId, reviewId or commandId. */
   id: string;
   title: string;
@@ -427,7 +505,8 @@ export function isWaiting(i: Item): boolean {
     (i.kind === 'permission' && !i.answer) ||
     (i.kind === 'review' && i.state === 'pending') ||
     (i.kind === 'command' && i.state === 'awaiting') ||
-    (i.kind === 'bridge' && i.state === 'awaiting')
+    (i.kind === 'bridge' && i.state === 'awaiting') ||
+    (i.kind === 'question' && i.state === 'awaiting')
   );
 }
 
@@ -456,6 +535,7 @@ export function decisions(state: Pick<AppState, 'chats'>): Decision[] {
       else if (i.kind === 'review') out.push({ chatId: chat.id, kind: 'review', id: i.reviewId, title: `Review edit to ${basename(i.path)}` });
       else if (i.kind === 'command') out.push({ chatId: chat.id, kind: 'command', id: i.commandId, title: `Run ${shortCommand(i.commandLine)}` });
       else if (i.kind === 'bridge') out.push({ chatId: chat.id, kind: 'bridge', id: i.requestId, title: bridgeTitle(state, chat, i) });
+      else if (i.kind === 'question') out.push({ chatId: chat.id, kind: 'question', id: i.requestId, title: `Answer: ${i.message.slice(0, 80)}` });
     }
   }
   return out;
@@ -564,8 +644,12 @@ export function stateLine(chat: ChatView): StateLine {
     );
     if (item?.kind === 'review') return { text: `Edit to review: ${basename(item.path)} +${item.added} −${item.removed}`, decision: waiting };
     if (item?.kind === 'command') return { text: 'Wants to run a command', code: item.commandLine, decision: waiting };
-    if (item?.kind === 'permission') return { text: `Asks: ${item.title}`, decision: waiting };
+    if (item?.kind === 'permission') {
+      const files = item.detail?.files?.map((f) => basename(f.path)).join(', ');
+      return { text: `Asks: ${item.title}`, code: item.detail?.command?.line ?? files, decision: waiting };
+    }
     if (waiting.kind === 'bridge') return { text: waiting.title, decision: waiting };
+    if (waiting.kind === 'question') return { text: `Asks you: ${waiting.title.slice(8)}`, decision: waiting };
   }
   const status = chatStatus(chat);
   if (status === 'working') {

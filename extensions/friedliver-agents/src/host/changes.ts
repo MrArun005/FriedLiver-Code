@@ -13,13 +13,13 @@ function beforeUri(chatId: string, file: string): vscode.Uri {
 /** Serves the "before" side of a chat's diffs from its turn log. */
 export function registerBeforeProvider(core: () => AgentCore): vscode.Disposable {
   return vscode.workspace.registerTextDocumentContentProvider(BEFORE_SCHEME, {
-    provideTextDocumentContent(uri) {
+    async provideTextDocumentContent(uri) {
       const chatId = uri.path.split('/')[1];
       const file = new URLSearchParams(uri.query).get('file');
       if (!chatId || !file || !core().chat(chatId)) return '';
       // Only files the chat touched, so this can't be used to read anything else.
       if (!core().touchedFiles(chatId).includes(file)) return '';
-      return core().beforeChat(chatId, file) ?? '';
+      return (await core().beforeChat(chatId, file)) ?? '';
     },
   });
 }
@@ -54,9 +54,10 @@ export async function viewChanges(core: AgentCore, chatId: string): Promise<void
     void vscode.window.showInformationMessage(`${chat.label} hasn’t changed any files.`);
     return;
   }
-  const known = touched.filter((f) => core.beforeChat(chatId, f) !== undefined);
+  const before = await Promise.all(touched.map((f) => core.beforeChat(chatId, f)));
+  const known = touched.filter((_, n) => before[n] !== undefined);
   if (known.length) {
-    const list = known.map((f) => [vscode.Uri.file(f), core.beforeChat(chatId, f) === null ? undefined : beforeUri(chatId, f), vscode.Uri.file(f)]);
+    const list = known.map((f) => [vscode.Uri.file(f), before[touched.indexOf(f)] === null ? undefined : beforeUri(chatId, f), vscode.Uri.file(f)]);
     await vscode.commands.executeCommand('vscode.changes', `${chat.label}: changes since the chat started`, list);
     return;
   }
