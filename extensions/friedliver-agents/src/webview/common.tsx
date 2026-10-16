@@ -1,17 +1,71 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { parseMarkdown, type Inline } from '../shared/markdown';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
 import { AGENT_FACES, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
+  getState(): unknown;
+  setState(state: unknown): void;
 }
 declare function acquireVsCodeApi(): VsCodeApi;
 const vscode = acquireVsCodeApi();
 
 export function send(message: WebviewMessage): void {
   vscode.postMessage(message);
+}
+
+let viewState: Record<string, unknown> = {};
+try {
+  viewState = (vscode.getState() as Record<string, unknown> | undefined) ?? {};
+} catch {
+  // A stub without state: start fresh.
+}
+
+/** Like useState, kept by the webview across reloads (the view, the sort order). */
+export function usePersisted<T>(key: string, initial: T): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => (key in viewState ? (viewState[key] as T) : initial));
+  const set = (next: T) => {
+    setValue(next);
+    viewState = { ...viewState, [key]: next };
+    vscode.setState(viewState);
+  };
+  return [value, set];
+}
+
+/** The webview's width, for laying out by the room there is (side bar or editor). */
+export function useWidth(): number {
+  const [width, setWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
+}
+
+/** Smooth scrolling, unless motion is turned down. */
+export function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+/** Arrow keys move the choice in a radio group, as native radios do. */
+export function radioKeys(e: KeyboardEvent): void {
+  const forward = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+  if (!forward && e.key !== 'ArrowLeft' && e.key !== 'ArrowUp') return;
+  const radios = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="radio"]')];
+  const at = radios.indexOf(document.activeElement as HTMLElement);
+  if (at < 0) return;
+  e.preventDefault();
+  const next = radios[(at + (forward ? 1 : radios.length - 1)) % radios.length];
+  next.focus();
+  next.click();
+}
+
+/** Typing in a field: single-key shortcuts stay out of the way. */
+export function isTyping(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable="true"]');
 }
 
 /** The host's state, kept in step by folding the same actions with the same reducer. */
@@ -62,7 +116,7 @@ export function Glyph({ agent, size }: { agent: AgentKey; size?: 'sm' | 'lg' }) 
   );
 }
 
-const DOT_LABEL: Record<string, string> = {
+export const DOT_LABEL: Record<string, string> = {
   idle: 'Idle',
   next: 'Next',
   working: 'Working',
@@ -144,6 +198,25 @@ const ICONS = {
   tasks: 'M2.5 3.5h3v9h-3zM6.5 3.5h3v6h-3zM10.5 3.5h3v4h-3z',
   file: 'M4.5 2.5h4l3 3v8h-7zM8.5 2.5v3h3',
   terminal: 'M3 4.5l3 3-3 3M7.5 11h5',
+  search: 'M7 2.75a4.25 4.25 0 1 1 0 8.5a4.25 4.25 0 0 1 0-8.5zM10.2 10.2l3.3 3.3',
+  list: 'M2.75 4.5h.5M5.5 4.5h7.75M2.75 8h.5M5.5 8h7.75M2.75 11.5h.5M5.5 11.5h7.75',
+  map: 'M2.5 3.5h3.5v3h-3.5zM10 3.5h3.5v3H10zM10 10.5h3.5v3H10zM6 5h4M4.25 6.5v3.75a1.75 1.75 0 0 0 1.75 1.75h4',
+  archive: 'M2.5 3.5h11v2.75h-11zM3.5 6.25v6.25h9V6.25M6.5 9h3',
+  unarchive: 'M2.5 3.5h11v2.75h-11zM3.5 6.25v6.25h9V6.25M8 11.5V8.25M6.5 9.75 8 8.25l1.5 1.5',
+  handoff: 'M2.5 8h7.5M7.5 5l3 3-3 3M13.25 3.5v9',
+  ask: 'M2.75 3.5h10.5v6.75H8L5 12.75v-2.5H2.75z',
+  pipe: 'M2.5 6.5h7.5M2.5 9.5h7.5M9.5 4.5 13 8l-3.5 3.5',
+  chevron: 'M5 6.5l3 3 3-3',
+  more: 'M3 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0M7 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0M11 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
+  branch: 'M5 2.75v10.5M11 6a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3zM11 6c0 3-6 2.25-6 5',
+  diff: 'M4.5 2.5h4l3 3v8h-7zM6.5 8.25h3M8 6.75v3M6.5 11.25h3',
+  open: 'M9.5 2.75h3.75V6.5M13.25 2.75 8 8M11.5 9.5v3.75h-8.75V4.5H6.5',
+  user: 'M8 7.75a2.5 2.5 0 1 0 0-5a2.5 2.5 0 0 0 0 5zM3.25 13.25c.6-2.4 2.4-3.5 4.75-3.5s4.15 1.1 4.75 3.5',
+  link: 'M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.5.5M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.5-.5',
+  compare: 'M2.75 3.5h4v9h-4zM9.25 3.5h4v9h-4z',
+  history: 'M2.75 8a5.25 5.25 0 1 0 1.55-3.7M2.75 2.75v2.5h2.5M8 5.25V8l2 1.5',
+  grid: 'M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z',
+  keep: 'M3.5 8.5l3 3 6-7',
 };
 export type IconName = keyof typeof ICONS;
 
@@ -157,4 +230,138 @@ export function Icon({ name }: { name: IconName }) {
 
 export function basename(p: string): string {
   return p.split(/[\\/]/).filter(Boolean).at(-1) ?? p;
+}
+
+export function Kbd({ children }: { children: ComponentChildren }) {
+  return <kbd>{children}</kbd>;
+}
+
+const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';
+
+/**
+ * A button that opens a menu or a small form. Escape, Tab or a click outside
+ * closes it; Escape returns focus to the button. Menus move with the arrows.
+ */
+export function Popover({
+  label,
+  title,
+  trigger,
+  kind = 'menu',
+  align = 'start',
+  buttonClass,
+  class: className,
+  disabled,
+  children,
+}: {
+  /** The panel's accessible name. */
+  label: string;
+  /** Tooltip and accessible name for a button that shows only an icon. */
+  title?: string;
+  trigger: ComponentChildren;
+  kind?: 'menu' | 'dialog';
+  align?: 'start' | 'end';
+  buttonClass?: string;
+  class?: string;
+  disabled?: boolean;
+  children: (close: (refocus?: boolean) => void) => ComponentChildren;
+}) {
+  const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<{ up: boolean; dx: number }>({ up: false, dx: 0 });
+  const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const close = (refocus = true) => {
+    setOpen(false);
+    if (refocus) button.current?.focus();
+  };
+
+  useLayoutEffect(() => {
+    if (!open) setPlace({ up: false, dx: 0 });
+    if (!open || !panel.current || !button.current) return;
+    // Open upward when there's no room below, and slide sideways to stay inside the webview.
+    const b = button.current.getBoundingClientRect();
+    const p = panel.current.getBoundingClientRect();
+    const dx = p.right > window.innerWidth - 8 ? window.innerWidth - 8 - p.right : 0;
+    setPlace({ up: b.bottom + p.height + 8 > window.innerHeight && b.top - p.height - 8 > 0, dx: p.left + dx < 8 ? 8 - p.left : dx });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Menus focus their first item; forms their text field first.
+    const first =
+      kind === 'menu'
+        ? panel.current?.querySelector<HTMLElement>(MENU_ITEMS)
+        : (panel.current?.querySelector<HTMLElement>('input, textarea') ?? panel.current?.querySelector<HTMLElement>('button:not(:disabled)'));
+    first?.focus();
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!panel.current?.contains(t) && !button.current?.contains(t)) setOpen(false);
+    };
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, [open]);
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      return;
+    }
+    if (e.key === 'Tab' && kind === 'menu') {
+      setOpen(false);
+      return;
+    }
+    if (kind !== 'menu' || !panel.current) return;
+    const items = [...panel.current.querySelectorAll<HTMLElement>(MENU_ITEMS)];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const go = (n: number) => {
+      e.preventDefault();
+      items[(n + items.length) % items.length]?.focus();
+    };
+    if (e.key === 'ArrowDown') go(at + 1);
+    else if (e.key === 'ArrowUp') go(at - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(items.length - 1);
+  };
+
+  return (
+    <span class={`pop ${className ?? ''}`}>
+      <button
+        ref={button}
+        type="button"
+        class={buttonClass}
+        title={title}
+        disabled={disabled}
+        aria-label={title}
+        aria-haspopup={kind === 'menu' ? 'menu' : 'dialog'}
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => {
+          if (kind === 'menu' && !open && e.key === 'ArrowDown') {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        {trigger}
+      </button>
+      {open && (
+        <div
+          ref={panel}
+          id={id}
+          class={`popover ${kind}`}
+          role={kind}
+          aria-label={label}
+          data-up={place.up ? '' : undefined}
+          data-end={align === 'end' ? '' : undefined}
+          style={place.dx ? { transform: `translateX(${Math.round(place.dx)}px)` } : undefined}
+          onKeyDown={onKeyDown}
+        >
+          {children(close)}
+        </div>
+      )}
+    </span>
+  );
 }
