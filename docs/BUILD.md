@@ -51,14 +51,19 @@ Environment variables:
 Install Git, Python 3, and Visual Studio 2022 or newer with the *Desktop
 development with C++* workload (upstream checks this in preinstall). Then run
 the same `node code/scripts/...` commands from a normal terminal. `dev.mjs`
-runs `scripts\code.bat`. `--package` runs `gulp vscode-win32-x64-min`.
-**Not tested yet.**
+runs `scripts\code.bat`. `--package` runs `gulp vscode-win32-x64-min`,
+which also needs `signtool.exe` from the Windows SDK on PATH (it strips old
+signatures before stamping FriedLiver's name into bundled binaries), and
+`git config --global core.autocrlf false` before cloning, because the patches
+use LF line endings. CI does both (`.github/workflows/code.yml`).
 
 ### macOS
 
 Install the Xcode command line tools (`xcode-select --install`) and Python 3,
 then run the same commands. `dev.mjs` runs `scripts/code.sh`. `--package` runs
-`gulp vscode-darwin-<arch>-min`. **Not tested yet.**
+`gulp vscode-darwin-<arch>-min`. Built on CI for Apple silicon; the app is
+ad-hoc signed, not notarized, so macOS asks once under System Settings →
+Privacy & Security → Open Anyway.
 
 ### Icons
 

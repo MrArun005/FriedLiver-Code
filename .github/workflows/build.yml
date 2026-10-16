@@ -37,6 +37,17 @@ jobs:
         run: |
           git config --global core.longpaths true
           git config --global core.autocrlf false
+      # Packaging strips old Authenticode signatures with signtool before it stamps
+      # FriedLiver's name into bundled binaries; signtool comes with the Windows SDK.
+      - name: Put the Windows SDK's signtool on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $tool) { throw 'signtool.exe not found in the Windows SDK' }
+          "Using $($tool.FullName)"
+          $tool.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
