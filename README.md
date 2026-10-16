@@ -5,13 +5,25 @@ extensions from Open VSX, plus Claude, GPT (Codex) and Gemini coding agents in a
 panel on the right. Every file an agent wants to write opens as a diff you
 accept or reject, and every command waits for your approval.
 
-![First launch](docs/screenshots/1-first-launch.png)
+![An agent asks another agent, and waits for your Allow](docs/screenshots/app/03-agent-asks-agent.png)
+
+![The Agent Manager's map: which chat asked which](docs/screenshots/app/06-manager-map.png)
 
 What changes from stock VS Code:
 
-- **Agents on the right.** The FriedLiver Agents panel holds chats, the Agent
-  Manager board (Needs you / Working / Done), reviewed edits and approved commands.
-  Each agent signs in through its own official CLI.
+- **Agents on the right.** The FriedLiver Agents panel holds chats, reviewed
+  edits and approved commands. Each agent signs in through its own official CLI.
+- **An Agent Manager for many agents.** A board (Needs you / Working / Done)
+  where decisions are answered on the card, a sortable list, and a live map of
+  how every chat is connected: who handed off to whom, who asked whom, which
+  chats pipe into others, and which files two chats both changed. Run one task
+  on several agents and compare them side by side
+  ([screenshots](docs/screenshots/agents/)).
+- **Any chat can reach any agent.** Hand a chat off to another agent, ask
+  another agent from a chat (`@gemini …`, `@gpt …`, `@claude …`), pipe one
+  chat's replies into another, or forward a reply. Agents can ask each other
+  too, through FriedLiver's own tools, each time you allow it
+  ([how it works](docs/CONNECTIONS.md)). Chats survive a reload.
 - **No built-in Copilot, AI features off by default.** Copilot Chat and the
   agent host don't ship, so the fork settles about 165 MB below VS Code
   ([benchmarks](docs/benchmarks.md)).
@@ -71,8 +83,19 @@ Anyway**.
 | GPT (Codex) | `npm install -g @zed-industries/codex-acp` | Your browser opens OpenAI's sign-in page |
 | Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page |
 
-The command palette has the rest under "FriedLiver": Agent Manager (Tasks), Move
-Agents to the Center (Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents.
+4. Connect them. In a chat, start a message with `@gemini` (or `@gpt`,
+   `@claude`, `@demo`) to ask that agent; the answer comes back as a card you
+   can send on. **Hand off**, **Ask** and **Pipe to** in the chat's header and
+   on Agent Manager cards do the rest. With the Demo agent, `ask demo <question>`
+   shows an agent asking another agent: you get Allow, Allow for this chat, or
+   Deny.
+
+The command palette has the rest under "FriedLiver": Agent Manager (Tasks), Run
+a Task on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a
+Chat's Replies to Another Chat, Go to Next Decision, Move Agents to the Center
+(Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents.
+`friedliver.connections.agentToAgent` (ask, allow or off; user settings only)
+decides whether agents may reach each other.
 
 The program each agent runs (`friedliver.agents.<agent>.command` and `.args`)
 is read from your user settings only, never from a workspace's
@@ -141,7 +164,13 @@ removed `extensions/copilot` out of patch diffs; `prepare.mjs` handles those.
 ```bash
 npm ci && npm run lint && npm test               # lint, theme tests
 cd extensions/friedliver-agents && npm ci && npm run typecheck && npm test
+node scripts/ui-harness.mjs                      # the webviews from a fixture, with screenshots
 ```
+
+After a packaged build, `xvfb-run -a node scripts/e2e-demo.mjs
+VSCode-linux-x64/friedliver /tmp/fle` drives the real app with the Demo agent
+(an @mention, an agent asking another agent, the Agent Manager) and saves the
+screenshots in `docs/screenshots/app/`.
 
 ## License
 

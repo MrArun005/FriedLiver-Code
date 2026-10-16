@@ -86,6 +86,10 @@ describe('consult', () => {
       ['reply', expect.stringMatching(/review this$/)],
     ]);
     expect(core.snapshot.chats.map((c) => c.agent)).toEqual(['demo', 'gemini']);
+    // The chat is named after its first question, and a later message doesn't rename it.
+    expect(chat.title).toBe('review this');
+    await core.send(a.id, 'now fix it');
+    expect(core.chat(a.id)!.title).toBe('review this');
 
     // An @-question with an image takes the image along.
     const png = { name: 'shot.png', mimeType: 'image/png', data: 'iVBORw0KGgo=' };
