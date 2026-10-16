@@ -1,0 +1,21 @@
+{
+  "name": "friedliver-code",
+  "private": true,
+  "description": "FriedLiver on VS Code: build tooling, patches, branding and built-in extensions for the fork.",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "vitest run",
+    "fetch-upstream": "node scripts/fetch.mjs",
+    "prepare-upstream": "node scripts/prepare.mjs",
+    "package-app": "node scripts/build.mjs --package --installer"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "^1.8.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.5",
+    "eslint": "^10.12.0",
+    "typescript": "~6.0",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.5"
+  }
+}

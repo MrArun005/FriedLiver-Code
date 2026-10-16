@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AgentCore, type CoreUi, type PendingReview } from '../src/host/core';
 import type { CommandItem } from '../src/shared/model';
 
-const DEMO_AGENT = path.resolve(__dirname, '../../../../test/fixtures/fakeAgent.mjs');
+const DEMO_AGENT = path.resolve(__dirname, '../../../agent-core/demo/fakeAgent.mjs');
 
 let core: AgentCore | undefined;
 afterEach(async () => {

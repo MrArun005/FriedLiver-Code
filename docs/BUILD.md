@@ -1,10 +1,10 @@
 # Building FriedLiver on VS Code (Code - OSS)
 
-FriedLiver's fork is built VSCodium-style. This repo holds only `code/`: the
-pinned upstream tag, product.json overrides, patches, built-in extensions and
-the scripts. Upstream [microsoft/vscode](https://github.com/microsoft/vscode)
-(MIT) is cloned at build time. See [code/README.md](../../code/README.md) for
-the layout.
+FriedLiver on VS Code is built VSCodium-style. This repo holds the pinned
+upstream tag, product.json overrides, patches, branding, built-in extensions,
+the agent core and the scripts. Upstream
+[microsoft/vscode](https://github.com/microsoft/vscode) (MIT) is cloned at build
+time. See the [README](../README.md) for the layout.
 
 Pinned upstream: **1.142.0** (`d956e8a6ac5d904486557eea07e1d6bd62a4d36f`). On
 2026-10-16 this was the newest version on `update.code.visualstudio.com/api/releases/stable`.
@@ -12,12 +12,12 @@ Pinned upstream: **1.142.0** (`d956e8a6ac5d904486557eea07e1d6bd62a4d36f`). On
 ## Quick start (any OS)
 
 ```bash
-node code/scripts/fetch.mjs        # shallow clone of the pinned tag into code/vscode (or $VSCODE_DIR)
-node code/scripts/prepare.mjs      # patches, product.json, icon, built-in extensions
-node code/scripts/build.mjs        # deps + npm ci + compile + Electron (dev build)
-node code/scripts/dev.mjs [folder] # run from source; as root on Linux it adds --no-sandbox
-node code/scripts/build.mjs --package   # minified app in <VSCODE_DIR>/../VSCode-<os>-<arch>
-node code/scripts/build.mjs --package --installer   # plus the installer in <VSCODE_DIR>/../installers
+node scripts/fetch.mjs        # shallow clone of the pinned tag into vscode (or $VSCODE_DIR)
+node scripts/prepare.mjs      # patches, product.json, icon, built-in extensions
+node scripts/build.mjs        # deps + npm ci + compile + Electron (dev build)
+node scripts/dev.mjs [folder] # run from source; as root on Linux it adds --no-sandbox
+node scripts/build.mjs --package   # minified app in <VSCODE_DIR>/../VSCode-<os>-<arch>
+node scripts/build.mjs --package --installer   # plus the installer in <VSCODE_DIR>/../installers
 ```
 
 Installers, all unsigned:
@@ -28,23 +28,23 @@ Installers, all unsigned:
 | macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | an ad-hoc `codesign`, then `hdiutil` |
 | Linux | `friedliver_<version>_amd64.deb` | `gulp vscode-linux-<arch>-prepare-deb` and `-build-deb` |
 
-CI (`.github/workflows/code.yml`) builds all three with the portable apps on
-every change to the fork.
+CI (`.github/workflows/build.yml`) builds all three with the portable apps on
+every push to `main`.
 
 Environment variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `VSCODE_DIR` | `code/vscode` | Upstream checkout |
-| `FRIEDLIVER_EXTENSIONS_DIR` | `code/extensions` | Where `prepare.mjs` takes the FriedLiver built-ins from |
-| `FRIEDLIVER_CACHE_DIR` | `code/.cache` | Downloaded Node toolchain |
+| `VSCODE_DIR` | `vscode` | Upstream checkout |
+| `FRIEDLIVER_EXTENSIONS_DIR` | `extensions` | Where `prepare.mjs` takes the FriedLiver built-ins from |
+| `FRIEDLIVER_CACHE_DIR` | `.cache` | Downloaded Node toolchain |
 
 ### What the scripts handle for you
 
 - **Node version.** Upstream's `.nvmrc` wants **Node 24.18.0** (same major,
   >= 24.18.0), and its preinstall refuses anything else. If your Node doesn't
   match (this container has 22.22.0), `build.mjs` and `dev.mjs` download the
-  exact version from nodejs.org into `code/.cache` (203 MB) and put it first on
+  exact version from nodejs.org into `.cache` (203 MB) and put it first on
   `PATH`. Your system Node stays as it is. npm must be older than 13.
 - **Linux packages.** `build.mjs` installs any of these that are missing with
   apt-get (with sudo unless you're root): `build-essential g++ make pkg-config
@@ -62,12 +62,12 @@ Environment variables:
 
 Install Git, Python 3, and Visual Studio 2022 or newer with the *Desktop
 development with C++* workload (upstream checks this in preinstall). Then run
-the same `node code/scripts/...` commands from a normal terminal. `dev.mjs`
+the same `node scripts/...` commands from a normal terminal. `dev.mjs`
 runs `scripts\code.bat`. `--package` runs `gulp vscode-win32-x64-min`,
 which also needs `signtool.exe` from the Windows SDK on PATH (it strips old
 signatures before stamping FriedLiver's name into bundled binaries), and
 `git config --global core.autocrlf false` before cloning, because the patches
-use LF line endings. CI does both (`.github/workflows/code.yml`).
+use LF line endings. CI does both (`.github/workflows/build.yml`).
 
 ### macOS
 
@@ -79,10 +79,10 @@ Privacy & Security → Open Anyway.
 
 ### Icons and branding
 
-`prepare.mjs` copies `build/icon.png` (1024 px, roasted liver) over
-`resources/linux/code.png`, then copies `code/branding/overlay/` over the
-upstream tree. `code/branding/make-branding.py` (Pillow) generates that overlay
-from `build/icon.png` and `build/liver-art.svg`:
+`prepare.mjs` copies `branding/icon.png` (1024 px, roasted liver) over
+`resources/linux/code.png`, then copies `branding/overlay/` over the
+upstream tree. `branding/make-branding.py` (Pillow) generates that overlay
+from `branding/icon.png` and `branding/liver-art.svg`:
 
 - Windows `code.ico`, Start tiles and the Inno Setup wizard pictures for every
   display scale.
@@ -94,7 +94,7 @@ again after changing the artwork.
 
 ## What prepare changes
 
-- **product.json** ([code/product.json](../../code/product.json)): FriedLiver
+- **product.json** ([product.json](../product.json)): FriedLiver
   names, `friedliver` URL protocol, `.friedliver` data folder, server and
   tunnel names, fresh Windows AppIds, `com.friedliver.app`. Telemetry is off,
   and with no `updateUrl` there is no update service. The extension gallery is
@@ -130,14 +130,14 @@ again after changing the artwork.
 | `npm run compile` (dev, 0 errors) | 3 min with Copilot, 2 min without | +0.6 GB |
 | Electron 43.7.7 + 3 marketplace built-ins | under 30 s | |
 | **Dev build total** | **about 12 min** | **6.2 GB** |
-| `--package` (`gulp vscode-linux-x64-min`), after a dev build | about 5 min | 1.1 GB app in `code/VSCode-linux-x64` |
+| `--package` (`gulp vscode-linux-x64-min`), after a dev build | about 5 min | 1.1 GB app in `VSCode-linux-x64` |
 
 ## Memory
 
-Measured with `scripts/ram-benchmark.ts --pid <main pid> --seconds 30
---interval 5`: PSS over the whole process tree, under xvfb with software
+Measured with the FriedLiver app's `scripts/ram-benchmark.ts --pid <main pid>
+--seconds 30 --interval 5`: PSS over the whole process tree, under xvfb with software
 rendering, a fresh profile, `bench/fixture` open. Same container as
-[docs/benchmarks.md](../benchmarks.md).
+[benchmarks.md](benchmarks.md).
 
 | Build | Average | Peak | Processes |
 | --- | --- | --- | --- |
@@ -162,7 +162,7 @@ apps settle after about 20 seconds.
 | --- | --- | --- | --- | --- |
 | **FriedLiver fork 1.142.0, packaged** (Copilot removed, AI features off, Agents panel open) | 731 MB | 814 MB | about 580 MB | 11 |
 | Stock VS Code 1.105, packaged, no extensions | 702 MB | 745 MB | about 620 MB | 10 |
-| FriedLiver 0.2, the Electron app ([benchmarks](../benchmarks.md)) | 314 MB | 321 MB | | 6 |
+| FriedLiver 0.2, the Electron app ([benchmarks](https://github.com/MrArun005/FriedLiver/blob/main/docs/benchmarks.md)) | 314 MB | 321 MB | | 6 |
 
 The fork weighs about what VS Code does. It settles about 40 MB lower than
 stock VS Code even with its Agents panel's webview open, and averages a bit
@@ -173,7 +173,7 @@ Electron app, as expected for a full VS Code workbench. Further cuts are in
 ## Extensions from Open VSX
 
 Installed with the fork's CLI into a throwaway profile:
-`code/vscode/scripts/code-cli.sh --user-data-dir <tmp> --extensions-dir <tmp>
+`vscode/scripts/code-cli.sh --user-data-dir <tmp> --extensions-dir <tmp>
 --install-extension <id>`.
 
 | Extension | Result |

@@ -2,7 +2,7 @@
 // Launch FriedLiver (dev build by default) with a throwaway profile and save a screenshot.
 // Needs a display: on a headless Linux box wrap it in `xvfb-run -a -s "-screen 0 1440x900x24"`.
 //
-//   node code/scripts/screenshot.mjs --out shot.png [--folder dir] [--exe path/to/packaged/friedliver]
+//   node scripts/screenshot.mjs --out shot.png [--folder dir] [--exe path/to/packaged/friedliver]
 //       [--wait 8] [--keep 30] [--profile dir]   (--keep: stay open N seconds after the shot, e.g. to
 //       measure memory; --profile: keep user data, extensions and logs there instead of a temp dir)
 //

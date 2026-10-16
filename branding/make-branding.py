@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate FriedLiver's branding for the VS Code fork from build/icon.png and build/liver-art.svg.
+"""Generate FriedLiver's branding for the VS Code fork from branding/icon.png and branding/liver-art.svg.
 
-    python3 code/branding/make-branding.py      (needs Pillow)
+    python3 branding/make-branding.py      (needs Pillow)
 
-Output mirrors the upstream tree under code/branding/overlay/; prepare.mjs copies it
+Output mirrors the upstream tree under branding/overlay/; prepare.mjs copies it
 over the upstream checkout, replacing VS Code's icons, installer pictures and the
 empty-editor watermark. The generated files are committed, so builds need no Pillow.
 """
@@ -14,9 +14,8 @@ from pathlib import Path
 from PIL import Image
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
 OUT = HERE / 'overlay'
-ICON = Image.open(REPO / 'build' / 'icon.png').convert('RGBA')
+ICON = Image.open(HERE / 'icon.png').convert('RGBA')
 
 # Black Blue: ground behind the installer pictures, panel for the small header picture.
 GROUND = (6, 10, 18)
@@ -68,7 +67,7 @@ save(ICON, 'resources/server/favicon.ico', sizes=[(16, 16), (32, 32), (48, 48)])
 
 # Empty-editor watermark: the liver's silhouette and steam, in upstream's letterpress style
 # (black at 30 % on dark themes, 10 % on light, solid greys for high contrast).
-art = (REPO / 'build' / 'liver-art.svg').read_text()
+art = (HERE / 'liver-art.svg').read_text()
 liver = re.search(r'<path id="fl-liver-path" d="([^"]+)"', art).group(1)
 steam = re.findall(r'<path d="(M\d+ \d+ C[^"]+)"/>', art.split('<!-- Steam')[1].split('</g>')[0])
 assert steam, 'steam paths not found in liver-art.svg'

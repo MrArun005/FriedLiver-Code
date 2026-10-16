@@ -3,11 +3,11 @@ import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, '../../..');
+const core = path.resolve(here, '../../agent-core');
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
-// The agent core is imported from the app's src/main. Packages it shares with
+// The agent core lives in agent-core/ at the repo root. Packages it shares with
 // this extension resolve from the extension's own node_modules, so the bundle
 // holds one copy and builds without the app's dependencies installed.
 const ownPackages = {
@@ -27,15 +27,15 @@ const shared = {
   logLevel: 'warning',
   absWorkingDir: here,
   plugins: [ownPackages],
-  alias: { '@friedliver/main': path.join(repo, 'src/main') },
+  alias: { '@friedliver/main': path.join(core, 'main') },
 };
 const node = { ...shared, platform: 'node', format: 'cjs', target: 'node20', external: ['vscode'] };
 const web = { ...shared, platform: 'browser', format: 'iife', target: 'chrome120', jsx: 'automatic', jsxImportSource: 'preact' };
 
 const builds = [
   { ...node, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js' },
-  // The offline demo agent (the app's test agent), started with the editor's own runtime.
-  { ...node, entryPoints: [path.join(repo, 'test/fixtures/fakeAgent.mjs')], outfile: 'dist/demo-agent.js' },
+  // The offline demo agent, started with the editor's own runtime.
+  { ...node, entryPoints: [path.join(core, 'demo/fakeAgent.mjs')], outfile: 'dist/demo-agent.js' },
   { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx' }, outdir: 'media/dist' },
   // Integration tests that run inside the editor (see src/test).
   { ...node, entryPoints: { run: 'src/test/run.ts', suite: 'src/test/suite.ts' }, outdir: 'dist/test', external: ['vscode'] },

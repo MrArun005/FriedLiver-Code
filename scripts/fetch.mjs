@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Clone or update the upstream VS Code checkout to the tag pinned in code/upstream.json.
+// Clone or update the upstream VS Code checkout to the tag pinned in upstream.json.
 //
-//   node code/scripts/fetch.mjs            # VSCODE_DIR defaults to code/vscode
-//   VSCODE_DIR=/path/to/vscode node code/scripts/fetch.mjs
+//   node scripts/fetch.mjs            # VSCODE_DIR defaults to vscode
+//   VSCODE_DIR=/path/to/vscode node scripts/fetch.mjs
 //
 // Shallow (depth 1): about 120 MB of git data and 420 MB of files.
 // An existing checkout is moved to the pinned commit with `git checkout --force`,
@@ -35,6 +35,6 @@ if (!fs.existsSync(path.join(VSCODE_DIR, '.git'))) {
 
 const head = git(['rev-parse', 'HEAD'], { capture: true }).stdout.trim();
 if (head !== commit) {
-	fail(`tag ${tag} resolved to ${head}, but code/upstream.json pins ${commit}. Update upstream.json if the tag moved on purpose.`);
+	fail(`tag ${tag} resolved to ${head}, but upstream.json pins ${commit}. Update upstream.json if the tag moved on purpose.`);
 }
 log(`OK: ${VSCODE_DIR} at ${tag} (${head})`);

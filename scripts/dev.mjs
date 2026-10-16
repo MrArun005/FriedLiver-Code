@@ -2,9 +2,9 @@
 // Run FriedLiver from source (upstream scripts/code.sh, or code.bat on Windows).
 // Every argument is passed through, e.g.:
 //
-//   node code/scripts/dev.mjs                         # empty window
-//   node code/scripts/dev.mjs ~/some/folder           # open a folder
-//   node code/scripts/dev.mjs --user-data-dir /tmp/fl # throwaway profile
+//   node scripts/dev.mjs                         # empty window
+//   node scripts/dev.mjs ~/some/folder           # open a folder
+//   node scripts/dev.mjs --user-data-dir /tmp/fl # throwaway profile
 //
 // As root on Linux, Electron needs --no-sandbox; it is added automatically.
 
@@ -14,7 +14,7 @@ import path from 'node:path';
 import { VSCODE_DIR, fail, isWindows, nodeEnv } from './lib.mjs';
 
 if (!fs.existsSync(path.join(VSCODE_DIR, 'out'))) {
-	fail(`${VSCODE_DIR}/out is missing. Run: node code/scripts/build.mjs`);
+	fail(`${VSCODE_DIR}/out is missing. Run: node scripts/build.mjs`);
 }
 
 const args = process.argv.slice(2).map(a => (fs.existsSync(a) ? path.resolve(a) : a));
