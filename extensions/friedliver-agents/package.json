@@ -2,7 +2,7 @@
   "name": "friedliver-agents",
   "displayName": "FriedLiver Agents",
   "description": "Claude, Codex and Gemini coding agents over ACP: chat, reviewed edits, approved commands and a task board.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "friedliver",
   "license": "UNLICENSED",
   "private": true,
@@ -14,9 +14,6 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "enabledApiProposals": [
-    "contribSecondarySidebar"
-  ],
   "activationEvents": [
     "onFileSystem:friedliver-proposed",
     "onWebviewPanel:friedliver.tasks",
@@ -38,10 +35,10 @@
   },
   "contributes": {
     "viewsContainers": {
-      "secondarySidebar": [
+      "activitybar": [
         {
           "id": "friedliver",
-          "title": "Agents",
+          "title": "FriedLiver Agents",
           "icon": "media/agents.svg"
         }
       ]
