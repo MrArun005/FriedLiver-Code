@@ -30,6 +30,10 @@
   "win32UserAppId": "{{AF4ACD84-69A3-4EE0-99E1-657DACE27DEC}",
   "win32x64UserAppId": "{{8BE8DDE4-2D74-4612-8EE4-8C8E552D689C}",
   "win32arm64UserAppId": "{{2EB6E602-0B5E-4B03-BAD7-381F0CB2CE2B}",
+  "win32ContextMenu": {
+    "x64": { "clsid": "{94F2CD5B-E9DB-49EE-A243-108ACB65281F}" },
+    "arm64": { "clsid": "{035E5CBF-F735-4C5E-AD05-7ECD9D2CB1EA}" }
+  },
 
   "darwinBundleIdentifier": "com.friedliver.app",
   "darwinProfileUUID": "EA19101C-DCC2-4400-BD68-B758A3A2BB0A",
