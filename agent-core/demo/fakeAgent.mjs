@@ -7,11 +7,36 @@
 //   "tour"            the UI demo: a plan, a file read, an edit, a command and an image
 //   "project"         builds calc/, runs its tests, fixes the failing one, reruns, runs the app
 //   anything else     echoes the text back in two chunks
-// FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first.
+// FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first;
+// that browser-style sign-in prints a sign-in link to stderr, like Gemini's.
+// --require-login makes it need a terminal login instead, like Claude's: the
+// client runs this script with --cli, which asks for Enter and saves a marker.
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 
+const LOGIN_MARKER = process.env.FAKE_AGENT_LOGIN_MARKER ?? path.join(os.tmpdir(), 'friedliver-demo-login');
+
+if (process.argv.includes('--cli')) {
+  // Stands in for `claude /login`: a terminal program that signs you in and exits.
+  process.stdout.write('Demo login (stands in for `claude /login`).\r\n');
+  process.stdout.write('A real CLI opens your browser here. Press Enter to approve… ');
+  createInterface({ input: process.stdin }).once('line', () => {
+    writeFileSync(LOGIN_MARKER, new Date().toISOString());
+    process.stdout.write('\r\nSigned in. You can close this terminal.\r\n');
+    process.exit(0);
+  });
+} else {
+  serve();
+}
+
+function serve() {
 const needsAuth = process.env.FAKE_AGENT_AUTH === '1';
+const needsTerminalLogin = process.argv.includes('--require-login');
+if (process.argv.includes('--logout')) rmSync(LOGIN_MARKER, { force: true });
 const images = process.env.FAKE_AGENT_IMAGES !== '0';
 let authenticated = false;
 let nextSession = 1;
@@ -210,7 +235,8 @@ async function project(client, sessionId) {
     await say(client, sessionId, second.code === 0 ? 'All 3 tests pass now.\n\n' : 'Tests still fail; check the commands panel.\n\n');
   }
   await plan(4);
-  const app = await shell(client, sessionId, 'start', 'npm start -- 6*7', "npm start -- '6*7'", dir);
+  // Unquoted on purpose: '…' is literal in cmd.exe, and sh leaves an unmatched glob as is.
+  const app = await shell(client, sessionId, 'start', 'npm start -- 6*7', 'npm start -- 6*7', dir);
   const result = app?.output.match(/^-?\d+ [+*-] -?\d+ = -?\d+$/m)?.[0];
   await plan(5);
   await say(client, sessionId, result ? `The app works: \`${result}\`.` : 'The app did not print a result; check the commands panel.');
@@ -250,16 +276,23 @@ acp
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession: false, promptCapabilities: { image: images } },
-    authMethods: needsAuth ? [{ id: 'fake-login', name: 'Fake login' }] : [],
+    authMethods: needsTerminalLogin
+      ? [{ id: 'demo-login', name: 'Log in with Demo', description: 'Run the demo login in the terminal', type: 'terminal', args: ['--cli'] }]
+      : needsAuth
+        ? [{ id: 'fake-login', name: 'Fake login' }]
+        : [],
     agentInfo: { name: 'fake-agent', version: '0.0.0' },
   }))
-  .onRequest(acp.methods.agent.authenticate, ({ params }) => {
+  .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
     if (params.methodId !== 'fake-login') throw acp.RequestError.invalidParams();
+    process.stderr.write('Open https://accounts.google.com/o/oauth2/v2/auth?client_id=demo to sign in\n');
+    await new Promise((r) => setTimeout(r, 300));
     authenticated = true;
     return {};
   })
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
     if (needsAuth && !authenticated) throw acp.RequestError.authRequired();
+    if (needsTerminalLogin && !existsSync(LOGIN_MARKER)) throw acp.RequestError.authRequired();
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     return { sessionId };
@@ -301,3 +334,4 @@ acp
     return { stopReason: 'end_turn' };
   })
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+}

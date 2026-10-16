@@ -20,8 +20,25 @@ export interface SignInMethod {
   id: string;
   name: string;
   description?: string;
-  /** Terminal methods run the agent's own CLI login; the user does that in a terminal. */
-  terminal: boolean;
+  /**
+   * browser: the agent opens the vendor's sign-in page and waits for it (Google, ChatGPT).
+   * terminal: the agent's own CLI login runs in a FriedLiver terminal (Claude's /login).
+   * key: an API key in an environment variable (Settings → API keys).
+   */
+  kind: 'browser' | 'terminal' | 'key';
+}
+
+/** What starting a sign-in did. */
+export type SignInStart =
+  | { kind: 'done' }
+  | { kind: 'terminal'; ptyId: string; title: string }
+  | { kind: 'settings' };
+
+export interface AccountStatus {
+  status: 'signed-in' | 'needs-sign-in' | 'not-installed' | 'error';
+  methods: SignInMethod[];
+  message?: string;
+  installCommand?: string;
 }
 
 export type PromptOutcome =
@@ -106,8 +123,13 @@ export type MainEvent =
   | { type: 'image'; image: ImageItem }
   | { type: 'fileChanged'; path: string }
   | { type: 'turnChanges'; chatId: string; turnId: string; files: string[] }
-  | { type: 'ptyData'; id: string; data: string }
-  | { type: 'ptyExit'; id: string; exitCode: number };
+  | { type: 'ptyData'; id: string; data: string; seq: number }
+  | { type: 'ptyExit'; id: string; exitCode: number }
+  /** A terminal sign-in finished (its CLI exited). */
+  | { type: 'signInDone'; agent: AgentKey; ok: boolean }
+  /** The agent printed a sign-in link, in case it couldn't open the browser itself. */
+  | { type: 'signInUrl'; agent: AgentKey; url: string }
+  | { type: 'menu'; action: 'settings' | 'openFolder' | 'commandPalette' | 'quickOpen' | 'undo' | 'redo' };
 
 export interface MemoryReport {
   kind: string;
@@ -132,7 +154,11 @@ export interface FriedLiverApi {
   createChat(agent: AgentKey, options?: { worktree?: boolean; title?: string }): Promise<Result<ChatInfo>>;
   prompt(chatId: string, blocks: acp.ContentBlock[]): Promise<PromptOutcome>;
   cancel(chatId: string): Promise<void>;
-  signIn(agent: AgentKey, methodId: string): Promise<{ ok: boolean; message?: string }>;
+  signIn(agent: AgentKey, methodId: string): Promise<Result<SignInStart>>;
+  cancelSignIn(agent: AgentKey): Promise<void>;
+  checkSignIn(agent: AgentKey): Promise<AccountStatus>;
+  /** Opens a link in the default browser; only https links to known vendor and docs sites. */
+  openExternal(url: string): Promise<boolean>;
   respondPermission(requestId: string, optionId: string | null): Promise<void>;
   respondWrite(reviewId: string, accept: boolean, content?: string): Promise<void>;
   respondCommand(commandId: string, approve: boolean): Promise<void>;
@@ -142,10 +168,12 @@ export interface FriedLiverApi {
   stopAgents(): Promise<void>;
 
   ptyCreate(cols: number, rows: number): Promise<{ id: string; title: string }>;
+  ptyBuffer(id: string): Promise<{ data: string; seq: number }>;
   ptyWrite(id: string, data: string): Promise<void>;
   ptyResize(id: string, cols: number, rows: number): Promise<void>;
   ptyKill(id: string): Promise<void>;
 
+  gitInstalled(): Promise<boolean>;
   gitStatus(): Promise<GitStatus | null>;
   gitHead(file: string): Promise<string | null>;
   gitCommit(message: string): Promise<Result<string>>;
@@ -172,6 +200,9 @@ export const METHODS = [
   'prompt',
   'cancel',
   'signIn',
+  'cancelSignIn',
+  'checkSignIn',
+  'openExternal',
   'respondPermission',
   'respondWrite',
   'respondCommand',
@@ -180,9 +211,11 @@ export const METHODS = [
   'removeTask',
   'stopAgents',
   'ptyCreate',
+  'ptyBuffer',
   'ptyWrite',
   'ptyResize',
   'ptyKill',
+  'gitInstalled',
   'gitStatus',
   'gitHead',
   'gitCommit',

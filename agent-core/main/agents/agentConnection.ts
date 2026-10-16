@@ -31,6 +31,8 @@ export interface StartOptions {
   host: ClientHost;
   clientVersion: string;
   log?: (line: string) => void;
+  /** Every stderr line, e.g. to catch a sign-in URL the agent couldn't open itself. */
+  onStderr?: (line: string) => void;
 }
 
 const STDERR_TAIL_LINES = 40;
@@ -62,7 +64,7 @@ export class AgentConnection {
   }
 
   static async start(spec: AgentSpec, options: StartOptions): Promise<AgentConnection> {
-    const { cwd, host, log } = options;
+    const { cwd, host, log, onStderr } = options;
     const child = spawn(spec.command, spec.args, {
       cwd,
       env: { ...process.env, ...spec.env },
@@ -78,6 +80,7 @@ export class AgentConnection {
       for (const line of chunk.split(/\r?\n/)) {
         if (!line) continue;
         log?.(`[${spec.id}] ${line}`);
+        onStderr?.(line);
         stderrTail.push(line);
         if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
       }

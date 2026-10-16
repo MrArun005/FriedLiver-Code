@@ -29,6 +29,15 @@ export interface GitStatus {
   files: GitFile[];
 }
 
+export async function installed(): Promise<boolean> {
+  try {
+    await git(process.cwd(), ['--version']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function repoRoot(cwd: string): Promise<string | null> {
   try {
     return path.resolve((await git(cwd, ['rev-parse', '--show-toplevel'])).trim());
