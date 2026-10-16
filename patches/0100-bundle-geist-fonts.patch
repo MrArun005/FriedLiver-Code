@@ -10,6 +10,43 @@ index c439d777..c502c990 100644
  				'.svg': 'file',
  				'.png': 'file',
  				'.sh': 'file',
+diff --git a/src/vs/editor/common/config/fontInfo.ts b/src/vs/editor/common/config/fontInfo.ts
+index fae3b625..4f782f6e 100644
+--- a/src/vs/editor/common/config/fontInfo.ts
++++ b/src/vs/editor/common/config/fontInfo.ts
+@@ -218,16 +218,17 @@ export const FONT_VARIATION_TRANSLATE = 'translate';
+ 
+ /**
+  * @internal
++ * FriedLiver: Geist Mono first on every platform, the platform's own font as the fallback.
+  */
+-export const DEFAULT_WINDOWS_FONT_FAMILY = 'Consolas, \'Courier New\', monospace';
++export const DEFAULT_WINDOWS_FONT_FAMILY = '\'Geist Mono\', Consolas, \'Courier New\', monospace';
+ /**
+  * @internal
+  */
+-export const DEFAULT_MAC_FONT_FAMILY = 'Menlo, Monaco, \'Courier New\', monospace';
++export const DEFAULT_MAC_FONT_FAMILY = '\'Geist Mono\', Menlo, Monaco, \'Courier New\', monospace';
+ /**
+  * @internal
+  */
+-export const DEFAULT_LINUX_FONT_FAMILY = '\'Droid Sans Mono\', monospace';
++export const DEFAULT_LINUX_FONT_FAMILY = '\'Geist Mono\', \'Droid Sans Mono\', monospace';
+ /**
+  * @internal
+  */
+@@ -236,9 +237,8 @@ export const EDITOR_FONT_DEFAULTS = {
+ 		platform.isMacintosh ? DEFAULT_MAC_FONT_FAMILY : (platform.isWindows ? DEFAULT_WINDOWS_FONT_FAMILY : DEFAULT_LINUX_FONT_FAMILY)
+ 	),
+ 	fontWeight: 'normal',
+-	fontSize: (
+-		platform.isMacintosh ? 12 : 14
+-	),
++	// FriedLiver: the same size everywhere; Geist Mono ships with the app (see workbench media/fonts).
++	fontSize: 13,
+ 	lineHeight: 0,
+ 	letterSpacing: 0,
+ };
 diff --git a/src/vs/workbench/browser/media/fonts/OFL-Geist.txt b/src/vs/workbench/browser/media/fonts/OFL-Geist.txt
 new file mode 100644
 index 00000000..98835ac3
