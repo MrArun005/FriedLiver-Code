@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseMention, type AppState, type ChatLink, type ChatView, type Item } from '../src/shared/model';
+import { parseMention, reduce, type AppState, type ChatLink, type ChatView, type Item } from '../src/shared/model';
 import {
   MAP,
   MENTION_OPTIONS,
   applyMention,
   cardLine,
+  cardModel,
   clip,
   conflictText,
   conflictsOf,
@@ -14,6 +15,7 @@ import {
   filterChats,
   keepPlan,
   linkBadges,
+  mapKey,
   mapLayout,
   mentionOptions,
   mentionQuery,
@@ -22,6 +24,8 @@ import {
   planProgress,
   recentChats,
   relativePath,
+  rosterKey,
+  settleOrder,
   sortChats,
   statusOf,
   switcherGroups,
@@ -299,6 +303,69 @@ describe('the agent map', () => {
     const sorted = [...m.nodes].sort((a, b) => a.y - b.y);
     for (let i = 1; i < sorted.length; i++) expect(sorted[i].y - sorted[i - 1].y).toBeGreaterThanOrEqual(MAP.nodeH);
     expect(m.lanes).toHaveLength(4);
+  });
+});
+
+describe('what views draw again', () => {
+  const plan = (current: number): Item => ({
+    kind: 'plan',
+    entries: ['Read', 'Edit', 'Test'].map((content, i) => ({ content, status: i < current ? 'completed' : i === current ? 'in_progress' : 'pending' })),
+  });
+  const working = chat('a', { label: 'Claude 1', busy: true, items: [said, plan(0), { kind: 'agent', text: 'Looking' }], files: ['src/a.ts'] });
+  const s = state([working, chat('b', { label: 'Claude 2', files: ['src/a.ts'] })], [link({ id: 'k', from: 'a', to: 'b' })]);
+  const chunk = (st: AppState, text = ' around') => reduce(st, { t: 'update', chatId: 'a', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }, at: 99 });
+
+  it('keeps a card the same while its agent only streams text', () => {
+    const before = cardModel(s, s.chats[0], 0);
+    const after = chunk(s);
+    expect(after.chats[0]).not.toBe(s.chats[0]);
+    expect(cardModel(after, after.chats[0], 0).key).toBe(before.key);
+    expect(before).toMatchObject({ status: 'working', line: { text: 'Step 1 of 3: Read' }, conflicts: [{ file: 'src/a.ts' }], age: '0s' });
+    expect(before.badges.map((b) => b.text)).toEqual(['asked Claude 2']);
+  });
+
+  it('changes the card when its step, status, age, links or another chat it names change', () => {
+    const key = (st: AppState, now = 0) => cardModel(st, st.chats[0], now).key;
+    const base = key(s);
+    const next = reduce(s, { t: 'update', chatId: 'a', update: { sessionUpdate: 'plan', entries: [{ content: 'Read', status: 'completed', priority: 'medium' }, { content: 'Edit', status: 'in_progress', priority: 'medium' }] } });
+    expect(key(next)).not.toBe(base);
+    expect(key(reduce(s, { t: 'busy', chatId: 'a', busy: false }))).not.toBe(base);
+    expect(key(s, 61_000)).not.toBe(base);
+    expect(key(reduce(s, { t: 'unlink', linkId: 'k' }))).not.toBe(base);
+    expect(key({ ...s, chats: [s.chats[0], { ...s.chats[1], label: 'Claude 9' }] })).not.toBe(base);
+  });
+
+  it('lays the map out again only when something it shows changes', () => {
+    const base = mapKey(s);
+    expect(mapKey(chunk(s))).toBe(base);
+    expect(mapKey(reduce(s, { t: 'busy', chatId: 'a', busy: false }))).not.toBe(base);
+    expect(mapKey(reduce(s, { t: 'files', chatId: 'b', files: ['src/b.ts'] }))).not.toBe(base);
+    expect(mapKey(reduce(s, { t: 'title', chatId: 'b', title: 'Other' }))).not.toBe(base);
+    expect(mapKey(reduce(s, { t: 'linkPatch', linkId: 'k', patch: { count: 2 } }))).not.toBe(base);
+    // The same drawing: nodes differ only in the chat object they carry.
+    const drawn = (st: AppState) => ({ ...mapLayout(st), nodes: mapLayout(st).nodes.map(({ chat: c, ...n }) => ({ ...n, id: c.id })) });
+    expect(drawn(chunk(s))).toEqual(drawn(s));
+  });
+
+  it('moves cards and rows at most once a second, but shows new chats and another sort at once', () => {
+    const first = settleOrder(undefined, ['a', 'b', 'c'], 'activity', 1000, 1000);
+    expect(first).toEqual({ order: { ids: ['a', 'b', 'c'], sort: 'activity', at: 1000 }, pending: false });
+    // A reorder after a quiet spell shows at once; the next one within the second waits.
+    const moved = settleOrder(first.order, ['b', 'a', 'c'], 'activity', 2500, 1000);
+    expect(moved).toEqual({ order: { ids: ['b', 'a', 'c'], sort: 'activity', at: 2500 }, pending: false });
+    const soon = settleOrder(moved.order, ['c', 'b', 'a'], 'activity', 2900, 1000);
+    expect(soon).toEqual({ order: moved.order, pending: true });
+    expect(settleOrder(moved.order, ['b', 'a', 'c'], 'activity', 2900, 1000)).toEqual({ order: moved.order, pending: false });
+    expect(settleOrder(soon.order, ['c', 'b', 'a'], 'activity', 3500, 1000).order.ids).toEqual(['c', 'b', 'a']);
+    expect(settleOrder(moved.order, ['c', 'b', 'a', 'd'], 'activity', 2600, 1000).order.ids).toEqual(['c', 'b', 'a', 'd']);
+    expect(settleOrder(moved.order, ['a', 'c'], 'activity', 2600, 1000).order.ids).toEqual(['a', 'c']);
+    expect(settleOrder(moved.order, ['c', 'b', 'a'], 'task:asc', 2600, 1000).order.ids).toEqual(['c', 'b', 'a']);
+    expect(settleOrder(moved.order, ['b', 'a', 'd'], 'activity', 2600, 1000).order.ids).toEqual(['b', 'a', 'd']);
+  });
+
+  it('names the chats in a roster that ignores what they stream', () => {
+    expect(rosterKey(chunk(s).chats)).toBe(rosterKey(s.chats));
+    expect(rosterKey(reduce(s, { t: 'title', chatId: 'a', title: 'Renamed' }).chats)).not.toBe(rosterKey(s.chats));
   });
 });
 

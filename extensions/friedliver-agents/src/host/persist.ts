@@ -39,7 +39,7 @@ const STOPPED = 'Stopped when the window closed';
  */
 export function trimForSave(saved: SavedState, limit = SAVE_LIMITS.bytes): SavedState {
   let chats = saved.state.chats.map(trimChat);
-  const size = new Map(chats.map((c) => [c.id, JSON.stringify(c).length + JSON.stringify(saved.chats[c.id] ?? {}).length]));
+  const size = new Map(chats.map((c) => [c.id, savedJson(c).length + JSON.stringify(saved.chats[c.id] ?? {}).length]));
   let total = [...size.values()].reduce((a, b) => a + b, 0);
   const byAge = (a: ChatView, b: ChatView) => a.lastActivity - b.lastActivity;
   const order = [...chats.filter((c) => c.archived).sort(byAge), ...chats.filter((c) => !c.archived).sort(byAge)];
@@ -58,7 +58,44 @@ export function trimForSave(saved: SavedState, limit = SAVE_LIMITS.bytes): Saved
   };
 }
 
+/**
+ * What saveText writes: JSON.stringify(trimForSave(saved)). Chats that didn't
+ * change since the last save reuse their JSON, so a save while agents stream
+ * turns only the chats that changed into text, not every transcript again.
+ */
+export function saveText(saved: SavedState, limit = SAVE_LIMITS.bytes): string {
+  const trimmed = trimForSave(saved, limit);
+  const json = JSON.stringify({ ...trimmed, state: { ...trimmed.state, chats: [CHATS] } });
+  // The marker is the first string in the file: only numbers come before it.
+  return json.replace(JSON.stringify([CHATS]), () => `[${trimmed.state.chats.map(savedJson).join(',')}]`);
+}
+
+const CHATS = '\u0000friedliver:chats\u0000';
+
+/** Trimmed chats, by the chat they were trimmed from, and their JSON, by the trimmed chat. */
+const trimmedCache = new WeakMap<ChatView, ChatView>();
+const jsonCache = new WeakMap<ChatView, string>();
+
+function savedJson(trimmed: ChatView): string {
+  let json = jsonCache.get(trimmed);
+  if (json === undefined) {
+    json = JSON.stringify(trimmed);
+    jsonCache.set(trimmed, json);
+  }
+  return json;
+}
+
+/** A chat as it is saved; the same object for the same chat, so its JSON is made once. */
 function trimChat(chat: ChatView): ChatView {
+  let trimmed = trimmedCache.get(chat);
+  if (!trimmed) {
+    trimmed = trimItems(chat);
+    trimmedCache.set(chat, trimmed);
+  }
+  return trimmed;
+}
+
+function trimItems(chat: ChatView): ChatView {
   const items = chat.items.slice(-SAVE_LIMITS.items).map((i): Item => {
     if (i.kind === 'command' && i.output.length > SAVE_LIMITS.output) return { ...i, output: i.output.slice(-SAVE_LIMITS.output) };
     if (i.kind === 'user' && i.images.length) i = { ...i, images: [] };
@@ -205,7 +242,7 @@ export class StateFile {
     clearTimeout(this.timer);
     this.timer = undefined;
     if (this.stopped) return this.writing;
-    const json = JSON.stringify(trimForSave(this.read()));
+    const json = saveText(this.read());
     this.writing = this.writing.then(async () => {
       try {
         await mkdir(path.dirname(this.file), { recursive: true });

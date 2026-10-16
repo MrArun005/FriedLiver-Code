@@ -6,6 +6,7 @@ import {
   age,
   boardColumn,
   decisions,
+  fileConflicts,
   lastReply,
   type AgentKey,
   type AppState,
@@ -15,30 +16,28 @@ import {
 import {
   COLUMN_TITLES,
   ago,
-  cardLine,
+  cardModel,
   conflictText,
-  conflictsOf,
   counts,
   defaultDir,
   excerpt,
   fanoutGroups,
   filterChats,
   keepPlan,
-  linkBadges,
   matchesQuery,
   nextDecision,
   openChats,
-  planProgress,
   sortChats,
   statusOf,
   type Badge,
   type CardLine,
+  type CardModel,
   type FanoutGroup,
   type Progress,
   type Sort,
   type SortKey,
 } from '../shared/view';
-import { DOT_LABEL, Dot, Glyph, Icon, Kbd, Popover, isTyping, scrollBehavior, send, useHost, useNow, usePersisted } from './common';
+import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, scrollBehavior, send, useHost, useNow, usePersisted, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
 import { AgentMap } from './map';
 
@@ -151,99 +150,101 @@ function Manager() {
 
   const nav = { focusId, onFocus: setFocusId };
   return (
-    <div class="manager">
-      <header class="mgr-head">
-        <div class="mgr-title">
-          <h1>Agent Manager</h1>
-          <div class="mgr-counts" aria-label="Tasks by status">
-            <span class="count-item">
-              <Dot state="needs-you" /> {tally.needsYou} need{tally.needsYou === 1 ? 's' : ''} you
+    <LiveState.Provider value={state}>
+      <div class="manager">
+        <header class="mgr-head">
+          <div class="mgr-title">
+            <h1>Agent Manager</h1>
+            <div class="mgr-counts" aria-label="Tasks by status">
+              <span class="count-item">
+                <Dot state="needs-you" /> {tally.needsYou} need{tally.needsYou === 1 ? 's' : ''} you
+              </span>
+              <span class="count-item">
+                <Dot state="working" still={tally.working === 0} /> {tally.working} working
+              </span>
+              <span class="count-item">
+                <Dot state="done" /> {tally.done} done
+              </span>
+              {tally.archived > 0 && (
+                <button
+                  class="link count-item"
+                  onClick={() => {
+                    setHistoryOpen(true);
+                    requestAnimationFrame(() => document.getElementById('history')?.scrollIntoView({ block: 'start', behavior: scrollBehavior() }));
+                  }}
+                >
+                  <Icon name="history" /> {tally.archived} archived
+                </button>
+              )}
+            </div>
+          </div>
+          <span class="spacer" />
+          {waiting.length > 0 ? (
+            <button class="pill loud" onClick={jump} title="Go to the next decision">
+              <Dot state="needs-you" />
+              {waiting.length} decision{waiting.length === 1 ? '' : 's'} waiting
+            </button>
+          ) : (
+            <span class="pill quiet">
+              <Icon name="check" /> Nothing waiting
             </span>
-            <span class="count-item">
-              <Dot state="working" /> {tally.working} working
-            </span>
-            <span class="count-item">
-              <Dot state="done" /> {tally.done} done
-            </span>
-            {tally.archived > 0 && (
+          )}
+          <label class="search">
+            <Icon name="search" />
+            <input
+              ref={search}
+              type="search"
+              value={query}
+              placeholder="Search tasks, agents, branches"
+              aria-label="Search tasks"
+              onInput={(e) => setQuery(e.currentTarget.value)}
+            />
+            {!query && <Kbd>/</Kbd>}
+          </label>
+          <div class="seg views" role="tablist" aria-label="View">
+            {VIEWS.map((v, i) => (
               <button
-                class="link count-item"
-                onClick={() => {
-                  setHistoryOpen(true);
-                  requestAnimationFrame(() => document.getElementById('history')?.scrollIntoView({ block: 'start', behavior: scrollBehavior() }));
+                key={v.id}
+                role="tab"
+                class="seg-item"
+                aria-selected={view === v.id}
+                aria-controls="view"
+                tabIndex={view === v.id ? 0 : -1}
+                title={`${v.title} (${i + 1})`}
+                onClick={() => setView(v.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    const n = (i + (e.key === 'ArrowRight' ? 1 : VIEWS.length - 1)) % VIEWS.length;
+                    setView(VIEWS[n].id);
+                    (e.currentTarget.parentElement?.children[n] as HTMLElement | undefined)?.focus();
+                  }
                 }}
               >
-                <Icon name="history" /> {tally.archived} archived
+                <Icon name={v.icon} /> {v.title}
               </button>
-            )}
+            ))}
           </div>
-        </div>
-        <span class="spacer" />
-        {waiting.length > 0 ? (
-          <button class="pill loud" onClick={jump} title="Go to the next decision">
-            <Dot state="needs-you" />
-            {waiting.length} decision{waiting.length === 1 ? '' : 's'} waiting
-          </button>
-        ) : (
-          <span class="pill quiet">
-            <Icon name="check" /> Nothing waiting
-          </span>
-        )}
-        <label class="search">
-          <Icon name="search" />
-          <input
-            ref={search}
-            type="search"
-            value={query}
-            placeholder="Search tasks, agents, branches"
-            aria-label="Search tasks"
-            onInput={(e) => setQuery(e.currentTarget.value)}
-          />
-          {!query && <Kbd>/</Kbd>}
-        </label>
-        <div class="seg views" role="tablist" aria-label="View">
-          {VIEWS.map((v, i) => (
-            <button
-              key={v.id}
-              role="tab"
-              class="seg-item"
-              aria-selected={view === v.id}
-              aria-controls="view"
-              tabIndex={view === v.id ? 0 : -1}
-              title={`${v.title} (${i + 1})`}
-              onClick={() => setView(v.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                  e.preventDefault();
-                  const n = (i + (e.key === 'ArrowRight' ? 1 : VIEWS.length - 1)) % VIEWS.length;
-                  setView(VIEWS[n].id);
-                  (e.currentTarget.parentElement?.children[n] as HTMLElement | undefined)?.focus();
-                }
-              }}
-            >
-              <Icon name={v.icon} /> {v.title}
-            </button>
-          ))}
-        </div>
-      </header>
+        </header>
 
-      <NewTask />
+        <NewTask />
 
-      <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
-        {query && shown.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
-        {!query && shown.length === 0 && (
-          <div class="empty-view">
-            <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
-            <p class="hint">Several agents on one task compare side by side.</p>
-          </div>
-        )}
-        {view === 'board' && <Board state={state} chats={shown} now={now} {...nav} />}
-        {view === 'list' && <List state={state} chats={shown} now={now} sort={sort} setSort={setSort} {...nav} />}
-        {view === 'map' && <AgentMap state={shownState} now={now} {...nav} />}
+        <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
+          {query && shown.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
+          {!query && shown.length === 0 && (
+            <div class="empty-view">
+              <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
+              <p class="hint">Several agents on one task compare side by side.</p>
+            </div>
+          )}
+          {view === 'board' && <Board state={state} chats={shown} now={now} {...nav} />}
+          {view === 'list' && <List state={state} chats={shown} now={now} sort={sort} setSort={setSort} {...nav} />}
+          {view === 'map' && <AgentMap state={shownState} now={now} {...nav} />}
+        </div>
+
+        <History chats={state.chats.filter((c) => c.archived)} now={now} open={historyOpen} setOpen={setHistoryOpen} />
       </div>
-
-      <History chats={state.chats.filter((c) => c.archived)} now={now} open={historyOpen} setOpen={setHistoryOpen} />
-    </div>
+    </LiveState.Provider>
   );
 }
 
@@ -308,10 +309,12 @@ interface NavProps {
 
 /** `chats` are the ones the search shows; `state` is everything, for links and shared files. */
 function Board({ state, chats, now, focusId, onFocus }: { state: AppState; chats: ChatView[]; now: number } & NavProps) {
+  const sorted = useSettledOrder(sortChats(chats, { key: 'activity', dir: 'asc' }), 'activity');
   if (!chats.length) return null;
   const groups = fanoutGroups(state).filter((g) => g.chats.some((c) => chats.includes(c)));
-  const byColumn = (col: BoardColumn) => sortChats(chats, { key: 'activity', dir: 'asc' }).filter((c) => boardColumn(statusOf(c)) === col);
-  const columns = COLUMNS.map((col) => ({ ...col, cards: byColumn(col.id) }));
+  const conflicts = fileConflicts(state);
+  const models = new Map(chats.map((c) => [c.id, cardModel(state, c, now, conflicts)]));
+  const columns = COLUMNS.map((col) => ({ ...col, cards: sorted.filter((c) => boardColumn(models.get(c.id)!.status) === col.id) }));
   const first = chats.some((c) => c.id === focusId) ? focusId : columns.find((c) => c.cards.length)?.cards[0].id;
   return (
     <>
@@ -322,13 +325,13 @@ function Board({ state, chats, now, focusId, onFocus }: { state: AppState; chats
         {columns.map((col) => (
           <section key={col.id} class="column" data-column={col.id} aria-label={COLUMN_TITLES[col.id]}>
             <h2 class="col-head">
-              <Dot state={col.id} />
+              <Dot state={col.id} still={col.cards.length === 0} />
               {COLUMN_TITLES[col.id]}
               <span class="col-count">{col.cards.length}</span>
             </h2>
             {col.cards.length === 0 && <div class="column-empty">{col.empty}</div>}
             {col.cards.map((c) => (
-              <Card key={c.id} chat={c} state={state} now={now} tabbable={c.id === first} onFocus={onFocus} />
+              <Card key={c.id} chat={c} model={models.get(c.id)!} tabbable={c.id === first} onFocus={onFocus} />
             ))}
           </section>
         ))}
@@ -434,12 +437,18 @@ function BadgeView({ badge }: { badge: Badge }) {
   );
 }
 
-function Card({ chat, state, now, tabbable, onFocus }: { chat: ChatView; state: AppState; now: number; tabbable: boolean; onFocus(id: string): void }) {
-  const status = statusOf(chat);
-  const line = cardLine(state, chat);
-  const progress = status === 'working' || status === 'needs-you' ? planProgress(chat) : null;
-  const badges = linkBadges(state, chat);
-  const conflicts = conflictsOf(state, chat.id);
+interface CardProps {
+  chat: ChatView;
+  model: CardModel;
+  tabbable: boolean;
+  onFocus(id: string): void;
+}
+
+/** A card draws again only when what it shows changed, not on every chunk its agent streams. */
+const Card = memo(CardView, (a: CardProps, b: CardProps) => a.model.key === b.model.key && a.tabbable === b.tabbable && a.onFocus === b.onFocus);
+
+function CardView({ chat, model, tabbable, onFocus }: CardProps) {
+  const { status, line, progress, badges, conflicts } = model;
   const files = chat.files.length || chat.changedFiles;
   const canMerge = !!chat.branch && !chat.merged && !chat.busy;
   const archive = () => send({ type: 'archive', chatId: chat.id, archived: true });
@@ -459,7 +468,7 @@ function Card({ chat, state, now, tabbable, onFocus }: { chat: ChatView; state: 
         <Glyph agent={chat.agent} />
         <span class="card-who">{chat.label}</span>
         <span class="sep">·</span>
-        <span title="Started">{age(chat.createdAt, now)}</span>
+        <span title="Started">{model.age}</span>
         <span class="spacer" />
         {chat.merged && <span class="tag">merged</span>}
         {chat.branch && (
@@ -531,7 +540,7 @@ function Card({ chat, state, now, tabbable, onFocus }: { chat: ChatView; state: 
         )}
         <HandoffMenu chat={chat} />
         <AskMenu chat={chat} />
-        <PipeMenu chat={chat} state={state} />
+        <PipeMenu chat={chat} />
         <span class="spacer" />
         {(files > 0 || chat.branch) && (
           <button class="ghost icon-btn sm" title="Changes" aria-label="Changes" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
@@ -664,9 +673,10 @@ const SORT_COLUMNS: { key: SortKey; title: string }[] = [
 
 /** Every chat as a dense, sortable row: for fifteen agents and more. */
 function List({ state, chats, now, sort, setSort, focusId, onFocus }: { state: AppState; chats: ChatView[]; now: number; sort: Sort; setSort(s: Sort): void } & NavProps) {
-  const rows = sortChats(chats, sort);
+  const rows = useSettledOrder(sortChats(chats, sort), `${sort.key}:${sort.dir}`);
   const roving = rows.some((c) => c.id === focusId) ? focusId : rows[0]?.id;
   if (!rows.length) return null;
+  const conflicts = fileConflicts(state);
   return (
     <div class="table-wrap">
       <table class="chat-table">
@@ -691,77 +701,85 @@ function List({ state, chats, now, sort, setSort, focusId, onFocus }: { state: A
           </tr>
         </thead>
         <tbody>
-          {rows.map((c) => {
-            const status = statusOf(c);
-            const line = cardLine(state, c);
-            const conflicts = conflictsOf(state, c.id);
-            const badges = linkBadges(state, c);
-            return (
-              <tr
-                key={c.id}
-                data-status={status}
-                data-nav={c.id}
-                tabIndex={c.id === roving ? 0 : -1}
-                aria-label={`${c.label}: ${c.title}. ${DOT_LABEL[status]}`}
-                onFocus={(e) => e.target === e.currentTarget && onFocus(c.id)}
-                onClick={(e) => !(e.target as HTMLElement).closest('button') && open(c.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.target === e.currentTarget) open(c.id);
-                }}
-              >
-                <td class="c-status">
-                  <span class="cell-status">
-                    <Dot state={status} /> {DOT_LABEL[status]}
-                  </span>
-                </td>
-                <td class="c-agent">
-                  <span class="cell-agent">
-                    <Glyph agent={c.agent} size="sm" /> {c.label}
-                  </span>
-                </td>
-                <td class="c-task">
-                  <div class="cell-title">
-                    <span class="cell-title-text" title={c.title}>
-                      {c.title}
-                    </span>
-                    {c.branch && (
-                      <span class="chip">
-                        <Icon name="branch" />
-                        {c.branch}
-                      </span>
-                    )}
-                  </div>
-                  <div class="cell-line" data-decision={line.decision ? '' : undefined}>
-                    <span class="cell-line-text">{line.code ? `${line.text}: ${line.code}` : line.text}</span>
-                    {badges.map((b) => (
-                      <span key={b.text} class="mini-badge" data-kind={b.kind}>
-                        {b.text}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td class="c-activity num">{ago(c.lastActivity, now)}</td>
-                <td class="c-files num">
-                  {c.files.length || '–'}
-                  {conflicts.length > 0 && (
-                    <span class="conflict-mark" title={conflicts.map(conflictText).join('\n')} aria-label={`${conflicts.length} shared with other chats`}>
-                      <Icon name="diff" />
-                    </span>
-                  )}
-                </td>
-                <td class="c-age num">{age(c.createdAt, now)}</td>
-                <td class="c-act">
-                  <RowDecision chat={c} line={line} />
-                  <button class="ghost icon-btn sm" title="Open chat" aria-label={`Open ${c.label}`} onClick={() => open(c.id)}>
-                    <Icon name="open" />
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
+          {rows.map((c) => (
+            <Row key={c.id} chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
+          ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+interface RowProps extends CardProps {
+  /** "3s ago". */
+  activity: string;
+}
+
+/** Like the cards: a row draws again only when what it shows changed. */
+const Row = memo(RowView, (a: RowProps, b: RowProps) => a.model.key === b.model.key && a.activity === b.activity && a.tabbable === b.tabbable && a.onFocus === b.onFocus);
+
+function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
+  const { status, line, conflicts, badges } = model;
+  return (
+    <tr
+      data-status={status}
+      data-nav={c.id}
+      tabIndex={tabbable ? 0 : -1}
+      aria-label={`${c.label}: ${c.title}. ${DOT_LABEL[status]}`}
+      onFocus={(e) => e.target === e.currentTarget && onFocus(c.id)}
+      onClick={(e) => !(e.target as HTMLElement).closest('button') && open(c.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) open(c.id);
+      }}
+    >
+      <td class="c-status">
+        <span class="cell-status">
+          <Dot state={status} /> {DOT_LABEL[status]}
+        </span>
+      </td>
+      <td class="c-agent">
+        <span class="cell-agent">
+          <Glyph agent={c.agent} size="sm" /> {c.label}
+        </span>
+      </td>
+      <td class="c-task">
+        <div class="cell-title">
+          <span class="cell-title-text" title={c.title}>
+            {c.title}
+          </span>
+          {c.branch && (
+            <span class="chip">
+              <Icon name="branch" />
+              {c.branch}
+            </span>
+          )}
+        </div>
+        <div class="cell-line" data-decision={line.decision ? '' : undefined}>
+          <span class="cell-line-text">{line.code ? `${line.text}: ${line.code}` : line.text}</span>
+          {badges.map((b) => (
+            <span key={b.text} class="mini-badge" data-kind={b.kind}>
+              {b.text}
+            </span>
+          ))}
+        </div>
+      </td>
+      <td class="c-activity num">{activity}</td>
+      <td class="c-files num">
+        {c.files.length || '–'}
+        {conflicts.length > 0 && (
+          <span class="conflict-mark" title={conflicts.map(conflictText).join('\n')} aria-label={`${conflicts.length} shared with other chats`}>
+            <Icon name="diff" />
+          </span>
+        )}
+      </td>
+      <td class="c-age num">{model.age}</td>
+      <td class="c-act">
+        <RowDecision chat={c} line={line} />
+        <button class="ghost icon-btn sm" title="Open chat" aria-label={`Open ${c.label}`} onClick={() => open(c.id)}>
+          <Icon name="open" />
+        </button>
+      </td>
+    </tr>
   );
 }
 

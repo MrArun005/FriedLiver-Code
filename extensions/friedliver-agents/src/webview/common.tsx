@@ -1,8 +1,9 @@
-import type { ComponentChildren } from 'preact';
+import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { parseMarkdown, type Inline } from '../shared/markdown';
+import { parseDoc, type Block, type Inline, type MarkdownDoc } from '../shared/markdown';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
 import { AGENT_FACES, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
+import { settleOrder, type Settled } from '../shared/view';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -96,6 +97,47 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
   return { state, selected, setSelected };
 }
 
+/**
+ * A component that draws again only when `same` says its props changed. With
+ * fifteen agents streaming, most updates are for chats a component doesn't
+ * show, and drawing every card and transcript item again for each one kept
+ * the webviews busy.
+ */
+export function memo<P extends object>(component: FunctionComponent<P>, same: (prev: P, next: P) => boolean = shallowSame): FunctionComponent<P> {
+  function Memo(this: { props: P; shouldComponentUpdate?: (next: P) => boolean }, props: P) {
+    this.shouldComponentUpdate = (next) => !same(this.props, next);
+    return createElement(component, props);
+  }
+  return Memo as FunctionComponent<P>;
+}
+
+function shallowSame<P extends object>(a: P, b: P): boolean {
+  const ka = Object.keys(a) as (keyof P)[];
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+}
+
+/**
+ * The whole state, for parts that need the latest of it only now and then
+ * (a menu listing the other chats), so the parts around them can skip
+ * drawing while other chats stream.
+ */
+export const LiveState = createContext<AppState>(EMPTY_STATE);
+
+/** `sorted`, in an order that moves at most every `ms` while chats stream (see settleOrder). */
+export function useSettledOrder<T extends { id: string }>(sorted: T[], sort: string, ms = 1000): T[] {
+  const shown = useRef<Settled>(undefined);
+  const [, wake] = useState(0);
+  const { order, pending } = settleOrder(shown.current, sorted.map((c) => c.id), sort, Date.now(), ms);
+  shown.current = order;
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => wake((n) => n + 1), Math.max(0, order.at + ms - Date.now()));
+    return () => clearTimeout(timer);
+  });
+  const byId = new Map(sorted.map((c) => [c.id, c]));
+  return order.ids.map((id) => byId.get(id)!);
+}
+
 /** Re-renders every `ms`, for ages like "3m". */
 export function useNow(ms: number): number {
   const [now, setNow] = useState(Date.now());
@@ -125,41 +167,54 @@ export const DOT_LABEL: Record<string, string> = {
   error: 'Problem',
 };
 
-export function Dot({ state }: { state: string }) {
-  return <span class="dot" data-state={state} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
+/**
+ * A status dot; "working" pulses. `still` keeps it from pulsing where nothing
+ * is working right now (a count of none, a legend, a step of a finished turn):
+ * an animation that never ends repaints the webview every frame.
+ */
+export function Dot({ state, still }: { state: string; still?: boolean }) {
+  return <span class="dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
 }
 
-export function Markdown({ text }: { text: string }) {
+/** A reply as markdown. While it streams in, only its tail is parsed and drawn again. */
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  const doc = useRef<MarkdownDoc>(undefined);
+  doc.current = parseDoc(text, doc.current);
   return (
     <div class="md">
-      {parseMarkdown(text).map((b, i) => {
-        switch (b.t) {
-          case 'p':
-            return <p key={i}>{inline(b.inline)}</p>;
-          case 'h':
-            return b.level === 1 ? <h3 key={i}>{inline(b.inline)}</h3> : <h4 key={i}>{inline(b.inline)}</h4>;
-          case 'ul':
-          case 'ol': {
-            const List = b.t;
-            return (
-              <List key={i}>
-                {b.items.map((item, n) => (
-                  <li key={n}>{inline(item)}</li>
-                ))}
-              </List>
-            );
-          }
-          case 'pre':
-            return (
-              <pre key={i}>
-                <code>{b.code}</code>
-              </pre>
-            );
-        }
-      })}
+      {doc.current.blocks.map((b, i) => (
+        <MarkdownBlock key={i} block={b} />
+      ))}
     </div>
   );
-}
+});
+
+/** Blocks a reply has finished keep their object, so they aren't drawn again. */
+const MarkdownBlock = memo(function MarkdownBlock({ block: b }: { block: Block }) {
+  switch (b.t) {
+    case 'p':
+      return <p>{inline(b.inline)}</p>;
+    case 'h':
+      return b.level === 1 ? <h3>{inline(b.inline)}</h3> : <h4>{inline(b.inline)}</h4>;
+    case 'ul':
+    case 'ol': {
+      const List = b.t;
+      return (
+        <List>
+          {b.items.map((item, n) => (
+            <li key={n}>{inline(item)}</li>
+          ))}
+        </List>
+      );
+    }
+    case 'pre':
+      return (
+        <pre>
+          <code>{b.code}</code>
+        </pre>
+      );
+  }
+});
 
 function inline(parts: Inline[]): ComponentChildren[] {
   return parts.map((p, i) => {

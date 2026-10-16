@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseSaved, SAVE_LIMITS, settleRestored, StateFile, trimForSave, type SavedState } from '../src/host/persist';
+import { parseSaved, SAVE_LIMITS, saveText, settleRestored, StateFile, trimForSave, type SavedState } from '../src/host/persist';
 import { EMPTY_STATE, lastReply, type ChatView, type Item } from '../src/shared/model';
 import { buildBridge, disposeCores, gitRepo, makeCore, waitFor } from './helpers';
 
@@ -33,6 +33,23 @@ const saved = (chats: ChatView[]): SavedState => ({
 });
 
 describe('saving chats', () => {
+  it('writes what JSON.stringify(trimForSave) would, turning only changed chats into text again', () => {
+    const odd = '"quotes", \\ back\u0000slash, ünïcode, \u2028 and ' + JSON.stringify(['\u0000friedliver:chats\u0000']);
+    const set = saved([
+      chat('chat-1', { title: odd, items: [{ kind: 'agent', text: odd }], lastActivity: 1 }),
+      chat('chat-2', { archived: true, items: [{ kind: 'agent', text: 'y'.repeat(1000) }], lastActivity: 2 }),
+      chat('chat-3', { items: [{ kind: 'user', text: 'z', images: ['img'] }], lastActivity: 3 }),
+    ]);
+    set.state.links = [{ id: 'link-1', kind: 'pipe', from: 'chat-1', to: 'chat-3', by: 'user', createdAt: 0, active: true, count: 0 }];
+    expect(saveText(set)).toBe(JSON.stringify(trimForSave(set)));
+    expect(saveText(set, 1600)).toBe(JSON.stringify(trimForSave(set, 1600)));
+    expect(JSON.parse(saveText(set)).state.chats[0].title).toBe(odd);
+    // One chat changes, as the reducer changes it: a new object; the others are the same.
+    const next = { ...set, state: { ...set.state, chats: [set.state.chats[0], set.state.chats[1], { ...set.state.chats[2], title: 'Renamed' }] } };
+    expect(saveText(next)).toBe(JSON.stringify(trimForSave(next)));
+    expect(saveText(saved([]))).toBe(JSON.stringify(trimForSave(saved([]))));
+  });
+
   it('keeps recent items, short output and no images, and drops the oldest archived chats when too big', () => {
     const many: Item[] = Array.from({ length: 450 }, (_, n) => ({ kind: 'agent', text: `m${n}` }));
     const big = chat('chat-1', {

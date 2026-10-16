@@ -14,6 +14,7 @@ import { StateFile } from './host/persist';
 import { ReviewUi } from './host/review';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
+import { actionsFor, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, type Script, type Surface } from './host/webviews';
 import { LIMITS, type Attachment, type HostMessage, type WebviewMessage } from './shared/messages';
@@ -85,6 +86,8 @@ export class Controller {
   private warnedAgentToAgent = false;
   /** References for a composer, sent again to a chat view that (re)loads soon after; the view drops duplicates. */
   private composerRefs: { message: HostMessage; until: number }[] = [];
+  /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
+  private shownDecisions?: { key: string; view?: vscode.WebviewView };
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.accounts = new Accounts(
@@ -232,8 +235,13 @@ export class Controller {
   }
 
   private sendActions(actions: Action[]): void {
-    const message = actions.length === 1 ? ({ type: 'action', action: actions[0] } as const) : ({ type: 'actions', actions } as const);
-    for (const s of this.surfaces) post(s, message);
+    // Each kind of surface gets the actions it shows; the Agent Manager, for one, no images.
+    const byKind = new Map<Script, Action[]>();
+    for (const s of this.surfaces) {
+      let mine = byKind.get(s.kind);
+      if (!mine) byKind.set(s.kind, (mine = actionsFor(s.kind, actions)));
+      if (mine.length) post(s, mine.length === 1 ? { type: 'action', action: mine[0] } : { type: 'actions', actions: mine });
+    }
     this.updateDecisions();
     this.closeAnswered();
   }
@@ -313,7 +321,7 @@ export class Controller {
           // Queued actions are already in the snapshot: send them first, while this surface isn't ready, so it never gets them twice.
           this.batcher.flush();
           surface.ready = true;
-          post(surface, { type: 'snapshot', state: this.core.snapshot, selected: surface.selected ?? this.lastSelected, now: Date.now() });
+          post(surface, { type: 'snapshot', state: stateFor(surface.kind, this.core.snapshot), selected: surface.selected ?? this.lastSelected, now: Date.now() });
           if (surface.kind === 'chat') {
             this.composerRefs = this.composerRefs.filter((r) => r.until > Date.now());
             for (const r of this.composerRefs) post(surface, r.message);
@@ -637,6 +645,10 @@ export class Controller {
 
   private updateDecisions(): void {
     const waiting = this.core.decisions();
+    // Every batch of agent updates comes here; most change nothing the status item or the badge show.
+    const key = JSON.stringify(waiting.map((d) => d.title));
+    if (this.shownDecisions?.key === key && this.shownDecisions.view === this.agentsView) return;
+    this.shownDecisions = { key, view: this.agentsView };
     const n = waiting.length;
     if (n === 0) {
       this.statusItem.hide();

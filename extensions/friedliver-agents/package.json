@@ -544,7 +544,6 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.8.0",
-    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "^22.20.5",
     "@types/vscode": "~1.104.0",
     "@vscode/test-electron": "^3.1.0",

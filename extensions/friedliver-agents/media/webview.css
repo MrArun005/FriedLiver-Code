@@ -668,6 +668,9 @@ button.badge:hover:not(:disabled) {
     opacity: 0.3;
   }
 }
+.dot[data-still] {
+  animation: none;
+}
 
 /* Pills: the decisions-waiting jump and its quiet "nothing waiting". */
 .pill {
@@ -2222,6 +2225,10 @@ svg.map {
   to {
     stroke-dashoffset: -11;
   }
+}
+/* The legend's sample moves only while something on the map does: a moving dash repaints every frame. */
+.map-legend[data-still] .flow {
+  animation: none;
 }
 .edge.lit .line,
 .edge.lit .pipe-outer {

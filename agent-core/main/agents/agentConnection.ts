@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
-import * as acp from '@agentclientprotocol/sdk';
+import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentSpec } from './registry';
 import { killProcessTree, launchFor } from './processes';
 import { TerminalManager, type TerminalListener } from './terminals';
@@ -35,6 +35,13 @@ export interface StartOptions {
   onStderr?: (line: string) => void;
 }
 
+/**
+ * The ACP library, loaded with the first agent: with the schemas it builds
+ * when it loads, it is most of the editor's memory for agents, and a window
+ * where no agent runs doesn't need it.
+ */
+let sdk: typeof import('@agentclientprotocol/sdk') | undefined;
+
 const STDERR_TAIL_LINES = 40;
 const STOP_GRACE_MS = 2000;
 const EXIT_GRACE_MS = 1000;
@@ -66,6 +73,7 @@ export class AgentConnection {
 
   static async start(spec: AgentSpec, options: StartOptions): Promise<AgentConnection> {
     const { cwd, host, log, onStderr } = options;
+    const lib = (sdk ??= await import('@agentclientprotocol/sdk'));
     let launch: ReturnType<typeof launchFor>;
     try {
       launch = launchFor(spec.command, spec.args);
@@ -116,27 +124,27 @@ export class AgentConnection {
     failed.catch(() => {});
 
     const terminals = new TerminalManager(cwd, host.terminalListener);
-    const stream = acp.ndJsonStream(
+    const stream = lib.ndJsonStream(
       Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
       Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
     );
-    const connection = acp
+    const connection = lib
       .client({ name: 'friedliver' })
-      .onNotification(acp.methods.client.session.update, ({ params }) => host.sessionUpdate(params))
-      .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) => host.requestPermission(params, signal))
-      .onRequest(acp.methods.client.fs.readTextFile, ({ params }) => host.readTextFile(params))
-      .onRequest(acp.methods.client.fs.writeTextFile, async ({ params }) => {
+      .onNotification(lib.methods.client.session.update, ({ params }) => host.sessionUpdate(params))
+      .onRequest(lib.methods.client.session.requestPermission, ({ params, signal }) => host.requestPermission(params, signal))
+      .onRequest(lib.methods.client.fs.readTextFile, ({ params }) => host.readTextFile(params))
+      .onRequest(lib.methods.client.fs.writeTextFile, async ({ params }) => {
         await host.writeTextFile(params);
         return {};
       })
-      .onRequest(acp.methods.client.terminal.create, ({ params }) => terminals.create(params))
-      .onRequest(acp.methods.client.terminal.output, ({ params }) => terminals.output(params))
-      .onRequest(acp.methods.client.terminal.waitForExit, ({ params }) => terminals.waitForExit(params))
-      .onRequest(acp.methods.client.terminal.kill, ({ params }) => {
+      .onRequest(lib.methods.client.terminal.create, ({ params }) => terminals.create(params))
+      .onRequest(lib.methods.client.terminal.output, ({ params }) => terminals.output(params))
+      .onRequest(lib.methods.client.terminal.waitForExit, ({ params }) => terminals.waitForExit(params))
+      .onRequest(lib.methods.client.terminal.kill, ({ params }) => {
         terminals.kill(params);
         return {};
       })
-      .onRequest(acp.methods.client.terminal.release, ({ params }) => {
+      .onRequest(lib.methods.client.terminal.release, ({ params }) => {
         terminals.release(params);
         return {};
       })
@@ -144,8 +152,8 @@ export class AgentConnection {
 
     try {
       const info = await Promise.race([
-        connection.agent.request(acp.methods.agent.initialize, {
-          protocolVersion: acp.PROTOCOL_VERSION,
+        connection.agent.request(lib.methods.agent.initialize, {
+          protocolVersion: lib.PROTOCOL_VERSION,
           clientCapabilities: {
             fs: { readTextFile: true, writeTextFile: true },
             terminal: true,
@@ -189,23 +197,23 @@ export class AgentConnection {
 
   /** `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own. */
   newSession(cwd: string, mcpServers: acp.McpServer[] = []): Promise<acp.NewSessionResponse> {
-    return this.connection.agent.request(acp.methods.agent.session.new, { cwd, mcpServers });
+    return this.connection.agent.request(sdk!.methods.agent.session.new, { cwd, mcpServers });
   }
 
   async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = []): Promise<void> {
-    await this.connection.agent.request(acp.methods.agent.session.load, { sessionId, cwd, mcpServers });
+    await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers });
   }
 
   prompt(sessionId: string, prompt: acp.ContentBlock[]): Promise<acp.PromptResponse> {
-    return this.connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt });
+    return this.connection.agent.request(sdk!.methods.agent.session.prompt, { sessionId, prompt });
   }
 
   cancel(sessionId: string): Promise<void> {
-    return this.connection.agent.notify(acp.methods.agent.session.cancel, { sessionId });
+    return this.connection.agent.notify(sdk!.methods.agent.session.cancel, { sessionId });
   }
 
   async authenticate(methodId: string): Promise<void> {
-    await this.connection.agent.request(acp.methods.agent.authenticate, { methodId });
+    await this.connection.agent.request(sdk!.methods.agent.authenticate, { methodId });
   }
 
   async stop(): Promise<void> {
@@ -238,5 +246,6 @@ function notInstalled(spec: AgentSpec): AgentStartError {
 }
 
 export function isAuthRequired(err: unknown): boolean {
-  return err instanceof acp.RequestError && err.code === -32000;
+  // Before the library loads, no agent has answered at all.
+  return !!sdk && err instanceof sdk.RequestError && err.code === -32000;
 }

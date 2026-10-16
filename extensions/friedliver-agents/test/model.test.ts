@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_STATE,
+  MAX_IMAGE_CHARS,
   age,
   boardColumn,
   chatStatus,
@@ -10,6 +11,7 @@ import {
   shortCommand,
   stateLine,
   titleFrom,
+  waitingItems,
   type Action,
   type AppState,
   type ChatView,
@@ -99,6 +101,51 @@ describe('transcript reducer', () => {
   it('ignores duplicate images', () => {
     const image = { id: 'i1', src: 'data:image/png;base64,AA==', title: 'x', from: 'agent' as const };
     expect(run([{ t: 'image', image }, { t: 'image', image }]).images).toHaveLength(1);
+  });
+
+  it('keeps the newest images that fit in the size cap, and always the newest one', () => {
+    const big = (id: string) => ({ id, src: 'x'.repeat(MAX_IMAGE_CHARS / 2 - 1), title: id, from: 'agent' as const });
+    expect(run([{ t: 'image', image: big('a') }, { t: 'image', image: big('b') }]).images.map((i) => i.id)).toEqual(['a', 'b']);
+    expect(run([{ t: 'image', image: big('a') }, { t: 'image', image: big('b') }, { t: 'image', image: big('c') }]).images.map((i) => i.id)).toEqual(['b', 'c']);
+    const huge = { id: 'h', src: 'x'.repeat(MAX_IMAGE_CHARS + 1), title: 'h', from: 'agent' as const };
+    expect(run([{ t: 'image', image: big('a') }, { t: 'image', image: huge }]).images.map((i) => i.id)).toEqual(['h']);
+  });
+});
+
+describe('reducer fast paths', () => {
+  const command = (id: string) => ({ kind: 'command' as const, commandId: id, commandLine: 'npm test', cwd: '/w', outside: false, state: 'running' as const, output: '' });
+  const three = run([
+    { t: 'created', chat: chat({ id: 'a', items: [{ kind: 'agent', text: 'hi' }, command('cmd-a')] }) },
+    { t: 'created', chat: chat({ id: 'b', items: [command('cmd-b'), { kind: 'agent', text: 'hey' }] }) },
+    { t: 'created', chat: chat({ id: 'c' }) },
+  ]);
+
+  it('copies only the chat and the item that command output changes', () => {
+    const next = reduce(three, { t: 'commandOutput', commandId: 'cmd-b', data: 'ok\n' });
+    expect(next.chats[0]).toBe(three.chats[0]);
+    expect(next.chats[2]).toBe(three.chats[2]);
+    expect(next.chats[1].items[0]).toMatchObject({ output: 'ok\n' });
+    expect(next.chats[1].items[1]).toBe(three.chats[1].items[1]);
+    expect(three.chats[1].items[0]).toMatchObject({ output: '' });
+    expect(next.links).toBe(three.links);
+  });
+
+  it('gives the same state back when no item matches', () => {
+    expect(reduce(three, { t: 'commandOutput', commandId: 'cmd-x', data: 'ok' })).toBe(three);
+    expect(reduce(three, { t: 'permissionAnswered', requestId: 'perm-x', answer: 'Allow' })).toBe(three);
+  });
+
+  it('scans a transcript for decisions once until it changes', () => {
+    const asking = chat({ items: [{ kind: 'agent', text: 'hi' }, { ...command('cmd-1'), state: 'awaiting' }] });
+    const first = waitingItems(asking.items);
+    expect(first).toHaveLength(1);
+    expect(waitingItems(asking.items)).toBe(first);
+    const s = run([{ t: 'created', chat: asking }, { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '!' } } }]);
+    expect(waitingItems(s.chats[0].items)).not.toBe(first);
+    expect(decisions(s)).toEqual([{ chatId: 'chat-1', kind: 'command', id: 'cmd-1', title: 'Run npm test' }]);
+    const answered = reduce(s, { t: 'command', commandId: 'cmd-1', patch: { state: 'running' } });
+    expect(decisions(answered)).toEqual([]);
+    expect(chatStatus(answered.chats[0])).toBe('idle');
   });
 });
 
