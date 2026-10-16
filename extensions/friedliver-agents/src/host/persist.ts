@@ -1,0 +1,235 @@
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { EMPTY_STATE, isAgentKey, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
+
+/** What the next window needs to bring a chat back. Never API keys or bridge tokens. */
+export interface SavedChat {
+  agent: ChatView['agent'];
+  cwd: string;
+  /** The agent's session, reloaded when the agent supports it. */
+  sessionId?: string;
+  worktree?: { path: string; branch: string; repo: string; title: string };
+  /** A hand-off's context that no message has carried yet. */
+  preamble?: string;
+}
+
+export interface SavedState {
+  version: 1;
+  state: AppState;
+  chats: Record<string, SavedChat>;
+  /** Where the core's ids continue, so new ones never match restored ones. */
+  nextId: number;
+  chatCount: Partial<Record<ChatView['agent'], number>>;
+}
+
+export const SAVE_LIMITS = {
+  items: 400,
+  output: 8 * 1024,
+  /** Characters of one message; a chat can hold replies of up to 512 KB. */
+  text: 32 * 1024,
+  bytes: 8 * 1024 * 1024,
+};
+
+const STOPPED = 'Stopped when the window closed';
+
+/**
+ * The state as it goes to disk: recent items only, short command output, no
+ * images (they are large and the Images view starts empty anyway). If it is
+ * still too big, the oldest archived chats go first, then the oldest others.
+ */
+export function trimForSave(saved: SavedState, limit = SAVE_LIMITS.bytes): SavedState {
+  let chats = saved.state.chats.map(trimChat);
+  const size = new Map(chats.map((c) => [c.id, JSON.stringify(c).length + JSON.stringify(saved.chats[c.id] ?? {}).length]));
+  let total = [...size.values()].reduce((a, b) => a + b, 0);
+  const byAge = (a: ChatView, b: ChatView) => a.lastActivity - b.lastActivity;
+  const order = [...chats.filter((c) => c.archived).sort(byAge), ...chats.filter((c) => !c.archived).sort(byAge)];
+  const dropped = new Set<string>();
+  for (const c of order) {
+    if (total <= limit) break;
+    dropped.add(c.id);
+    total -= size.get(c.id)!;
+  }
+  chats = chats.filter((c) => !dropped.has(c.id));
+  const kept = new Set(chats.map((c) => c.id));
+  return {
+    ...saved,
+    state: { chats, images: [], links: saved.state.links.filter((l) => kept.has(l.from) && kept.has(l.to)) },
+    chats: Object.fromEntries(Object.entries(saved.chats).filter(([id]) => kept.has(id))),
+  };
+}
+
+function trimChat(chat: ChatView): ChatView {
+  const items = chat.items.slice(-SAVE_LIMITS.items).map((i): Item => {
+    if (i.kind === 'command' && i.output.length > SAVE_LIMITS.output) return { ...i, output: i.output.slice(-SAVE_LIMITS.output) };
+    if (i.kind === 'user' && i.images.length) i = { ...i, images: [] };
+    if ((i.kind === 'user' || i.kind === 'agent' || i.kind === 'thought' || i.kind === 'link') && i.text.length > SAVE_LIMITS.text) {
+      return { ...i, text: `${i.text.slice(0, SAVE_LIMITS.text)}\n\n[Shortened when saved.]` };
+    }
+    return i;
+  });
+  return { ...chat, items };
+}
+
+/**
+ * Nothing restored is waiting any more: the agent that asked is gone. Open
+ * questions, reviews, commands and tool requests are closed as stopped, and
+ * chats that were busy say so.
+ */
+export function settleRestored(state: AppState): AppState {
+  const chats = state.chats.map((chat) => {
+    let stopped = chat.busy;
+    const items = chat.items.map((i): Item => {
+      if (i.kind === 'permission' && !i.answer) {
+        stopped = true;
+        return { ...i, answer: STOPPED };
+      }
+      if (i.kind === 'review' && i.state === 'pending') {
+        stopped = true;
+        return { ...i, state: 'rejected' };
+      }
+      if (i.kind === 'command' && i.state === 'awaiting') {
+        stopped = true;
+        return { ...i, state: 'denied' };
+      }
+      if (i.kind === 'command' && i.state === 'running') {
+        stopped = true;
+        return { ...i, state: 'exited', exitCode: null };
+      }
+      if (i.kind === 'bridge' && i.state === 'awaiting') {
+        stopped = true;
+        return { ...i, state: 'denied' };
+      }
+      return i;
+    });
+    if (stopped) items.push({ kind: 'notice', tone: 'info', text: `${STOPPED}.` });
+    return { ...chat, busy: false, items };
+  });
+  return { ...state, chats };
+}
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+const ID = /^[\w.:-]{1,128}$/;
+const str = (v: unknown): v is string => typeof v === 'string';
+const ITEM_KINDS = new Set(['user', 'agent', 'thought', 'tool', 'plan', 'permission', 'review', 'command', 'notice', 'changes', 'link', 'bridge']);
+
+/** A saved file read back, or null when it isn't one. Chats that don't make sense are left out. */
+export function parseSaved(raw: unknown): SavedState | null {
+  if (!isObj(raw) || raw.version !== 1 || !isObj(raw.state) || !isObj(raw.chats) || !Array.isArray(raw.state.chats)) return null;
+  const host = raw.chats;
+  const chats: ChatView[] = [];
+  const saved: Record<string, SavedChat> = {};
+  for (const c of raw.state.chats as unknown[]) {
+    if (!isObj(c) || !str(c.id) || !ID.test(c.id) || !isAgentKey(c.agent) || !str(c.cwd) || !Array.isArray(c.items)) continue;
+    if (chats.some((x) => x.id === c.id)) continue;
+    const h = host[c.id];
+    if (!isObj(h) || h.agent !== c.agent || h.cwd !== c.cwd) continue;
+    const createdAt = num(c.createdAt, Date.now());
+    chats.push({
+      id: c.id,
+      agent: c.agent,
+      label: str(c.label) ? c.label : c.agent,
+      title: str(c.title) ? c.title : 'Untitled task',
+      cwd: c.cwd,
+      branch: str(c.branch) ? c.branch : undefined,
+      merged: c.merged === true || undefined,
+      createdAt,
+      busy: c.busy === true,
+      changedFiles: num(c.changedFiles, 0),
+      items: (c.items as unknown[]).filter((i): i is Item => isObj(i) && ITEM_KINDS.has(i.kind as string)),
+      origin: isObj(c.origin) && (c.origin.kind === 'handoff' || c.origin.kind === 'consult') && str(c.origin.chatId) && (c.origin.by === 'user' || c.origin.by === 'agent')
+        ? { kind: c.origin.kind, chatId: c.origin.chatId, by: c.origin.by }
+        : undefined,
+      group: str(c.group) ? c.group : undefined,
+      depth: num(c.depth, 0),
+      files: Array.isArray(c.files) ? c.files.filter(str) : [],
+      lastActivity: num(c.lastActivity, createdAt),
+      turns: num(c.turns, 0),
+      archived: c.archived === true || undefined,
+    });
+    const wt = h.worktree;
+    saved[c.id] = {
+      agent: c.agent,
+      cwd: c.cwd,
+      sessionId: str(h.sessionId) ? h.sessionId : undefined,
+      worktree: isObj(wt) && str(wt.path) && str(wt.branch) && str(wt.repo) && str(wt.title) ? { path: wt.path, branch: wt.branch, repo: wt.repo, title: wt.title } : undefined,
+      preamble: str(h.preamble) ? h.preamble : undefined,
+    };
+  }
+  const ids = new Set(chats.map((c) => c.id));
+  const links = (Array.isArray(raw.state.links) ? raw.state.links : []).filter(
+    (l): l is ChatLink => isObj(l) && str(l.id) && (l.kind === 'handoff' || l.kind === 'consult' || l.kind === 'pipe') && ids.has(l.from as string) && ids.has(l.to as string),
+  );
+  const count: SavedState['chatCount'] = {};
+  if (isObj(raw.chatCount)) for (const [k, v] of Object.entries(raw.chatCount)) if (isAgentKey(k)) count[k] = num(v, 0);
+  return { version: 1, state: { ...EMPTY_STATE, chats, links }, chats: saved, nextId: num(raw.nextId, 1), chatCount: count };
+}
+
+function num(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+/**
+ * The chats file in the editor's storage for this workspace. Saves are
+ * debounced, written to a temporary file and renamed into place, so a crash
+ * mid-write leaves the previous save intact.
+ */
+export class StateFile {
+  private timer?: ReturnType<typeof setTimeout>;
+  private writing: Promise<void> = Promise.resolve();
+  private stopped = false;
+
+  constructor(
+    readonly file: string,
+    private readonly read: () => SavedState,
+    private readonly log?: (line: string) => void,
+    private readonly delayMs = 1000,
+  ) {}
+
+  async load(): Promise<SavedState | null> {
+    try {
+      return parseSaved(JSON.parse(await readFile(this.file, 'utf8')));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.log?.(`Couldn't read saved chats: ${String(err)}`);
+      return null;
+    }
+  }
+
+  schedule(): void {
+    if (this.stopped) return;
+    this.timer ??= setTimeout(() => void this.flush(), this.delayMs);
+  }
+
+  /** Writes now, after any write already under way. */
+  flush(): Promise<void> {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    if (this.stopped) return this.writing;
+    const json = JSON.stringify(trimForSave(this.read()));
+    this.writing = this.writing.then(async () => {
+      try {
+        await mkdir(path.dirname(this.file), { recursive: true });
+        const tmp = `${this.file}.${process.pid}.tmp`;
+        await writeFile(tmp, json, 'utf8');
+        await rename(tmp, this.file);
+      } catch (err) {
+        this.log?.(`Couldn't save chats: ${String(err)}`);
+      }
+    });
+    return this.writing;
+  }
+
+  /** No more saves, e.g. once the core starts shutting down and cancels what was running. */
+  stop(): void {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  /** Stops saving and deletes the file, when the user turns restoring off. */
+  async clear(): Promise<void> {
+    this.stop();
+    await this.writing;
+    await rm(this.file, { force: true });
+  }
+}

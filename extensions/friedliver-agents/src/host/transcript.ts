@@ -1,0 +1,167 @@
+// Chats as text for other agents: the context a hand-off starts from, the
+// brief a consulted agent gets, and what the FriedLiver tools return.
+import path from 'node:path';
+import { AGENT_FACES, AGENT_KEYS, lastReply, type AppState, type ChatView, type Item } from '../shared/model';
+
+/** Characters kept from one message in a hand-off or a read. */
+const MAX_MESSAGE = 2000;
+/** Characters of transcript a hand-off carries; older messages go first. */
+const MAX_HANDOFF = 24_000;
+const MAX_EXCERPT = 1500;
+const MAX_READ = 100_000;
+
+/** A file the agents touched, as the chat sees it: relative to its folder, with forward slashes. */
+export function relativeFile(cwd: string, file: string): string {
+  const rel = path.relative(cwd, file) || path.basename(file);
+  return rel.split(path.sep).join('/');
+}
+
+function clip(text: string, max: number): string {
+  const t = text.trim();
+  return t.length > max ? `${t.slice(0, max)}… [trimmed]` : t;
+}
+
+/** The chat's conversation as "who: text" lines, oldest first. */
+function messages(chat: ChatView, max: number): string[] {
+  const out: string[] = [];
+  let agentText = '';
+  const flush = () => {
+    if (agentText.trim()) out.push(`${chat.label}: ${clip(agentText, max)}`);
+    agentText = '';
+  };
+  for (const i of chat.items) {
+    if (i.kind === 'agent') {
+      agentText += (agentText ? '\n\n' : '') + i.text;
+      continue;
+    }
+    const line = messageLine(chat, i, max);
+    if (line) {
+      flush();
+      out.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+
+function messageLine(chat: ChatView, i: Item, max: number): string | null {
+  switch (i.kind) {
+    case 'user':
+      return i.text.trim() ? `User: ${clip(i.text, max)}` : null;
+    case 'link':
+      switch (i.role) {
+        case 'asked':
+          return `${chat.label} asked ${i.label}: ${clip(i.text, max)}`;
+        case 'reply':
+          return `${i.label} answered: ${clip(i.text, max)}`;
+        case 'consulted':
+          return `${i.label} asked: ${clip(i.text, max)}`;
+        case 'piped-in':
+          return `Message from ${i.label}: ${clip(i.text, max)}`;
+        default:
+          return null;
+      }
+    default:
+      return null;
+  }
+}
+
+/**
+ * What a new agent needs to continue another's work: the conversation, the
+ * latest plan, the commands that ran and the files that changed. Sent once,
+ * in front of the user's first message in the new chat, so it costs no turn.
+ */
+export function handoffContext(chat: ChatView): string {
+  const header = [
+    `[FriedLiver] You are taking over a task from another coding agent, ${chat.label}, in this same folder (${chat.cwd}).`,
+    'Below is what happened in that chat, oldest first. The files on disk already include the changes the user accepted.',
+    "Continue from where it stopped. The user's message follows this context.",
+    '',
+    `Task: ${chat.title}`,
+  ];
+  let lines = messages(chat, MAX_MESSAGE);
+  let dropped = 0;
+  while (lines.length > 1 && lines.join('\n\n').length > MAX_HANDOFF) {
+    // Keep the first message: it usually states the task.
+    lines = [lines[0], ...lines.slice(2)];
+    dropped++;
+  }
+  if (dropped) lines.splice(1, 0, `(${dropped} earlier message${dropped === 1 ? '' : 's'} left out)`);
+  const parts = [header.join('\n'), lines.length ? `Conversation:\n\n${lines.join('\n\n')}` : ''];
+
+  const plan = [...chat.items].reverse().find((i) => i.kind === 'plan');
+  if (plan?.kind === 'plan' && plan.entries.length) parts.push(`Plan:\n${plan.entries.map((e) => `- [${e.status}] ${e.content}`).join('\n')}`);
+
+  const commands = chat.items.flatMap((i) => (i.kind === 'command' ? [`- \`${clip(i.commandLine, 300)}\` (${commandOutcome(i)})`] : []));
+  if (commands.length) parts.push(`Commands:\n${commands.slice(-30).join('\n')}`);
+  if (chat.files.length) parts.push(`Files changed:\n${chat.files.map((f) => `- ${f}`).join('\n')}`);
+  return parts.filter(Boolean).join('\n\n');
+}
+
+function commandOutcome(i: Extract<Item, { kind: 'command' }>): string {
+  if (i.state === 'denied') return 'the user denied it';
+  if (i.state === 'exited') return i.exitCode == null ? 'stopped' : `exit ${i.exitCode}`;
+  return 'did not finish';
+}
+
+/** "3 messages · 2 files changed · 1 command", for the hand-off cards. */
+export function handoffSummary(chat: ChatView): string {
+  const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  const parts = [n(messages(chat, 0).length, 'message')];
+  if (chat.files.length) parts.push(`${n(chat.files.length, 'file')} changed`);
+  const commands = chat.items.filter((i) => i.kind === 'command').length;
+  if (commands) parts.push(n(commands, 'command'));
+  return parts.join(' · ');
+}
+
+/** What a consulted agent learns about the chat that asks it, ahead of the question. */
+export function consultBrief(chat: ChatView): string {
+  const lines = [
+    `[FriedLiver] ${chat.label}, another coding agent working in this folder (${chat.cwd}), asks you the question below.`,
+    `Its task: ${chat.title}`,
+  ];
+  const reply = lastReply(chat);
+  if (reply) lines.push(`Its latest reply (excerpt):\n${clip(reply.slice(-MAX_EXCERPT), MAX_EXCERPT)}`);
+  if (chat.files.length) lines.push(`Files it changed: ${chat.files.slice(0, 30).join(', ')}`);
+  lines.push('Answer the question. Read files here as you need; change them only if the question asks you to.');
+  return lines.join('\n\n');
+}
+
+/** A finished turn from one chat, given to another as a message. */
+export function forwardText(from: ChatView, text: string): string {
+  return `[FriedLiver] From ${from.label}, another agent's chat (task: ${from.title}):\n\n${text}`;
+}
+
+/** read_chat: the latest messages of a chat. */
+export function renderChat(chat: ChatView, last: number): string {
+  const lines = messages(chat, MAX_MESSAGE * 2).slice(-last);
+  const head = `${chat.id} · ${chat.label} · task: ${chat.title} · ${chat.busy ? 'busy' : 'idle'} · ${chat.turns} turn${chat.turns === 1 ? '' : 's'}`;
+  const body = lines.length ? lines.join('\n\n') : '(no messages yet)';
+  const text = `${head}\n\n${body}`;
+  return text.length > MAX_READ ? `…${text.slice(-MAX_READ)}` : text;
+}
+
+/** list_chats: the open chats, with the caller marked. */
+export function chatList(state: Pick<AppState, 'chats' | 'links'>, callerId: string): string {
+  const open = state.chats.filter((c) => !c.archived);
+  if (!open.length) return 'No chats are open.';
+  return open
+    .map((c) => {
+      const notes = [c.busy ? 'busy' : 'idle'];
+      if (c.id === callerId) notes.push('this chat');
+      else if (state.links.some((l) => l.from === callerId && l.to === c.id && l.kind === 'consult')) notes.push('you consulted it');
+      if (c.branch) notes.push(`own worktree on ${c.branch}`);
+      return `${c.id} · ${AGENT_FACES[c.agent].name} (${c.label}) · ${JSON.stringify(c.title)} · ${notes.join(', ')}`;
+    })
+    .join('\n');
+}
+
+/** list_agents: the agents FriedLiver can start. */
+export function agentList(): string {
+  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', demo: 'offline test agent; it echoes what it is told' };
+  return [
+    ...AGENT_KEYS.map((k) => `${k} · ${AGENT_FACES[k].name}${about[k] ? ` (${about[k]})` : ''}`),
+    '',
+    'Pass the key as `agent` to ask_agent. An agent the user has not installed or signed in to answers with an error.',
+  ].join('\n');
+}

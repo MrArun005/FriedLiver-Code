@@ -1,6 +1,8 @@
 // Drives the demo agent through the real editor: chat, edit review in the
 // diff editor, command approval, undo, then a task in its own worktree that
-// is merged into main. Takes screenshots when an X display is available.
+// is merged into main, then connected chats: a hand-off, an @mention, and an
+// agent asking another through the FriedLiver tools. Takes screenshots when
+// an X display is available.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
@@ -8,6 +10,7 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import type { Controller } from '../extension';
 import type { Surface } from '../host/webviews';
+import { lastReply } from '../shared/model';
 
 const shots = process.env.FRIEDLIVER_SCREENSHOTS;
 const workspace = process.env.FRIEDLIVER_WORKSPACE!;
@@ -87,6 +90,26 @@ export async function run(): Promise<void> {
   if (!existsSync(notes)) throw new Error('Merge did not bring NOTES.md into main');
   await c.core.removeWorktree(task.id);
   if (existsSync(task.cwd)) throw new Error('Worktree still there');
+
+  step('connections: hand-off, @mention, and an agent asking another');
+  const main = await c.newChat('demo');
+  if (!main) throw new Error('No chat');
+  await c.handle(fake, { type: 'send', chatId: main, text: 'hello', images: [] });
+  await waitFor(() => c.core.chat(main)!.turns === 1, 'the first reply');
+  await c.handle(fake, { type: 'handoff', chatId: main, agent: 'demo' });
+  const next = c.core.snapshot.chats.find((x) => x.origin?.kind === 'handoff');
+  if (!next) throw new Error('No hand-off chat');
+  await c.handle(fake, { type: 'send', chatId: next.id, text: 'go on', images: [] });
+  await waitFor(() => lastReply(c.core.chat(next.id)!).includes('taking over a task'), 'the hand-off context');
+  await c.handle(fake, { type: 'send', chatId: main, text: '@demo second opinion?', images: [] });
+  await waitFor(() => c.core.chat(main)!.items.some((i) => i.kind === 'link' && i.role === 'reply'), 'the consulted reply');
+  // The real dist/bridge.js, started by the agent with the editor's own runtime.
+  await c.handle(fake, { type: 'send', chatId: main, text: 'ask demo hi', images: [] });
+  await waitFor(() => c.core.decisions()[0]?.kind === 'bridge', 'the request to ask another agent');
+  await pause(800);
+  await screenshot('09-bridge-ask');
+  await c.handle(fake, { type: 'bridge', requestId: c.core.decisions()[0].id, answer: 'allow' });
+  await waitFor(() => lastReply(c.core.chat(main)!).startsWith('Demo says:'), 'the answer through the FriedLiver tools', 30_000);
 
   step('center panel and images');
   await c.moveToCenter();

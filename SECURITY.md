@@ -50,7 +50,8 @@ Through FriedLiver an agent can't:
 - Run a command without your approval, or get a Run button for a command the
   notification doesn't show in full.
 - Put a link that runs editor commands into a notification.
-- Read another agent's chat, post into it, or pose as that agent.
+- Read another chat, post into it, or ask another agent without your OK
+  (see "Agents reaching other agents" below), or pose as another agent's chat.
 - Get another vendor's API key, swap its own key through a sign-in method, or
   load code into its sign-in command through variables like `NODE_OPTIONS`.
 - Open a web page. The only exception is a sign-in link on its own vendor's
@@ -84,6 +85,9 @@ It can't:
 - Pick the program FriedLiver runs as an agent. `friedliver.agents.*.command`
   and `.args` are machine-scoped and read only from your user settings, so a
   repository can't redirect an agent or the API key that goes with it.
+- Let agents reach each other without asking you.
+  `friedliver.connections.agentToAgent` is machine-scoped and read only from
+  your user settings too.
 - Lead agents out of the workspace through symlinks.
 - Get a planted `claude-agent-acp.exe`, `node.exe` or `git.exe` run in place of
   the real one on Windows.
@@ -94,8 +98,9 @@ It can't:
 Assume the agent's process is hostile: it can do anything you can do in a
 terminal, and FriedLiver can't prevent that. Through FriedLiver itself it gets
 no more than a well-behaved agent: approvals still apply, it gets only its own
-vendor's key, it can't forge links in notifications or reach other agents'
-chats, its sign-in arguments are checked, and its images and output are bounded.
+vendor's key, it can't forge links in notifications, it reaches other chats
+only through the FriedLiver tools and within your setting, its sign-in
+arguments are checked, and its images and output are bounded.
 
 ### Data at rest
 
@@ -105,8 +110,15 @@ chats, its sign-in arguments are checked, and its images and output are bounded.
   process, as an environment variable, which other processes running as you
   can read. Keys are never logged, persisted elsewhere, or sent to a webview.
 - **Vendor logins** are stored by each vendor's CLI in its own config folder.
-- **Chats, pending reviews and undo checkpoints** live in memory and are gone
-  after a reload. Task worktrees are git checkouts next to the repository.
+- **Chats** are saved per folder in VS Code's workspace storage
+  (`chats.json`) while `friedliver.restoreChats` is on (the default): the last
+  400 items of each chat, messages cut to 32 KB, command output to 8 KB, no
+  images, at most 8 MB. Agent session IDs and task worktree paths are saved
+  with them. API keys and bridge tokens never are. Turning the setting off
+  deletes the file. Anything that was waiting when the window closed comes
+  back closed, never approved.
+- **Pending reviews and undo checkpoints** live in memory and are gone after a
+  reload. Task worktrees are git checkouts next to the repository.
 - **The output channel** (FriedLiver Agents) logs agent commands, agent stderr
   and errors. It never logs keys.
 - **globalState** holds the update check's last-check time and the last
@@ -131,14 +143,56 @@ by default and use actions pinned to commits. Only the release job and the
 weekly upstream job can write. Builds aren't code-signed yet (see
 docs/BUILD.md), so verify downloads against `SHA256SUMS.txt`.
 
-### Not reviewed yet
+### Agents reaching other agents
 
-The **agent-to-agent bridge** (hand-offs, consultations, pipes, and agents
-reaching other chats through the FriedLiver tools) is being built in parallel
-and gets its own review once it's merged. That review covers instructions
-passing from one agent to another, which chats an agent may read, approval for
-every link an agent makes, the `MAX_LINK_DEPTH` limit, and that the new code
-uses the same path checks, notification text handling and update compaction.
+Chats can be connected (docs/CONNECTIONS.md): you hand a chat off, ask another
+agent, pipe one chat's replies into another, or run a task on several agents.
+Agents can do some of that themselves through FriedLiver's MCP server
+(`friedliver`, `dist/bridge.js`), with the tools `list_agents`, `list_chats`,
+`ask_agent`, `send_to_chat` and `read_chat`.
+
+- **Your OK.** Under `friedliver.connections.agentToAgent: ask` (the default)
+  only the two list tools answer directly. Asking an agent, messaging a chat and
+  reading one wait for Allow, Allow for this chat, or Deny in the chat (and a
+  notification when no chat is on screen). No answer in 10 minutes is a Deny.
+  `off` gives sessions no FriedLiver tools at all and refuses calls from
+  sessions that already have them. "Allow for this chat" lasts until the window
+  closes and is never saved.
+- **Who is asking.** Each chat gets a random 32-byte token, held in memory and
+  passed only to that chat's tool server. The editor acts only as the chat a
+  token belongs to, looks tokens up by SHA-256, and revokes a chat's token when
+  the chat is removed.
+- **The socket.** On macOS and Linux it's in a fresh `mkdtemp` directory under
+  the temp folder, mode 0700, socket 0600. On Windows it's a named pipe with a
+  random name; the token is what keeps other users out there. Every request is
+  checked (tool, agent key, chat ID, text size). A line over 1 MB, a malformed
+  request, an unknown token, or more than 1000 requests on one connection
+  closes the connection.
+- **No loops.** An agent can't reach its own chat, a busy chat, or a chat that
+  waits on it (or that it waits on). Chats agents start may be at most
+  `MAX_LINK_DEPTH` (2) steps from one you started. Pipes refuse cycles and pause
+  after 20 forwards. Stopping a chat denies its pending requests and stops the
+  consultations it waits on. A chat may have at most 3 requests waiting for you;
+  further ones are refused, so an agent can't bury its chat in questions.
+- **The token in the agent's hands.** The token reaches the tool server through
+  the session's MCP settings, so the agent process that starts that server
+  sees it too and could talk to the socket directly. That gives it nothing
+  more: the same chat, the same checks and the same need for your OK.
+- **What crosses.** A consulted agent gets the asking chat's title, an excerpt
+  of its last reply and its changed files; a hand-off carries the transcript.
+  Text from another agent is untrusted input for the agent that gets it, like
+  a file in the repository: it may carry injected instructions, so every edit
+  and command that follows still waits for your review in that chat. A reply
+  you consult for yourself is shown, not sent to your agent, unless you
+  forward it or set up a pipe. The consulted chat is an ordinary chat with the
+  same path checks, `.git` refusal, notification text handling and update
+  compaction as any other.
+
+### Review of the bridge
+
+The agent-to-agent bridge was built after the audit below and reviewed when it
+was merged (FL-23). It has been exercised with the offline Demo agent only, not
+yet with the vendors' agents.
 
 ## Findings
 
@@ -169,3 +223,4 @@ for a typical single-user desktop.
 | FL-20 | Accepted | Demo agent | The offline Demo agent ships in the app. | Accepted. It has no network access and no keys, and goes through the same review and approval paths. Its terminal-login mode (a marker in the temp folder) is reachable only from tests. |
 | FL-21 | Info | Platform defaults | Checked: workspace trust stays on by default, and no patch touches the renderer sandbox or context isolation. Telemetry is off, the update service is absent, and product.json uses HTTPS only with a minimal link-protection list. `--no-sandbox` appears only in `dev.mjs` (as root) and test tooling. `webviewContentExternalBaseUrlTemplate` (Microsoft's CDN) only matters for web and server builds, which FriedLiver doesn't ship. | No change needed. |
 | FL-22 | Accepted | Residual | There is a short gap between the path check and the write, which a process you approved could use to swap a link. On Windows, terminal commands you approve still find programs in their folder, as cmd.exe always does. The extension host's environment reaches agents. | Accepted. These need a process you already allowed, or they are standard platform behaviour. |
+| FL-23 | Low | Agent-to-agent bridge | Reviewed at merge: per-chat tokens, socket permissions, request checks, approval, loop and depth limits hold. Under "ask", an agent could leave any number of requests waiting in its chat. | Fixed. At most 3 waiting per chat; more are refused with a message to the agent. |

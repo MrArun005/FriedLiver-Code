@@ -10,7 +10,7 @@ FriedLiver Agents extension bundles it (`@friedliver/main/*` in
 | `main/agents/` | Agent processes (`processes.ts`), the ACP connection, the hub that shares one process per agent between chats, sign-in methods, file access, terminals, turn logs |
 | `main/workspace/git.ts` | Git helpers for task worktrees |
 | `shared/ipc.ts` | Shared types (the extension uses `SignInMethod`) |
-| `demo/fakeAgent.mjs` | The offline Demo agent: `tour`, `project`, edits, commands, images |
+| `demo/fakeAgent.mjs` | The offline Demo agent: `tour`, `project`, edits, commands, images, and `ask <agent> …` through the FriedLiver tools |
 
 It started as a copy of `src/main/agents/` and friends from the
 [FriedLiver app](https://github.com/MrArun005/FriedLiver) (branch `vscode-fork`,

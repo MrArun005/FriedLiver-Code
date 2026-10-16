@@ -3,16 +3,20 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { Accounts } from './host/accounts';
+import { ActionBatcher } from './host/batch';
+import type { AgentToAgent } from './host/bridgeRequests';
+import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
+import { StateFile } from './host/persist';
 import { ReviewUi } from './host/review';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, type Script, type Surface } from './host/webviews';
-import type { Attachment, WebviewMessage } from './shared/messages';
-import { AGENT_FACES, AGENT_KEYS, isAgentKey, type AgentKey, type NoticeAction } from './shared/model';
+import { LIMITS, type Attachment, type WebviewMessage } from './shared/messages';
+import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type NoticeAction } from './shared/model';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
@@ -69,6 +73,11 @@ export class Controller {
   private readonly notified = new Map<string, () => void>();
   /** Commands whose open notification offers Run; the Run link approves nothing else. */
   private readonly runnable = new Set<string>();
+  /** Actions on their way to the webviews, sent in batches while agents stream. */
+  private readonly batcher = new ActionBatcher((actions) => this.sendActions(actions));
+  /** This folder's saved chats; unset when restoring is off or no folder is open. */
+  private stateFile?: StateFile;
+  private warnedAgentToAgent = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.accounts = new Accounts(
@@ -81,6 +90,8 @@ export class Controller {
       folders: () => this.folders(),
       clientVersion: String(context.extension.packageJSON.version ?? '0.0.0'),
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
+      bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
+      agentToAgent: () => this.agentToAgent(),
       agentCommand: (id) => this.agentConfig[id],
       apiKey: (id) => this.accounts.apiKey(id),
       limits: () => {
@@ -93,6 +104,7 @@ export class Controller {
         closeReview: (id) => void this.reviews.close(id),
         askCommand: (ask) => void this.askCommand(ask),
         askPermission: (ask) => void this.askPermission(ask),
+        askBridge: (ask) => void this.askBridge(ask),
         signInUrl: (agent, url) => void this.offerSignInUrl(agent, url),
         unsavedText: (file) => vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === file && d.isDirty)?.getText(),
       },
@@ -106,6 +118,8 @@ export class Controller {
   async start(): Promise<void> {
     const { context } = this;
     await this.accounts.loadKeys();
+    // Before any view asks for a snapshot, so restored chats are in the first one.
+    await this.openStateFile(true);
     const command = (id: string, fn: (...args: never[]) => unknown) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
     context.subscriptions.push(
@@ -123,11 +137,11 @@ export class Controller {
       vscode.window.registerWebviewPanelSerializer('friedliver.tasks', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'tasks') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'chat') }),
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
+      registerBeforeProvider(() => this.core),
     );
     const unsubscribe = this.core.onAction((action) => {
-      for (const s of this.surfaces) post(s, { type: 'action', action });
-      this.updateDecisions();
-      this.closeAnswered();
+      this.batcher.push(action);
+      this.stateFile?.schedule();
     });
     context.subscriptions.push({ dispose: unsubscribe });
 
@@ -160,11 +174,53 @@ export class Controller {
     command('friedliver.command.show', (chatId: unknown, itemId: unknown) => {
       if (typeof chatId === 'string' && typeof itemId === 'string') void this.showChat(chatId, itemId);
     });
+    command('friedliver.bridge.answer', (requestId: unknown, answer: unknown) => {
+      if (typeof requestId === 'string' && (answer === 'allow' || answer === 'allowChat' || answer === 'deny')) this.core.answerBridge(requestId, answer);
+    });
+    command('friedliver.handoff', (chatId?: unknown) => this.handoffCommand(typeof chatId === 'string' ? chatId : undefined));
+    command('friedliver.consult', (chatId?: unknown) => this.consultCommand(typeof chatId === 'string' ? chatId : undefined));
+    command('friedliver.fanout', () => this.fanoutCommand());
+    command('friedliver.pipe', (chatId?: unknown) => this.pipeCommand(typeof chatId === 'string' ? chatId : undefined));
     this.updateDecisions();
   }
 
   async dispose(): Promise<void> {
+    // Save before the core shuts down: stopping cancels running turns, and a
+    // restored chat should read "stopped when the window closed", not "cancelled".
+    await this.stateFile?.flush();
+    this.stateFile?.stop();
+    this.batcher.dispose();
     await this.core.dispose();
+  }
+
+  /** Brings back this folder's chats (once, at startup) and saves them from then on. */
+  private async openStateFile(restore: boolean): Promise<void> {
+    const dir = this.context.storageUri?.fsPath;
+    if (!dir) return;
+    const file = new StateFile(path.join(dir, 'chats.json'), () => this.core.exportState(), (line) => this.log.warn(line));
+    if (!vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
+      // Turned off while the window was closed: nothing stays on disk.
+      await file.clear();
+      return;
+    }
+    if (restore) {
+      const saved = await file.load();
+      if (saved?.state.chats.length) {
+        try {
+          this.core.restore(saved);
+        } catch (err) {
+          this.log.warn(`Couldn't restore chats: ${messageOf(err)}`);
+        }
+      }
+    }
+    this.stateFile = file;
+  }
+
+  private sendActions(actions: Action[]): void {
+    const message = actions.length === 1 ? ({ type: 'action', action: actions[0] } as const) : ({ type: 'actions', actions } as const);
+    for (const s of this.surfaces) post(s, message);
+    this.updateDecisions();
+    this.closeAnswered();
   }
 
   folders(): string[] {
@@ -239,6 +295,8 @@ export class Controller {
     try {
       switch (m.type) {
         case 'ready':
+          // Queued actions are already in the snapshot: send them first, while this surface isn't ready, so it never gets them twice.
+          this.batcher.flush();
           surface.ready = true;
           post(surface, { type: 'snapshot', state: this.core.snapshot, selected: surface.selected ?? this.lastSelected, now: Date.now() });
           return;
@@ -311,10 +369,49 @@ export class Controller {
         case 'openTasks':
           this.openTasks();
           return;
+        case 'handoff': {
+          const chat = await this.core.handoff(m.chatId, m.agent);
+          this.selectOn(surface, chat.id);
+          return;
+        }
+        case 'consult':
+          void this.core.consult(m.chatId, m.agent, m.text).catch((err: unknown) => this.error(err));
+          return;
+        case 'pipe':
+          this.core.pipe(m.from, m.to);
+          return;
+        case 'unlink':
+          this.core.unlink(m.linkId);
+          return;
+        case 'forward':
+          void this.core.forward(m.fromChatId, m.toChatId).catch((err: unknown) => this.error(err));
+          return;
+        case 'fanout':
+          await this.fanout(m.agents, m.prompt, m.worktree);
+          return;
+        case 'bridge':
+          this.core.answerBridge(m.requestId, m.answer);
+          return;
+        case 'archive':
+          this.core.archive(m.chatId, m.archived);
+          return;
+        case 'removeChat':
+          await this.core.removeChat(m.chatId);
+          return;
+        case 'viewChanges':
+          await viewChanges(this.core, m.chatId);
+          return;
       }
     } catch (err) {
       this.error(err);
     }
+  }
+
+  /** Shows a chat on the surface that asked for it. */
+  private selectOn(surface: Surface, chatId: string): void {
+    surface.selected = chatId;
+    this.lastSelected = chatId;
+    post(surface, { type: 'select', chatId });
   }
 
   private async noticeAction(chatId: string, action: NoticeAction): Promise<void> {
@@ -356,13 +453,8 @@ export class Controller {
     if (!chosen) return undefined;
     try {
       const chat = await this.core.createChat(chosen);
-      if (surface) {
-        surface.selected = chat.id;
-        this.lastSelected = chat.id;
-        post(surface, { type: 'select', chatId: chat.id });
-      } else {
-        await this.showChat(chat.id);
-      }
+      if (surface) this.selectOn(surface, chat.id);
+      else await this.showChat(chat.id);
       return chat.id;
     } catch (err) {
       this.error(err);
@@ -392,6 +484,111 @@ export class Controller {
     }
     const panel = vscode.window.createWebviewPanel('friedliver.tasks', 'Agent Manager', vscode.ViewColumn.Active, { retainContextWhenHidden: false });
     this.adoptPanel(panel, 'tasks');
+  }
+
+  // ---- Connections ----
+
+  async handoffCommand(chatId?: string): Promise<void> {
+    const source = await this.pickChat('Hand off which chat?', chatId);
+    if (!source) return;
+    const agent = await this.pickAgent(`Continue “${source.title}” with…`, source.agent);
+    if (!agent) return;
+    try {
+      const chat = await this.core.handoff(source.id, agent);
+      await this.showChat(chat.id);
+    } catch (err) {
+      this.error(err);
+    }
+  }
+
+  async consultCommand(chatId?: string): Promise<void> {
+    const source = await this.pickChat('Ask from which chat?', chatId);
+    if (!source) return;
+    const agent = await this.pickAgent('Ask which agent?', source.agent);
+    if (!agent) return;
+    const text = await vscode.window.showInputBox({
+      title: `Ask ${AGENT_FACES[agent].name}`,
+      prompt: `The answer comes back into ${source.label}.`,
+      validateInput: (v) => (v.trim() ? undefined : 'Type a question.'),
+    });
+    if (!text?.trim()) return;
+    void this.core.consult(source.id, agent, text).catch((err: unknown) => this.error(err));
+    await this.showChat(source.id);
+  }
+
+  /** "Run a Task on Several Agents": one prompt, a chat per agent, to compare. */
+  async fanoutCommand(): Promise<void> {
+    const picked = await vscode.window.showQuickPick(
+      AGENT_KEYS.map((a) => ({ label: AGENT_FACES[a].name, description: a === 'demo' ? 'offline, no sign-in' : undefined, agent: a, picked: a !== 'demo' })),
+      { title: 'Run a task on which agents?', canPickMany: true },
+    );
+    if (!picked?.length) return;
+    const prompt = await vscode.window.showInputBox({ title: 'Run a Task on Several Agents', prompt: 'Each agent gets this same message.', validateInput: (v) => (v.trim() ? undefined : 'Describe the task.') });
+    if (!prompt?.trim()) return;
+    const where = await vscode.window.showQuickPick(
+      [
+        { label: 'Each in Its Own Worktree', description: 'separate git branches, so their edits never mix', worktree: true },
+        { label: 'All in This Folder', description: 'they may edit the same files', worktree: false },
+      ],
+      { title: 'Where should they work?' },
+    );
+    if (!where) return;
+    await this.fanout(
+      picked.map((p) => p.agent),
+      prompt,
+      where.worktree,
+    );
+  }
+
+  private async fanout(agents: AgentKey[], prompt: string, worktree: boolean): Promise<void> {
+    try {
+      // Resolves once the chats exist; their turns run on, and the board shows them side by side.
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Starting ${agents.length} agents…` }, () =>
+        this.core.fanout(agents.slice(0, LIMITS.fanout), prompt, worktree),
+      );
+      this.openTasks();
+    } catch (err) {
+      this.error(err);
+    }
+  }
+
+  async pipeCommand(chatId?: string): Promise<void> {
+    const from = await this.pickChat('Pipe which chat’s replies?', chatId);
+    if (!from) return;
+    const to = await this.pickChat(`Send each reply from ${from.label} to…`, undefined, from.id);
+    if (!to) return;
+    try {
+      this.core.pipe(from.id, to.id);
+      void vscode.window.showInformationMessage(`Each reply from ${from.label} now goes to ${to.label}.`);
+    } catch (err) {
+      this.error(err);
+    }
+  }
+
+  /** The given chat, else the one on screen if the caller didn't need a choice, else the user's pick. */
+  private async pickChat(title: string, chatId?: string, exclude?: string): Promise<ChatView | undefined> {
+    const given = chatId ? this.core.chat(chatId) : undefined;
+    if (given) return given;
+    const chats = this.core.snapshot.chats.filter((c) => !c.archived && c.id !== exclude);
+    if (!chats.length) {
+      void vscode.window.showInformationMessage(exclude ? 'Start another chat first.' : 'Start a chat first.');
+      return undefined;
+    }
+    const items = chats
+      .map((c) => ({ label: c.label, description: c.title, chat: c }))
+      .sort((a, b) => (b.chat.id === this.lastSelected ? 1 : 0) - (a.chat.id === this.lastSelected ? 1 : 0));
+    return (await vscode.window.showQuickPick(items, { title }))?.chat;
+  }
+
+  /** Another agent first: these commands are for reaching a different one. */
+  private async pickAgent(title: string, current: AgentKey): Promise<AgentKey | undefined> {
+    const order = [...AGENT_KEYS.filter((a) => a !== current && a !== 'demo'), ...AGENT_KEYS.filter((a) => a === current || a === 'demo')];
+    return (
+      await vscode.window.showQuickPick(
+        order.map((a) => ({ label: AGENT_FACES[a].name, description: a === current ? 'same agent' : a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
+        { title },
+      )
+    )?.agent;
   }
 
   /** Jumps to the oldest thing an agent is waiting on: a diff to review, a command or a question. */
@@ -449,6 +646,17 @@ export class Controller {
     if (this.chatSurfaces().some((s) => s.visible())) return Promise.resolve();
     const show = `[Show](${commandLink('friedliver.command.show', ask.chatId, ask.requestId)})`;
     return this.waitingNotification(ask.requestId, `${plainText(ask.agentLabel)} asks: ${plainText(ask.title)}`, show, () => {});
+  }
+
+  /** Like questions: shown in the chat, with a notification only when no chat view is on screen. */
+  private askBridge(ask: { chatId: string; requestId: string; title: string }): Promise<void> {
+    if (this.chatSurfaces().some((s) => s.visible())) return Promise.resolve();
+    const links = [
+      `[Allow](${commandLink('friedliver.bridge.answer', ask.requestId, 'allow')})`,
+      `[Deny](${commandLink('friedliver.bridge.answer', ask.requestId, 'deny')})`,
+      `[Show](${commandLink('friedliver.command.show', ask.chatId, ask.requestId)})`,
+    ];
+    return this.waitingNotification(ask.requestId, plainText(ask.title), links.join(' · '), () => {});
   }
 
   private waitingNotification(id: string, title: string, message: string, onCancel: () => void): Promise<void> {
@@ -519,8 +727,27 @@ export class Controller {
     return { claude: one('claude'), codex: one('codex'), gemini: one('gemini') };
   }
 
+  /** From the user's own settings only: a repository must not let its agents reach other chats unasked. */
+  private agentToAgent(): AgentToAgent {
+    const { value, ignored } = userSetting(vscode.workspace.getConfiguration('friedliver.connections').inspect<unknown>('agentToAgent'));
+    if (ignored && !this.warnedAgentToAgent) {
+      this.warnedAgentToAgent = true;
+      this.log.warn('Ignored friedliver.connections.agentToAgent from the workspace settings; only your user settings decide it.');
+    }
+    return value === 'allow' || value === 'off' ? value : 'ask';
+  }
+
   private onConfig(e: vscode.ConfigurationChangeEvent): void {
     if (!e.affectsConfiguration('friedliver')) return;
+    if (e.affectsConfiguration('friedliver.restoreChats')) {
+      if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
+        if (!this.stateFile) void this.openStateFile(false).then(() => this.stateFile?.schedule());
+      } else {
+        // Off means nothing stays on disk either.
+        void this.stateFile?.clear();
+        this.stateFile = undefined;
+      }
+    }
     const before = this.agentConfig;
     this.agentConfig = this.readAgentConfig();
     // A running agent keeps the command it started with; stop it so the next message starts the new one.

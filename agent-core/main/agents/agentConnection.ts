@@ -187,12 +187,13 @@ export class AgentConnection {
     return this.info.authMethods ?? [];
   }
 
-  newSession(cwd: string): Promise<acp.NewSessionResponse> {
-    return this.connection.agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [] });
+  /** `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own. */
+  newSession(cwd: string, mcpServers: acp.McpServer[] = []): Promise<acp.NewSessionResponse> {
+    return this.connection.agent.request(acp.methods.agent.session.new, { cwd, mcpServers });
   }
 
-  async loadSession(sessionId: string, cwd: string): Promise<void> {
-    await this.connection.agent.request(acp.methods.agent.session.load, { sessionId, cwd, mcpServers: [] });
+  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = []): Promise<void> {
+    await this.connection.agent.request(acp.methods.agent.session.load, { sessionId, cwd, mcpServers });
   }
 
   prompt(sessionId: string, prompt: acp.ContentBlock[]): Promise<acp.PromptResponse> {

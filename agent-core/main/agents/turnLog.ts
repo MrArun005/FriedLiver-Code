@@ -39,6 +39,28 @@ export class TurnLog {
     if (turn && !turn.before.has(file)) turn.before.set(file, before);
   }
 
+  /**
+   * What a file held before the oldest kept turn that changed it, which is
+   * where the chat started from unless it ran more than KEEP_TURNS turns.
+   * Null: the chat created it. Undefined: no kept turn changed it.
+   */
+  firstBefore(chatId: string, file: string): string | null | undefined {
+    for (const turn of this.turns.get(chatId) ?? []) if (turn.before.has(file)) return turn.before.get(file);
+    return undefined;
+  }
+
+  /** Numbers new turns after ids restored from an earlier window, so a restored card never matches a new turn. */
+  continueAfter(turnIds: Iterable<string>): void {
+    for (const id of turnIds) {
+      const n = Number(/^turn-(\d+)$/.exec(id)?.[1]);
+      if (n >= this.nextId) this.nextId = n + 1;
+    }
+  }
+
+  forget(chatId: string): void {
+    this.turns.delete(chatId);
+  }
+
   latest(chatId: string): TurnFiles | null {
     const turn = this.turns.get(chatId)?.at(-1);
     return turn && turn.before.size ? { turnId: turn.turnId, files: [...turn.before.keys()] } : null;

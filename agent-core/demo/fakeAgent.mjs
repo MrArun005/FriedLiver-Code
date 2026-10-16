@@ -6,11 +6,19 @@
 //   "wait"            keeps working until cancelled
 //   "tour"            the UI demo: a plan, a file read, an edit, a command and an image
 //   "project"         builds calc/, runs its tests, fixes the failing one, reruns, runs the app
+//   "ask <agent> <q>" asks another agent through the session's FriedLiver tools (MCP) and
+//                     replies "<Agent> says: <answer>"; "ask demo hello" needs no sign-in
+//   "chats"           lists FriedLiver's chats through the same tools
 //   anything else     echoes the text back in two chunks
+// Only the last text block is read as one of these, so context a client puts
+// in front of the message (a hand-off, a consultation) is echoed but ignored.
+// FAKE_AGENT_LOAD_SESSION=1 makes it offer session/load (it remembers nothing, so
+// a reloaded chat just carries on).
 // FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first;
 // that browser-style sign-in prints a sign-in link to stderr, like Gemini's.
 // --require-login makes it need a terminal login instead, like Claude's: the
 // client runs this script with --cli, which asks for Enter and saves a marker.
+import { spawn } from 'node:child_process';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,10 +46,13 @@ const needsAuth = process.env.FAKE_AGENT_AUTH === '1';
 const needsTerminalLogin = process.argv.includes('--require-login');
 if (process.argv.includes('--logout')) rmSync(LOGIN_MARKER, { force: true });
 const images = process.env.FAKE_AGENT_IMAGES !== '0';
+const loadSession = process.env.FAKE_AGENT_LOAD_SESSION === '1';
 let authenticated = false;
 let nextSession = 1;
 const cancels = new Map();
 const sessionCwd = new Map();
+const sessionMcp = new Map();
+const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
 
 const say = (client, sessionId, text) =>
   client.notify(acp.methods.client.session.update, {
@@ -242,6 +253,92 @@ async function project(client, sessionId) {
   await say(client, sessionId, result ? `The app works: \`${result}\`.` : 'The app did not print a result; check the commands panel.');
 }
 
+/**
+ * A minimal MCP client over stdio, enough to call one tool: initialize, the
+ * initialized notification, tools/call. Hand-written so this agent needs no
+ * MCP package.
+ */
+function mcpClient(server) {
+  const env = { ...process.env };
+  for (const v of server.env ?? []) env[v.name] = v.value;
+  const child = spawn(server.command, server.args ?? [], { env, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
+  const waiting = new Map();
+  let nextId = 1;
+  let buffer = '';
+  const failAll = (err) => {
+    for (const w of waiting.values()) w.reject(err);
+    waiting.clear();
+  };
+  child.once('error', (err) => failAll(err));
+  child.once('exit', () => failAll(new Error('The FriedLiver tools stopped.')));
+  child.stdout.setEncoding('utf8').on('data', (chunk) => {
+    buffer += chunk;
+    let nl;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const w = msg.id !== undefined && waiting.get(msg.id);
+      if (!w) continue;
+      waiting.delete(msg.id);
+      if (msg.error) w.reject(new Error(msg.error.message));
+      else w.resolve(msg.result);
+    }
+  });
+  const send = (message) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+  return {
+    request: (method, params) =>
+      new Promise((resolve, reject) => {
+        const id = nextId++;
+        waiting.set(id, { resolve, reject });
+        send({ id, method, params });
+      }),
+    notify: (method, params) => send({ method, params }),
+    close: () => {
+      child.stdin.end();
+      child.kill();
+    },
+  };
+}
+
+/** Calls one of the session's FriedLiver tools and returns its text; a tool error throws. */
+async function useTool(sessionId, name, args) {
+  const server = (sessionMcp.get(sessionId) ?? []).find((s) => s.name === 'friedliver' && typeof s.command === 'string');
+  if (!server) throw new Error('This session has no FriedLiver tools.');
+  const mcp = mcpClient(server);
+  const stop = new Promise((_, reject) => cancels.set(sessionId, () => reject(new Error('cancelled'))));
+  stop.catch(() => {});
+  try {
+    await Promise.race([mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-agent', version: '0.0.0' } }), stop]);
+    mcp.notify('notifications/initialized');
+    const result = await Promise.race([mcp.request('tools/call', { name, arguments: args }), stop]);
+    const text = (result.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    if (result.isError) throw new Error(text || 'The tool failed.');
+    return text;
+  } finally {
+    cancels.delete(sessionId);
+    mcp.close();
+  }
+}
+
+async function ask(client, sessionId, agent, question) {
+  const name = AGENT_NAMES[agent] ?? agent;
+  try {
+    const answer = await useTool(sessionId, 'ask_agent', { agent, prompt: question });
+    await say(client, sessionId, `${name} says: ${answer}`);
+  } catch (err) {
+    if (err.message === 'cancelled') return 'cancelled';
+    await say(client, sessionId, `Couldn't ask ${name}: ${err.message}`);
+  }
+  return 'end_turn';
+}
+
 async function run(client, sessionId) {
   let terminalId;
   try {
@@ -275,7 +372,7 @@ acp
   .agent({ name: 'fake-agent' })
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
-    agentCapabilities: { loadSession: false, promptCapabilities: { image: images } },
+    agentCapabilities: { loadSession, promptCapabilities: { image: images } },
     authMethods: needsTerminalLogin
       ? [{ id: 'demo-login', name: 'Log in with Demo', description: 'Run the demo login in the terminal', type: 'terminal', args: ['--cli'] }]
       : needsAuth
@@ -295,30 +392,45 @@ acp
     if (needsTerminalLogin && !existsSync(LOGIN_MARKER)) throw acp.RequestError.authRequired();
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
+    sessionMcp.set(sessionId, params.mcpServers ?? []);
     return { sessionId };
+  })
+  .onRequest(acp.methods.agent.session.load, ({ params }) => {
+    if (!loadSession) throw acp.RequestError.methodNotFound('session/load');
+    sessionCwd.set(params.sessionId, params.cwd);
+    sessionMcp.set(params.sessionId, params.mcpServers ?? []);
+    return {};
   })
   .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
     cancels.get(params.sessionId)?.();
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     const { sessionId } = params;
-    const text = params.prompt
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join(' ');
+    const texts = params.prompt.filter((b) => b.type === 'text').map((b) => b.text);
+    const text = texts.join(' ');
+    // What to do comes from the last text block; earlier ones are context.
+    const command = texts.at(-1) ?? '';
     const imageCount = params.prompt.filter((b) => b.type === 'image').length;
+    const asked = command.match(/^ask (\w+) ([\s\S]+)$/);
 
-    if (text === 'wait') {
+    if (command === 'wait') {
       await new Promise((resolve) => cancels.set(sessionId, resolve));
       cancels.delete(sessionId);
       return { stopReason: 'cancelled' };
     }
-    if (text === 'tour') await tour(client, sessionId);
-    else if (text === 'project') await project(client, sessionId);
-    else if (text.startsWith('edit ')) await edit(client, sessionId, text.slice(5));
-    else if (text === 'run') await run(client, sessionId);
-    else if (text.startsWith('read-image ')) {
-      const path = text.slice(11);
+    if (asked) return { stopReason: await ask(client, sessionId, asked[1], asked[2]) };
+    if (command === 'chats') {
+      try {
+        await say(client, sessionId, await useTool(sessionId, 'list_chats', {}));
+      } catch (err) {
+        await say(client, sessionId, `Couldn't list chats: ${err.message}`);
+      }
+    } else if (command === 'tour') await tour(client, sessionId);
+    else if (command === 'project') await project(client, sessionId);
+    else if (command.startsWith('edit ')) await edit(client, sessionId, command.slice(5));
+    else if (command === 'run') await run(client, sessionId);
+    else if (command.startsWith('read-image ')) {
+      const path = command.slice(11);
       await tool(client, sessionId, {
         sessionUpdate: 'tool_call',
         toolCallId: 'read-1',

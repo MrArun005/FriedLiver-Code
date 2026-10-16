@@ -127,6 +127,26 @@
         "command": "friedliver.stopAgents",
         "title": "Stop All Agents",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.handoff",
+        "title": "Hand Off to Another Agent",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.consult",
+        "title": "Ask Another Agent",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.fanout",
+        "title": "Run a Task on Several Agents",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.pipe",
+        "title": "Pipe a Chat's Replies to Another Chat",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
@@ -327,12 +347,34 @@
           "minimum": 0,
           "maximum": 240,
           "description": "Stop an agent after this many minutes without a turn, to free its memory. 0 keeps agents running."
+        },
+        "friedliver.connections.agentToAgent": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Agents can list agents and chats. Asking another agent, messaging a chat or reading one waits for your OK.",
+            "Agents can ask other agents, message chats and read them without asking you each time.",
+            "Agents get no FriedLiver tools and can't reach other agents or chats."
+          ],
+          "default": "ask",
+          "scope": "machine",
+          "description": "Whether agents can reach other agents and chats through FriedLiver's tools. Applies to agent sessions started after the change."
+        },
+        "friedliver.restoreChats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Bring this folder's chats back when the window opens again. They are kept in the editor's storage for the folder, without images, API keys or tokens. Turning this off deletes the saved chats."
         }
       }
     }
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "^22.20.5",
     "@types/vscode": "~1.104.0",
     "@vscode/test-electron": "^3.1.0",
@@ -340,6 +382,7 @@
     "playwright": "1.56.1",
     "preact": "^11.0.1",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
   }
 }
