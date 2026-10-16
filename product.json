@@ -1,0 +1,60 @@
+{
+  "nameShort": "FriedLiver",
+  "nameLong": "FriedLiver",
+  "applicationName": "friedliver",
+  "dataFolderName": ".friedliver",
+  "sharedDataFolderName": ".friedliver-shared",
+  "urlProtocol": "friedliver",
+  "quality": "stable",
+
+  "serverApplicationName": "friedliver-server",
+  "serverDataFolderName": ".friedliver-server",
+  "tunnelApplicationName": "friedliver-tunnel",
+
+  "licenseName": "MIT",
+  "licenseUrl": "https://github.com/MrArun005/FriedLiver/blob/main/code/README.md",
+  "serverLicenseUrl": "https://github.com/MrArun005/FriedLiver/blob/main/code/README.md",
+  "reportIssueUrl": "https://github.com/MrArun005/FriedLiver/issues/new",
+
+  "win32DirName": "FriedLiver",
+  "win32NameVersion": "FriedLiver",
+  "win32RegValueName": "FriedLiver",
+  "win32MutexName": "friedliver",
+  "win32TunnelServiceMutex": "friedliver-tunnelservice",
+  "win32TunnelMutex": "friedliver-tunnel",
+  "win32AppUserModelId": "FriedLiver.FriedLiver",
+  "win32ShellNameShort": "&FriedLiver",
+  "win32AppId": "{{8F98DF1F-4CDA-4986-9090-7F2FF5212656}",
+  "win32x64AppId": "{{9D587EA1-31A9-4E2C-96B8-8531C29D953B}",
+  "win32arm64AppId": "{{8EC0AF32-0856-4312-AB90-C87A77AF0761}",
+  "win32UserAppId": "{{AF4ACD84-69A3-4EE0-99E1-657DACE27DEC}",
+  "win32x64UserAppId": "{{8BE8DDE4-2D74-4612-8EE4-8C8E552D689C}",
+  "win32arm64UserAppId": "{{2EB6E602-0B5E-4B03-BAD7-381F0CB2CE2B}",
+
+  "darwinBundleIdentifier": "com.friedliver.app",
+  "darwinProfileUUID": "EA19101C-DCC2-4400-BD68-B758A3A2BB0A",
+  "darwinProfilePayloadUUID": "BAB260D5-DDE1-469A-8B7E-447E7CD7EBAD",
+
+  "linuxDesktopName": "friedliver",
+  "linuxIconName": "friedliver",
+
+  "enableTelemetry": false,
+  "agentsTelemetryAppName": null,
+  "voiceWsUrl": null,
+  "defaultChatAgent": null,
+  "builtInExtensionsEnabledWithAutoUpdates": [],
+  "sessionsWindowAllowedExtensions": [],
+  "trustedExtensionAuthAccess": {
+    "github": [],
+    "github-enterprise": [],
+    "microsoft": ["vscode.github-authentication"]
+  },
+
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "latestUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
+    "controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
+  },
+  "linkProtectionTrustedDomains": ["https://open-vsx.org"]
+}

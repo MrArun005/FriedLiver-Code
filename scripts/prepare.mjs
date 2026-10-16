@@ -1,0 +1,154 @@
+#!/usr/bin/env node
+// Turn the pristine upstream checkout into FriedLiver source:
+//   1. undo a previous prepare (git reset --hard + remove files it added)
+//   2. apply code/patches/*.patch in name order, remove unwanted upstream built-ins
+//   3. deep-merge code/product.json into upstream product.json (null deletes a key)
+//   4. use build/icon.png as the Linux icon
+//   5. copy code/extensions/<name>/ (or $FRIEDLIVER_EXTENSIONS_DIR/<name>/) into upstream extensions/<name>/ (without node_modules),
+//      after `npm ci|install` + `npm run build` when the extension has a build script
+//
+// Safe to run again after editing a patch, product.json or an extension.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { CODE_DIR, EXTENSIONS_DIR, REPO_ROOT, VSCODE_DIR, copyDir, deepMerge, fail, git, log, readJson, run, upstream, writeJson } from './lib.mjs';
+
+const MARKER = path.join(VSCODE_DIR, '.friedliver-prepare.json');
+
+if (!fs.existsSync(path.join(VSCODE_DIR, '.git'))) {
+	fail(`${VSCODE_DIR} is not a git checkout. Run: node code/scripts/fetch.mjs`);
+}
+
+const { tag, commit } = upstream();
+const head = git(['rev-parse', 'HEAD'], { capture: true }).stdout.trim();
+if (head !== commit) {
+	fail(`${VSCODE_DIR} is at ${head}, expected ${tag} (${commit}). Run: node code/scripts/fetch.mjs`);
+}
+
+// 1. Undo the previous prepare.
+if (fs.existsSync(MARKER)) {
+	const previous = readJson(MARKER);
+	for (const rel of previous.added || []) {
+		fs.rmSync(path.join(VSCODE_DIR, rel), { recursive: true, force: true });
+	}
+}
+git(['reset', '--quiet', '--hard', 'HEAD']);
+
+const untracked = () => new Set(
+	git(['ls-files', '--others', '--exclude-standard', '--directory'], { capture: true }).stdout
+		.split('\n').map(s => s.replace(/\/$/, '')).filter(Boolean)
+);
+const before = untracked();
+
+// 2. Patches.
+const patchesDir = path.join(CODE_DIR, 'patches');
+const patches = fs.existsSync(patchesDir)
+	? fs.readdirSync(patchesDir).filter(f => f.endsWith('.patch')).sort()
+	: [];
+for (const name of patches) {
+	const file = path.join(patchesDir, name);
+	const check = git(['apply', '--check', '--whitespace=nowarn', file], { capture: true, allowFail: true });
+	if (check.status !== 0) {
+		fail(`patch ${name} does not apply to ${tag}:\n${check.stderr}`);
+	}
+	git(['apply', '--whitespace=nowarn', file]);
+	log(`applied ${name}`);
+}
+
+// 2b. Upstream built-in extensions FriedLiver does not ship (see docs/fork/memory-plan.md).
+//     copilot: Copilot Chat, activates on startup in every window; FriedLiver brings its own agents.
+//     Patch 0010 removes it from the install, compile and packaging steps.
+const REMOVED_BUILTINS = ['copilot'];
+for (const name of REMOVED_BUILTINS) {
+	const dir = path.join(VSCODE_DIR, 'extensions', name);
+	if (fs.existsSync(dir)) {
+		fs.rmSync(dir, { recursive: true, force: true });
+		log(`removed upstream built-in extensions/${name}`);
+	}
+}
+
+// 3. product.json.
+const productFile = path.join(VSCODE_DIR, 'product.json');
+const merged = deepMerge(readJson(productFile), readJson(path.join(CODE_DIR, 'product.json')));
+writeJson(productFile, merged);
+log(`merged code/product.json -> ${merged.nameLong} (${merged.applicationName})`);
+
+// 4. Icons. Linux uses one PNG (packaging renames it to <linuxIconName>.png).
+const icon = path.join(REPO_ROOT, 'build', 'icon.png');
+if (fs.existsSync(icon)) {
+	fs.copyFileSync(icon, path.join(VSCODE_DIR, 'resources', 'linux', 'code.png'));
+	log('Linux icon <- build/icon.png');
+}
+
+// 5. Built-in extensions.
+//    The extensions stay portable (they run in stock VS Code and other forks); the fork-only
+//    manifest changes are made on the copy here.
+function upstreamHasProposal(proposal) {
+	const file = path.join(VSCODE_DIR, 'src', 'vs', 'platform', 'extensions', 'common', 'extensionsApiProposals.ts');
+	return fs.existsSync(file) && new RegExp(`^\\s*${proposal}:`, 'm').test(fs.readFileSync(file, 'utf8'));
+}
+const FORK_MANIFEST_CHANGES = {
+	// Agents panel starts in the secondary side bar (right) instead of the activity bar.
+	'friedliver-agents': pkg => {
+		const containers = pkg.contributes?.viewsContainers ?? {};
+		const moved = (containers.activitybar ?? []).filter(c => c.id === 'friedliver');
+		if (moved.length) {
+			containers.activitybar = containers.activitybar.filter(c => c.id !== 'friedliver');
+			if (!containers.activitybar.length) {
+				delete containers.activitybar;
+			}
+			containers.secondarySidebar = [...(containers.secondarySidebar ?? []), ...moved];
+			log('friedliver-agents: view container moved to the secondary side bar');
+		}
+		// Older upstreams gate secondarySidebar behind this proposal; 1.142 has finalized it and
+		// logs an error for unknown proposals, so declare it only where it still exists.
+		if (upstreamHasProposal('contribSecondarySidebar')) {
+			pkg.enabledApiProposals = [...new Set([...(pkg.enabledApiProposals ?? []), 'contribSecondarySidebar'])];
+			const productFile = path.join(VSCODE_DIR, 'product.json');
+			const product = readJson(productFile);
+			product.extensionEnabledApiProposals = { ...product.extensionEnabledApiProposals, [`${pkg.publisher}.${pkg.name}`]: ['contribSecondarySidebar'] };
+			writeJson(productFile, product);
+			log('friedliver-agents: enabled API proposal contribSecondarySidebar');
+		} else {
+			log('friedliver-agents: contribSecondarySidebar is final in this upstream; no proposal needed');
+		}
+		return pkg;
+	},
+};
+
+const extRoot = EXTENSIONS_DIR;
+const extensions = fs.existsSync(extRoot)
+	? fs.readdirSync(extRoot, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name).sort()
+	: [];
+for (const name of extensions) {
+	const src = path.join(extRoot, name);
+	const pkgFile = path.join(src, 'package.json');
+	if (!fs.existsSync(pkgFile)) {
+		log(`skip ${src}: no package.json`);
+		continue;
+	}
+	const pkg = readJson(pkgFile);
+	if (pkg.scripts?.build) {
+		const hasLock = fs.existsSync(path.join(src, 'package-lock.json'));
+		run('npm', [hasLock ? 'ci' : 'install', '--no-audit', '--no-fund'], { cwd: src });
+		run('npm', ['run', 'build'], { cwd: src });
+	}
+	const dest = path.join(VSCODE_DIR, 'extensions', name);
+	fs.rmSync(dest, { recursive: true, force: true });
+	copyDir(src, dest);
+	log(`copied ${src} -> extensions/${name}`);
+	if (FORK_MANIFEST_CHANGES[name]) {
+		const destPkg = path.join(dest, 'package.json');
+		writeJson(destPkg, FORK_MANIFEST_CHANGES[name](readJson(destPkg)));
+	}
+}
+
+const added = [...untracked()].filter(p => !before.has(p) && p !== path.basename(MARKER));
+for (const name of extensions) {
+	const rel = `extensions/${name}`;
+	if (!added.includes(rel)) {
+		added.push(rel);
+	}
+}
+writeJson(MARKER, { tag, commit, patches, extensions, added, preparedAt: new Date().toISOString() });
+log(`OK: prepared ${VSCODE_DIR} (${patches.length} patches, ${extensions.length} built-in extensions)`);

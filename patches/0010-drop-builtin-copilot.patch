@@ -1,0 +1,155 @@
+diff --git a/build/gulpfile.vscode.ts b/build/gulpfile.vscode.ts
+index 185be479..f911243c 100644
+--- a/build/gulpfile.vscode.ts
++++ b/build/gulpfile.vscode.ts
+@@ -584,7 +584,6 @@ BUILD_TARGETS.forEach(buildTarget => {
+ 			compileNativeExtensionsBuildTask,
+ 			util.rimraf(path.join(buildRoot, destinationFolderName)),
+ 			packageTask(platform, arch, sourceFolderName, destinationFolderName, opts),
+-			prepareCopilotRipgrepShimTask(platform, arch, destinationFolderName)
+ 		];
+ 
+ 		if (platform === 'win32') {
+@@ -611,7 +610,6 @@ BUILD_TARGETS.forEach(buildTarget => {
+ 			copyCodiconsTask,
+ 			cleanExtensionsBuildTask,
+ 			compileNonNativeExtensionsBuildTask,
+-			compileCopilotExtensionBuildTask,
+ 			compileExtensionMediaBuildTask,
+ 			writeISODate('out-build'),
+ 			esbuildBundleTask,
+diff --git a/build/npm/dirs.ts b/build/npm/dirs.ts
+index 7bc33635..89f8708b 100644
+--- a/build/npm/dirs.ts
++++ b/build/npm/dirs.ts
+@@ -15,7 +15,6 @@ export const dirs = [
+ 	'build/vite',
+ 	'extensions',
+ 	'extensions/configuration-editing',
+-	'extensions/copilot',
+ 	'extensions/css-language-features',
+ 	'extensions/css-language-features/server',
+ 	'extensions/debug-auto-launch',
+diff --git a/package.json b/package.json
+index b30a7a8e..c68b72e6 100644
+--- a/package.json
++++ b/package.json
+@@ -23,7 +23,7 @@
+     "preinstall": "node build/npm/preinstall.ts",
+     "postinstall": "node build/npm/postinstall.ts",
+     "install-fast": "node build/npm/fast-install.ts",
+-    "compile": "npm-run-all2 -lp compile-client compile-copilot",
++    "compile": "npm run compile-client",
+     "compile-client": "npm run gulp compile",
+     "compile-copilot": "npm --prefix extensions/copilot run compile",
+     "build-fast": "node build/next/build-fast.ts",
+diff --git a/src/vs/platform/extensionManagement/common/abstractExtensionManagementService.ts b/src/vs/platform/extensionManagement/common/abstractExtensionManagementService.ts
+index e506b831..bf59b56a 100644
+--- a/src/vs/platform/extensionManagement/common/abstractExtensionManagementService.ts
++++ b/src/vs/platform/extensionManagement/common/abstractExtensionManagementService.ts
+@@ -984,7 +984,7 @@ export abstract class AbstractExtensionManagementService extends CommontExtensio
+ 		if (checked.indexOf(extension) !== -1) {
+ 			return [];
+ 		}
+-		if (areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId })) {
++		if (this.productService.defaultChatAgent && areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId })) {
+ 			return [];
+ 		}
+ 		checked.push(extension);
+diff --git a/src/vs/platform/extensionManagement/common/extensionGalleryService.ts b/src/vs/platform/extensionManagement/common/extensionGalleryService.ts
+index b00f8d12..a1dad7ef 100644
+--- a/src/vs/platform/extensionManagement/common/extensionGalleryService.ts
++++ b/src/vs/platform/extensionManagement/common/extensionGalleryService.ts
+@@ -1161,7 +1161,7 @@ export abstract class AbstractExtensionGalleryService implements IExtensionGalle
+ 			for (let index = 0; index < extensions.length; index++) {
+ 				const extension = extensions[index];
+ 				setTelemetry(extension, ((query.pageNumber - 1) * query.pageSize) + index, options.source);
+-				if (areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId, })) {
++				if (this.productService.defaultChatAgent && areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId, })) {
+ 					defaultChatAgentExtension = extension;
+ 				} else {
+ 					result.push(extension);
+@@ -1977,15 +1977,17 @@ export abstract class AbstractExtensionGalleryService implements IExtensionGalle
+ 			}
+ 		}
+ 
+-		deprecated[this.productService.defaultChatAgent.extensionId.toLowerCase()] = {
+-			disallowInstall: true,
+-			extension: {
+-				id: this.productService.defaultChatAgent.chatExtensionId,
+-				displayName: 'GitHub Copilot Chat',
+-				autoMigrate: { storage: false, donotDisable: true },
+-				preRelease: this.productService.quality !== 'stable'
+-			}
+-		};
++		if (this.productService.defaultChatAgent) {
++			deprecated[this.productService.defaultChatAgent.extensionId.toLowerCase()] = {
++				disallowInstall: true,
++				extension: {
++					id: this.productService.defaultChatAgent.chatExtensionId,
++					displayName: 'GitHub Copilot Chat',
++					autoMigrate: { storage: false, donotDisable: true },
++					preRelease: this.productService.quality !== 'stable'
++				}
++			};
++		}
+ 
+ 		return { malicious, deprecated, search, autoUpdate };
+ 	}
+diff --git a/src/vs/workbench/contrib/extensions/browser/extensionsWorkbenchService.ts b/src/vs/workbench/contrib/extensions/browser/extensionsWorkbenchService.ts
+index 7d9de121..dcce59ca 100644
+--- a/src/vs/workbench/contrib/extensions/browser/extensionsWorkbenchService.ts
++++ b/src/vs/workbench/contrib/extensions/browser/extensionsWorkbenchService.ts
+@@ -2851,7 +2851,7 @@ export class ExtensionsWorkbenchService extends Disposable implements IExtension
+ 		}
+ 
+ 		const extensionsToUninstall: UninstallExtensionInfo[] = [{ extension: extension.local }];
+-		if (!areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId })) {
++		if (!this.productService.defaultChatAgent || !areSameExtensions(extension.identifier, { id: this.productService.defaultChatAgent.extensionId })) {
+ 			for (const packExtension of this.getAllPackedExtensions(extension, this.local)) {
+ 				if (packExtension.local && !extensionsToUninstall.some(e => areSameExtensions(e.extension.identifier, packExtension.identifier))) {
+ 					extensionsToUninstall.push({ extension: packExtension.local });
+diff --git a/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts b/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts
+index ff993368..ddcc7def 100644
+--- a/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts
++++ b/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts
+@@ -10,7 +10,6 @@ import { isCancellationError } from '../../../../base/common/errors.js';
+ import { StopWatch } from '../../../../base/common/stopwatch.js';
+ import { URI } from '../../../../base/common/uri.js';
+ import { isWindows, isMacintosh, isLinux } from '../../../../base/common/platform.js';
+-import { assertDefined } from '../../../../base/common/types.js';
+ import { FileAccess } from '../../../../base/common/network.js';
+ import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
+ import { KeyCode } from '../../../../base/common/keyCodes.js';
+@@ -78,8 +77,8 @@ type OnboardingActionEvent = {
+ 
+ type EnterpriseSignInUiState = 'options' | 'instance' | 'progress';
+ 
+-assertDefined(product.defaultChatAgent, 'Onboarding requires a default chat agent product configuration.');
+-const defaultChat = product.defaultChatAgent;
++// FriedLiver: product.json has no defaultChatAgent; this module must still load.
++const defaultChat = product.defaultChatAgent ?? ({ provider: { default: {}, enterprise: {} } } as unknown as NonNullable<typeof product.defaultChatAgent>);
+ 
+ /**
+  * Variation A — Classic Wizard Modal
+diff --git a/src/vs/workbench/services/accounts/browser/defaultAccount.ts b/src/vs/workbench/services/accounts/browser/defaultAccount.ts
+index b505994a..55b9c9af 100644
+--- a/src/vs/workbench/services/accounts/browser/defaultAccount.ts
++++ b/src/vs/workbench/services/accounts/browser/defaultAccount.ts
+@@ -92,7 +92,15 @@ interface IMcpRegistryResponse {
+ 	readonly mcp_registries: ReadonlyArray<IMcpRegistryProvider>;
+ }
+ 
+-function toDefaultAccountConfig(defaultChatAgent: IDefaultChatAgent): IDefaultAccountConfig {
++// FriedLiver: product.json has no defaultChatAgent (no built-in Copilot).
++const NO_DEFAULT_CHAT_AGENT = {
++	chatExtensionId: '', extensionId: '', completionsAdvancedSetting: '', providerScopes: [],
++	provider: { default: { id: '', name: '' }, enterprise: { id: '', name: '' } },
++	entitlementUrl: '', tokenEntitlementUrl: '', mcpRegistryDataUrl: '', managedSettingsUrl: '',
++} as unknown as IDefaultChatAgent;
++
++function toDefaultAccountConfig(agent: IDefaultChatAgent | undefined): IDefaultAccountConfig {
++	const defaultChatAgent = agent ?? NO_DEFAULT_CHAT_AGENT;
+ 	return {
+ 		preferredExtensions: [
+ 			defaultChatAgent.chatExtensionId,

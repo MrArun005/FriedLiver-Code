@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/microsoft/vscode",
+  "tag": "1.142.0",
+  "commit": "d956e8a6ac5d904486557eea07e1d6bd62a4d36f",
+  "node": "24.18.0",
+  "checkedOn": "2026-10-16",
+  "notes": "Latest stable on update.code.visualstudio.com/api/releases/stable on 2026-10-16. Microsoft's shipped 1.142.0 binaries come from the release/1.142 head (6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1); we pin the public tag. node is upstream's .nvmrc at this tag."
+}
