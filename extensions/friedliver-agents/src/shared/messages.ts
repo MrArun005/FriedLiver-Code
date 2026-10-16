@@ -97,7 +97,8 @@ function noticeAction(v: unknown): NoticeAction | null {
     case 'apiKey':
       return isAgentKey(v.agent) ? { label, do: 'apiKey', agent: v.agent } : null;
     case 'install':
-      return str(v.command, LIMITS.command) && v.command ? { label, do: 'install', command: v.command } : null;
+      // Only which agent to install; the host chooses the command itself.
+      return isAgentKey(v.agent) && v.agent !== 'demo' ? { label, do: 'install', agent: v.agent } : null;
     default:
       return null;
   }

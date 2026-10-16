@@ -3,6 +3,7 @@ import { launchFor } from '@friedliver/main/agents/processes';
 import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { AGENT_FACES, AGENT_KEYS, type AgentKey } from '../shared/model';
 import { KEY_ENV, VENDOR_AGENTS, messageOf, type AccountStatus, type AgentCore } from './core';
+import { plainText } from './notify';
 
 const STATUS_TEXT: Record<AccountStatus['status'], string> = {
   'signed-in': 'Signed in',
@@ -105,7 +106,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       );
       if (method) await this.signIn(pick.agent, method.id);
     } else {
-      void vscode.window.showWarningMessage(s.message ?? STATUS_TEXT[s.status]);
+      void vscode.window.showWarningMessage(plainText(s.message ?? STATUS_TEXT[s.status]));
     }
   }
 
@@ -132,7 +133,8 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       this.changed.fire(undefined);
       after?.();
     } catch (err) {
-      void vscode.window.showErrorMessage(`${label} sign-in: ${messageOf(err)}`);
+      // The agent's own error text: in a notification it must not become a link.
+      void vscode.window.showErrorMessage(`${label} sign-in: ${plainText(messageOf(err))}`);
     }
   }
 
@@ -168,7 +170,8 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       shellPath: launch.file,
       // A cmd.exe line that launchFor already quoted must reach Windows as is.
       shellArgs: launch.windowsVerbatimArguments ? launch.args.join(' ') : launch.args,
-      env: login.env,
+      // On Windows, npm's .cmd wrappers run `node` by bare name; don't let cmd.exe find one in the workspace.
+      env: process.platform === 'win32' ? { ...login.env, NoDefaultCurrentDirectoryInExePath: '1' } : login.env,
       cwd: this.cwd(),
     });
     terminal.show();

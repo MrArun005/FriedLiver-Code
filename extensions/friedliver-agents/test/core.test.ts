@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, symlinkSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -171,3 +171,121 @@ async function waitFor(check: () => boolean, ms = 10_000): Promise<void> {
     await new Promise((r) => setTimeout(r, 20));
   }
 }
+
+describe('AgentCore against hostile repositories and agents', () => {
+  /** A repo with `link` pointing at a folder outside it that holds secret.txt; null where links can't be made. */
+  async function repoWithLinkOut(): Promise<{ dir: string; outside: string } | null> {
+    const dir = await gitRepo();
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'fl-outside-'));
+    await writeFile(path.join(outside, 'secret.txt'), 'secret\n');
+    try {
+      symlinkSync(outside, path.join(dir, 'link'), process.platform === 'win32' ? 'junction' : undefined);
+    } catch {
+      return null;
+    }
+    return { dir, outside };
+  }
+
+  it('neither reads nor writes through a symlink that leads out of the workspace', async (ctx) => {
+    const repo = await repoWithLinkOut();
+    if (!repo) return ctx.skip();
+    try {
+      symlinkSync(path.join(repo.outside, 'secret.txt'), path.join(repo.dir, 'NOTES.md'));
+    } catch {
+      return ctx.skip();
+    }
+    const { core, seen } = makeCore(repo.dir);
+    const chat = await core.createChat('demo');
+    // The tour reads NOTES.md, then proposes to write it.
+    await core.send(chat.id, 'tour');
+    expect(seen.reviews).toHaveLength(0);
+    expect(await readFile(path.join(repo.outside, 'secret.txt'), 'utf8')).toBe('secret\n');
+    expect(core.chat(chat.id)!.items.some((i) => i.kind === 'agent' && i.text.includes('nothing was written'))).toBe(true);
+  });
+
+  it('refuses a new file under a linked folder', async (ctx) => {
+    const repo = await repoWithLinkOut();
+    if (!repo) return ctx.skip();
+    const { core, seen } = makeCore(repo.dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `edit ${path.join(repo.dir, 'link', 'planted.txt')}`);
+    await waitFor(() => core.decisions().length === 1);
+    core.answerPermission(core.decisions()[0].id, 'allow');
+    await turn;
+    expect(seen.reviews).toHaveLength(0);
+    expect(existsSync(path.join(repo.outside, 'planted.txt'))).toBe(false);
+  });
+
+  it('refuses writes into .git, where config and hooks run programs', async () => {
+    const dir = await gitRepo();
+    const { core, seen } = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const before = await readFile(path.join(dir, '.git', 'config'), 'utf8');
+    const turn = core.send(chat.id, `edit ${path.join(dir, '.git', 'config')}`);
+    await waitFor(() => core.decisions().length === 1);
+    core.answerPermission(core.decisions()[0].id, 'allow');
+    await turn;
+    expect(seen.reviews).toHaveLength(0);
+    expect(await readFile(path.join(dir, '.git', 'config'), 'utf8')).toBe(before);
+  });
+
+  it('ignores an answer the agent did not offer', async () => {
+    const dir = await gitRepo();
+    const { core } = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `edit ${path.join(dir, 'x.txt')}`);
+    await waitFor(() => core.decisions().length === 1);
+    const { id } = core.decisions()[0];
+    core.answerPermission(id, 'allow_always_everything');
+    expect(core.decisions().map((d) => d.id)).toEqual([id]);
+    core.answerPermission(id, 'reject');
+    await turn;
+    expect(existsSync(path.join(dir, 'x.txt'))).toBe(false);
+  });
+
+  it('names the agent, not a command, in the install action', async () => {
+    const dir = await gitRepo();
+    const c = new AgentCore({
+      folders: () => [dir],
+      clientVersion: 'test',
+      demoAgentScript: DEMO_AGENT,
+      agentCommand: () => ({ command: 'fl-agent-that-is-not-installed', args: [] }),
+      apiKey: () => undefined,
+      limits: () => ({ maxRunning: 2, idleStopMinutes: 0 }),
+      ui: { showReview: () => {}, closeReview: () => {} },
+    });
+    core = c;
+    const chat = await c.createChat('claude');
+    await c.send(chat.id, 'hi');
+    const notice = c.chat(chat.id)!.items.at(-1);
+    expect(notice).toMatchObject({ kind: 'notice', tone: 'error' });
+    const install = notice?.kind === 'notice' ? notice.actions?.find((a) => a.do === 'install') : undefined;
+    expect(install).toEqual({ label: 'Install in terminal', do: 'install', agent: 'claude' });
+  });
+
+  it('keeps two agents that pick the same session ID apart', async () => {
+    const dir = await gitRepo();
+    // "Claude" here is a second copy of the demo agent: both name their first session fake-session-1.
+    const c = new AgentCore({
+      folders: () => [dir],
+      clientVersion: 'test',
+      demoAgentScript: DEMO_AGENT,
+      agentCommand: () => ({ command: process.execPath, args: [DEMO_AGENT] }),
+      apiKey: () => undefined,
+      limits: () => ({ maxRunning: 2, idleStopMinutes: 0 }),
+      ui: { showReview: () => {}, closeReview: () => {} },
+    });
+    core = c;
+    const a = await c.createChat('claude');
+    const b = await c.createChat('demo');
+    await c.send(a.id, 'first');
+    await c.send(b.id, 'second');
+    await c.send(a.id, 'third');
+    const replies = (id: string) => c.chat(id)!.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : []));
+    expect(replies(a.id).join(' ')).toContain('first');
+    expect(replies(a.id).join(' ')).toContain('third');
+    expect(replies(a.id).join(' ')).not.toContain('second');
+    expect(replies(b.id).join(' ')).toContain('second');
+    expect(replies(b.id).join(' ')).not.toMatch(/first|third/);
+  });
+});

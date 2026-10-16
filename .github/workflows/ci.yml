@@ -7,6 +7,10 @@ on:
   push:
   pull_request:
 
+# Read-only token; pull requests from forks get no secrets either (this is not pull_request_target).
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -15,8 +19,11 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      # Actions are pinned to commits (Dependabot keeps them current); nothing here pushes, so no credentials stay on disk.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
@@ -29,8 +36,10 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
@@ -47,7 +56,7 @@ jobs:
       - name: Theme extension
         working-directory: extensions/friedliver-theme
         run: npx -y @vscode/vsce@3.6.0 package --no-dependencies --allow-missing-repository --skip-license -o ../../vsix/friedliver-theme.vsix
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: friedliver-vscode-extensions
           path: vsix/*.vsix

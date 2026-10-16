@@ -125,7 +125,7 @@ field from `IProductService` and passes it to
 |---|---|---|---|
 | `telemetry.telemetryLevel` | `off` | application (`src/vs/platform/telemetry/common/telemetryService.ts:321-339`) | ship no `aiConfig`/`ariaKey` keys. Code-OSS has none, so telemetry is a no-op |
 | `workbench.enableExperiments` | `false` | application (`src/vs/workbench/services/assignment/common/assignmentService.ts:618`) | omit `tasConfig` |
-| `update.mode` | `manual` (or `none` until FriedLiver has an update feed) | application (`src/vs/platform/update/common/update.config.contribution.ts:19`) | omit `updateUrl` and the update service stays idle |
+| `update.mode` | `manual` (or `none` until FriedLiver has an update feed) | application (`src/vs/platform/update/common/update.config.contribution.ts:19`) | omit `updateUrl` and the update service stays idle. `none` also stops the Agents extension's weekly release check |
 | `update.showReleaseNotes` | `false` | application (`update.config.contribution.ts:74`) | omit `releaseNotesUrl` |
 | `extensions.autoCheckUpdates` | `false` | application (`contrib/extensions/browser/extensions.contribution.ts:190`) | follows `extensionsGallery`; with no gallery, nothing is checked |
 | `extensions.autoUpdate` | `false` | application (`extensions.contribution.ts:139`) | same |
@@ -133,6 +133,22 @@ field from `IProductService` and passes it to
 | `window.titleBarStyle` | `custom` | application (`desktop.contribution.ts:243`) | already the upstream default |
 | `window.menuStyle` | leave | application (`desktop.contribution.ts:270`) | none |
 | `gulp.autoDetect`, `grunt.autoDetect`, `jake.autoDetect` | `off` | application (`extensions/{gulp,grunt,jake}/package.json`) | already `off` upstream |
+
+## Security-relevant defaults
+
+What the fork keeps or changes from upstream, for the threat model in
+[SECURITY.md](../SECURITY.md).
+
+| Default | Value | Where |
+|---|---|---|
+| Workspace trust (`security.workspace.trust.enabled`) | on, as upstream | not changed. The Agents extension declares `untrustedWorkspaces.supported: false`, so it doesn't run in Restricted Mode |
+| Renderer sandbox, context isolation | as upstream | no patch touches them. `scripts/dev.mjs` adds `--no-sandbox` only for dev runs as root on Linux |
+| Telemetry | off | `enableTelemetry: false`, no telemetry keys in product.json |
+| Update service | none | no `updateUrl` |
+| FriedLiver release check (`friedliver.updates.check`) | on, weekly, application scope | Agents extension, FriedLiver app only. One anonymous GET to `api.github.com/repos/MrArun005/FriedLiver-Code/releases/latest`; also off when `update.mode` is `none` |
+| Extension signature checks (`extensions.verifySignature`) | off | patch 0040; the verifier is Microsoft-only |
+| Agent program (`friedliver.agents.*.command`, `.args`) | machine scope | Agents extension; read from user settings only |
+| Link protection (`linkProtectionTrustedDomains`) | `https://open-vsx.org` | product.json; other links ask before they open |
 
 ## Geist fonts: patch pending
 

@@ -30,7 +30,8 @@ export type NoticeAction =
   | { label: string; do: 'retry' }
   | { label: string; do: 'signIn'; agent: AgentKey; methodId: string }
   | { label: string; do: 'apiKey'; agent: AgentKey }
-  | { label: string; do: 'install'; command: string };
+  /** The host looks the install command up from the agent; a webview never supplies it. */
+  | { label: string; do: 'install'; agent: AgentKey };
 
 export interface PermissionOption {
   optionId: string;
@@ -207,6 +208,10 @@ export type Action =
 /** Command output kept in the transcript; the agent still gets its full output through ACP. */
 export const MAX_COMMAND_OUTPUT = 64 * 1024;
 const MAX_IMAGES = 100;
+/** One agent message or thought stops growing here, so a runaway agent can't fill the editor's memory. */
+export const MAX_ITEM_TEXT = 512 * 1024;
+/** Transcript items kept per chat. Past it the oldest replies and steps go; nothing that waits for you does. */
+export const MAX_ITEMS = 2000;
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.t) {
@@ -219,9 +224,9 @@ export function reduce(state: AppState, action: Action): AppState {
         links: state.links.filter((l) => l.from !== action.chatId && l.to !== action.chatId),
       };
     case 'items':
-      return editChat(state, action.chatId, (c) => ({ ...c, items: [...c.items, ...action.items], lastActivity: action.at ?? c.lastActivity }));
+      return editChat(state, action.chatId, (c) => ({ ...c, items: capItems([...c.items, ...action.items]), lastActivity: action.at ?? c.lastActivity }));
     case 'update':
-      return editChat(state, action.chatId, (c) => ({ ...c, items: applyUpdate(c.items, action.update), lastActivity: action.at ?? c.lastActivity }));
+      return editChat(state, action.chatId, (c) => ({ ...c, items: capItems(applyUpdate(c.items, action.update)), lastActivity: action.at ?? c.lastActivity }));
     case 'busy':
       return editChat(state, action.chatId, (c) => ({
         ...c,
@@ -283,6 +288,28 @@ export function reduce(state: AppState, action: Action): AppState {
   }
 }
 
+const CUT_OFF = '\n\n[FriedLiver stopped showing this reply here: it is over 512 KB.]';
+
+function capText(text: string): string {
+  return text.length <= MAX_ITEM_TEXT ? text : text.slice(0, MAX_ITEM_TEXT) + CUT_OFF;
+}
+
+const DROPPABLE = new Set<Item['kind']>(['agent', 'thought', 'tool', 'plan', 'notice']);
+
+/** Drops the oldest replies, steps, plans and notices once a chat holds more than MAX_ITEMS. */
+function capItems(items: Item[]): Item[] {
+  let excess = items.length - MAX_ITEMS;
+  if (excess <= 0) return items;
+  const drop = new Set<number>();
+  for (let n = 0; n < items.length && excess > 0; n++) {
+    if (DROPPABLE.has(items[n].kind)) {
+      drop.add(n);
+      excess--;
+    }
+  }
+  return drop.size ? items.filter((_, n) => !drop.has(n)) : items;
+}
+
 function editChat(state: AppState, chatId: string, fn: (c: ChatView) => ChatView): AppState {
   return { ...state, chats: state.chats.map((c) => (c.id === chatId ? fn(c) : c)) };
 }
@@ -310,8 +337,11 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
     case 'agent_thought_chunk': {
       if (update.content.type !== 'text') return items;
       const kind = update.sessionUpdate === 'agent_message_chunk' ? 'agent' : 'thought';
-      if (last?.kind === kind) return [...items.slice(0, -1), { kind, text: last.text + update.content.text }];
-      return [...items, { kind, text: update.content.text }];
+      if (last?.kind === kind) {
+        if (last.text.length > MAX_ITEM_TEXT) return items; // Already cut off.
+        return [...items.slice(0, -1), { kind, text: capText(last.text + update.content.text) }];
+      }
+      return [...items, { kind, text: capText(update.content.text) }];
     }
     case 'tool_call': {
       const tool: Item = {

@@ -79,6 +79,10 @@ export class AgentHub {
   private readonly agents = new Map<AgentId, RunningAgent>();
   private readonly starting = new Map<AgentId, Promise<RunningAgent>>();
   private readonly chats = new Map<string, ChatState>();
+  /**
+   * Keyed by agent and session ID. Session IDs come from the agents, so two agents can
+   * pick the same one, and one agent must never reach (or pose as) another's chat.
+   */
   private readonly sessionToChat = new Map<string, string>();
   private nextChat = 1;
   private nextGeneration = 1;
@@ -101,8 +105,9 @@ export class AgentHub {
     return this.chats.get(chatId);
   }
 
-  chatIdForSession(sessionId: string): string | undefined {
-    return this.sessionToChat.get(sessionId);
+  /** The chat a session belongs to, only if that agent owns it. */
+  chatIdForSession(sessionId: string, agentId: AgentId): string | undefined {
+    return this.sessionToChat.get(sessionKey(agentId, sessionId));
   }
 
   async prompt(chatId: string, blocks: acp.ContentBlock[]): Promise<acp.PromptResponse> {
@@ -280,7 +285,7 @@ export class AgentHub {
 
     const session = await agent.conn.newSession(cwd);
     if (previous) {
-      this.sessionToChat.delete(previous);
+      this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(
         chat.id,
         `${agent.conn.spec.label} was restarted, so this chat continues in a new session. It won't remember the earlier messages.`,
@@ -288,7 +293,7 @@ export class AgentHub {
     }
     chat.sessionId = session.sessionId;
     chat.sessionGeneration = agent.generation;
-    this.sessionToChat.set(session.sessionId, chat.id);
+    this.sessionToChat.set(sessionKey(chat.agentId, session.sessionId), chat.id);
   }
 
   private fitToAgent(chat: ChatState, agent: RunningAgent, blocks: acp.ContentBlock[]): acp.ContentBlock[] {
@@ -300,7 +305,7 @@ export class AgentHub {
   private hostFor(agentId: AgentId): ClientHost {
     const { events, files } = this.options;
     const chatFor = (sessionId: string) => {
-      const chatId = this.sessionToChat.get(sessionId);
+      const chatId = this.chatIdForSession(sessionId, agentId);
       return chatId ? this.chats.get(chatId) : undefined;
     };
     return {
@@ -336,4 +341,8 @@ export class AgentHub {
     if (agent.idleTimer) clearTimeout(agent.idleTimer);
     agent.idleTimer = undefined;
   }
+}
+
+function sessionKey(agentId: AgentId, sessionId: string): string {
+  return `${agentId}:${sessionId}`;
 }

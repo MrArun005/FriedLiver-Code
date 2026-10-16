@@ -1,8 +1,28 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import path from 'node:path';
 import type * as acp from '@agentclientprotocol/sdk';
 import { killProcessTree, launchFor, quoteWindowsArg } from './processes';
 
 const DEFAULT_OUTPUT_LIMIT = 1_000_000;
+/** An agent may ask to keep more output than the default, but not unbounded memory. */
+export const MAX_OUTPUT_LIMIT = 16_000_000;
+/** Windows names can hold characters like `(x86)`; no name may hold `=` or NUL. */
+const ENV_NAME = /^[^=\0]+$/;
+
+function outputLimit(requested: number | null | undefined): number {
+  if (requested == null || !Number.isFinite(requested)) return DEFAULT_OUTPUT_LIMIT;
+  return Math.min(Math.max(0, Math.floor(requested)), MAX_OUTPUT_LIMIT);
+}
+
+// Control characters other than tab and newline, and the invisible ones that reorder or
+// hide text (bidi overrides, zero-width characters): enough to make `rm -rf ~` look harmless.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+
+/** Spells out characters that wouldn't show on screen, as <U+202E>, so what the user approves reads true. */
+export function visibleText(text: string): string {
+  return text.replace(INVISIBLE, (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`);
+}
 
 export interface TerminalInfo {
   terminalId: string;
@@ -95,13 +115,25 @@ export class TerminalManager {
   async create(req: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
     const terminalId = `term-${this.nextId++}`;
     const args = req.args ?? [];
-    const cwd = req.cwd ?? this.defaultCwd;
+    // A relative folder resolves against the session's folder, the one the user is shown,
+    // not against wherever the editor process happens to run.
+    const cwd = path.resolve(this.defaultCwd, req.cwd ?? '.');
+    const extraEnv = req.env ?? [];
+    for (const v of extraEnv) {
+      if (!ENV_NAME.test(v.name) || v.value.includes('\0')) throw new Error(`Refused an invalid environment variable name: ${JSON.stringify(v.name)}`);
+    }
     const env = { ...process.env };
-    for (const v of req.env ?? []) env[v.name] = v.value;
+    for (const v of extraEnv) env[v.name] = v.value;
     // With no args the command is a whole shell line ("npm test"); otherwise quote it too,
     // since a path like C:\Program Files\nodejs\node.exe would split at the space.
-    const commandLine = [args.length ? quoteArg(req.command) : req.command, ...args.map(quoteArg)].join(' ');
+    const shellLine = [args.length ? quoteArg(req.command) : req.command, ...args.map(quoteArg)].join(' ');
+    // What the user approves shows everything that changes what runs: the variables the
+    // agent sets (NODE_OPTIONS or PATH can turn `npm test` into anything) come first, as a
+    // shell would write them, and characters that don't show on screen are spelled out.
+    const commandLine = visibleText([...extraEnv.map((v) => `${v.name}=${quoteArg(v.value)}`), shellLine].join(' '));
     const info: TerminalInfo = { terminalId, sessionId: req.sessionId, commandLine, cwd };
+    // Resolved before asking, so a command that can't start doesn't wait for a decision.
+    const launch = args.length ? launchFor(req.command, args) : undefined;
 
     if (this.listener?.approve && !(await this.listener.approve(info))) {
       throw new Error(`The user denied this command: ${commandLine}`);
@@ -111,15 +143,14 @@ export class TerminalManager {
     // arguments starts directly, so nothing re-splits them (see launchFor).
     const detached = process.platform !== 'win32';
     let child: ChildProcess;
-    if (args.length === 0) {
-      child = spawn(commandLine, { cwd, env, shell: true, detached, windowsHide: true });
+    if (!launch) {
+      child = spawn(shellLine, { cwd, env, shell: true, detached, windowsHide: true });
     } else {
-      const launch = launchFor(req.command, args);
       child = spawn(launch.file, launch.args, { cwd, env, detached, windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
     }
 
     this.listener?.onStart(info);
-    this.commands.set(terminalId, new RunningCommand(info, child, req.outputByteLimit ?? DEFAULT_OUTPUT_LIMIT, this.listener));
+    this.commands.set(terminalId, new RunningCommand(info, child, outputLimit(req.outputByteLimit), this.listener));
     return { terminalId };
   }
 

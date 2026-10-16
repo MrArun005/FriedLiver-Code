@@ -2,6 +2,7 @@
 // Plain Node, no dependencies, so the scripts run on Linux, macOS and Windows.
 
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,69 @@ export function writeJson(file, value) {
 
 export function upstream() {
 	return readJson(path.join(ROOT_DIR, 'upstream.json'));
+}
+
+/**
+ * The FriedLiver version stamped into product.json (friedliverVersion), which the
+ * agents extension's update check compares with the latest GitHub release. Release
+ * builds set FRIEDLIVER_VERSION from their tag (v1.142.0, v1.142.0-2); other builds
+ * use the pinned upstream version.
+ */
+export function friedliverVersion(env = process.env) {
+	const fromEnv = (env.FRIEDLIVER_VERSION || '').trim();
+	if (!fromEnv) {
+		return upstream().tag;
+	}
+	if (!/^v?\d+\.\d+\.\d+(-\d+)?$/.test(fromEnv)) {
+		fail(`FRIEDLIVER_VERSION ${JSON.stringify(fromEnv)} is not X.Y.Z or X.Y.Z-N`);
+	}
+	return fromEnv.replace(/^v/, '');
+}
+
+// ---- Download integrity ----
+
+export function sha256File(file) {
+	return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/** The SHA-256 for `fileName` in a SHASUMS256.txt (`<hash>  <name>` per line), or null. */
+export function shasumFor(shasums, fileName) {
+	for (const line of String(shasums).split(/\r?\n/)) {
+		const m = /^([0-9a-f]{64}) [ *]?(.+)$/.exec(line.trim());
+		if (m && m[2] === fileName) {
+			return m[1];
+		}
+	}
+	return null;
+}
+
+/** Whether a file matches an npm lockfile `integrity` (Subresource Integrity, e.g. `sha512-…`). */
+export function matchesIntegrity(file, integrity) {
+	const bytes = fs.readFileSync(file);
+	return String(integrity ?? '').split(/\s+/).some(entry => {
+		const m = /^(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/.exec(entry);
+		return m !== null && crypto.createHash(m[1]).update(bytes).digest('base64') === m[2];
+	});
+}
+
+/**
+ * SHA-256 pins for downloads that publish no checksums of their own (the ripgrep
+ * binaries), from scripts/checksums.json.
+ */
+export function pinnedSha256(fileName, pinsFile = path.join(SCRIPTS_DIR, 'checksums.json')) {
+	const pins = fs.existsSync(pinsFile) ? readJson(pinsFile) : {};
+	const hash = pins.files?.[fileName];
+	return typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash) ? hash : null;
+}
+
+/** Fails, and deletes the file, unless it has the expected SHA-256. */
+export function checkSha256(file, expected, what) {
+	const actual = sha256File(file);
+	if (actual !== expected) {
+		fs.rmSync(file, { force: true });
+		fail(`${what}: SHA-256 is ${actual}, expected ${expected}. The download was deleted.`);
+	}
+	log(`${what}: SHA-256 verified`);
 }
 
 export function log(...args) {
@@ -139,11 +203,22 @@ export function nodeEnv() {
 	const bin = isWindows ? home : path.join(home, 'bin');
 	const exe = path.join(bin, isWindows ? 'node.exe' : 'node');
 	if (!fs.existsSync(exe)) {
+		if (!/^\d+\.\d+\.\d+$/.test(required)) {
+			fail(`upstream .nvmrc asks for Node ${JSON.stringify(required)}, which is not a plain version`);
+		}
 		fs.mkdirSync(CACHE_DIR, { recursive: true });
 		const archive = path.join(CACHE_DIR, `${name}.${ext}`);
-		const url = `https://nodejs.org/dist/v${required}/${name}.${ext}`;
-		log(`Node ${process.versions.node} does not match upstream .nvmrc ${required}; downloading ${url}`);
-		run('curl', ['-fL', '--retry', '3', '-o', archive, url], { cwd: CACHE_DIR });
+		const base = `https://nodejs.org/dist/v${required}`;
+		log(`Node ${process.versions.node} does not match upstream .nvmrc ${required}; downloading ${base}/${name}.${ext}`);
+		run('curl', ['-fL', '--retry', '3', '-o', archive, `${base}/${name}.${ext}`], { cwd: CACHE_DIR });
+		// Checked against the release's SHASUMS256.txt before anything is unpacked or run.
+		const sums = run('curl', ['-fsSL', '--retry', '3', `${base}/SHASUMS256.txt`], { cwd: CACHE_DIR, capture: true }).stdout;
+		const expected = shasumFor(sums, `${name}.${ext}`);
+		if (!expected) {
+			fs.rmSync(archive, { force: true });
+			fail(`${base}/SHASUMS256.txt lists no ${name}.${ext}`);
+		}
+		checkSha256(archive, expected, `Node ${required} (${name}.${ext})`);
 		run('tar', ['-xf', archive, '-C', CACHE_DIR], { cwd: CACHE_DIR });
 		fs.rmSync(archive, { force: true });
 	}

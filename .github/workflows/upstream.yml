@@ -1,0 +1,64 @@
+name: Upstream VS Code
+
+# Weekly: when update.code.visualstudio.com lists a newer stable VS Code than
+# upstream.json pins, open a pull request that moves the pin (upstream.json and
+# the pinned version in docs/BUILD.md and README.md). Someone then checks that
+# the patches still apply and merges it, which starts a build.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" under
+# Settings > Actions > General. Pull requests made with the workflow token
+# start no other workflows; push to the branch to run CI on it.
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Push a branch and open a pull request; nothing else.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # This job pushes, so the checkout keeps the token. It installs no packages: the
+      # script below uses only Node's own modules.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - id: check
+        run: node scripts/check-upstream.mjs
+      - name: Open a pull request
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+          BODY: ${{ steps.check.outputs.body }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected version $VERSION"
+            exit 1
+          fi
+          branch="upstream/$VERSION"
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "A pull request for VS Code $VERSION is already open."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add upstream.json docs/BUILD.md README.md
+          git commit -m "Upstream: VS Code $VERSION"
+          git push --force origin "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" --title "Upstream: VS Code $VERSION" --body-file "$BODY"

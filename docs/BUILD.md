@@ -29,7 +29,24 @@ Installers, all unsigned:
 | Linux | `friedliver_<version>_amd64.deb` | `gulp vscode-linux-<arch>-prepare-deb` and `-build-deb` |
 
 CI (`.github/workflows/build.yml`) builds all three with the portable apps on
-every push to `main`.
+every push to `main`. For a pushed tag `vX.Y.Z` or `vX.Y.Z-N` (the upstream
+version, then FriedLiver's own build number) it also publishes a GitHub
+release with every installer, the portable apps and `SHA256SUMS.txt`. Only that
+release job gets a token that can write (`contents: write`).
+
+To release: `git tag v1.142.0-1 && git push origin v1.142.0-1`. The tag is
+stamped into the app's `product.json` as `friedliverVersion`, which the Agents
+extension's weekly update check compares with the latest release.
+
+`.github/workflows/upstream.yml` runs every Monday. When
+`update.code.visualstudio.com/api/releases/stable` lists a newer stable VS Code
+than `upstream.json`, it opens a pull request moving the pin (`upstream.json`,
+the pinned line above, the README). Check that the patches still apply before
+merging. It needs **Settings → Actions → General → Allow GitHub Actions to
+create and approve pull requests**. Pull requests made with the workflow token
+don't start other workflows, so push to the branch to run CI on it.
+Dependabot (`.github/dependabot.yml`) proposes updates for the pinned actions
+and the npm lockfiles every week.
 
 Environment variables:
 
@@ -38,14 +55,18 @@ Environment variables:
 | `VSCODE_DIR` | `vscode` | Upstream checkout |
 | `FRIEDLIVER_EXTENSIONS_DIR` | `extensions` | Where `prepare.mjs` takes the FriedLiver built-ins from |
 | `FRIEDLIVER_CACHE_DIR` | `.cache` | Downloaded Node toolchain |
+| `FRIEDLIVER_VERSION` | upstream tag | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag |
+| `FRIEDLIVER_REQUIRE_PINS` | unset | When set, a download with no SHA-256 pin in `scripts/checksums.json` fails the build (release builds set it) |
 
 ### What the scripts handle for you
 
 - **Node version.** Upstream's `.nvmrc` wants **Node 24.18.0** (same major,
   >= 24.18.0), and its preinstall refuses anything else. If your Node doesn't
   match (this container has 22.22.0), `build.mjs` and `dev.mjs` download the
-  exact version from nodejs.org into `.cache` (203 MB) and put it first on
-  `PATH`. Your system Node stays as it is. npm must be older than 13.
+  exact version from nodejs.org into `.cache` (203 MB), check it against that
+  release's `SHASUMS256.txt` before unpacking (a mismatch deletes it and
+  stops the build), and put it first on `PATH`. Your system Node stays as it
+  is. npm must be older than 13.
 - **Linux packages.** `build.mjs` installs any of these that are missing with
   apt-get (with sudo unless you're root): `build-essential g++ make pkg-config
   python-is-python3 libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev
@@ -53,7 +74,12 @@ Environment variables:
 - **ripgrep.** `@vscode/ripgrep` looks its binary up through `api.github.com`.
   That fails behind restrictive proxies, and without a token on CI it hits rate
   limits. `build.mjs` first puts the binary in the package's cache from the
-  plain release-download URL.
+  plain release-download URL. It checks the `@vscode/ripgrep` package against
+  the integrity in upstream's `package-lock.json`, and the binary against its
+  SHA-256 in `scripts/checksums.json` (ripgrep-prebuilt publishes no checksums,
+  and the package's own download checks nothing). A mismatch stops the build.
+  When an upstream bump changes `@vscode/ripgrep`, add the new binaries'
+  hashes there; the upstream pull request reminds you.
 - **Flaky sub-installs.** Upstream's postinstall runs about 100 `npm ci` in
   parallel. If one of them dies (we saw `ECONNRESET`), `build.mjs` retries the
   postinstall instead of the whole `npm ci`.
@@ -202,6 +228,10 @@ editor hasn't been checked yet.
 
 ## Known gaps
 
+- **No extension signature checks.** Patch 0040 turns off
+  `extensions.verifySignature`, because the verifier (`@vscode/vsce-sign`) ships
+  only with Microsoft's builds. Extensions come over HTTPS from Open VSX, whose
+  list of malicious extensions still applies. See [SECURITY.md](../SECURITY.md).
 - **Unsigned builds.** Windows SmartScreen and macOS Gatekeeper warn on first
   launch. Signing needs a Windows code-signing certificate and an Apple
   Developer ID (for notarization), both bought in the publisher's name.

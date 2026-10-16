@@ -4,11 +4,15 @@ import * as vscode from 'vscode';
 import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { Accounts } from './host/accounts';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
+import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { ReviewUi } from './host/review';
+import { userSetting } from './host/settings';
+import { installCommandFor } from './host/signin';
+import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, type Script, type Surface } from './host/webviews';
 import type { Attachment, WebviewMessage } from './shared/messages';
-import { AGENT_FACES, AGENT_KEYS, isAgentKey, shortCommand, type AgentKey, type NoticeAction } from './shared/model';
+import { AGENT_FACES, AGENT_KEYS, isAgentKey, type AgentKey, type NoticeAction } from './shared/model';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
@@ -18,6 +22,7 @@ let controller: Controller | undefined;
 export async function activate(context: vscode.ExtensionContext) {
   controller = new Controller(context);
   await controller.start();
+  context.subscriptions.push(startUpdateChecks(context, controller.log));
   void revealOnFirstStart(context);
   // Integration tests drive the same controller the views use.
   return context.extensionMode === vscode.ExtensionMode.Test ? controller : undefined;
@@ -62,6 +67,8 @@ export class Controller {
   private readonly asked = new Set<string>();
   /** Open notifications for waiting decisions, closed once the decision is made anywhere. */
   private readonly notified = new Map<string, () => void>();
+  /** Commands whose open notification offers Run; the Run link approves nothing else. */
+  private readonly runnable = new Set<string>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.accounts = new Accounts(
@@ -148,7 +155,7 @@ export class Controller {
     );
     command('friedliver.stopAgents', () => this.core.stopAll());
     // Targets of the links in decision notifications.
-    command('friedliver.command.approve', (id: unknown) => typeof id === 'string' && this.core.decideCommand(id, true));
+    command('friedliver.command.approve', (id: unknown) => typeof id === 'string' && this.runnable.has(id) && this.core.decideCommand(id, true));
     command('friedliver.command.deny', (id: unknown) => typeof id === 'string' && this.core.decideCommand(id, false));
     command('friedliver.command.show', (chatId: unknown, itemId: unknown) => {
       if (typeof chatId === 'string' && typeof itemId === 'string') void this.showChat(chatId, itemId);
@@ -323,10 +330,13 @@ export class Controller {
         if (action.agent !== 'demo') await this.accounts.setApiKey(action.agent);
         return;
       case 'install': {
-        // Typed, not run: the user reads it and presses Enter.
+        // FriedLiver's own install line for that agent, typed but not run: the user reads it and
+        // presses Enter. It has no line break, so typing it can't run anything by itself.
+        const line = installCommandFor(action.agent);
+        if (!line) return;
         const terminal = vscode.window.createTerminal({ name: 'Install agent', cwd: this.folders()[0] });
         terminal.show();
-        terminal.sendText(action.command, false);
+        terminal.sendText(line, false);
         return;
       }
     }
@@ -419,13 +429,18 @@ export class Controller {
    * Cancel denies.
    */
   private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string }): Promise<void> {
+    // Run only when the notification shows the whole command as it will run; otherwise it's
+    // approved in the chat, where it shows in full.
+    const shown = commandNotice(ask.commandLine);
     const links = [
-      `[Run](${commandLink('friedliver.command.approve', ask.commandId)})`,
+      ...(shown.runnable ? [`[Run](${commandLink('friedliver.command.approve', ask.commandId)})`] : []),
       `[Deny](${commandLink('friedliver.command.deny', ask.commandId)})`,
       ...(ask.chatId ? [`[Show](${commandLink('friedliver.command.show', ask.chatId, ask.commandId)})`] : []),
     ];
-    return this.waitingNotification(ask.commandId, `${ask.agentLabel} wants to run ${shortCommand(ask.commandLine)}`, links.join(' · '), () =>
-      this.core.decideCommand(ask.commandId, false),
+    const title = `${plainText(ask.agentLabel)} wants to run ${shown.text}${shown.runnable ? '' : ' (open the chat to see all of it)'}`;
+    if (shown.runnable) this.runnable.add(ask.commandId);
+    return this.waitingNotification(ask.commandId, title, links.join(' · '), () => this.core.decideCommand(ask.commandId, false)).finally(() =>
+      this.runnable.delete(ask.commandId),
     );
   }
 
@@ -433,7 +448,7 @@ export class Controller {
   private askPermission(ask: { chatId: string; requestId: string; agentLabel: string; title: string }): Promise<void> {
     if (this.chatSurfaces().some((s) => s.visible())) return Promise.resolve();
     const show = `[Show](${commandLink('friedliver.command.show', ask.chatId, ask.requestId)})`;
-    return this.waitingNotification(ask.requestId, `${ask.agentLabel} asks: ${ask.title}`, show, () => {});
+    return this.waitingNotification(ask.requestId, `${plainText(ask.agentLabel)} asks: ${plainText(ask.title)}`, show, () => {});
   }
 
   private waitingNotification(id: string, title: string, message: string, onCancel: () => void): Promise<void> {
@@ -464,7 +479,7 @@ export class Controller {
     if (this.asked.has(url)) return;
     this.asked.add(url);
     const open = await vscode.window.showInformationMessage(`${AGENT_FACES[agent].name} printed a sign-in link.`, 'Open sign-in page');
-    if (open) await vscode.env.openExternal(vscode.Uri.parse(url));
+    if (open) await vscode.env.openExternal(vscode.Uri.parse(url, true));
   }
 
   private async pickImages(): Promise<Attachment[]> {
@@ -485,12 +500,22 @@ export class Controller {
 
   // ---- Settings ----
 
+  /** From the user's own settings only: a repository must not choose the program run as an agent. */
   private readAgentConfig(): Record<VendorAgentId, { command: string; args: string[] }> {
     const c = vscode.workspace.getConfiguration('friedliver.agents');
-    const one = (id: VendorAgentId) => ({
-      command: c.get<string>(`${id}.command`, '') ?? '',
-      args: (c.get<unknown[]>(`${id}.args`, []) ?? []).filter((a): a is string => typeof a === 'string'),
-    });
+    const read = <T>(key: string): T | undefined => {
+      const { value, ignored } = userSetting(c.inspect<T>(key));
+      if (ignored) this.log.warn(`Ignored friedliver.agents.${key} from the workspace settings; only your user settings choose the agent program.`);
+      return value;
+    };
+    const one = (id: VendorAgentId) => {
+      const command = read<unknown>(`${id}.command`);
+      const args = read<unknown>(`${id}.args`);
+      return {
+        command: typeof command === 'string' ? command : '',
+        args: Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : [],
+      };
+    };
     return { claude: one('claude'), codex: one('codex'), gemini: one('gemini') };
   }
 
@@ -506,7 +531,8 @@ export class Controller {
   private error(err: unknown): void {
     const message = messageOf(err);
     this.log.error(message);
-    void vscode.window.showErrorMessage(message);
+    // Errors carry agent and git output; in a notification that text must not become a link.
+    void vscode.window.showErrorMessage(plainText(message));
   }
 }
 

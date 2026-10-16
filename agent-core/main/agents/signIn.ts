@@ -17,13 +17,31 @@ export const EXTERNAL_HOSTS = [
   'agentclientprotocol.com',
 ];
 
-export function allowedExternal(raw: string): boolean {
+export function allowedExternal(raw: string, hosts: readonly string[] = EXTERNAL_HOSTS): boolean {
   try {
     const url = new URL(raw);
-    return url.protocol === 'https:' && EXTERNAL_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`));
+    return url.protocol === 'https:' && !url.username && !url.password && hosts.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`));
   } catch {
     return false;
   }
+}
+
+/**
+ * Where each agent's own sign-in page may be. A link an agent prints while
+ * signing in is only offered when it goes to that vendor, so an agent can't
+ * send you to another site (or another vendor's login) dressed up as its sign-in.
+ */
+export const SIGN_IN_HOSTS: Record<string, readonly string[]> = {
+  claude: ['claude.ai', 'claude.com', 'anthropic.com'],
+  codex: ['auth.openai.com', 'chatgpt.com', 'platform.openai.com'],
+  gemini: ['accounts.google.com', 'aistudio.google.com'],
+  // The demo agent prints a Google-style link in its browser sign-in.
+  demo: ['accounts.google.com'],
+};
+
+export function allowedSignInUrl(agentId: string, raw: string): boolean {
+  const hosts = SIGN_IN_HOSTS[agentId];
+  return hosts !== undefined && allowedExternal(raw, hosts);
 }
 
 /** ACP auth methods, sorted the way a person would want to use them. */
