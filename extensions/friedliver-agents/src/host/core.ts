@@ -316,7 +316,7 @@ export class AgentCore {
       ids.push(id);
       this.addImage(id, src, img.name || 'Attached image', 'you');
     }
-    if (!chat.items.some((i) => i.kind === 'user') && text.trim()) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
+    if (!chat.items.some((i) => i.kind === 'user' || i.kind === 'link') && text.trim()) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
     this.items(chatId, [{ kind: 'user', text, images: ids }]);
     const blocks: acp.ContentBlock[] = [];
     if (text) blocks.push({ type: 'text', text });
@@ -350,6 +350,9 @@ export class AgentCore {
     if (bad) throw new Error(`${bad.name || 'An attachment'} is not an image FriedLiver can send.`);
     // Shown like any attachment; an agent that can't take images gets the text and says so in its chat.
     images.forEach((img, n) => this.addImage(this.id('you'), srcs[n]!, img.name || 'Attached image', 'you'));
+    // A chat whose first message is a question for another agent is about that question.
+    const chat = this.requireChat(chatId);
+    if (by === 'user' && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link')) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
     return this.links.consult(chatId, agent, text, by, { images });
   }
 
