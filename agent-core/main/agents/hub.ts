@@ -17,6 +17,7 @@ export interface HubEvents {
   permission(chatId: string, req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse>;
   notice(chatId: string, text: string): void;
   agentsChanged(): void;
+  agentStderr?(agentId: AgentId, line: string): void;
 }
 
 export interface FileHost {
@@ -143,6 +144,21 @@ export class AgentHub {
     await agent.conn.authenticate(methodId);
   }
 
+  /**
+   * Whether the agent is signed in, by asking for a session (no model call).
+   * The probe session is never used.
+   */
+  async checkSignIn(agentId: AgentId): Promise<{ signedIn: true } | { signedIn: false; methods: acp.AuthMethod[] }> {
+    const agent = await this.ensureAgent(agentId);
+    try {
+      await agent.conn.newSession(this.options.cwd);
+      return { signedIn: true };
+    } catch (err) {
+      if (isAuthRequired(err)) return { signedIn: false, methods: agent.conn.authMethods };
+      throw err;
+    }
+  }
+
   running(): RunningAgentInfo[] {
     return [...this.agents.values()].map((a) => ({
       id: a.id,
@@ -195,7 +211,7 @@ export class AgentHub {
 
   private async startAgent(agentId: AgentId): Promise<RunningAgent> {
     if (this.disposed) throw new Error('FriedLiver is shutting down.');
-    await this.makeRoom();
+    await this.makeRoom(agentId);
     const spec = this.options.resolveSpec(agentId);
     this.options.log?.(`Starting ${spec.label}: ${[spec.command, ...spec.args].join(' ')}`);
     const conn = await AgentConnection.start(spec, {
@@ -203,6 +219,7 @@ export class AgentHub {
       clientVersion: this.options.clientVersion,
       host: this.hostFor(agentId),
       log: this.options.log,
+      onStderr: (line) => this.options.events.agentStderr?.(agentId, line),
     });
     if (this.disposed) {
       await conn.stop();
@@ -227,8 +244,10 @@ export class AgentHub {
     return agent;
   }
 
-  private async makeRoom(): Promise<void> {
-    const excess = this.agents.size + 1 - Math.max(1, this.options.maxRunning);
+  private async makeRoom(agentId: AgentId): Promise<void> {
+    // Agents starting at the same moment count against the limit too.
+    const othersStarting = [...this.starting.keys()].filter((id) => id !== agentId).length;
+    const excess = this.agents.size + othersStarting + 1 - Math.max(1, this.options.maxRunning);
     if (excess <= 0) return;
     const idle = [...this.agents.values()]
       .filter((a) => a.activeTurns === 0)

@@ -98,7 +98,9 @@ export class TerminalManager {
     const cwd = req.cwd ?? this.defaultCwd;
     const env = { ...process.env };
     for (const v of req.env ?? []) env[v.name] = v.value;
-    const commandLine = [req.command, ...args.map(quoteArg)].join(' ');
+    // With no args the command is a whole shell line ("npm test"); otherwise quote it too,
+    // since a path like C:\Program Files\nodejs\node.exe would split at the space.
+    const commandLine = [args.length ? quoteArg(req.command) : req.command, ...args.map(quoteArg)].join(' ');
     const info: TerminalInfo = { terminalId, sessionId: req.sessionId, commandLine, cwd };
 
     if (this.listener?.approve && !(await this.listener.approve(info))) {

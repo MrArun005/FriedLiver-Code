@@ -1,0 +1,48 @@
+<!-- The roasted liver, shared by the app icon and the in-app logo. 1024-unit canvas. -->
+<defs>
+  <linearGradient id="fl-roast" x1="0.15" y1="0.1" x2="0.85" y2="0.95">
+    <stop offset="0" stop-color="#e59a4c"/>
+    <stop offset="0.35" stop-color="#b8622a"/>
+    <stop offset="0.75" stop-color="#7a3512"/>
+    <stop offset="1" stop-color="#4a1d07"/>
+  </linearGradient>
+  <radialGradient id="fl-sheen" cx="0.38" cy="0.32" r="0.35">
+    <stop offset="0" stop-color="#fff2d9" stop-opacity="0.55"/>
+    <stop offset="1" stop-color="#fff2d9" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="fl-steam" x1="0" y1="1" x2="0" y2="0">
+    <stop offset="0" stop-color="#4c9aff" stop-opacity="0.95"/>
+    <stop offset="1" stop-color="#79d4ff" stop-opacity="0.15"/>
+  </linearGradient>
+  <clipPath id="fl-shape">
+    <path id="fl-liver-path" d="M200 500 C190 380 292 318 424 318 C522 318 566 338 604 350 C619 336 636 330 656 330 C748 328 846 340 884 372 C910 394 900 420 862 436 C762 480 662 548 562 628 C522 660 484 678 456 688 C446 718 414 738 382 728 C300 716 212 640 200 500 Z"/>
+  </clipPath>
+</defs>
+<!-- Plate shadow -->
+<ellipse cx="545" cy="742" rx="320" ry="40" fill="#0b1a33"/>
+<!-- Steam, in the theme's blues -->
+<g fill="none" stroke="url(#fl-steam)" stroke-width="22" stroke-linecap="round">
+  <path d="M430 270 C400 230 460 200 430 160 C405 128 440 104 432 84"/>
+  <path d="M560 285 C532 245 590 215 562 175 C540 145 572 122 566 102"/>
+  <path d="M690 300 C664 266 716 240 692 206"/>
+</g>
+<!-- The liver -->
+<path d="M200 500 C190 380 292 318 424 318 C522 318 566 338 604 350 C619 336 636 330 656 330 C748 328 846 340 884 372 C910 394 900 420 862 436 C762 480 662 548 562 628 C522 660 484 678 456 688 C446 718 414 738 382 728 C300 716 212 640 200 500 Z" fill="url(#fl-roast)"/>
+<g clip-path="url(#fl-shape)">
+  <!-- Seared grill marks -->
+  <g stroke="#2e1104" stroke-opacity="0.78" stroke-width="30" stroke-linecap="round">
+    <line x1="250" y1="330" x2="470" y2="760"/>
+    <line x1="380" y1="300" x2="600" y2="730"/>
+    <line x1="510" y1="290" x2="730" y2="720"/>
+    <line x1="640" y1="280" x2="860" y2="700"/>
+  </g>
+  <!-- Caramelized speckles -->
+  <g fill="#2e1104" fill-opacity="0.45">
+    <circle cx="300" cy="560" r="9"/><circle cx="340" cy="640" r="6"/><circle cx="470" cy="470" r="7"/>
+    <circle cx="560" cy="540" r="8"/><circle cx="700" cy="420" r="6"/><circle cx="790" cy="390" r="5"/>
+  </g>
+  <!-- Glossy sheen -->
+  <ellipse cx="400" cy="410" rx="230" ry="120" fill="url(#fl-sheen)"/>
+</g>
+<!-- Crisp roasted edge -->
+<path d="M200 500 C190 380 292 318 424 318 C522 318 566 338 604 350 C619 336 636 330 656 330 C748 328 846 340 884 372 C910 394 900 420 862 436 C762 480 662 548 562 628 C522 660 484 678 456 688 C446 718 414 738 382 728 C300 716 212 640 200 500 Z" fill="none" stroke="#3a1505" stroke-width="12" stroke-linejoin="round"/>
