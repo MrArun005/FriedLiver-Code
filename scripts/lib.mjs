@@ -7,17 +7,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
-export const CODE_DIR = path.dirname(SCRIPTS_DIR);
-export const REPO_ROOT = path.dirname(CODE_DIR);
+/** The repository root: upstream.json, product.json, patches/, branding/, extensions/. */
+export const ROOT_DIR = path.dirname(SCRIPTS_DIR);
 
-/** Upstream checkout. Override with VSCODE_DIR; default is code/vscode. */
-export const VSCODE_DIR = path.resolve(process.env.VSCODE_DIR || path.join(CODE_DIR, 'vscode'));
+/** Upstream checkout. Override with VSCODE_DIR; default is vscode/ in this repo. */
+export const VSCODE_DIR = path.resolve(process.env.VSCODE_DIR || path.join(ROOT_DIR, 'vscode'));
 
-/** FriedLiver built-in extensions. Override with FRIEDLIVER_EXTENSIONS_DIR; default is code/extensions. */
-export const EXTENSIONS_DIR = path.resolve(process.env.FRIEDLIVER_EXTENSIONS_DIR || path.join(CODE_DIR, 'extensions'));
+/** FriedLiver built-in extensions. Override with FRIEDLIVER_EXTENSIONS_DIR; default is extensions/. */
+export const EXTENSIONS_DIR = path.resolve(process.env.FRIEDLIVER_EXTENSIONS_DIR || path.join(ROOT_DIR, 'extensions'));
 
-/** Downloads (Node toolchain). Override with FRIEDLIVER_CACHE_DIR; default is code/.cache. */
-export const CACHE_DIR = path.resolve(process.env.FRIEDLIVER_CACHE_DIR || path.join(CODE_DIR, '.cache'));
+/** Downloads (Node toolchain). Override with FRIEDLIVER_CACHE_DIR; default is .cache/. */
+export const CACHE_DIR = path.resolve(process.env.FRIEDLIVER_CACHE_DIR || path.join(ROOT_DIR, '.cache'));
 
 export const isWindows = process.platform === 'win32';
 
@@ -30,7 +30,7 @@ export function writeJson(file, value) {
 }
 
 export function upstream() {
-	return readJson(path.join(CODE_DIR, 'upstream.json'));
+	return readJson(path.join(ROOT_DIR, 'upstream.json'));
 }
 
 export function log(...args) {

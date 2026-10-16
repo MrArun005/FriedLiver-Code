@@ -5,7 +5,7 @@ from that tag.
 
 ## What ships
 
-`code/extensions/friedliver-theme` is a built-in extension with no code. It
+`extensions/friedliver-theme` is a built-in extension with no code. It
 contributes four color themes and a set of `configurationDefaults`.
 
 | Theme | uiTheme | File |
@@ -16,8 +16,8 @@ contributes four color themes and a set of `configurationDefaults`.
 | FriedLiver Graphite | vs-dark | `themes/friedliver-graphite-color-theme.json` |
 
 The theme JSONs are generated. Edit `palette.json`, then run
-`node code/extensions/friedliver-theme/scripts/generate-themes.mjs`.
-`test/forkThemes.test.ts` fails if the JSONs drift from the palette, if any
+`node extensions/friedliver-theme/scripts/generate-themes.mjs`.
+`test/themes.test.ts` fails if the JSONs drift from the palette, if any
 text pair drops below WCAG AA (4.5:1), if an icon or squiggle drops below 3:1,
 or if any token color drops below 4.5:1 on the editor background.
 `.vscodeignore` keeps `scripts/` and `palette.json` out of the packaged
@@ -142,7 +142,7 @@ Until the patch lands, the `'Geist Mono'` entry in `editor.fontFamily` falls
 through to JetBrains Mono, Cascadia Code, Menlo or Consolas, and the UI keeps
 upstream's system font.
 
-Plan for `code/patches/0100-bundle-geist-fonts.patch`, against 1.142.0. It
+Plan for `patches/0100-bundle-geist-fonts.patch`, against 1.142.0. It
 must be made with `git diff --binary` because it adds woff2 files, and it
 applies with `git apply`.
 

@@ -1,15 +1,16 @@
-name: FriedLiver fork
+name: Build FriedLiver
 
-# The VS Code fork: fetch the pinned upstream, apply FriedLiver's branding and
-# patches, add the built-in extensions, build the minified app for each OS and
-# upload it. About an hour per OS, so it runs only when the fork changes.
+# Fetch the pinned upstream, apply FriedLiver's branding and patches, add the
+# built-in extensions, build the minified app and its installer for each OS and
+# upload them. About an hour per OS, so docs-only changes don't start it.
 on:
   push:
-    branches: [vscode-fork]
-    paths:
-      - 'code/**'
-      - 'src/main/agents/**'
-      - '.github/workflows/code.yml'
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'test/**'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 # A build takes most of an hour: a newer push waits for the running build instead of
@@ -55,26 +56,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # The agents extension bundles the app's ACP core from src/, which resolves the root packages.
+      # Root packages: the ACP SDK that agent-core/ and the demo agent import.
       - run: npm ci
-      - run: node code/scripts/fetch.mjs
-      - run: node code/scripts/prepare.mjs
+      - run: node scripts/fetch.mjs
+      - run: node scripts/prepare.mjs
       # Downloads the Node version upstream's .nvmrc asks for, installs, runs gulp vscode-<os>-<arch>-min,
-      # then makes the installer: per-user setup .exe, .dmg or .deb, in code/installers/.
-      - run: node code/scripts/build.mjs --package --installer
+      # then makes the installer: per-user setup .exe, .dmg or .deb, in installers/.
+      - run: node scripts/build.mjs --package --installer
 
       - name: Archive (Linux)
         if: runner.os == 'Linux'
-        run: tar -czf ${{ matrix.artifact }}.tar.gz -C code VSCode-${{ matrix.target }}
+        run: tar -czf ${{ matrix.artifact }}.tar.gz VSCode-${{ matrix.target }}
       - name: Archive (macOS)
         if: runner.os == 'macOS'
         run: |
           # build.mjs already ad-hoc signed the app for the .dmg.
-          app=$(ls -d code/VSCode-${{ matrix.target }}/*.app | head -1)
+          app=$(ls -d VSCode-${{ matrix.target }}/*.app | head -1)
           ditto -c -k --keepParent "$app" ${{ matrix.artifact }}.zip
       - name: Archive (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path code/VSCode-${{ matrix.target }}/* -DestinationPath ${{ matrix.artifact }}.zip
+        run: Compress-Archive -Path VSCode-${{ matrix.target }}/* -DestinationPath ${{ matrix.artifact }}.zip
 
       # Portable app (unzip and run) and the installer, as separate downloads.
       - uses: actions/upload-artifact@v4
@@ -87,5 +88,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-installer
-          path: code/installers/*
+          path: installers/*
           if-no-files-found: error

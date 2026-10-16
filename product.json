@@ -12,9 +12,9 @@
   "tunnelApplicationName": "friedliver-tunnel",
 
   "licenseName": "MIT",
-  "licenseUrl": "https://github.com/MrArun005/FriedLiver/blob/main/code/README.md",
-  "serverLicenseUrl": "https://github.com/MrArun005/FriedLiver/blob/main/code/README.md",
-  "reportIssueUrl": "https://github.com/MrArun005/FriedLiver/issues/new",
+  "licenseUrl": "https://github.com/MrArun005/FriedLiver-Code/blob/main/README.md",
+  "serverLicenseUrl": "https://github.com/MrArun005/FriedLiver-Code/blob/main/README.md",
+  "reportIssueUrl": "https://github.com/MrArun005/FriedLiver-Code/issues/new",
 
   "win32DirName": "FriedLiver",
   "win32NameVersion": "FriedLiver",

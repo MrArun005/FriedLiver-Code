@@ -1,0 +1,54 @@
+name: CI
+
+# Quick checks on every push and pull request: lint and the theme tests on each
+# OS, then the agents extension's tests and both extensions as VSIX files for
+# stock VS Code and editors built on it.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: node extensions/friedliver-theme/scripts/generate-themes.mjs --check
+
+  extensions:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      # Root packages include the ACP SDK the demo agent imports in the tests.
+      - run: npm ci && mkdir vsix
+      - name: Agents extension
+        working-directory: extensions/friedliver-agents
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+          npx -y @vscode/vsce@3.6.0 package --no-dependencies --allow-missing-repository --skip-license -o ../../vsix/friedliver-agents.vsix
+      - name: Theme extension
+        working-directory: extensions/friedliver-theme
+        run: npx -y @vscode/vsce@3.6.0 package --no-dependencies --allow-missing-repository --skip-license -o ../../vsix/friedliver-theme.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: friedliver-vscode-extensions
+          path: vsix/*.vsix
+          if-no-files-found: error

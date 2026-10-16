@@ -1,7 +1,7 @@
 // Generates the four FriedLiver color themes from ../palette.json.
 //
-//   node code/extensions/friedliver-theme/scripts/generate-themes.mjs          write themes/*.json
-//   node code/extensions/friedliver-theme/scripts/generate-themes.mjs --check  exit 1 if they are stale
+//   node extensions/friedliver-theme/scripts/generate-themes.mjs          write themes/*.json
+//   node extensions/friedliver-theme/scripts/generate-themes.mjs --check  exit 1 if they are stale
 //
 // Design rules (the "Control Room" direction):
 // - One loud color, `accent`, and it means only "you must decide": primary
@@ -1007,7 +1007,7 @@ function main() {
     }
   }
   if (stale) {
-    console.error('Run: node code/extensions/friedliver-theme/scripts/generate-themes.mjs');
+    console.error('Run: node extensions/friedliver-theme/scripts/generate-themes.mjs');
     process.exit(1);
   }
 }

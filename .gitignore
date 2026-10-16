@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.vsix
+.vscode-test/
+
+# Upstream checkout, toolchain cache, packaged apps and installers
+vscode/
+.cache/
+VSCode-*/
+installers/

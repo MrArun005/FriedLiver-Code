@@ -3,8 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// The VS Code fork's built-in theme extension (code/extensions/friedliver-theme).
-const EXT = path.join(__dirname, '..', 'code', 'extensions', 'friedliver-theme');
+// The VS Code fork's built-in theme extension (extensions/friedliver-theme).
+const EXT = path.join(__dirname, '..', 'extensions', 'friedliver-theme');
 
 interface ThemeContribution {
   id: string;

@@ -1,5 +1,5 @@
 {
-  "$comment": "Source of truth for the FriedLiver color themes. Edit this, then run: node code/extensions/friedliver-theme/scripts/generate-themes.mjs",
+  "$comment": "Source of truth for the FriedLiver color themes. Edit this, then run: node extensions/friedliver-theme/scripts/generate-themes.mjs",
   "themes": [
     {
       "id": "FriedLiver Black Blue",

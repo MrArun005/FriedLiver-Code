@@ -1,46 +1,129 @@
-# FriedLiver on VS Code (Code - OSS)
+# FriedLiver Code
 
-This folder turns upstream [Code - OSS](https://github.com/microsoft/vscode) (MIT)
-into FriedLiver, VSCodium-style. The upstream source is fetched at build time
-and is never committed here.
+FriedLiver built on VS Code 1.142 (Code - OSS). You get VS Code's editor and
+extensions from Open VSX, plus Claude, GPT (Codex) and Gemini coding agents in a
+panel on the right. Every file an agent wants to write opens as a diff you
+accept or reject, and every command waits for your approval.
+
+![First launch](docs/screenshots/1-first-launch.png)
+
+What changes from stock VS Code:
+
+- **Agents on the right.** The FriedLiver Agents panel holds chats, the Agent
+  Manager board (Needs you / Working / Done), reviewed edits and approved commands.
+  Each agent signs in through its own official CLI.
+- **No built-in Copilot, AI features off by default.** Copilot Chat and the
+  agent host don't ship, so the fork settles about 165 MB below VS Code
+  ([benchmarks](docs/benchmarks.md)).
+- **Open VSX gallery.** Prettier, ESLint, GitLens, Python, Go, rust-analyzer and
+  most others install as usual. Microsoft-only extensions (Pylance, C/C++, C#,
+  Remote - SSH, Copilot) aren't there. Open replacements are listed in the
+  benchmarks.
+- **Black Blue theme and Geist fonts** built in, plus Light Blue, Midnight Blue
+  and Graphite.
+- **No telemetry, no experiments, no update service.** It has its own
+  `.friedliver` settings folder, so it doesn't touch an installed VS Code.
+
+The Electron app, a separate and lighter editor (about 370 MB against about
+840 MB here), lives in [FriedLiver](https://github.com/MrArun005/FriedLiver).
+
+## Install
+
+The **Build FriedLiver** workflow builds every push to `main`. Open its latest
+run under **Actions** and download from **Artifacts**:
+
+| System | Installer | Portable |
+|---|---|---|
+| Windows x64 | `friedliver-fork-windows-x64-installer`: `FriedLiverUserSetup-x64-<version>.exe`, installs for your user, no admin rights | `friedliver-fork-windows-x64`: unzip, run `FriedLiver.exe` |
+| macOS (Apple silicon) | `friedliver-fork-macos-arm64-installer`: `.dmg`, drag to Applications | `friedliver-fork-macos-arm64`: zipped `.app` |
+| Linux x64 | `friedliver-fork-linux-x64-installer`: `.deb` | `friedliver-fork-linux-x64`: `.tar.gz` |
+
+Builds aren't code-signed yet. On Windows choose **More info → Run anyway**. On
+macOS, the first time, go to **System Settings → Privacy & Security → Open
+Anyway**.
+
+## Use the agents
+
+1. Open a folder. The Agents panel opens on the right.
+2. Pick **Demo** and type `tour` to try it offline: a plan, an edit you review as
+   a diff, a command you approve, an image. Accept is Ctrl/Cmd+Alt+Y and Reject
+   is Ctrl/Cmd+Alt+N. The "decisions waiting" item in the status bar jumps to
+   whatever waits on you.
+3. For the real agents, install a CLI once, then sign in from **Accounts** in
+   the same panel:
+
+| Agent | Install | Sign-in |
+|---|---|---|
+| Claude | `npm install -g @zed-industries/claude-agent-acp` | Claude Code's own login in a terminal: `/login`, approve on claude.ai, `/exit` |
+| GPT (Codex) | `npm install -g @zed-industries/codex-acp` | Your browser opens OpenAI's sign-in page |
+| Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page |
+
+The command palette has the rest under "FriedLiver": Agent Manager (Tasks), Move
+Agents to the Center (Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents.
+
+### In VS Code or Antigravity instead
+
+The two built-in extensions also install into VS Code 1.104 or newer and into
+editors built on it. Download **friedliver-vscode-extensions** from the latest
+**CI** run, then in the Extensions view choose **⋯ → Install from VSIX…** for
+`friedliver-agents.vsix` and `friedliver-theme.vsix`. There the Agents icon sits
+in the activity bar; drag it to the right-hand side bar if you want it there.
+
+## Build it
+
+```bash
+node scripts/fetch.mjs                          # clone upstream at the pinned tag into vscode/
+node scripts/prepare.mjs                        # patches, product.json, branding, built-in extensions
+node scripts/build.mjs                          # npm ci + compile (dev build)
+node scripts/dev.mjs [folder]                   # run from source
+node scripts/build.mjs --package --installer    # minified app in VSCode-<os>-<arch>/, installer in installers/
+```
+
+`VSCODE_DIR` puts the upstream checkout somewhere else. The full guide covers
+prerequisites per OS, time, disk and memory: [docs/BUILD.md](docs/BUILD.md).
 
 | Path | What it is |
 | --- | --- |
-| `upstream.json` | Pinned upstream tag and commit (and the Node version upstream wants) |
-| `product.json` | Branding and service overrides, deep-merged into upstream `product.json`. `null` deletes a key |
-| `patches/*.patch` | Source patches, applied with `git apply` in file-name order |
-| `extensions/<name>/` | FriedLiver built-in extensions, copied into upstream `extensions/` (a `build` script runs first) |
-| `scripts/` | `fetch.mjs`, `prepare.mjs`, `build.mjs`, `dev.mjs` (plain Node, any OS) |
+| `upstream.json` | Pinned upstream tag and commit |
+| `product.json` | Names, IDs, Open VSX gallery and service overrides, deep-merged into upstream's. `null` deletes a key |
+| `patches/` | Source patches, applied in file-name order |
+| `branding/` | The roasted liver icon and artwork, and `make-branding.py`, which generates `overlay/` (Windows and macOS icons, installer pictures, watermark) |
+| `extensions/friedliver-agents/` | The Agents panel, Agent Manager and reviews |
+| `extensions/friedliver-theme/` | Color themes generated from `palette.json`, and the workbench defaults |
+| `agent-core/` | The ACP client the agents extension bundles, and the offline Demo agent ([README](agent-core/README.md)) |
+| `scripts/` | `fetch`, `prepare`, `build`, `dev`, `screenshot` (plain Node, any OS) |
+| `docs/` | [BUILD.md](docs/BUILD.md), [DEFAULTS.md](docs/DEFAULTS.md), [memory-plan.md](docs/memory-plan.md), [benchmarks.md](docs/benchmarks.md) |
+
+Patches:
+
+| Patch | What it does |
+| --- | --- |
+| `0010-drop-builtin-copilot` | No built-in Copilot extension; runs without `defaultChatAgent` |
+| `0020-disable-builtin-ai-by-default` | `chat.disableAIFeatures` defaults to true, and the Chat view hides with it |
+| `0030-installers-without-microsoft-only-parts` | Installers build without the Windows appx package and the tunnel CLI |
+| `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary |
+| `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
+
+### Writing a patch
 
 ```bash
-node code/scripts/fetch.mjs              # clone/update upstream at the pinned tag
-node code/scripts/prepare.mjs            # patches + product.json + icon + built-in extensions
-node code/scripts/build.mjs              # npm ci + compile (dev build)
-node code/scripts/dev.mjs [folder]       # run from source
-node code/scripts/build.mjs --package    # minified app in <VSCODE_DIR>/../VSCode-<os>-<arch>
+node scripts/prepare.mjs                         # start from a prepared tree
+# edit files in vscode/
+git -C vscode diff -- src > patches/0200-my-change.patch
+node scripts/prepare.mjs                         # check it applies on a clean tree
 ```
 
-The upstream checkout lives in `code/vscode` unless `VSCODE_DIR` says otherwise.
-`FRIEDLIVER_EXTENSIONS_DIR` points `prepare.mjs` at another folder of built-in
-extensions. `code/scripts/screenshot.mjs` launches the build under Playwright
-and saves a screenshot.
+Leave `product.json`, `resources/linux/code.png`, the branding overlay and the
+removed `extensions/copilot` out of patch diffs; `prepare.mjs` handles those.
 
-Current patches:
-
-- `0010-drop-builtin-copilot.patch`: no built-in Copilot extension, and runs without `defaultChatAgent`
-- `0020-disable-builtin-ai-by-default.patch`: `chat.disableAIFeatures` defaults to true, and the Chat view hides with it
-
-The full guide (prerequisites, time, disk, memory, extensions) is
-[docs/fork/BUILD.md](../docs/fork/BUILD.md).
-
-## Writing a patch
+### Checks
 
 ```bash
-node code/scripts/prepare.mjs                 # start from a prepared tree
-# edit files in code/vscode
-git -C code/vscode diff -- src > code/patches/0200-my-change.patch
-node code/scripts/prepare.mjs                 # check it applies on a clean tree
+npm ci && npm run lint && npm test               # lint, theme tests
+cd extensions/friedliver-agents && npm ci && npm run typecheck && npm test
 ```
 
-Exclude `product.json`, `resources/linux/code.png` and the removed `extensions/copilot`
-from patch diffs; `prepare.mjs` handles those itself.
+## License
+
+Upstream Code - OSS is MIT licensed. Its `LICENSE.txt` and
+`ThirdPartyNotices.txt` ship inside every build.

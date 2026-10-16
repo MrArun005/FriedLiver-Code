@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Build FriedLiver from the prepared upstream checkout.
 //
-//   node code/scripts/build.mjs              # dev build: npm ci + compile + Electron (run with dev.mjs)
-//   node code/scripts/build.mjs --package    # packaged, minified app: <VSCODE_DIR>/../VSCode-<os>-<arch>
-//   node code/scripts/build.mjs --package --installer   # also the installer, into code/installers/
+//   node scripts/build.mjs              # dev build: npm ci + compile + Electron (run with dev.mjs)
+//   node scripts/build.mjs --package    # packaged, minified app: <VSCODE_DIR>/../VSCode-<os>-<arch>
+//   node scripts/build.mjs --package --installer   # also the installer, into installers/
 //   options: --skip-deps (no apt-get), --reinstall (fresh npm ci), --no-compile (install only)
 //
 // Linux: installs the apt packages upstream's build needs if they are missing
 // (uses sudo unless already root). Node: if the current Node does not satisfy
-// upstream's .nvmrc, the exact version is downloaded to code/.cache (FRIEDLIVER_CACHE_DIR).
+// upstream's .nvmrc, the exact version is downloaded to .cache (FRIEDLIVER_CACHE_DIR).
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,7 +22,7 @@ if (!fs.existsSync(path.join(VSCODE_DIR, 'package.json'))) {
 	fail(`${VSCODE_DIR} has no package.json. Run fetch.mjs and prepare.mjs first.`);
 }
 if (!fs.existsSync(path.join(VSCODE_DIR, '.friedliver-prepare.json'))) {
-	fail(`${VSCODE_DIR} is not prepared. Run: node code/scripts/prepare.mjs`);
+	fail(`${VSCODE_DIR} is not prepared. Run: node scripts/prepare.mjs`);
 }
 
 // Linux build dependencies, from upstream's "How to Contribute" wiki plus
@@ -164,7 +164,7 @@ function trimPackagedApp(appDir) {
 }
 
 /**
- * The installer for this OS, into code/installers/: a per-user setup .exe on Windows (no admin
+ * The installer for this OS, into installers/: a per-user setup .exe on Windows (no admin
  * rights needed), a .dmg on macOS, a .deb on Linux. Unsigned: signing needs certificates.
  */
 function buildInstaller(arch, appDir) {
@@ -219,5 +219,5 @@ if (wantPackage) {
 	run('npm', ['run', 'compile'], { env });
 	run('npm', ['run', 'electron'], { env });
 	run('node', ['build/lib/preLaunch.ts'], { env });
-	log(`dev build ready (${Math.round((Date.now() - started) / 60000)} min). Run: node code/scripts/dev.mjs`);
+	log(`dev build ready (${Math.round((Date.now() - started) / 60000)} min). Run: node scripts/dev.mjs`);
 }

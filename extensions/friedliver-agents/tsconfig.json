@@ -15,7 +15,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@friedliver/main/*": ["../../../src/main/*"],
+      "@friedliver/main/*": ["../../agent-core/main/*"],
       "@agentclientprotocol/sdk": ["./node_modules/@agentclientprotocol/sdk"]
     }
   },
