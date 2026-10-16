@@ -1,0 +1,33 @@
+diff --git a/build/gulpfile.vscode.win32.ts b/build/gulpfile.vscode.win32.ts
+index 1f0f2d9e..fa94ea23 100644
+--- a/build/gulpfile.vscode.win32.ts
++++ b/build/gulpfile.vscode.win32.ts
+@@ -113,8 +113,12 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
+ 			Quality: quality
+ 		};
+ 
+-		if (quality === 'stable' || quality === 'insider') {
+-			definitions['AppxPackage'] = `${quality === 'stable' ? 'code' : 'code_insider'}_${arch}.appx`;
++		// FriedLiver: the Windows 11 context-menu package (.appx and its DLL) comes from Microsoft's
++		// own release pipeline. Without it in the build, leave it out of the installer.
++		const appxPackage = `${quality === 'stable' ? 'code' : 'code_insider'}_${arch}.appx`;
++		const hasAppx = fs.existsSync(path.join(sourcePath, versionedResourcesFolder, 'appx', appxPackage));
++		if ((quality === 'stable' || quality === 'insider') && hasAppx) {
++			definitions['AppxPackage'] = appxPackage;
+ 			definitions['AppxPackageDll'] = `${quality === 'stable' ? 'code' : 'code_insider'}_explorer_command_${arch}.dll`;
+ 			definitions['AppxPackageName'] = `${product.win32AppUserModelId}`;
+ 			const ctxMenu = (product as { win32ContextMenu?: Record<string, { clsid: string }> }).win32ContextMenu;
+diff --git a/build/linux/dependencies-generator.ts b/build/linux/dependencies-generator.ts
+index 8d886549..9c867c53 100644
+--- a/build/linux/dependencies-generator.ts
++++ b/build/linux/dependencies-generator.ts
+@@ -20,7 +20,8 @@ import product from '../../product.json' with { type: 'json' };
+ // If true, we fail the build if there are new dependencies found during that task.
+ // The reference dependencies, which one has to update when the new dependencies
+ // are valid, are in dep-lists.ts
+-const FAIL_BUILD_FOR_NEW_DEPENDENCIES: boolean = true;
++// FriedLiver: the reference lists match Microsoft's toolchain; a fork's build computes its own and logs the difference.
++const FAIL_BUILD_FOR_NEW_DEPENDENCIES: boolean = false;
+ 
+ // Based on https://source.chromium.org/chromium/chromium/src/+/refs/tags/150.0.7871.250:chrome/installer/linux/BUILD.gn;l=64-80
+ // and the Linux Archive build

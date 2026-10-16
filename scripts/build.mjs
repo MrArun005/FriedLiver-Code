@@ -3,6 +3,7 @@
 //
 //   node code/scripts/build.mjs              # dev build: npm ci + compile + Electron (run with dev.mjs)
 //   node code/scripts/build.mjs --package    # packaged, minified app: <VSCODE_DIR>/../VSCode-<os>-<arch>
+//   node code/scripts/build.mjs --package --installer   # also the installer, into code/installers/
 //   options: --skip-deps (no apt-get), --reinstall (fresh npm ci), --no-compile (install only)
 //
 // Linux: installs the apt packages upstream's build needs if they are missing
@@ -130,6 +131,47 @@ if (args.has('--no-compile')) {
 	process.exit(0);
 }
 
+/**
+ * The installer for this OS, into code/installers/: a per-user setup .exe on Windows (no admin
+ * rights needed), a .dmg on macOS, a .deb on Linux. Unsigned: signing needs certificates.
+ */
+function buildInstaller(arch, appDir) {
+	const version = readJson(path.join(VSCODE_DIR, 'package.json')).version;
+	const dest = path.join(path.dirname(fs.realpathSync(VSCODE_DIR)), 'installers');
+	fs.mkdirSync(dest, { recursive: true });
+	let file;
+	if (process.platform === 'win32') {
+		run('npm', ['run', 'gulp', '--', `vscode-win32-${arch}-inno-updater`], { env });
+		run('npm', ['run', 'gulp', '--', `vscode-win32-${arch}-user-setup`], { env });
+		file = path.join(dest, `FriedLiverUserSetup-${arch}-${version}.exe`);
+		fs.copyFileSync(path.join(VSCODE_DIR, '.build', `win32-${arch}`, 'user-setup', 'VSCodeSetup.exe'), file);
+	} else if (process.platform === 'darwin') {
+		const app = fs.readdirSync(appDir).find(name => name.endsWith('.app'));
+		if (!app) {
+			fail(`no .app in ${appDir}`);
+		}
+		// Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
+		run('codesign', ['--force', '--deep', '--sign', '-', path.join(appDir, app)], { cwd: appDir });
+		file = path.join(dest, `FriedLiver-darwin-${arch}-${version}.dmg`);
+		run('hdiutil', ['create', '-volname', 'FriedLiver', '-srcfolder', path.join(appDir, app), '-ov', '-format', 'UDZO', file], { cwd: appDir });
+	} else if (process.platform === 'linux') {
+		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-prepare-deb`], { env });
+		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-build-deb`], { env });
+		const debDir = fs.readdirSync(path.join(VSCODE_DIR, '.build', 'linux', 'deb'))
+			.map(d => path.join(VSCODE_DIR, '.build', 'linux', 'deb', d, 'deb'))
+			.find(d => fs.existsSync(d));
+		const deb = debDir && fs.readdirSync(debDir).find(name => name.endsWith('.deb'));
+		if (!deb) {
+			fail('the .deb was not produced');
+		}
+		file = path.join(dest, deb);
+		fs.copyFileSync(path.join(debDir, deb), file);
+	} else {
+		fail(`no installer for ${process.platform}`);
+	}
+	log(`installer: ${file}`);
+}
+
 const started = Date.now();
 if (wantPackage) {
 	const arch = process.arch === 'arm' ? 'armhf' : process.arch;
@@ -137,6 +179,9 @@ if (wantPackage) {
 	run('npm', ['run', 'gulp', '--', task], { env });
 	const out = path.join(path.dirname(fs.realpathSync(VSCODE_DIR)), `VSCode-${process.platform}-${arch}`);
 	log(`packaged app: ${out} (${Math.round((Date.now() - started) / 60000)} min)`);
+	if (args.has('--installer')) {
+		buildInstaller(arch, out);
+	}
 } else {
 	run('npm', ['run', 'compile'], { env });
 	run('npm', ['run', 'electron'], { env });
