@@ -996,7 +996,8 @@ function main() {
       } catch {
         // Missing file counts as stale.
       }
-      if (current !== text) {
+      // Git on Windows checks the JSON out with CRLF; only content counts.
+      if (current.replace(/\r\n/g, '\n') !== text) {
         console.error(`stale: themes/${def.file}`);
         stale++;
       }
