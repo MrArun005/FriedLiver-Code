@@ -28,6 +28,8 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
         setSelected(m.selected);
       } else if (m.type === 'action') {
         setState((s) => reduce(s, m.action));
+      } else if (m.type === 'actions') {
+        setState((s) => m.actions.reduce(reduce, s));
       } else if (m.type === 'select') {
         setSelected(m.chatId);
       }
