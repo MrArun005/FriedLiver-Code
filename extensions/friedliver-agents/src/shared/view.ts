@@ -1,0 +1,700 @@
+// Pure helpers for the agent views: search, sorting, badges, the agent map's
+// layout and the @-mention picker. No DOM here, so all of it is unit tested.
+import {
+  AGENT_FACES,
+  AGENT_KEYS,
+  age,
+  boardColumn,
+  bridgeTitle,
+  chatStatus,
+  decisions,
+  fileConflicts,
+  stateLine,
+  type AgentKey,
+  type AppState,
+  type BoardColumn,
+  type BridgeItem,
+  type ChatLink,
+  type ChatStatus,
+  type ChatView,
+  type Decision,
+  type LinkKind,
+  type StateLine,
+} from './model';
+
+export const agentName = (agent: AgentKey) => AGENT_FACES[agent].name;
+
+/** Shortens to `max` characters with an ellipsis. */
+export function clip(text: string, max: number): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+}
+
+/** Plain one-paragraph text from markdown, for excerpts. */
+export function excerpt(text: string, max: number): string {
+  const plain = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[`*_#>]+/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  return clip(plain, max);
+}
+
+/** "3s ago"; nothing yet reads "—". */
+export function ago(at: number, now: number): string {
+  return at > 0 ? `${age(at, now)} ago` : '—';
+}
+
+/**
+ * chatStatus, except that a chat another chat started (a consultation, a
+ * hand-off, a pipe's target) has no message of yours, so chatStatus reads it as
+ * "not started" even after it answered: it is done once the agent has replied.
+ */
+export function statusOf(chat: ChatView): ChatStatus {
+  const status = chatStatus(chat);
+  return status === 'idle' && chat.items.some((i) => i.kind === 'agent') ? 'done' : status;
+}
+
+/** Chats on the board and in the tab strip: archived ones live in History. */
+export function openChats(chats: ChatView[]): ChatView[] {
+  return chats.filter((c) => !c.archived);
+}
+
+// ---- Search and sorting ----
+
+/** Words people use for an agent besides its name. */
+const AGENT_WORDS: Record<AgentKey, string> = {
+  claude: 'claude',
+  codex: 'codex gpt chatgpt openai',
+  gemini: 'gemini google',
+  demo: 'demo',
+};
+
+/** Every word of the query must appear in the title, agent, label or branch. */
+export function matchesQuery(chat: ChatView, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [chat.title, chat.label, AGENT_WORDS[chat.agent], chat.branch ?? ''].join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+export function filterChats(chats: ChatView[], query: string): ChatView[] {
+  return chats.filter((c) => matchesQuery(c, query));
+}
+
+export type SortKey = 'status' | 'agent' | 'task' | 'activity' | 'files' | 'age';
+export interface Sort {
+  key: SortKey;
+  dir: 'asc' | 'desc';
+}
+
+/** Waiting on you first, then failed, working, not started, done. */
+const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, error: 1, working: 2, idle: 3, done: 4 };
+const AGENT_RANK = Object.fromEntries(AGENT_KEYS.map((a, i) => [a, i])) as Record<AgentKey, number>;
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+/** The direction a header click starts with: the useful end first. */
+export function defaultDir(key: SortKey): Sort['dir'] {
+  return key === 'files' ? 'desc' : 'asc';
+}
+
+/**
+ * Sorted copy. Activity and age sort like the "3m" they show: ascending is the
+ * most recent first. Ties fall back to the most recent activity, then the id,
+ * so the order never flickers.
+ */
+export function sortChats(chats: ChatView[], sort: Sort): ChatView[] {
+  const by: Record<SortKey, (a: ChatView, b: ChatView) => number> = {
+    status: (a, b) => STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)],
+    agent: (a, b) => AGENT_RANK[a.agent] - AGENT_RANK[b.agent] || collator.compare(a.label, b.label),
+    task: (a, b) => collator.compare(a.title, b.title),
+    activity: (a, b) => b.lastActivity - a.lastActivity,
+    files: (a, b) => a.files.length - b.files.length,
+    age: (a, b) => b.createdAt - a.createdAt,
+  };
+  const sign = sort.dir === 'asc' ? 1 : -1;
+  return [...chats].sort((a, b) => sign * by[sort.key](a, b) || b.lastActivity - a.lastActivity || collator.compare(a.id, b.id));
+}
+
+export interface Counts {
+  needsYou: number;
+  working: number;
+  done: number;
+  archived: number;
+  decisions: number;
+}
+
+export function counts(state: Pick<AppState, 'chats'>): Counts {
+  const out: Counts = { needsYou: 0, working: 0, done: 0, archived: 0, decisions: 0 };
+  for (const chat of state.chats) {
+    if (chat.archived) {
+      out.archived++;
+      continue;
+    }
+    const col = boardColumn(statusOf(chat));
+    if (col === 'needs-you') out.needsYou++;
+    else if (col === 'working') out.working++;
+    else out.done++;
+  }
+  out.decisions = decisions({ chats: openChats(state.chats) }).length;
+  return out;
+}
+
+/** The decision after `current` (by id), wrapping around; the first when none is current. */
+export function nextDecision(list: Decision[], current?: string): Decision | undefined {
+  if (!list.length) return undefined;
+  const at = list.findIndex((d) => d.id === current);
+  return list[(at + 1) % list.length];
+}
+
+// ---- Cards ----
+
+export interface CardLine extends StateLine {
+  bridge?: BridgeItem;
+  /** Decisions waiting in this chat, the shown one included. */
+  waiting: number;
+}
+
+/** stateLine, plus an agent's request to reach another chat, which it doesn't know. */
+export function cardLine(state: Pick<AppState, 'chats'>, chat: ChatView): CardLine {
+  const all = decisions({ chats: [chat] });
+  const first = all[0];
+  if (first?.kind === 'bridge') {
+    const item = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === first.id);
+    if (item) return { text: bridgeTitle(state, chat, item), code: item.text || undefined, decision: first, bridge: item, waiting: all.length };
+  }
+  const line = stateLine(chat);
+  if (line.text === 'Not started' && statusOf(chat) === 'done') return { text: 'Done', waiting: all.length };
+  return { ...line, waiting: all.length };
+}
+
+export type StepState = 'done' | 'working' | 'next';
+
+export interface Progress {
+  steps: StepState[];
+  done: number;
+  /** 1-based step in progress; 0 when all are done. */
+  current: number;
+  currentText?: string;
+}
+
+/** The latest plan as a segmented bar. */
+export function planProgress(chat: ChatView): Progress | null {
+  const plan = chat.items.findLast((i) => i.kind === 'plan');
+  if (plan?.kind !== 'plan' || !plan.entries.length) return null;
+  const at = plan.entries.findIndex((e) => e.status !== 'completed');
+  return {
+    steps: plan.entries.map((e, i) => (e.status === 'completed' ? 'done' : i === at ? 'working' : 'next')),
+    done: plan.entries.filter((e) => e.status === 'completed').length,
+    current: at + 1,
+    currentText: at >= 0 ? plan.entries[at].content : undefined,
+  };
+}
+
+export interface Badge {
+  kind: 'origin' | LinkKind | 'group';
+  text: string;
+  /** The other chat, to open. */
+  chatId?: string;
+  /** Pipes can be stopped from the badge. */
+  linkId?: string;
+  group?: string;
+}
+
+/** "from Claude 2", "asking Gemini", "pipes to Codex 3", "1 of 3 · compare". */
+export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView): Badge[] {
+  const byId = new Map(state.chats.map((c) => [c.id, c]));
+  const out: Badge[] = [];
+  const parent = chat.origin && byId.get(chat.origin.chatId);
+  if (chat.origin && parent) {
+    out.push({ kind: 'origin', text: `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.label}`, chatId: parent.id });
+  }
+  for (const l of state.links) {
+    if (l.from === chat.id) {
+      const to = byId.get(l.to);
+      if (!to) continue;
+      if (l.kind === 'consult') out.push({ kind: 'consult', text: `${to.busy ? 'asking' : 'asked'} ${to.label}`, chatId: to.id });
+      else if (l.kind === 'handoff') out.push({ kind: 'handoff', text: `handed to ${to.label}`, chatId: to.id });
+      else out.push({ kind: 'pipe', text: l.active ? `pipes to ${to.label}` : `pipe to ${to.label} paused`, chatId: to.id, linkId: l.id });
+    } else if (l.to === chat.id && l.from !== chat.origin?.chatId) {
+      const from = byId.get(l.from);
+      if (!from) continue;
+      if (l.kind === 'pipe') out.push({ kind: 'pipe', text: `piped from ${from.label}`, chatId: from.id, linkId: l.id });
+      else out.push({ kind: 'origin', text: `${l.kind === 'handoff' ? 'from' : 'asked by'} ${from.label}`, chatId: from.id });
+    }
+  }
+  if (chat.group) {
+    const members = groupMembers(state.chats, chat.group);
+    const at = members.findIndex((c) => c.id === chat.id);
+    if (members.length > 1 && at >= 0) out.push({ kind: 'group', text: `${at + 1} of ${members.length} · compare`, group: chat.group });
+  }
+  return out.filter((b, i) => out.findIndex((x) => x.text === b.text) === i);
+}
+
+export interface ChatConflict {
+  file: string;
+  others: ChatView[];
+}
+
+/** Files this chat changed that other open chats changed too. */
+export function conflictsOf(state: Pick<AppState, 'chats'>, chatId: string): ChatConflict[] {
+  const byId = new Map(state.chats.map((c) => [c.id, c]));
+  return fileConflicts(state)
+    .filter((f) => f.chats.includes(chatId))
+    .map((f) => ({ file: f.file, others: f.chats.filter((id) => id !== chatId).flatMap((id) => byId.get(id) ?? []) }));
+}
+
+/** "also in Codex 2: src/format.ts". */
+export function conflictText(c: ChatConflict): string {
+  return `also in ${c.others.map((o) => o.label).join(', ')}: ${c.file}`;
+}
+
+/** A path relative to the chat's folder, with forward slashes, as `files` keeps them. */
+export function relativePath(cwd: string, p: string): string {
+  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+  const dir = norm(cwd);
+  const file = norm(p);
+  return dir && file.toLowerCase().startsWith(`${dir.toLowerCase()}/`) ? file.slice(dir.length + 1) : file;
+}
+
+// ---- Fan-out groups ----
+
+export function groupMembers(chats: ChatView[], group: string): ChatView[] {
+  return chats
+    .filter((c) => c.group === group && !c.archived)
+    .sort((a, b) => a.createdAt - b.createdAt || AGENT_RANK[a.agent] - AGENT_RANK[b.agent] || collator.compare(a.label, b.label));
+}
+
+export interface FanoutGroup {
+  id: string;
+  title: string;
+  chats: ChatView[];
+}
+
+/** The same task on several agents, still open, oldest first. */
+export function fanoutGroups(state: Pick<AppState, 'chats'>): FanoutGroup[] {
+  const ids = [...new Set(state.chats.flatMap((c) => (c.group && !c.archived ? [c.group] : [])))];
+  return ids
+    .map((id) => {
+      const chats = groupMembers(state.chats, id);
+      return { id, title: chats[0]?.title ?? '', chats };
+    })
+    .filter((g) => g.chats.length > 1)
+    .sort((a, b) => a.chats[0].createdAt - b.chats[0].createdAt);
+}
+
+/** "Keep this one": merge it when it has a branch to merge, and put the others away. */
+export function keepPlan(group: FanoutGroup, keepId: string): { merge?: string; archive: string[] } {
+  const keep = group.chats.find((c) => c.id === keepId);
+  return {
+    merge: keep?.branch && !keep.merged ? keep.id : undefined,
+    archive: group.chats.filter((c) => c.id !== keepId).map((c) => c.id),
+  };
+}
+
+// ---- The chat switcher ----
+
+/**
+ * The strip of chat tabs: the `n` most recently active open chats, always with
+ * the open one, shown in the order they were started so tabs don't jump about
+ * while agents stream.
+ */
+export function recentChats(chats: ChatView[], activeId: string | undefined, n: number): ChatView[] {
+  const open = openChats(chats);
+  const recent = [...open].sort((a, b) => b.lastActivity - a.lastActivity || b.createdAt - a.createdAt).slice(0, Math.max(1, n));
+  const active = open.find((c) => c.id === activeId);
+  if (active && !recent.includes(active)) recent[recent.length - 1] = active;
+  return recent.sort((a, b) => a.createdAt - b.createdAt || collator.compare(a.id, b.id));
+}
+
+export interface ChatGroup {
+  column: BoardColumn;
+  title: string;
+  chats: ChatView[];
+}
+
+export const COLUMN_TITLES: Record<BoardColumn, string> = { 'needs-you': 'Needs you', working: 'Working', done: 'Done' };
+
+/** Open chats matching the query, by where they stand, most recent first. */
+export function switcherGroups(chats: ChatView[], query: string): ChatGroup[] {
+  const shown = sortChats(filterChats(openChats(chats), query), { key: 'activity', dir: 'asc' });
+  return (['needs-you', 'working', 'done'] as const)
+    .map((column) => ({ column, title: COLUMN_TITLES[column], chats: shown.filter((c) => boardColumn(statusOf(c)) === column) }))
+    .filter((g) => g.chats.length > 0);
+}
+
+// ---- @-mentions ----
+
+export interface MentionOption {
+  agent: AgentKey;
+  /** What the picker shows. */
+  name: string;
+  /** What it inserts after the @. */
+  insert: string;
+  /** Every word that picks it, as parseMention reads them. */
+  words: string[];
+}
+
+export const MENTION_OPTIONS: MentionOption[] = [
+  { agent: 'claude', name: 'Claude', insert: 'claude', words: ['claude'] },
+  { agent: 'codex', name: 'GPT (Codex)', insert: 'gpt', words: ['gpt', 'codex', 'chatgpt', 'openai'] },
+  { agent: 'gemini', name: 'Gemini', insert: 'gemini', words: ['gemini', 'google'] },
+  { agent: 'demo', name: 'Demo', insert: 'demo', words: ['demo'] },
+];
+
+/**
+ * The word typed after an @ at the very start of the message, while the caret
+ * is in it; null when the picker should stay shut.
+ */
+export function mentionQuery(text: string, caret: number): string | null {
+  const m = text.match(/^(\s*)@([a-z]*)/i);
+  if (!m) return null;
+  const start = m[1].length + 1;
+  return caret >= start && caret <= m[0].length ? m[2].toLowerCase() : null;
+}
+
+export function mentionOptions(query: string): MentionOption[] {
+  const q = query.toLowerCase();
+  return MENTION_OPTIONS.filter((o) => o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q));
+}
+
+/** Replaces the leading @word with the option's, followed by one space. */
+export function applyMention(text: string, option: MentionOption): { text: string; caret: number } {
+  const rest = text.replace(/^\s*@[a-z]*[\s,:]*/i, '');
+  const head = `@${option.insert} `;
+  return { text: head + rest, caret: head.length };
+}
+
+/** The agent a leading @word names, even before the question is typed. */
+export function mentionedAgent(text: string): AgentKey | null {
+  const m = text.match(/^\s*@([a-z]+)(?![a-z])/i);
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  return MENTION_OPTIONS.find((o) => o.words.includes(word))?.agent ?? null;
+}
+
+// ---- The agent map ----
+
+/** Sizes in CSS pixels; the map scrolls rather than zooms. */
+export const MAP = {
+  pad: 16,
+  youW: 84,
+  youH: 30,
+  trunkX: 58,
+  laneX: 84,
+  col0: 188,
+  nodeW: 232,
+  nodeH: 40,
+  gutter: 84,
+  row: 50,
+  laneHead: 30,
+  lanePad: 10,
+  laneGap: 10,
+  fileW: 188,
+  fileH: 40,
+  maxCol: 4,
+} as const;
+
+export interface MapNode {
+  chat: ChatView;
+  status: ChatStatus;
+  lane: AgentKey;
+  col: number;
+  x: number;
+  y: number;
+  /** Center line, where edges attach. */
+  cy: number;
+  title: string;
+}
+
+export interface MapLane {
+  agent: AgentKey;
+  y: number;
+  h: number;
+  chats: number;
+  working: number;
+  needsYou: number;
+}
+
+export interface MapEdge {
+  id: string;
+  kind: LinkKind;
+  from: string;
+  to: string;
+  d: string;
+  label: string;
+  lx: number;
+  ly: number;
+  /** Messages are moving: a live pipe, or a consultant still answering. */
+  flowing: boolean;
+  by: ChatLink['by'];
+}
+
+export interface MapGroup {
+  id: string;
+  x: number;
+  y1: number;
+  y2: number;
+  /** Where the line from You joins the bracket. */
+  joinY: number;
+  members: number[];
+  size: number;
+}
+
+export interface MapConflict {
+  file: string;
+  chats: string[];
+  x: number;
+  y: number;
+  /** One line per chat that changed the file. */
+  lines: string[];
+}
+
+export interface MapColumn {
+  x: number;
+  title: string;
+}
+
+export interface MapLayout {
+  width: number;
+  height: number;
+  you: { x: number; y: number };
+  /** The line down from You and its branches to the chats you started. */
+  trunk: { x: number; y1: number; y2: number };
+  starts: string[];
+  columns: MapColumn[];
+  lanes: MapLane[];
+  nodes: MapNode[];
+  edges: MapEdge[];
+  groups: MapGroup[];
+  conflicts: MapConflict[];
+}
+
+const COLUMN_TITLES_MAP = ['Started by you', '1 link away', '2 links away', '3 links away', '4 links away'];
+
+/**
+ * Where everything on the agent map goes. Lanes run across, one per agent;
+ * columns count links from a chat you started. Every chat has a row of its own,
+ * so an edge can run along its source's row and turn only in the gutter before
+ * its target's column: no line ever crosses a node. Deterministic: the same
+ * state draws the same map.
+ */
+export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
+  const M = MAP;
+  const chats = openChats(state.chats);
+  const byId = new Map(chats.map((c) => [c.id, c]));
+
+  // Columns: hops along `origin` back to a chat the user started.
+  const cols = new Map<string, number>();
+  const colOf = (c: ChatView, seen: Set<string> = new Set()): number => {
+    const known = cols.get(c.id);
+    if (known !== undefined) return known;
+    const parent = c.origin ? byId.get(c.origin.chatId) : undefined;
+    seen.add(c.id);
+    const col = parent && !seen.has(parent.id) ? Math.min(colOf(parent, seen) + 1, M.maxCol) : 0;
+    cols.set(c.id, col);
+    return col;
+  };
+  const rootOf = (c: ChatView): ChatView => {
+    const seen = new Set<string>();
+    let cur = c;
+    while (cur.origin && byId.has(cur.origin.chatId) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = byId.get(cur.origin.chatId)!;
+    }
+    return cur;
+  };
+  // Rows in a lane follow the flows they belong to, so related chats sit at like heights.
+  const groupStart = new Map<string, number>();
+  for (const c of chats) if (c.group) groupStart.set(c.group, Math.min(groupStart.get(c.group) ?? Infinity, c.createdAt));
+  const flow = (c: ChatView): [number, string] => {
+    const r = rootOf(c);
+    return r.group ? [groupStart.get(r.group)!, r.group] : [r.createdAt, r.id];
+  };
+  const order = (a: ChatView, b: ChatView) => {
+    const [fa, ka] = flow(a);
+    const [fb, kb] = flow(b);
+    return fa - fb || collator.compare(ka, kb) || colOf(a) - colOf(b) || a.createdAt - b.createdAt || collator.compare(a.id, b.id);
+  };
+
+  const maxCol = chats.reduce((m, c) => Math.max(m, colOf(c)), 0);
+  const colX = (col: number) => M.col0 + col * (M.nodeW + M.gutter);
+  const nodesRight = colX(maxCol) + M.nodeW;
+
+  const lanes: MapLane[] = [];
+  const nodes: MapNode[] = [];
+  let y = M.pad + M.youH + 18;
+  for (const agent of AGENT_KEYS) {
+    const inLane = chats.filter((c) => c.agent === agent).sort(order);
+    if (!inLane.length) continue;
+    const top = y;
+    inLane.forEach((chat, r) => {
+      const ny = top + M.laneHead + r * M.row;
+      nodes.push({ chat, status: statusOf(chat), lane: agent, col: colOf(chat), x: colX(colOf(chat)), y: ny, cy: ny + M.nodeH / 2, title: clip(chat.title, 27) });
+    });
+    const h = M.laneHead + (inLane.length - 1) * M.row + M.nodeH + M.lanePad;
+    const statuses = inLane.map((c) => boardColumn(statusOf(c)));
+    lanes.push({ agent, y: top, h, chats: inLane.length, working: statuses.filter((s) => s === 'working').length, needsYou: statuses.filter((s) => s === 'needs-you').length });
+    y = top + h + M.laneGap;
+  }
+  const node = new Map(nodes.map((n) => [n.chat.id, n]));
+
+  // Links, plus an edge for any origin whose link is gone, so no chat floats.
+  const links: ChatLink[] = state.links.filter((l) => node.has(l.from) && node.has(l.to) && l.from !== l.to);
+  for (const c of chats) {
+    if (c.origin && node.has(c.origin.chatId) && !links.some((l) => l.from === c.origin!.chatId && l.to === c.id)) {
+      links.push({ id: `origin:${c.id}`, kind: c.origin.kind, from: c.origin.chatId, to: c.id, by: c.origin.by, createdAt: c.createdAt, active: true, count: 0 });
+    }
+  }
+
+  // Shared files go in a column of their own, near the chats that changed them.
+  const conflictList = fileConflicts({ chats }).filter((f) => f.chats.every((id) => node.has(id)));
+  const filesX = nodesRight + M.gutter;
+  const placed: { file: string; chats: string[]; y: number }[] = [];
+  const firstRow = nodes.length ? Math.min(...nodes.map((n) => n.y)) : y;
+  for (const f of conflictList
+    .map((f) => ({ ...f, want: f.chats.reduce((s, id) => s + node.get(id)!.cy, 0) / f.chats.length - M.fileH / 2 }))
+    .sort((a, b) => a.want - b.want || collator.compare(a.file, b.file))) {
+    const prev = placed.at(-1);
+    placed.push({ file: f.file, chats: f.chats, y: Math.max(f.want, firstRow, prev ? prev.y + M.fileH + 10 : -Infinity) });
+  }
+
+  // Ports: edges meeting one side of a node spread out, in the order of their other ends.
+  type Side = 'l' | 'r';
+  const ends = new Map<string, { id: string; other: number }[]>();
+  const attach = (key: string, id: string, other: number) => ends.set(key, [...(ends.get(key) ?? []), { id, other }]);
+  const routes = links.map((l) => {
+    const a = node.get(l.from)!;
+    const b = node.get(l.to)!;
+    const shape = b.col > a.col ? 'forward' : b.col === a.col ? 'loop' : 'back';
+    const fromSide: Side = shape === 'back' ? 'l' : 'r';
+    const toSide: Side = shape === 'forward' ? 'l' : 'r';
+    attach(`${a.chat.id}:${fromSide}`, l.id, b.cy);
+    attach(`${b.chat.id}:${toSide}`, l.id, a.cy);
+    return { l, a, b, shape, fromSide, toSide };
+  });
+  const conflictLines = placed.flatMap((f, fi) => f.chats.map((id) => ({ id: `file:${fi}:${id}`, chat: id, fi })));
+  for (const c of conflictLines) {
+    attach(`${c.chat}:r`, c.id, placed[c.fi].y + M.fileH / 2);
+    attach(`file:${c.fi}`, c.id, node.get(c.chat)!.cy);
+  }
+  const port = (key: string, id: string) => {
+    const list = [...(ends.get(key) ?? [])].sort((p, q) => p.other - q.other || collator.compare(p.id, q.id));
+    const at = list.findIndex((p) => p.id === id);
+    const step = Math.min(7, 26 / Math.max(1, list.length - 1));
+    return (at - (list.length - 1) / 2) * step;
+  };
+
+  const r = (n: number) => Math.round(n * 10) / 10;
+  const curve = (x0: number, y0: number, x1: number, y1: number) => {
+    const m = (x0 + x1) / 2;
+    return `C ${r(m)} ${r(y0)}, ${r(m)} ${r(y1)}, ${r(x1)} ${r(y1)}`;
+  };
+
+  const loops = new Map<number, number>();
+  const edges: MapEdge[] = routes.map(({ l, a, b, shape, fromSide, toSide }) => {
+    const ys = a.cy + port(`${a.chat.id}:${fromSide}`, l.id);
+    const yt = b.cy + port(`${b.chat.id}:${toSide}`, l.id);
+    let d: string;
+    let lx: number;
+    if (shape === 'forward') {
+      // Along the source's own row, then turn in the gutter before the target.
+      const xs = a.x + M.nodeW;
+      const gx = b.x - M.gutter;
+      d = `M ${r(xs)} ${r(ys)} ${gx > xs ? `L ${r(gx)} ${r(ys)} ` : ''}${curve(gx, ys, b.x, yt)}`;
+      lx = (gx + b.x) / 2;
+    } else if (shape === 'back') {
+      const xs = a.x;
+      const gx = b.x + M.nodeW + M.gutter;
+      d = `M ${r(xs)} ${r(ys)} ${xs > gx ? `L ${r(gx)} ${r(ys)} ` : ''}${curve(gx, ys, b.x + M.nodeW, yt)}`;
+      lx = (gx + b.x + M.nodeW) / 2;
+    } else {
+      // Same column: a loop out into the gutter on the right.
+      const n = loops.get(a.col) ?? 0;
+      loops.set(a.col, n + 1);
+      const xs = a.x + M.nodeW;
+      const k = Math.min(M.gutter - 14, 30 + n * 10);
+      d = `M ${r(xs)} ${r(ys)} C ${r(xs + k)} ${r(ys)}, ${r(xs + k)} ${r(yt)}, ${r(xs)} ${r(yt)}`;
+      lx = xs + k * 0.75;
+    }
+    const kind = l.kind === 'handoff' ? 'hand-off' : l.kind === 'consult' ? 'asks' : l.active ? 'pipe' : 'pipe · paused';
+    const verb = l.by === 'agent' ? `agent ${kind}` : kind;
+    return {
+      id: l.id,
+      kind: l.kind,
+      from: l.from,
+      to: l.to,
+      d,
+      label: l.count > 0 ? `${verb} · ${l.count}` : verb,
+      lx,
+      ly: (ys + yt) / 2,
+      flowing: l.kind === 'pipe' ? l.active : l.kind === 'consult' && b.chat.busy,
+      by: l.by,
+    };
+  });
+  // Labels that would overlap step down until they don't.
+  const labels: MapEdge[] = [];
+  for (const e of [...edges].sort((p, q) => p.lx - q.lx || p.ly - q.ly)) {
+    while (labels.some((o) => Math.abs(o.lx - e.lx) < 64 && Math.abs(o.ly - e.ly) < 18)) e.ly += 18;
+    labels.push(e);
+  }
+
+  const conflicts: MapConflict[] = placed.map((f, fi) => {
+    const cy = f.y + M.fileH / 2;
+    return {
+      file: f.file,
+      chats: f.chats,
+      x: filesX,
+      y: f.y,
+      lines: f.chats.map((id) => {
+        const n = node.get(id)!;
+        const lineId = `file:${fi}:${id}`;
+        const ys = n.cy + port(`${id}:r`, lineId);
+        const yt = cy + port(`file:${fi}`, lineId);
+        const xs = n.x + M.nodeW;
+        const gx = filesX - M.gutter;
+        return `M ${r(xs)} ${r(ys)} ${gx > xs ? `L ${r(gx)} ${r(ys)} ` : ''}${curve(gx, ys, filesX, yt)}`;
+      }),
+    };
+  });
+
+  // Fan-out: one branch from You splits into the chats that got the same task.
+  const groupIds = [...new Set(nodes.flatMap((n) => (n.chat.group && n.col === 0 ? [n.chat.group] : [])))]
+    .map((id) => ({ id, members: nodes.filter((n) => n.chat.group === id && n.col === 0) }))
+    .filter((g) => g.members.length > 1)
+    .sort((p, q) => (groupStart.get(p.id) ?? 0) - (groupStart.get(q.id) ?? 0) || collator.compare(p.id, q.id));
+  const grouped = new Set(groupIds.flatMap((g) => g.members.map((n) => n.chat.id)));
+  const gaps = nodes.flatMap((n) => [n.y - (M.row - M.nodeH) / 2, n.y + M.nodeH + (M.row - M.nodeH) / 2]);
+  const groups: MapGroup[] = groupIds.map((g, gi) => {
+    const ys = g.members.map((n) => n.cy).sort((p, q) => p - q);
+    const y1 = ys[0];
+    const y2 = ys.at(-1)!;
+    const mid = (y1 + y2) / 2;
+    // Join between rows, so the branch never reads as one more chat's line.
+    const joinY = gaps.filter((v) => v > y1 && v < y2).sort((p, q) => Math.abs(p - mid) - Math.abs(q - mid) || p - q)[0] ?? mid;
+    return { id: g.id, x: M.col0 - 26 - gi * 12, y1, y2, joinY, members: ys, size: g.members.length };
+  });
+
+  const starts = [
+    ...nodes.filter((n) => n.col === 0 && !grouped.has(n.chat.id)).map((n) => `M ${M.trunkX} ${r(n.cy)} H ${M.col0}`),
+    ...groups.flatMap((g) => [`M ${M.trunkX} ${r(g.joinY)} H ${g.x}`, ...g.members.map((my) => `M ${g.x} ${r(my)} H ${M.col0}`)]),
+  ];
+  const branchYs = [...nodes.filter((n) => n.col === 0 && !grouped.has(n.chat.id)).map((n) => n.cy), ...groups.map((g) => g.joinY)];
+
+  const columns: MapColumn[] = Array.from({ length: maxCol + 1 }, (_, c) => ({ x: colX(c), title: COLUMN_TITLES_MAP[c] }));
+  if (placed.length) columns.push({ x: filesX, title: 'Shared files' });
+
+  const contentBottom = Math.max(y - M.laneGap, ...placed.map((f) => f.y + M.fileH));
+  return {
+    width: (placed.length ? filesX + M.fileW : nodesRight + 40) + M.pad,
+    height: contentBottom + M.pad,
+    you: { x: M.pad, y: M.pad },
+    trunk: { x: M.trunkX, y1: M.pad + M.youH, y2: branchYs.length ? Math.max(...branchYs) : M.pad + M.youH },
+    starts,
+    columns,
+    lanes,
+    nodes,
+    edges,
+    groups,
+    conflicts,
+  };
+}

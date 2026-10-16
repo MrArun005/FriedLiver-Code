@@ -1,0 +1,311 @@
+import { describe, expect, it } from 'vitest';
+import { parseMention, type AppState, type ChatLink, type ChatView, type Item } from '../src/shared/model';
+import {
+  MAP,
+  MENTION_OPTIONS,
+  applyMention,
+  cardLine,
+  clip,
+  conflictText,
+  conflictsOf,
+  counts,
+  excerpt,
+  fanoutGroups,
+  filterChats,
+  keepPlan,
+  linkBadges,
+  mapLayout,
+  mentionOptions,
+  mentionQuery,
+  mentionedAgent,
+  nextDecision,
+  planProgress,
+  recentChats,
+  relativePath,
+  sortChats,
+  statusOf,
+  switcherGroups,
+} from '../src/shared/view';
+
+const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
+  id,
+  agent: 'claude',
+  label: 'Claude',
+  title: 'New chat',
+  cwd: '/w',
+  createdAt: 0,
+  busy: false,
+  changedFiles: 0,
+  items: [],
+  depth: 0,
+  files: [],
+  lastActivity: 0,
+  turns: 0,
+  ...over,
+});
+const link = (over: Partial<ChatLink> = {}): ChatLink => ({ id: 'link-1', kind: 'consult', from: 'a', to: 'b', by: 'user', createdAt: 0, active: true, count: 0, ...over });
+const said: Item = { kind: 'user', text: 'go', images: [] };
+const waiting: Item = { kind: 'command', commandId: 'cmd-1', commandLine: 'npm test', cwd: '/w', outside: false, state: 'awaiting', output: '' };
+const state = (chats: ChatView[], links: ChatLink[] = []): AppState => ({ chats, links, images: [] });
+
+describe('search and sorting', () => {
+  const chats = [
+    chat('a', { title: 'Fix formatCents', label: 'Claude 1', lastActivity: 5, createdAt: 1 }),
+    chat('b', { agent: 'codex', label: 'Codex 1', title: 'Add tests', branch: 'codex/add-tests', lastActivity: 9, createdAt: 2, files: ['a', 'b'] }),
+    chat('c', { agent: 'gemini', label: 'Gemini 1', title: 'Document the API', busy: true, items: [said], lastActivity: 7, createdAt: 3, files: ['a'] }),
+    chat('d', { label: 'Claude 10', title: 'Review', items: [said, waiting], lastActivity: 1, createdAt: 4 }),
+    chat('e', { label: 'Claude 2', title: 'Zebra', items: [said], lastActivity: 3, createdAt: 5 }),
+  ];
+
+  it('matches every word against title, agent, label and branch', () => {
+    expect(filterChats(chats, 'add-tests').map((c) => c.id)).toEqual(['b']);
+    expect(filterChats(chats, 'GPT').map((c) => c.id)).toEqual(['b']);
+    expect(filterChats(chats, 'claude fix').map((c) => c.id)).toEqual(['a']);
+    expect(filterChats(chats, '  ').length).toBe(5);
+    expect(filterChats(chats, 'nothing')).toEqual([]);
+  });
+
+  it('sorts by status, agent (numbered labels in order), task, activity, files and age', () => {
+    const ids = (key: Parameters<typeof sortChats>[1]['key'], dir: 'asc' | 'desc' = 'asc') => sortChats(chats, { key, dir }).map((c) => c.id);
+    expect(ids('status')[0]).toBe('d');
+    expect(ids('status')[1]).toBe('c');
+    expect(ids('agent')).toEqual(['a', 'e', 'd', 'b', 'c']);
+    expect(ids('task')).toEqual(['b', 'c', 'a', 'd', 'e']);
+    expect(ids('activity')).toEqual(['b', 'c', 'a', 'e', 'd']);
+    expect(ids('files', 'desc').slice(0, 2)).toEqual(['b', 'c']);
+    expect(ids('age')).toEqual(['e', 'd', 'c', 'b', 'a']);
+    expect(ids('age', 'desc')).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('counts the columns, archived chats and decisions', () => {
+    expect(counts(state([...chats, chat('x', { archived: true, items: [said, waiting] })]))).toEqual({ needsYou: 1, working: 1, done: 3, archived: 1, decisions: 1 });
+  });
+
+  it('steps through decisions and wraps around', () => {
+    const list = [
+      { chatId: 'a', kind: 'command' as const, id: '1', title: '' },
+      { chatId: 'b', kind: 'review' as const, id: '2', title: '' },
+    ];
+    expect(nextDecision(list)?.id).toBe('1');
+    expect(nextDecision(list, '1')?.id).toBe('2');
+    expect(nextDecision(list, '2')?.id).toBe('1');
+    expect(nextDecision([], '1')).toBeUndefined();
+  });
+});
+
+describe('cards', () => {
+  it('reads an agent asking to reach another agent as a decision with its request', () => {
+    const c = chat('a', { label: 'Claude 2', items: [said, { kind: 'bridge', requestId: 'br-1', tool: 'ask_agent', target: { agent: 'gemini' }, text: 'Is this safe?', state: 'awaiting' }, waiting] });
+    const line = cardLine(state([c]), c);
+    expect(line).toMatchObject({ text: 'Claude 2 wants to ask Gemini', code: 'Is this safe?', waiting: 2 });
+    expect(line.decision?.kind).toBe('bridge');
+    expect(cardLine(state([chat('b', { busy: true, items: [said] })]), chat('b', { busy: true, items: [said] })).text).toBe('Working…');
+  });
+
+  it('reads a consultation that answered as done, not as not started', () => {
+    const consulted = chat('g', {
+      items: [{ kind: 'link', linkId: 'l', role: 'consulted', chatId: 'a', agent: 'claude', label: 'Claude 1', text: 'Is it safe?', by: 'user' }, { kind: 'agent', text: 'Yes.' }],
+    });
+    expect(statusOf(consulted)).toBe('done');
+    expect(cardLine(state([consulted]), consulted).text).toBe('Done');
+    expect(statusOf(chat('n'))).toBe('idle');
+  });
+
+  it('turns the latest plan into steps', () => {
+    const c = chat('a', {
+      items: [
+        { kind: 'plan', entries: [{ content: 'old', status: 'pending' }] },
+        {
+          kind: 'plan',
+          entries: [
+            { content: 'Read', status: 'completed' },
+            { content: 'Edit', status: 'in_progress' },
+            { content: 'Test', status: 'pending' },
+          ],
+        },
+      ],
+    });
+    expect(planProgress(c)).toEqual({ steps: ['done', 'working', 'next'], done: 1, current: 2, currentText: 'Edit' });
+    expect(planProgress(chat('b'))).toBeNull();
+  });
+
+  it('names links from the point of view of each chat', () => {
+    const s = state(
+      [
+        chat('a', { label: 'Claude 2' }),
+        chat('b', { agent: 'gemini', label: 'Gemini 1', busy: true, origin: { kind: 'consult', chatId: 'a', by: 'agent' } }),
+        chat('c', { agent: 'codex', label: 'Codex 3', origin: { kind: 'handoff', chatId: 'a', by: 'user' } }),
+        chat('d', { agent: 'codex', label: 'Codex 4', group: 'g', createdAt: 1 }),
+        chat('e', { agent: 'gemini', label: 'Gemini 2', group: 'g', createdAt: 2 }),
+      ],
+      [link({ id: 'l1', from: 'a', to: 'b' }), link({ id: 'l2', kind: 'handoff', from: 'a', to: 'c' }), link({ id: 'l3', kind: 'pipe', from: 'c', to: 'd', active: true })],
+    );
+    const texts = (id: string) => linkBadges(s, s.chats.find((c) => c.id === id)!).map((b) => b.text);
+    expect(texts('a')).toEqual(['asking Gemini 1', 'handed to Codex 3']);
+    expect(texts('b')).toEqual(['asked by Claude 2']);
+    expect(texts('c')).toEqual(['from Claude 2', 'pipes to Codex 4']);
+    expect(texts('d')).toEqual(['piped from Codex 3', '1 of 2 · compare']);
+    expect(linkBadges(s, s.chats[3]).find((b) => b.kind === 'pipe')?.linkId).toBe('l3');
+  });
+
+  it('lists the other chats that changed the same file, and matches review paths to them', () => {
+    const s = state([chat('a', { label: 'Claude 1', files: ['src/format.ts', 'a.ts'] }), chat('b', { label: 'Codex 2', files: ['src/format.ts'] }), chat('c', { files: ['a.ts'], merged: true })]);
+    const mine = conflictsOf(s, 'a');
+    expect(mine.map(conflictText)).toEqual(['also in Codex 2: src/format.ts']);
+    expect(conflictsOf(s, 'c')).toEqual([]);
+    expect(relativePath('/w/', '/w/src/format.ts')).toBe('src/format.ts');
+    expect(relativePath('C:\\w', 'c:\\w\\src\\x.ts')).toBe('src/x.ts');
+    expect(relativePath('/w', '/other/x.ts')).toBe('/other/x.ts');
+  });
+});
+
+describe('fan-out groups', () => {
+  it('compares open groups of two or more and keeps one', () => {
+    const s = state([
+      chat('a', { group: 'g', createdAt: 2, branch: 'claude/x' }),
+      chat('b', { group: 'g', createdAt: 1 }),
+      chat('c', { group: 'g', archived: true }),
+      chat('d', { group: 'h' }),
+    ]);
+    const groups = fanoutGroups(s);
+    expect(groups.map((g) => g.chats.map((c) => c.id))).toEqual([['b', 'a']]);
+    expect(keepPlan(groups[0], 'a')).toEqual({ merge: 'a', archive: ['b'] });
+    expect(keepPlan(groups[0], 'b')).toEqual({ merge: undefined, archive: ['a'] });
+  });
+});
+
+describe('the chat switcher', () => {
+  const chats = Array.from({ length: 8 }, (_, i) => chat(`c${i}`, { createdAt: i, lastActivity: i * 10, items: i % 3 === 0 ? [said, waiting] : [said], busy: i % 3 === 1 }));
+  it('shows the most recent chats in start order, always with the open one', () => {
+    expect(recentChats(chats, 'c7', 3).map((c) => c.id)).toEqual(['c5', 'c6', 'c7']);
+    expect(recentChats(chats, 'c0', 3).map((c) => c.id)).toEqual(['c0', 'c6', 'c7']);
+    expect(recentChats([...chats, chat('z', { archived: true, lastActivity: 999 })], undefined, 2).map((c) => c.id)).toEqual(['c6', 'c7']);
+  });
+
+  it('groups chats by where they stand, most recent first', () => {
+    const groups = switcherGroups(chats, '');
+    expect(groups.map((g) => g.title)).toEqual(['Needs you', 'Working', 'Done']);
+    expect(groups[0].chats.map((c) => c.id)).toEqual(['c6', 'c3', 'c0']);
+    expect(switcherGroups(chats, 'nothing')).toEqual([]);
+  });
+});
+
+describe('@-mentions', () => {
+  it('opens only for an @ at the very start while the caret is in the word', () => {
+    expect(mentionQuery('@', 1)).toBe('');
+    expect(mentionQuery('@Gem', 4)).toBe('gem');
+    expect(mentionQuery('  @ge', 5)).toBe('ge');
+    expect(mentionQuery('@gemini review', 14)).toBeNull();
+    expect(mentionQuery('hi @gemini', 10)).toBeNull();
+    expect(mentionQuery('@ge', 0)).toBeNull();
+  });
+
+  it('filters agents by any of their names', () => {
+    expect(mentionOptions('').map((o) => o.agent)).toEqual(['claude', 'codex', 'gemini', 'demo']);
+    expect(mentionOptions('g').map((o) => o.agent)).toEqual(['codex', 'gemini']);
+    expect(mentionOptions('open').map((o) => o.agent)).toEqual(['codex']);
+    expect(mentionOptions('xyz')).toEqual([]);
+  });
+
+  it('inserts the mention, keeps the rest, and agrees with parseMention', () => {
+    const gemini = MENTION_OPTIONS.find((o) => o.agent === 'gemini')!;
+    expect(applyMention('@ge', gemini)).toEqual({ text: '@gemini ', caret: 8 });
+    expect(applyMention('@g, check this', gemini)).toEqual({ text: '@gemini check this', caret: 8 });
+    expect(mentionedAgent('@gpt')).toBe('codex');
+    expect(mentionedAgent('@gp')).toBeNull();
+    expect(mentionedAgent('hi @gpt')).toBeNull();
+    for (const o of MENTION_OPTIONS) for (const w of o.words) expect(parseMention(`@${w} hi`)?.agent).toBe(o.agent);
+  });
+});
+
+describe('the agent map', () => {
+  const s = state(
+    [
+      chat('c1', { label: 'Claude 1', createdAt: 1, busy: true, items: [said], files: ['src/format.ts'] }),
+      chat('c2', { label: 'Claude 2', createdAt: 2, group: 'g' }),
+      chat('x1', { agent: 'codex', label: 'Codex 1', createdAt: 3, group: 'g', files: ['src/format.ts'] }),
+      chat('g1', { agent: 'gemini', label: 'Gemini 1', createdAt: 4, group: 'g' }),
+      chat('g2', { agent: 'gemini', label: 'Gemini 2', createdAt: 5, busy: true, origin: { kind: 'consult', chatId: 'c1', by: 'agent' } }),
+      chat('x2', { agent: 'codex', label: 'Codex 2', createdAt: 6, origin: { kind: 'handoff', chatId: 'g2', by: 'user' } }),
+      chat('c3', { label: 'Claude 3', createdAt: 7 }),
+      chat('old', { label: 'Claude 4', archived: true, origin: { kind: 'handoff', chatId: 'c1', by: 'user' } }),
+    ],
+    [link({ id: 'k', from: 'c1', to: 'g2' }), link({ id: 'p', kind: 'pipe', from: 'c3', to: 'c1', count: 4 }), link({ id: 'gone', from: 'c1', to: 'old' })],
+  );
+  const map = mapLayout(s);
+  const at = (id: string) => map.nodes.find((n) => n.chat.id === id)!;
+
+  it('puts open chats in agent lanes and link columns, one row each', () => {
+    expect(map.nodes.map((n) => n.chat.id).sort()).toEqual(['c1', 'c2', 'c3', 'g1', 'g2', 'x1', 'x2']);
+    expect(map.lanes.map((l) => [l.agent, l.chats, l.working])).toEqual([
+      ['claude', 3, 1],
+      ['codex', 2, 0],
+      ['gemini', 2, 1],
+    ]);
+    expect([at('c1').col, at('g2').col, at('x2').col, at('c3').col]).toEqual([0, 1, 2, 0]);
+    expect(new Set(map.nodes.map((n) => n.y)).size).toBe(map.nodes.length);
+    for (const n of map.nodes) {
+      const lane = map.lanes.find((l) => l.agent === n.lane)!;
+      expect(n.y).toBeGreaterThanOrEqual(lane.y);
+      expect(n.y + MAP.nodeH).toBeLessThanOrEqual(lane.y + lane.h);
+    }
+    expect(map.columns.map((c) => c.title)).toEqual(['Started by you', '1 link away', '2 links away', 'Shared files']);
+  });
+
+  it('draws links between open chats, plus a missing origin link', () => {
+    expect(map.edges.map((e) => [e.id, e.kind, e.flowing]).sort()).toEqual([
+      ['k', 'consult', true],
+      ['origin:x2', 'handoff', false],
+      ['p', 'pipe', true],
+    ]);
+    expect(map.edges.find((e) => e.id === 'p')!.label).toBe('pipe · 4');
+    // Forward edges leave the source's right side and enter the target's left side.
+    const k = map.edges.find((e) => e.id === 'k')!;
+    expect(k.d.startsWith(`M ${at('c1').x + MAP.nodeW} `)).toBe(true);
+    expect(k.d.endsWith(`${at('g2').x} ${at('g2').cy}`)).toBe(true);
+  });
+
+  it('brackets the fan-out group and branches You to every chat you started', () => {
+    expect(map.groups).toHaveLength(1);
+    const g = map.groups[0];
+    expect(g.size).toBe(3);
+    expect(g.members).toEqual([at('c2').cy, at('x1').cy, at('g1').cy].sort((a, b) => a - b));
+    expect(map.nodes.some((n) => n.cy === g.joinY)).toBe(false);
+    // c1 and c3 directly, the group through its bracket (one branch plus three ticks).
+    expect(map.starts).toHaveLength(2 + 1 + 3);
+    expect(map.trunk.y2).toBeGreaterThan(map.trunk.y1);
+  });
+
+  it('adds a shared-file node to the right of every chat that touched it', () => {
+    expect(map.conflicts).toHaveLength(1);
+    const f = map.conflicts[0];
+    expect(f).toMatchObject({ file: 'src/format.ts', chats: ['c1', 'x1'] });
+    expect(f.lines).toHaveLength(2);
+    expect(Math.min(...map.nodes.map((n) => f.x - n.x))).toBeGreaterThan(MAP.nodeW);
+    expect(map.width).toBeGreaterThanOrEqual(f.x + MAP.fileW);
+    expect(map.height).toBeGreaterThan(Math.max(...map.nodes.map((n) => n.y + MAP.nodeH)));
+  });
+
+  it('is deterministic and handles an empty state', () => {
+    expect(mapLayout(s)).toEqual(map);
+    const empty = mapLayout(state([]));
+    expect(empty.nodes).toEqual([]);
+    expect(empty.width).toBeGreaterThan(0);
+  });
+
+  it('keeps twenty chats in their lanes without overlap', () => {
+    const many = state(Array.from({ length: 20 }, (_, i) => chat(`n${i}`, { agent: (['claude', 'codex', 'gemini', 'demo'] as const)[i % 4], createdAt: i })));
+    const m = mapLayout(many);
+    const sorted = [...m.nodes].sort((a, b) => a.y - b.y);
+    for (let i = 1; i < sorted.length; i++) expect(sorted[i].y - sorted[i - 1].y).toBeGreaterThanOrEqual(MAP.nodeH);
+    expect(m.lanes).toHaveLength(4);
+  });
+});
+
+describe('text', () => {
+  it('clips and strips markdown for excerpts', () => {
+    expect(clip('  a   b  ', 10)).toBe('a b');
+    expect(clip('abcdefghij', 5)).toBe('abcd…');
+    expect(excerpt('**Done.** See [the docs](http://x) and `x`.\n```\ncode\n```', 80)).toBe('Done. See the docs and x.');
+  });
+});
