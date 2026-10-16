@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 const dir = path.resolve(__dirname, '..', '.github', 'workflows');
 const workflows = fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
-const read = (f: string) => fs.readFileSync(path.join(dir, f), 'utf8');
+// Windows checkouts may turn LF into CRLF; the checks are about content.
+const read = (f: string) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n');
 
 /** The script text of every `run:` step (single line or block). */
 function runScripts(text: string): string[] {

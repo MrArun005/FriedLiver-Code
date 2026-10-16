@@ -79,13 +79,13 @@ describe('upstream check', () => {
   });
 
   it('moves the pinned version in the docs it owns', () => {
-    const build = fs.readFileSync(path.join(root, 'docs', 'BUILD.md'), 'utf8');
+    const build = fs.readFileSync(path.join(root, 'docs', 'BUILD.md'), 'utf8').replace(/\r\n/g, '\n');
     const commit = 'b'.repeat(40);
     const next = updateBuildDoc(build, { tag: '1.143.0', commit, date: '2026-10-19' });
     expect(next).toContain(`Pinned upstream: **1.143.0** (\`${commit}\`). On\n2026-10-19 this was the newest version`);
     expect(next!.split('\n').length).toBe(build.split('\n').length);
     expect(updateBuildDoc('no such paragraph', { tag: '1.143.0', commit, date: '2026-10-19' })).toBeNull();
-    const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+    const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8').replace(/\r\n/g, '\n');
     expect(updateReadme(readme, '1.143.0')).toContain('built on VS Code 1.143 (Code - OSS)');
   });
 
