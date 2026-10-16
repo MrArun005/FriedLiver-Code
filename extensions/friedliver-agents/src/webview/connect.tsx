@@ -1,9 +1,9 @@
 // Joining chats and agents: hand off, ask, pipe. The chat view and the Agent
 // Manager share these, so a connection reads and works the same in both.
-import { useState } from 'preact/hooks';
-import { AGENT_FACES, AGENT_KEYS, type AgentKey, type AppState, type ChatView } from '../shared/model';
+import { useContext, useState } from 'preact/hooks';
+import { AGENT_FACES, AGENT_KEYS, type AgentKey, type ChatView } from '../shared/model';
 import { clip, openChats } from '../shared/view';
-import { Glyph, Icon, Popover, radioKeys, send } from './common';
+import { Glyph, Icon, LiveState, Popover, radioKeys, send } from './common';
 
 /** Text beside the icon, or the icon alone where room is short. */
 function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['name']; text: string; compact?: boolean }) {
@@ -96,45 +96,53 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
 }
 
 /** Forward every finished turn of this chat to another one; picking a piped chat again stops the pipe. */
-export function PipeMenu({ chat, state, compact, buttonClass = 'ghost sm' }: { chat: ChatView; state: AppState; compact?: boolean; buttonClass?: string }) {
-  const others = openChats(state.chats)
-    .filter((c) => c.id !== chat.id)
-    .sort((a, b) => AGENT_KEYS.indexOf(a.agent) - AGENT_KEYS.indexOf(b.agent) || a.label.localeCompare(b.label, 'en', { numeric: true }));
-  const pipeTo = (id: string) => state.links.find((l) => l.kind === 'pipe' && l.from === chat.id && l.to === id);
+export function PipeMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   return (
     <Popover label={`Pipe ${chat.label} to`} title={compact ? 'Pipe to' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="pipe" text="Pipe to" compact={compact} />}>
-      {(close) => (
-        <>
-          <div class="pop-title" aria-hidden="true">Send each finished turn to</div>
-          <div class="pop-scroll">
-            {others.length === 0 && (
-              <button role="menuitem" disabled>
-                <span class="hint">No other chats</span>
-              </button>
-            )}
-            {others.map((c) => {
-              const pipe = pipeTo(c.id);
-              return (
-                <button
-                  key={c.id}
-                  role="menuitemcheckbox"
-                  aria-checked={!!pipe}
-                  title={c.title}
-                  onClick={() => {
-                    close();
-                    send(pipe ? { type: 'unlink', linkId: pipe.id } : { type: 'pipe', from: chat.id, to: c.id });
-                  }}
-                >
-                  <Glyph agent={c.agent} size="sm" />
-                  <span class="menu-label">{c.label}</span>
-                  <span class="menu-sub">{clip(c.title, 34)}</span>
-                  {pipe ? <span class="tag on">{pipe.active ? 'piping' : 'paused'} · stop</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+      {(close) => <PipeTargets chat={chat} close={close} />}
     </Popover>
+  );
+}
+
+const byLabel = new Intl.Collator('en', { numeric: true });
+
+/** The other open chats, read from the live state only while the menu is open. */
+function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: boolean): void }) {
+  const state = useContext(LiveState);
+  const others = openChats(state.chats)
+    .filter((c) => c.id !== chat.id)
+    .sort((a, b) => AGENT_KEYS.indexOf(a.agent) - AGENT_KEYS.indexOf(b.agent) || byLabel.compare(a.label, b.label));
+  const pipeTo = (id: string) => state.links.find((l) => l.kind === 'pipe' && l.from === chat.id && l.to === id);
+  return (
+    <>
+      <div class="pop-title" aria-hidden="true">Send each finished turn to</div>
+      <div class="pop-scroll">
+        {others.length === 0 && (
+          <button role="menuitem" disabled>
+            <span class="hint">No other chats</span>
+          </button>
+        )}
+        {others.map((c) => {
+          const pipe = pipeTo(c.id);
+          return (
+            <button
+              key={c.id}
+              role="menuitemcheckbox"
+              aria-checked={!!pipe}
+              title={c.title}
+              onClick={() => {
+                close();
+                send(pipe ? { type: 'unlink', linkId: pipe.id } : { type: 'pipe', from: chat.id, to: c.id });
+              }}
+            >
+              <Glyph agent={c.agent} size="sm" />
+              <span class="menu-label">{c.label}</span>
+              <span class="menu-sub">{clip(c.title, 34)}</span>
+              {pipe ? <span class="tag on">{pipe.active ? 'piping' : 'paused'} · stop</span> : null}
+            </button>
+          );
+        })}
+      </div>
+    </>
   );
 }

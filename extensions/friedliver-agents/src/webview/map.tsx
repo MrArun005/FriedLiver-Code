@@ -3,26 +3,57 @@
 // two chats both changed) as an edge, so you can see how the agents are joined.
 import type { ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
-import { AGENT_FACES, basename, decisions, type AppState } from '../shared/model';
-import { MAP, ago, cardLine, linkBadges, mapLayout, type MapEdge, type MapNode } from '../shared/view';
-import { DOT_LABEL, Dot, Glyph, Icon, send } from './common';
+import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
+import { MAP, ago, cardLine, linkBadges, mapKey, mapLayout, statusOf, type MapEdge, type MapLayout, type MapNode } from '../shared/view';
+import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
 
 const TIP_W = 288;
 
 export function AgentMap({ state, now, focusId, onFocus }: { state: AppState; now: number; focusId?: string; onFocus(id: string): void }) {
-  const map = useMemo(() => mapLayout(state), [state]);
+  // Laid out again only when something the map shows changed, not for every streamed chunk.
+  const key = mapKey(state);
+  const map = useMemo(() => mapLayout(state), [key]);
   const [tip, setTip] = useState<string | null>(null);
-  const waiting = useMemo(() => decisions({ chats: state.chats.filter((c) => !c.archived) }).length, [state]);
+  const waiting = decisions({ chats: state.chats.filter((c) => !c.archived) }).length;
   if (!map.nodes.length) return null;
-  const lit = tip ? new Set([tip, ...map.edges.flatMap((e) => (e.from === tip || e.to === tip ? [e.id, e.from, e.to] : []))]) : null;
   const tipNode = map.nodes.find((n) => n.chat.id === tip);
-  const roving = map.nodes.some((n) => n.chat.id === focusId) ? focusId : map.nodes[0].chat.id;
+  // The layout may be older than this update: the tooltip reads the chat as it is now.
+  const tipChat = tipNode && state.chats.find((c) => c.id === tipNode.chat.id);
+  const roving = map.nodes.some((n) => n.chat.id === focusId) ? focusId! : map.nodes[0].chat.id;
 
   return (
     <div class="map-wrap">
-      <Legend />
+      <Legend still={!map.edges.some((e) => e.flowing)} working={map.nodes.some((n) => n.status === 'working')} />
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
+          <MapCanvas map={map} tip={tip} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} onFocus={onFocus} />
+          {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} width={map.width} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface CanvasProps {
+  map: MapLayout;
+  tip: string | null;
+  roving: string;
+  waiting: number;
+  /** For the shared files' names of the chats; compared by layout, which changes with them. */
+  chats: ChatView[];
+  setTip(id: string | null): void;
+  onFocus(id: string): void;
+}
+
+/** The drawing itself: drawn again when the layout, the highlighted chat or the decision count changes. */
+const MapCanvas = memo(
+  MapCanvasView,
+  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus,
+);
+
+function MapCanvasView({ map, tip, roving, waiting, chats, setTip, onFocus }: CanvasProps) {
+  const lit = tip ? new Set([tip, ...map.edges.flatMap((e) => (e.from === tip || e.to === tip ? [e.id, e.from, e.to] : []))]) : null;
+  return (
           <svg class="map" width={map.width} height={map.height} viewBox={`0 0 ${map.width} ${map.height}`} role="group" aria-label="Agent map" data-lit={lit ? '' : undefined}>
             <MapDefs />
             {map.lanes.map((lane) => (
@@ -109,7 +140,7 @@ export function AgentMap({ state, now, focusId, onFocus }: { state: AppState; no
                 class="map-file"
                 transform={`translate(${f.x} ${f.y})`}
                 tabIndex={-1}
-                aria-label={`${f.file}, changed in ${f.chats.map((id) => state.chats.find((c) => c.id === id)?.label).join(' and ')}`}
+                aria-label={`${f.file}, changed in ${f.chats.map((id) => chats.find((c) => c.id === id)?.label).join(' and ')}`}
               >
                 <title>{f.file}</title>
                 <rect width={MAP.fileW} height={MAP.fileH} rx="8" />
@@ -125,10 +156,6 @@ export function AgentMap({ state, now, focusId, onFocus }: { state: AppState; no
               </g>
             ))}
           </svg>
-          {tipNode && <Tip node={tipNode} state={state} now={now} width={map.width} />}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -228,8 +255,8 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
   );
 }
 
-function Tip({ node, state, now, width }: { node: MapNode; state: AppState; now: number; width: number }) {
-  const { chat, status } = node;
+function Tip({ node, chat, state, now, width }: { node: MapNode; chat: ChatView; state: AppState; now: number; width: number }) {
+  const status = statusOf(chat);
   const line = cardLine(state, chat);
   const badges = linkBadges(state, chat);
   const right = node.x + MAP.nodeW + 12;
@@ -271,14 +298,15 @@ function Tip({ node, state, now, width }: { node: MapNode; state: AppState; now:
   );
 }
 
-function Legend() {
+/** `still`: nothing on the map is live, so the "Live" sample doesn't move either; a moving dash repaints every frame. Its Working dot pulses while a chat works. */
+function Legend({ still, working }: { still: boolean; working: boolean }) {
   const sample = (cls: string, extra?: ComponentChildren) => (
     <svg class="legend-sample" width="30" height="12" viewBox="0 0 30 12" aria-hidden="true">
       <g class={`edge ${cls}`}>{extra}</g>
     </svg>
   );
   return (
-    <ul class="map-legend" aria-label="Legend">
+    <ul class="map-legend" aria-label="Legend" data-still={still ? '' : undefined}>
       <li>{sample('handoff', <path class="line" d="M1 6 H26" marker-end="url(#map-arrow)" />)}Hand-off</li>
       <li>{sample('consult', <path class="line" d="M1 6 H26" marker-end="url(#map-arrow)" />)}Consult</li>
       <li>
@@ -305,7 +333,7 @@ function Legend() {
       <li class="legend-sep" aria-hidden="true" />
       {(['needs-you', 'working', 'done', 'error', 'idle'] as const).map((s) => (
         <li key={s}>
-          <Dot state={s} />
+          <Dot state={s} still={!working} />
           {DOT_LABEL[s]}
         </li>
       ))}

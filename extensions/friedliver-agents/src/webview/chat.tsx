@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import {
   AGENT_FACES,
@@ -8,6 +8,7 @@ import {
   bridgeTitle,
   fileConflicts,
   formatDuration,
+  isWaiting,
   parseMention,
   shortCommand,
   type AppState,
@@ -30,10 +31,11 @@ import {
   openChats,
   recentChats,
   relativePath,
+  rosterKey,
   switcherGroups,
   statusOf,
 } from '../shared/view';
-import { DOT_LABEL, Dot, Glyph, Icon, Markdown, Popover, basename, send, useHost, useWidth } from './common';
+import { DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, memo, send, useHost, useWidth } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
 import { RefList, refsOf, sameRef } from './refs';
 
@@ -59,31 +61,42 @@ function App() {
   // The selected chat even when archived (opened from History); otherwise the newest open one.
   const chat = state.chats.find((c) => c.id === selected) ?? openChats(state.chats).at(-1);
 
-  const select = (chatId: string) => {
+  const select = useCallback((chatId: string) => {
     setSelected(chatId);
     send({ type: 'select', chatId });
-  };
+  }, []);
+  const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
 
   return (
-    <div class="chat-app">
-      <Switcher state={state} active={chat?.id} onSelect={select} />
-      {chat ? (
-        <>
-          <ChatHeader chat={chat} state={state} onSelect={select} />
-          <Transcript chat={chat} state={state} reveal={reveal} onSelect={select} />
-          <Composer
-            chat={chat}
-            attachments={attachments}
-            setAttachments={setAttachments}
-            refs={refs[chat.id] ?? []}
-            setRefs={(fn) => setRefs((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
-            focusTick={focusTick}
-          />
-        </>
-      ) : (
-        <Empty />
-      )}
-    </div>
+    <LiveState.Provider value={state}>
+      <div class="chat-app">
+        <Switcher state={state} active={chat?.id} onSelect={select} />
+        {chat ? (
+          <>
+            <ChatHeader chat={chat} state={state} onSelect={select} />
+            <Transcript
+              chat={chat}
+              state={state}
+              roster={rosterKey(state.chats)}
+              conflicts={conflicts}
+              conflictKey={JSON.stringify(conflicts)}
+              reveal={reveal}
+              onSelect={select}
+            />
+            <Composer
+              chat={chat}
+              attachments={attachments}
+              setAttachments={setAttachments}
+              refs={refs[chat.id] ?? []}
+              setRefs={(fn) => setRefs((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
+              focusTick={focusTick}
+            />
+          </>
+        ) : (
+          <Empty />
+        )}
+      </div>
+    </LiveState.Provider>
   );
 }
 
@@ -271,7 +284,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
         <div class="chat-head-actions">
           <HandoffMenu chat={chat} compact={compact} />
           <AskMenu chat={chat} compact={compact} />
-          <PipeMenu chat={chat} state={state} compact={compact} />
+          <PipeMenu chat={chat} compact={compact} />
           <button
             class="ghost icon-btn sm"
             title={chat.archived ? 'Unarchive' : 'Archive'}
@@ -350,7 +363,30 @@ function group(items: Item[]): Group[] {
   return out;
 }
 
-function Transcript({ chat, state, reveal, onSelect }: { chat: ChatView; state: AppState; reveal: { id: string; n: number } | null; onSelect: Select }) {
+interface TranscriptProps {
+  chat: ChatView;
+  /** For other chats' names, images and shared files; what the transcript reads of it is in `roster`, `conflictKey` and `state.images`. */
+  state: AppState;
+  roster: string;
+  conflicts: FileConflict[];
+  conflictKey: string;
+  reveal: { id: string; n: number } | null;
+  onSelect: Select;
+}
+
+/** Drawn again when this chat, or what it shows of the others, changed: not for every chunk another agent streams. */
+const Transcript = memo(
+  TranscriptView,
+  (a: TranscriptProps, b: TranscriptProps) =>
+    a.chat === b.chat &&
+    a.roster === b.roster &&
+    a.conflictKey === b.conflictKey &&
+    a.state.images === b.state.images &&
+    a.reveal === b.reveal &&
+    a.onSelect === b.onSelect,
+);
+
+function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect }: TranscriptProps) {
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => {
@@ -367,7 +403,7 @@ function Transcript({ chat, state, reveal, onSelect }: { chat: ChatView; state: 
   }, [reveal]);
   const lastChanges = chat.items.map((i) => i.kind).lastIndexOf('changes');
   const waiting = new Set(chat.items.flatMap((i) => (i.kind === 'permission' && !i.answer && i.toolCallId ? [i.toolCallId] : [])));
-  const conflicts = fileConflicts(state).filter((f) => f.chats.includes(chat.id));
+  const waitingKey = [...waiting].join('\n');
 
   return (
     <div
@@ -381,9 +417,19 @@ function Transcript({ chat, state, reveal, onSelect }: { chat: ChatView; state: 
     >
       {group(chat.items).map((g) =>
         g.kind === 'steps' ? (
-          <Steps key={g.at} tools={g.items} waiting={waiting} />
+          <Steps key={g.at} tools={g.items} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} />
         ) : (
-          <ItemView key={g.at} item={g.item} chat={chat} state={state} conflicts={conflicts} onSelect={onSelect} canUndo={g.at === lastChanges && !chat.busy} />
+          <TranscriptItem
+            key={g.at}
+            item={g.item}
+            chat={chat}
+            state={state}
+            roster={roster}
+            conflicts={conflicts}
+            conflictKey={conflictKey}
+            onSelect={onSelect}
+            canUndo={g.at === lastChanges && !chat.busy}
+          />
         ),
       )}
       {chat.busy && !chat.items.some(isWaiting) && (
@@ -395,23 +441,28 @@ function Transcript({ chat, state, reveal, onSelect }: { chat: ChatView; state: 
   );
 }
 
-const isWaiting = (i: Item) =>
-  (i.kind === 'permission' && !i.answer) ||
-  (i.kind === 'review' && i.state === 'pending') ||
-  (i.kind === 'command' && i.state === 'awaiting') ||
-  (i.kind === 'bridge' && i.state === 'awaiting');
-
 const TOOL_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', failed: 'error', pending: 'next' };
 const PLAN_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', pending: 'next' };
 
-function Steps({ tools, waiting }: { tools: Extract<Item, { kind: 'tool' }>[]; waiting: Set<string> }) {
+type ToolItem = Extract<Item, { kind: 'tool' }>;
+/** `busy`: the chat's turn is running; a step left in progress after it ends doesn't pulse. */
+type StepsProps = { tools: ToolItem[]; waiting: Set<string>; waitingKey: string; busy: boolean };
+
+/** A run of tool calls; drawn again when one of them or the questions about them change. */
+const Steps = memo(
+  StepsView,
+  (a: StepsProps, b: StepsProps) =>
+    a.waitingKey === b.waitingKey && a.busy === b.busy && a.tools.length === b.tools.length && a.tools.every((t, n) => t === b.tools[n]),
+);
+
+function StepsView({ tools, waiting, busy }: StepsProps) {
   return (
     <ol class="steps" aria-label="Steps">
       {tools.map((t) => {
         const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
         return (
           <li key={t.id} data-state={state}>
-            <Dot state={state} />
+            <Dot state={state} still={!busy} />
             <span class="step-title">{t.title}</span>
             {t.toolKind && <span class="tag">{t.toolKind}</span>}
             {t.locations.slice(0, 3).map((l) => (
@@ -426,21 +477,39 @@ function Steps({ tools, waiting }: { tools: Extract<Item, { kind: 'tool' }>[]; w
   );
 }
 
-function ItemView({
-  item,
-  chat,
-  state,
-  conflicts,
-  onSelect,
-  canUndo,
-}: {
+interface ItemProps {
   item: Item;
   chat: ChatView;
   state: AppState;
+  roster: string;
   conflicts: FileConflict[];
+  conflictKey: string;
   onSelect: Select;
   canUndo: boolean;
-}) {
+}
+
+/**
+ * One transcript item, drawn again only when it changed (the reducer keeps
+ * items that didn't as the same objects), or what it shows of this chat or
+ * the others did. While a reply streams, only its last item draws.
+ */
+const TranscriptItem = memo(
+  ItemView,
+  (a: ItemProps, b: ItemProps) =>
+    a.item === b.item &&
+    a.canUndo === b.canUndo &&
+    a.chat.id === b.chat.id &&
+    a.chat.label === b.chat.label &&
+    a.chat.agent === b.chat.agent &&
+    a.chat.cwd === b.chat.cwd &&
+    a.chat.busy === b.chat.busy &&
+    a.roster === b.roster &&
+    a.conflictKey === b.conflictKey &&
+    a.state.images === b.state.images &&
+    a.onSelect === b.onSelect,
+);
+
+function ItemView({ item, chat, state, conflicts, onSelect, canUndo }: ItemProps) {
   switch (item.kind) {
     case 'user':
       return (
@@ -486,7 +555,7 @@ function ItemView({
               const s = PLAN_STATE[e.status] ?? 'next';
               return (
                 <li key={i} data-state={s}>
-                  <Dot state={s} />
+                  <Dot state={s} still={!chat.busy} />
                   <span class="step-title">{e.content}</span>
                 </li>
               );

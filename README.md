@@ -194,6 +194,13 @@ VSCode-linux-x64/friedliver /tmp/fle` drives the real app with the Demo agent
 (an @mention, an agent asking another agent, the Agent Manager) and saves the
 screenshots in `docs/screenshots/app/`.
 
+`xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/stress-demo.mjs
+VSCode-linux-x64/friedliver /tmp/fls` runs 15 Demo chats at once (`--agents 1`
+for a baseline) with the Agent Manager open beside an editor, and prints memory
+by process, CPU, long tasks, typing latency and how far the views lag behind.
+`--scenario idle` measures memory at rest instead. The numbers are in
+[docs/benchmarks.md](docs/benchmarks.md#15-agents-at-once).
+
 ## License
 
 Upstream Code - OSS is MIT licensed. Its `LICENSE.txt` and

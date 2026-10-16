@@ -219,6 +219,8 @@ export type Action =
 /** Command output kept in the transcript; the agent still gets its full output through ACP. */
 export const MAX_COMMAND_OUTPUT = 64 * 1024;
 const MAX_IMAGES = 100;
+/** Characters of data: URIs kept for the Images view, newest first; the newest image always stays. */
+export const MAX_IMAGE_CHARS = 64 * 1024 * 1024;
 /** One agent message or thought stops growing here, so a runaway agent can't fill the editor's memory. */
 export const MAX_ITEM_TEXT = 512 * 1024;
 /** Transcript items kept per chat. Past it the oldest replies and steps go; nothing that waits for you does. */
@@ -277,7 +279,7 @@ export function reduce(state: AppState, action: Action): AppState {
       return editChat(state, action.chatId, (c) => ({ ...c, branch: action.branch, merged: action.merged ?? c.merged }));
     case 'image':
       if (state.images.some((i) => i.id === action.image.id)) return state;
-      return { ...state, images: [...state.images, action.image].slice(-MAX_IMAGES) };
+      return { ...state, images: capImages([...state.images, action.image].slice(-MAX_IMAGES)) };
     case 'link':
       if (state.links.some((l) => l.id === action.link.id)) return state;
       return { ...state, links: [...state.links, action.link] };
@@ -305,6 +307,16 @@ function capText(text: string): string {
   return text.length <= MAX_ITEM_TEXT ? text : text.slice(0, MAX_ITEM_TEXT) + CUT_OFF;
 }
 
+/** Drops the oldest images until the rest fit in MAX_IMAGE_CHARS: a hundred screenshots can be a gigabyte. */
+function capImages(images: ImageItem[]): ImageItem[] {
+  let chars = 0;
+  for (let n = images.length - 1; n >= 0; n--) {
+    chars += images[n].src.length;
+    if (chars > MAX_IMAGE_CHARS && n < images.length - 1) return images.slice(n + 1);
+  }
+  return images;
+}
+
 const DROPPABLE = new Set<Item['kind']>(['agent', 'thought', 'tool', 'plan', 'notice']);
 
 /** Drops the oldest replies, steps, plans and notices once a chat holds more than MAX_ITEMS. */
@@ -325,19 +337,23 @@ function editChat(state: AppState, chatId: string, fn: (c: ChatView) => ChatView
   return { ...state, chats: state.chats.map((c) => (c.id === chatId ? fn(c) : c)) };
 }
 
+/**
+ * Edits the items `fn` changes, in whichever chat holds them. Only those chats
+ * and their item lists are copied: command output streams in many times a
+ * second, and copying every transcript for each piece kept all three
+ * processes busy. Nothing changed, the same state comes back.
+ */
 function editItems(state: AppState, fn: (i: Item) => Item): AppState {
-  return {
-    ...state,
-    chats: state.chats.map((c) => {
-      let changed = false;
-      const items = c.items.map((i) => {
-        const next = fn(i);
-        if (next !== i) changed = true;
-        return next;
-      });
-      return changed ? { ...c, items } : c;
-    }),
-  };
+  let chats: ChatView[] | undefined;
+  state.chats.forEach((c, n) => {
+    let items: Item[] | undefined;
+    for (let k = 0; k < c.items.length; k++) {
+      const next = fn(c.items[k]);
+      if (next !== c.items[k]) (items ??= c.items.slice())[k] = next;
+    }
+    if (items) (chats ??= state.chats.slice())[n] = { ...c, items };
+  });
+  return chats ? { ...state, chats } : state;
 }
 
 /** Folds one ACP session update into a transcript. */
@@ -405,15 +421,41 @@ export interface Decision {
   title: string;
 }
 
+/** A question, edit, command or tool request that waits for the user's answer. */
+export function isWaiting(i: Item): boolean {
+  return (
+    (i.kind === 'permission' && !i.answer) ||
+    (i.kind === 'review' && i.state === 'pending') ||
+    (i.kind === 'command' && i.state === 'awaiting') ||
+    (i.kind === 'bridge' && i.state === 'awaiting')
+  );
+}
+
+const waitingCache = new WeakMap<Item[], Item[]>();
+
+/**
+ * The items of a transcript that wait for the user, in order. Cached per item
+ * list: the reducer makes a new list whenever an item changes, so a chat that
+ * didn't change isn't scanned again on every update of another one.
+ */
+export function waitingItems(items: Item[]): Item[] {
+  let waiting = waitingCache.get(items);
+  if (!waiting) {
+    waiting = items.filter(isWaiting);
+    waitingCache.set(items, waiting);
+  }
+  return waiting;
+}
+
 /** Everything the agents are waiting on the user for, oldest chat first. */
 export function decisions(state: Pick<AppState, 'chats'>): Decision[] {
   const out: Decision[] = [];
   for (const chat of state.chats) {
-    for (const i of chat.items) {
-      if (i.kind === 'permission' && !i.answer) out.push({ chatId: chat.id, kind: 'permission', id: i.requestId, title: i.title });
-      else if (i.kind === 'review' && i.state === 'pending') out.push({ chatId: chat.id, kind: 'review', id: i.reviewId, title: `Review edit to ${basename(i.path)}` });
-      else if (i.kind === 'command' && i.state === 'awaiting') out.push({ chatId: chat.id, kind: 'command', id: i.commandId, title: `Run ${shortCommand(i.commandLine)}` });
-      else if (i.kind === 'bridge' && i.state === 'awaiting') out.push({ chatId: chat.id, kind: 'bridge', id: i.requestId, title: bridgeTitle(state, chat, i) });
+    for (const i of waitingItems(chat.items)) {
+      if (i.kind === 'permission') out.push({ chatId: chat.id, kind: 'permission', id: i.requestId, title: i.title });
+      else if (i.kind === 'review') out.push({ chatId: chat.id, kind: 'review', id: i.reviewId, title: `Review edit to ${basename(i.path)}` });
+      else if (i.kind === 'command') out.push({ chatId: chat.id, kind: 'command', id: i.commandId, title: `Run ${shortCommand(i.commandLine)}` });
+      else if (i.kind === 'bridge') out.push({ chatId: chat.id, kind: 'bridge', id: i.requestId, title: bridgeTitle(state, chat, i) });
     }
   }
   return out;
@@ -486,7 +528,7 @@ export function lastReply(chat: ChatView): string {
 }
 
 export function chatStatus(chat: ChatView): ChatStatus {
-  if (decisions({ chats: [chat] }).length > 0) return 'needs-you';
+  if (waitingItems(chat.items).length > 0) return 'needs-you';
   if (chat.busy) return 'working';
   const last = chat.items.at(-1);
   if (last?.kind === 'notice' && last.tone === 'error') return 'error';
@@ -527,12 +569,12 @@ export function stateLine(chat: ChatView): StateLine {
   }
   const status = chatStatus(chat);
   if (status === 'working') {
-    const plan = [...chat.items].reverse().find((i) => i.kind === 'plan');
+    const plan = chat.items.findLast((i) => i.kind === 'plan');
     if (plan?.kind === 'plan' && plan.entries.length) {
       const at = plan.entries.findIndex((e) => e.status !== 'completed');
       if (at >= 0) return { text: `Step ${at + 1} of ${plan.entries.length}: ${plan.entries[at].content}` };
     }
-    const tool = [...chat.items].reverse().find((i) => i.kind === 'tool');
+    const tool = chat.items.findLast((i) => i.kind === 'tool');
     return { text: tool?.kind === 'tool' ? tool.title : 'Working…' };
   }
   if (status === 'error') {

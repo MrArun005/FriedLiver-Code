@@ -18,6 +18,7 @@ import {
   type ChatStatus,
   type ChatView,
   type Decision,
+  type FileConflict,
   type LinkKind,
   type StateLine,
 } from './model';
@@ -113,6 +114,28 @@ export function sortChats(chats: ChatView[], sort: Sort): ChatView[] {
   };
   const sign = sort.dir === 'asc' ? 1 : -1;
   return [...chats].sort((a, b) => sign * by[sort.key](a, b) || b.lastActivity - a.lastActivity || collator.compare(a.id, b.id));
+}
+
+/** An order shown on screen: chat ids, the sort that made it, and when it last changed. */
+export interface Settled {
+  ids: string[];
+  sort: string;
+  at: number;
+}
+
+/**
+ * The order to show for `next`, which moves at most every `ms`. Sorted by
+ * activity, fifteen streaming agents reorder the board and the list many
+ * times a second: cards jump away from the pointer, and every move lays out
+ * and paints the whole column again. A chat added or gone, or another sort,
+ * shows at once; so does a reorder after a quiet spell. `pending` means a
+ * newer order waits, due at `order.at + ms`.
+ */
+export function settleOrder(prev: Settled | undefined, next: string[], sort: string, now: number, ms: number): { order: Settled; pending: boolean } {
+  if (prev && prev.sort === sort && prev.ids.length === next.length && prev.ids.every((id, n) => id === next[n])) return { order: prev, pending: false };
+  const sameSet = !!prev && prev.sort === sort && prev.ids.length === next.length && new Set([...prev.ids, ...next]).size === next.length;
+  if (sameSet && now - prev.at < ms) return { order: prev, pending: true };
+  return { order: { ids: next, sort, at: now }, pending: false };
 }
 
 export interface Counts {
@@ -235,10 +258,10 @@ export interface ChatConflict {
   others: ChatView[];
 }
 
-/** Files this chat changed that other open chats changed too. */
-export function conflictsOf(state: Pick<AppState, 'chats'>, chatId: string): ChatConflict[] {
+/** Files this chat changed that other open chats changed too. `all` is fileConflicts(state), when already at hand. */
+export function conflictsOf(state: Pick<AppState, 'chats'>, chatId: string, all: FileConflict[] = fileConflicts(state)): ChatConflict[] {
   const byId = new Map(state.chats.map((c) => [c.id, c]));
-  return fileConflicts(state)
+  return all
     .filter((f) => f.chats.includes(chatId))
     .map((f) => ({ file: f.file, others: f.chats.filter((id) => id !== chatId).flatMap((id) => byId.get(id) ?? []) }));
 }
@@ -254,6 +277,54 @@ export function relativePath(cwd: string, p: string): string {
   const dir = norm(cwd);
   const file = norm(p);
   return dir && file.toLowerCase().startsWith(`${dir.toLowerCase()}/`) ? file.slice(dir.length + 1) : file;
+}
+
+/** What a task card shows, worked out once per update for every card. */
+export interface CardModel {
+  status: ChatStatus;
+  line: CardLine;
+  progress: Progress | null;
+  badges: Badge[];
+  conflicts: ChatConflict[];
+  /** "3m": how long ago the task started. */
+  age: string;
+  /** Everything above and the chat's own fields the card shows, as one string: cards with equal keys look the same. */
+  key: string;
+}
+
+/** `conflicts` is fileConflicts(state), worked out once for all the cards. */
+export function cardModel(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView, now: number, conflicts: FileConflict[] = fileConflicts(state)): CardModel {
+  const status = statusOf(chat);
+  const line = cardLine(state, chat);
+  const progress = status === 'working' || status === 'needs-you' ? planProgress(chat) : null;
+  const badges = linkBadges(state, chat);
+  const shared = conflictsOf(state, chat.id, conflicts);
+  const started = age(chat.createdAt, now);
+  const key = JSON.stringify([
+    chat.id,
+    chat.agent,
+    chat.label,
+    chat.title,
+    chat.cwd,
+    chat.branch,
+    chat.merged,
+    chat.busy,
+    chat.files.length,
+    chat.changedFiles,
+    chat.turns,
+    status,
+    started,
+    line.text,
+    line.code,
+    line.decision?.kind,
+    line.decision?.id,
+    line.bridge?.requestId,
+    line.waiting,
+    progress,
+    badges,
+    shared.map((c) => [c.file, c.others.map((o) => [o.id, o.label])]),
+  ]);
+  return { status, line, progress, badges, conflicts: shared, age: started, key };
 }
 
 // ---- Fan-out groups ----
@@ -467,6 +538,23 @@ export interface MapLayout {
   edges: MapEdge[];
   groups: MapGroup[];
   conflicts: MapConflict[];
+}
+
+/**
+ * Everything mapLayout reads, as one string: states with equal keys lay out
+ * the same, so the map is laid out again only when a chat starts, stops,
+ * changes status or files, or a link changes, not on every streamed chunk.
+ */
+export function mapKey(state: Pick<AppState, 'chats' | 'links'>): string {
+  return JSON.stringify([
+    openChats(state.chats).map((c) => [c.id, c.agent, c.label, c.title, c.createdAt, c.origin, c.group, c.merged, c.busy, statusOf(c), c.files]),
+    state.links,
+  ]);
+}
+
+/** The chats' names and titles, as one string, for parts that show other chats by name. */
+export function rosterKey(chats: ChatView[]): string {
+  return JSON.stringify(chats.map((c) => [c.id, c.agent, c.label, c.title, c.archived]));
 }
 
 const COLUMN_TITLES_MAP = ['Started by you', '1 link away', '2 links away', '3 links away', '4 links away'];

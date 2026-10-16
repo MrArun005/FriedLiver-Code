@@ -10,11 +10,19 @@
 //                     replies "<Agent> says: <answer>"; "ask demo hello" needs no sign-in
 //   "chats"           lists FriedLiver's chats through the same tools
 //   an editor request (Edit with Agent, Review My Changes): see editorRequests.mjs
+//   "busy <s> [stamp]" works like a busy real agent for <s> seconds, for stress tests
+//                     (scripts/stress-demo.mjs): markdown in small chunks, four a second,
+//                     with lists and code blocks; tool calls and their updates; a plan; a
+//                     file read now and then. Never asks for anything. "stamp" ends each
+//                     sentence and the plan's current step with `t=<ms since epoch>`.
 //   anything else     echoes the text back in two chunks
 // Only the last text block is read as one of these, so context a client puts
 // in front of the message (a hand-off, a consultation) is echoed but ignored.
 // FAKE_AGENT_LOAD_SESSION=1 makes it offer session/load (it remembers nothing, so
 // a reloaded chat just carries on).
+// FAKE_AGENT_START_MCP=1 makes it start each session's MCP servers (the FriedLiver tools)
+// when the session starts and keep them running, as real agents do, instead of only
+// for a tool call; the stress test uses it to count their memory.
 // FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first;
 // that browser-style sign-in prints a sign-in link to stderr, like Gemini's.
 // --require-login makes it need a terminal login instead, like Claude's: the
@@ -309,6 +317,23 @@ function mcpClient(server) {
   };
 }
 
+const startMcp = process.env.FAKE_AGENT_START_MCP === '1';
+/** MCP servers started with their session, kept for as long as this agent runs. */
+const runningMcp = [];
+
+/** Starts an MCP server and lists its tools, the way an agent does when a session starts. */
+function keepMcp(server) {
+  const mcp = mcpClient(server);
+  runningMcp.push(mcp);
+  mcp
+    .request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-agent', version: '0.0.0' } })
+    .then(() => {
+      mcp.notify('notifications/initialized');
+      return mcp.request('tools/list', {});
+    })
+    .catch(() => {});
+}
+
 /** Calls one of the session's FriedLiver tools and returns its text; a tool error throws. */
 async function useTool(sessionId, name, args) {
   const server = (sessionMcp.get(sessionId) ?? []).find((s) => s.name === 'friedliver' && typeof s.command === 'string');
@@ -339,6 +364,152 @@ async function ask(client, sessionId, agent, question) {
     await say(client, sessionId, `Couldn't ask ${name}: ${err.message}`);
   }
   return 'end_turn';
+}
+
+const BUSY_CHUNK_MS = 250;
+const BUSY_STEPS = ['Read the code', 'Find what to change', 'Write the change', 'Add tests', 'Run the checks', 'Sum up'];
+const BUSY_FILES = ['package.json', 'README.md', 'src/format.ts', 'src/index.ts', 'test/format.test.ts'];
+const BUSY_TOOLS = [
+  { kind: 'read', title: (f) => `Read ${f}` },
+  { kind: 'search', title: (f) => `Search for callers of ${path.basename(f).replace(/\..*$/, '')}` },
+  { kind: 'think', title: () => 'Check the edge cases' },
+];
+const BUSY_SENTENCES = [
+  'The price formatter takes cents and returns a string with two decimals.',
+  'Negative amounts lose their sign before the dollar mark, so refunds print as charges.',
+  'I will keep the public signature and change only the body.',
+  'Rounding stays half-up, which is what the invoices expect.',
+  'The tests cover zero, one cent, large amounts and negative values.',
+  'Nothing else in the project calls this helper with fractions of a cent.',
+  'The change is small, so the diff should be easy to review.',
+  'Next I check the callers to make sure none of them depends on the old output.',
+];
+const BUSY_LISTS = [
+  ['Keep `formatCents` exported under the same name', 'Put the sign in front of the dollar mark', 'Leave the rounding alone'],
+  ['`formatCents(0)` is `$0.00`', '`formatCents(-150)` is `-$1.50`', '`formatCents(123456)` is `$1234.56`'],
+];
+const BUSY_CODE = [
+  '```ts',
+  'export function formatCents(cents: number): string {',
+  "  const sign = cents < 0 ? '-' : '';",
+  '  return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;',
+  '}',
+  '```',
+];
+
+/**
+ * What a busy agent streams: a heading, two paragraphs, a list and a code
+ * block, again and again, in chunks of three to five words (code a line at a
+ * time). The same sequence every time. `end` marks a sentence's last chunk;
+ * `block` a chunk inside a list or code block, which no tool call interrupts.
+ */
+function* busyChunks() {
+  for (let round = 0; ; round++) {
+    yield { text: `${round ? '\n' : ''}### Part ${round + 1}\n\n` };
+    for (let s = 0; s < 6; s++) {
+      const words = BUSY_SENTENCES[(round * 6 + s) % BUSY_SENTENCES.length].split(' ');
+      for (let w = 0, n = 0; w < words.length; n++) {
+        const size = 3 + (n % 3);
+        const end = w + size >= words.length;
+        yield { text: words.slice(w, w + size).join(' ') + (end ? '' : ' '), end };
+        w += size;
+      }
+      yield { text: s === 2 || s === 5 ? '\n\n' : ' ' };
+    }
+    for (const line of BUSY_LISTS[round % BUSY_LISTS.length]) yield { text: `- ${line}\n`, block: true };
+    yield { text: '\n' };
+    for (const [i, line] of BUSY_CODE.entries()) yield { text: `${line}\n`, block: i < BUSY_CODE.length - 1 };
+  }
+}
+
+/** "busy <seconds>": streams, calls tools, keeps a plan and reads files until the time is up or the turn is cancelled. */
+async function busy(client, sessionId, seconds, stamp) {
+  const cwd = sessionCwd.get(sessionId) ?? process.cwd();
+  const start = Date.now();
+  const end = start + seconds * 1000;
+  let cancelled = false;
+  let wake = () => {};
+  cancels.set(sessionId, () => {
+    cancelled = true;
+    wake();
+  });
+  // Stop wakes the loop at once; the timer, a quarter second at most, then resolves nothing.
+  const sleepUntil = (at) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, Math.max(0, at - Date.now()));
+      wake = resolve;
+    });
+  const stamped = () => (stamp ? ` \`t=${Date.now()}\`` : '');
+  const plan = (current) =>
+    tool(client, sessionId, {
+      sessionUpdate: 'plan',
+      entries: BUSY_STEPS.map((content, i) => ({
+        content: i === current ? `${content}${stamped()}` : content,
+        priority: 'medium',
+        status: i < current ? 'completed' : i === current ? 'in_progress' : 'pending',
+      })),
+    });
+  await client.notify(acp.methods.client.session.update, {
+    sessionId,
+    update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: `Planning ${BUSY_STEPS.length} steps for about ${seconds} s.` } },
+  });
+  const chunks = busyChunks();
+  /** Tool calls in progress: the tick each completes on, and what it found. */
+  const open = new Map();
+  let step = -1;
+  let nextTool = 5;
+  let tools = 0;
+  let reads = 0;
+  try {
+    for (let tick = 0; !cancelled && Date.now() < end; tick++) {
+      const due = Math.min(BUSY_STEPS.length - 1, Math.floor(((Date.now() - start) / (seconds * 1000)) * BUSY_STEPS.length));
+      if (due !== step) await plan((step = due));
+      const chunk = chunks.next().value;
+      await say(client, sessionId, chunk.end ? `${chunk.text}${stamped()}` : chunk.text);
+      // A tool call about every 2.5 s, between blocks: pending, in progress, and completed a second later.
+      if (tick >= nextTool && !chunk.block) {
+        nextTool = tick + 10;
+        const file = BUSY_FILES[tools % BUSY_FILES.length];
+        const kind = BUSY_TOOLS[tools % BUSY_TOOLS.length];
+        const toolCallId = `busy-${tools++}`;
+        const location = path.join(cwd, file);
+        await tool(client, sessionId, {
+          sessionUpdate: 'tool_call',
+          toolCallId,
+          title: kind.title(file),
+          kind: kind.kind,
+          status: 'pending',
+          locations: kind.kind === 'read' ? [{ path: location }] : [],
+        });
+        await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress' });
+        let found;
+        // Every other read goes through the client, as real agents read open files.
+        if (kind.kind === 'read' && reads++ % 2 === 0) {
+          found = await client
+            .request(acp.methods.client.fs.readTextFile, { sessionId, path: location })
+            .then((r) => `${r.content.split('\n').length} lines`)
+            .catch(() => 'not found');
+        }
+        open.set(toolCallId, { at: tick + 4, found });
+      }
+      for (const [toolCallId, { at, found }] of open) {
+        if (tick < at) continue;
+        open.delete(toolCallId);
+        const content = found ? [{ type: 'content', content: { type: 'text', text: found } }] : undefined;
+        await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', ...(content ? { content } : {}) });
+      }
+      await sleepUntil(start + (tick + 1) * BUSY_CHUNK_MS);
+    }
+    for (const toolCallId of open.keys()) {
+      await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: cancelled ? 'failed' : 'completed' });
+    }
+    if (cancelled) return 'cancelled';
+    await plan(BUSY_STEPS.length);
+    await say(client, sessionId, `\n\nDone after ${seconds} s: ${tools} tool calls, ${Math.ceil(reads / 2)} files read.`);
+    return 'end_turn';
+  } finally {
+    cancels.delete(sessionId);
+  }
 }
 
 async function run(client, sessionId) {
@@ -395,6 +566,7 @@ acp
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     sessionMcp.set(sessionId, params.mcpServers ?? []);
+    if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string') keepMcp(server);
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.load, ({ params }) => {
@@ -431,6 +603,8 @@ acp
       });
       return { stopReason: 'end_turn' };
     }
+    const busyFor = command.match(/^busy\s+(\d+(?:\.\d+)?)(\s+stamp)?\s*$/);
+    if (busyFor) return { stopReason: await busy(client, sessionId, Math.min(Number(busyFor[1]), 3600), !!busyFor[2]) };
     if (command === 'chats') {
       try {
         await say(client, sessionId, await useTool(sessionId, 'list_chats', {}));
@@ -458,4 +632,12 @@ acp
     return { stopReason: 'end_turn' };
   })
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+
+// The client is gone (it closed our stdin): the MCP servers kept for its sessions go too.
+if (startMcp) {
+  process.stdin.once('end', () => {
+    for (const mcp of runningMcp) mcp.close();
+    process.exit(0);
+  });
+}
 }

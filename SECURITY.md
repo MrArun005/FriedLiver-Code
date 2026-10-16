@@ -199,7 +199,13 @@ Agents can do some of that themselves through FriedLiver's MCP server
 
 The agent-to-agent bridge was built after the audit below and reviewed when it
 was merged (FL-23). It has been exercised with the offline Demo agent only, not
-yet with the vendors' agents.
+yet with the vendors' agents. The tools server speaks MCP itself
+(`src/bridge/mcp.ts`, about 150 lines) rather than through the MCP SDK, which
+cost each session's server about 10 MB. It answers initialize, ping,
+tools/list and tools/call, answers other requests with "method not found",
+ignores notifications and malformed lines, checks each call with the editor's
+own rules (`parseCall`) before passing it on, and drops input past 1 MB without
+a line break.
 
 ## Findings
 

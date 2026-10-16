@@ -15,11 +15,60 @@ export type Block =
   | { t: 'pre'; lang: string; code: string };
 
 export function parseMarkdown(text: string): Block[] {
-  const blocks: Block[] = [];
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  return parseDoc(text).blocks;
+}
+
+/** A parsed reply, kept so the next, longer version of it parses only its tail. */
+export interface MarkdownDoc {
+  /** The text with \r\n line ends made \n. */
+  text: string;
+  blocks: Block[];
+  /** Where each block's first line starts in `text`. */
+  starts: number[];
+}
+
+/**
+ * parseMarkdown, reusing `prev` when `text` only adds to the text it parsed:
+ * a streamed reply grows a few words at a time, and parsing all of it again
+ * for every chunk made long replies slower and slower. Every block but the
+ * last is final (a later line can only extend the last one), so those are
+ * kept, as the same objects, and parsing starts again at the last one. The
+ * result is always what parseMarkdown(text) gives.
+ */
+export function parseDoc(text: string, prev?: MarkdownDoc): MarkdownDoc {
+  const norm = text.includes('\r') ? text.replace(/\r\n/g, '\n') : text;
+  if (prev && norm === prev.text) return prev;
+  if (prev && prev.blocks.length > 0 && norm.startsWith(prev.text)) {
+    const last = prev.blocks.length - 1;
+    const doc = { text: norm, blocks: prev.blocks.slice(0, last), starts: prev.starts.slice(0, last) };
+    parseFrom(doc, prev.starts[last]);
+    return doc;
+  }
+  const doc = { text: norm, blocks: [], starts: [] };
+  parseFrom(doc, 0);
+  return doc;
+}
+
+/** Parses `doc.text` from `from`, a line start where no paragraph or code block is open, after `doc.blocks`. */
+function parseFrom(doc: MarkdownDoc, from: number): void {
+  const { blocks, starts } = doc;
+  // Blocks before `kept` may be another document's too: copy before changing one.
+  let kept = blocks.length;
+  const lines = doc.text.slice(from).split('\n');
+  let at = from;
+  const offsets = lines.map((l) => {
+    const o = at;
+    at += l.length + 1;
+    return o;
+  });
   let para: string[] = [];
+  let paraStart = 0;
+  const push = (block: Block, start: number) => {
+    blocks.push(block);
+    starts.push(start);
+  };
   const flush = () => {
-    if (para.length) blocks.push({ t: 'p', inline: parseInline(para.join('\n')) });
+    if (para.length) push({ t: 'p', inline: parseInline(para.join('\n')) }, paraStart);
     para = [];
   };
   for (let i = 0; i < lines.length; i++) {
@@ -27,35 +76,41 @@ export function parseMarkdown(text: string): Block[] {
     const fence = line.match(/^\s*```\s*([\w+-]*)\s*$/);
     if (fence) {
       flush();
+      const start = offsets[i];
       const code: string[] = [];
       while (++i < lines.length && !/^\s*```\s*$/.test(lines[i])) code.push(lines[i]);
-      blocks.push({ t: 'pre', lang: fence[1], code: code.join('\n') });
+      push({ t: 'pre', lang: fence[1], code: code.join('\n') }, start);
       continue;
     }
     const heading = line.match(/^(#{1,3})\s+(.*)$/);
     if (heading) {
       flush();
-      blocks.push({ t: 'h', level: heading[1].length as 1 | 2 | 3, inline: parseInline(heading[2]) });
+      push({ t: 'h', level: heading[1].length as 1 | 2 | 3, inline: parseInline(heading[2]) }, offsets[i]);
       continue;
     }
     const bullet = line.match(/^\s*(?:[-*+]|(\d+)[.)])\s+(.*)$/);
     if (bullet) {
       flush();
       const t = bullet[1] ? 'ol' : 'ul';
-      const prev = blocks.at(-1);
+      const n = blocks.length - 1;
+      const prev = blocks[n];
       const item = parseInline(bullet[2]);
-      if (prev && prev.t === t) prev.items.push(item);
-      else blocks.push({ t, items: [item] });
+      if (prev && prev.t === t) {
+        if (n < kept) {
+          blocks[n] = { t, items: [...prev.items, item] };
+          kept = n;
+        } else prev.items.push(item);
+      } else push({ t, items: [item] }, offsets[i]);
       continue;
     }
     if (!line.trim()) {
       flush();
       continue;
     }
+    if (!para.length) paraStart = offsets[i];
     para.push(line);
   }
   flush();
-  return blocks;
 }
 
 const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|(?<![\w*])\*[^*\s][^*\n]*\*(?![\w*])|(?<!\w)_[^_\s][^_\n]*_(?!\w)|\[[^\]\n]+\]\([^)\s]+\))/g;
