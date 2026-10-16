@@ -41,3 +41,23 @@ describe('agents in the editor: contributions', () => {
     }
   });
 });
+
+describe('approvals: contributions', () => {
+  it('lets only the user set the default level, and never to Full auto', () => {
+    const setting = contributes.configuration.properties['friedliver.approvals.default'];
+    expect(setting).toMatchObject({ scope: 'machine', default: 'ask', enum: ['ask', 'edits'] });
+  });
+
+  it('has the approval, review and other-agent commands', () => {
+    const own = new Set(contributes.commands.map((c: { command: string }) => c.command));
+    for (const id of ['friedliver.approvals.rules', 'friedliver.review.acceptAll', 'friedliver.review.rejectAll', 'friedliver.otherAgents']) expect(own.has(id), id).toBe(true);
+    expect(contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.nextDecision')).toMatchObject({ key: 'ctrl+alt+d' });
+  });
+
+  it('names no AI models in the session controls, the Demo agent or the docs', () => {
+    const files = ['src/shared/session.ts', 'src/shared/tools.ts', 'src/webview/controls.tsx', 'src/host/core.ts', 'scripts/ui-fixture.mjs', '../../agent-core/demo/fakeAgent.mjs', '../../README.md', '../../SECURITY.md', '../../docs/TRY-IT.md'];
+    for (const f of files) {
+      expect(readFileSync(path.join(root, f), 'utf8'), f).not.toMatch(/\b(opus|sonnet|haiku|gpt-\d|gemini-\d|o\d-mini|claude-\d)/i);
+    }
+  });
+});

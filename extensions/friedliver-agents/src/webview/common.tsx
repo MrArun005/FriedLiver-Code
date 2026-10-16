@@ -209,9 +209,17 @@ const MarkdownBlock = memo(function MarkdownBlock({ block: b }: { block: Block }
     }
     case 'pre':
       return (
-        <pre>
-          <code>{b.code}</code>
-        </pre>
+        <div class="code-block">
+          <pre>
+            <code>{b.code}</code>
+          </pre>
+          <span class="code-tools">
+            <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: b.code })}>
+              Insert
+            </button>
+            <CopyButton text={b.code} label="Copy code" />
+          </span>
+        </div>
       );
   }
 });
@@ -273,6 +281,12 @@ const ICONS = {
   grid: 'M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z',
   keep: 'M3.5 8.5l3 3 6-7',
   code: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5',
+  bolt: 'M9 2.5 4 9h3.5L7 13.5 12 7H8.5z',
+  copy: 'M5.5 5.5h7v7h-7zM10.5 5.5v-2h-7v7h2',
+  gauge: 'M2.75 11a5.25 5.25 0 1 1 10.5 0M8 11l2.5-3.5',
+  model: 'M8 2.5l1.4 3.1 3.1 1.4-3.1 1.4L8 11.5 6.6 8.4 3.5 7l3.1-1.4zM12.5 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
+  shield: 'M8 2.5l4.75 1.75v3.5c0 3-2 5-4.75 5.75C5.25 12.75 3.25 10.75 3.25 7.75v-3.5z',
+  queue: 'M2.75 4.5h10.5M2.75 8h10.5M2.75 11.5h6M11 10v3l2-1.5z',
 };
 export type IconName = keyof typeof ICONS;
 
@@ -281,6 +295,26 @@ export function Icon({ name }: { name: IconName }) {
     <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
       <path d={ICONS[name]} fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
+  );
+}
+
+/** Puts text on the clipboard through the editor, which a webview may not reach itself. */
+export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      class="ghost icon-btn sm copy-btn"
+      title={done ? 'Copied' : label}
+      aria-label={label}
+      onClick={() => {
+        send({ type: 'copy', text: text.slice(0, 1_000_000) });
+        setDone(true);
+        setTimeout(() => setDone(false), 1200);
+      }}
+    >
+      <Icon name={done ? 'check' : 'copy'} />
+    </button>
   );
 }
 

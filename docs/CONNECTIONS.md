@@ -24,7 +24,9 @@ The host side lives in `extensions/friedliver-agents/src/host/`
 
 Every message that crosses shows in both chats, with the other chat's name.
 The consulted chat is an ordinary chat: you review its edits and approve its
-commands there, as anywhere else.
+commands there, as anywhere else. A chat another one starts (a consultation,
+a hand-off) begins at your default approval level, never Full auto, whatever
+the chat that started it uses.
 
 Commands in the palette (category FriedLiver): **Hand Off to Another Agent**,
 **Ask Another Agent**, **Run a Task on Several Agents**, **Pipe a Chat's
@@ -98,5 +100,7 @@ items; messages are cut to 32 KB and command output to 8 KB; images are not
 saved. API keys and tokens never are. Anything that was waiting when the window closed (a
 question, a review, a command, a tool request) is closed and marked "Stopped
 when the window closed". A restored chat continues in its old agent session
-when the agent can reload it, and otherwise starts a new session and says so.
+when the agent can reload it, and otherwise starts a new session and says so;
+either way its model, effort and approval level are applied again (Full auto
+comes back as Ask). Messages that were queued aren't saved.
 Turning the setting off deletes the saved chats.

@@ -1,5 +1,5 @@
 import type * as acp from '@agentclientprotocol/sdk';
-import { AgentConnection, isAuthRequired, type ClientHost } from './agentConnection';
+import { AgentConnection, isAuthRequired, type ClientHost, type SessionSetup } from './agentConnection';
 import type { AgentId, AgentSpec } from './registry';
 import type { TerminalListener } from './terminals';
 
@@ -12,9 +12,34 @@ export class AuthRequiredError extends Error {
   }
 }
 
+/** A chat's session, new or reloaded, as the agent describes it. */
+export interface SessionStart extends SessionSetup {
+  /** `session/load` brought back the chat's earlier session. */
+  loaded: boolean;
+  /** The agent was restarted, so this replaces a session the chat had. */
+  replaced: boolean;
+  /** The agent takes a message while it works (`_session/steering`). */
+  steering: boolean;
+  agentInfo?: { name: string; version: string };
+}
+
+/** No session to change: the chat's agent hasn't started one yet, or was restarted since. */
+export class NoSessionError extends Error {
+  constructor() {
+    super('The agent has no session for this chat yet.');
+  }
+}
+
+/** Updates about the session itself, not the transcript: kept even while `session/load` replays history. */
+const SESSION_STATE_UPDATES = new Set(['config_option_update', 'current_mode_update', 'available_commands_update', 'usage_update', 'session_info_update']);
+
 export interface HubEvents {
   update(chatId: string, update: acp.SessionUpdate): void;
+  /** A session started or was reloaded. Awaited before the chat's first prompt goes out, so choices can be applied. */
+  session?(chatId: string, start: SessionStart): Promise<void> | void;
   permission(chatId: string, req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse>;
+  /** A form the agent asks the user to fill in; declined when not given. */
+  elicit?(chatId: string, req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse>;
   notice(chatId: string, text: string): void;
   agentsChanged(): void;
   agentStderr?(agentId: AgentId, line: string): void;
@@ -57,6 +82,8 @@ interface ChatState extends Chat {
   loading: boolean;
   /** Stop was pressed before the turn reached the agent, e.g. while it was still starting. */
   cancelled?: boolean;
+  /** A session on its way: a prompt and an early start share it. */
+  starting?: Promise<void>;
 }
 
 interface RunningAgent {
@@ -169,6 +196,56 @@ export class AgentHub {
     }
   }
 
+  /**
+   * Starts the chat's agent and session without a turn, so its options are
+   * known before the first message and a sign-in problem shows at once.
+   */
+  async startSession(chatId: string): Promise<void> {
+    const chat = this.requireChat(chatId);
+    let agent: RunningAgent | undefined;
+    try {
+      agent = await this.ensureAgent(chat.agentId);
+      await this.ensureSession(chat, agent);
+    } catch (err) {
+      if (agent && isAuthRequired(err)) throw new AuthRequiredError(agent.conn.spec, agent.conn.authMethods);
+      throw err;
+    } finally {
+      if (agent) {
+        agent.lastUsed = Date.now();
+        this.scheduleIdleStop(agent);
+      }
+    }
+  }
+
+  /** Whether the chat's session is live in its agent's current process. */
+  hasSession(chatId: string): boolean {
+    return this.live(this.requireChat(chatId)) !== undefined;
+  }
+
+  /** Changes one of the session's config options; returns the agent's whole new list. */
+  async setConfigOption(chatId: string, configId: string, value: string | boolean): Promise<acp.SessionConfigOption[]> {
+    const { agent, sessionId } = this.requireLive(chatId);
+    return agent.conn.setConfigOption(sessionId, configId, value);
+  }
+
+  async setMode(chatId: string, modeId: string): Promise<void> {
+    const { agent, sessionId } = this.requireLive(chatId);
+    await agent.conn.setMode(sessionId, modeId);
+  }
+
+  async setModel(chatId: string, modelId: string): Promise<void> {
+    const { agent, sessionId } = this.requireLive(chatId);
+    await agent.conn.setModel(sessionId, modelId);
+  }
+
+  /** Adds a message to the running turn. False when the agent had no turn running, so it wasn't taken. */
+  async steer(chatId: string, blocks: acp.ContentBlock[]): Promise<boolean> {
+    const chat = this.requireChat(chatId);
+    const { agent, sessionId } = this.requireLive(chatId);
+    if (!agent.conn.supportsSteering) return false;
+    return agent.conn.steer(sessionId, this.fitToAgent(chat, agent, blocks));
+  }
+
   async cancel(chatId: string): Promise<void> {
     const chat = this.requireChat(chatId);
     // Before the session exists there is nothing to tell the agent; the turn stops once it does.
@@ -193,12 +270,20 @@ export class AgentHub {
   async checkSignIn(agentId: AgentId): Promise<{ signedIn: true } | { signedIn: false; methods: acp.AuthMethod[] }> {
     const agent = await this.ensureAgent(agentId);
     try {
-      await agent.conn.newSession(this.options.cwd);
+      const probe = await agent.conn.newSession(this.options.cwd);
+      // Claude lists every session in its history; don't leave a probe there when it can be closed.
+      if (agent.conn.supportsCloseSession) await agent.conn.closeSession(probe.sessionId).catch(() => {});
       return { signedIn: true };
     } catch (err) {
       if (isAuthRequired(err)) return { signedIn: false, methods: agent.conn.authMethods };
       throw err;
     }
+  }
+
+  /** The running adapter's name and version, from `initialize`. */
+  agentInfo(agentId: AgentId): { name: string; version: string } | undefined {
+    const info = this.agents.get(agentId)?.conn.info.agentInfo;
+    return info ? { name: info.name, version: info.version } : undefined;
   }
 
   running(): RunningAgentInfo[] {
@@ -238,6 +323,18 @@ export class AgentHub {
     const chat = this.chats.get(chatId);
     if (!chat) throw new Error(`Unknown chat ${chatId}`);
     return chat;
+  }
+
+  private live(chat: ChatState): { agent: RunningAgent; sessionId: string } | undefined {
+    const agent = this.agents.get(chat.agentId);
+    if (!agent?.conn.running || !chat.sessionId || chat.sessionGeneration !== agent.generation) return undefined;
+    return { agent, sessionId: chat.sessionId };
+  }
+
+  private requireLive(chatId: string): { agent: RunningAgent; sessionId: string } {
+    const live = this.live(this.requireChat(chatId));
+    if (!live) throw new NoSessionError();
+    return live;
   }
 
   private ensureAgent(agentId: AgentId): Promise<RunningAgent> {
@@ -301,23 +398,34 @@ export class AgentHub {
     }
   }
 
-  private async ensureSession(chat: ChatState, agent: RunningAgent): Promise<void> {
-    if (chat.sessionId && chat.sessionGeneration === agent.generation) return;
+  private ensureSession(chat: ChatState, agent: RunningAgent): Promise<void> {
+    if (chat.sessionId && chat.sessionGeneration === agent.generation) return Promise.resolve();
+    chat.starting ??= this.openSession(chat, agent).finally(() => {
+      chat.starting = undefined;
+    });
+    return chat.starting;
+  }
+
+  private async openSession(chat: ChatState, agent: RunningAgent): Promise<void> {
     const previous = chat.sessionId;
     const { cwd } = chat;
     const mcpServers = this.options.mcpServersFor?.(chat.id) ?? [];
 
     if (previous && agent.conn.supportsLoadSession) {
       chat.loading = true;
+      let setup: SessionSetup | undefined;
       try {
-        await agent.conn.loadSession(previous, cwd, mcpServers);
+        setup = await agent.conn.loadSession(previous, cwd, mcpServers);
         chat.sessionGeneration = agent.generation;
-        return;
       } catch (err) {
         if (isAuthRequired(err)) throw err;
         this.options.log?.(`Couldn't reload session ${previous}: ${String(err)}`);
       } finally {
         chat.loading = false;
+      }
+      if (setup) {
+        await this.announce(chat, agent, { ...setup, loaded: true, replaced: false });
+        return;
       }
     }
 
@@ -332,6 +440,21 @@ export class AgentHub {
     chat.sessionId = session.sessionId;
     chat.sessionGeneration = agent.generation;
     this.sessionToChat.set(sessionKey(chat.agentId, session.sessionId), chat.id);
+    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined });
+  }
+
+  /** Tells the editor what the session offers. Its handler may set options; a failure there doesn't stop the turn. */
+  private async announce(chat: ChatState, agent: RunningAgent, start: Omit<SessionStart, 'steering' | 'agentInfo'>): Promise<void> {
+    const info = agent.conn.info.agentInfo;
+    try {
+      await this.options.events.session?.(chat.id, {
+        ...start,
+        steering: agent.conn.supportsSteering,
+        agentInfo: info ? { name: info.name, version: info.version } : undefined,
+      });
+    } catch (err) {
+      this.options.log?.(`Couldn't apply the chat's choices to ${agent.conn.spec.label}: ${String(err)}`);
+    }
   }
 
   private fitToAgent(chat: ChatState, agent: RunningAgent, blocks: acp.ContentBlock[]): acp.ContentBlock[] {
@@ -349,12 +472,19 @@ export class AgentHub {
     return {
       sessionUpdate: ({ sessionId, update }) => {
         const chat = chatFor(sessionId);
-        if (chat && !chat.loading) events.update(chat.id, update);
+        if (chat && (!chat.loading || SESSION_STATE_UPDATES.has(update.sessionUpdate))) events.update(chat.id, update);
       },
       requestPermission: async (req, signal) => {
         const chat = chatFor(req.sessionId);
         if (!chat) return { outcome: { outcome: 'cancelled' } };
         return events.permission(chat.id, req, signal);
+      },
+      createElicitation: async (req, signal) => {
+        // Only questions about one of this agent's sessions; one tied to another request has no chat to ask in.
+        const sessionId = (req as { sessionId?: unknown }).sessionId;
+        const chat = typeof sessionId === 'string' ? chatFor(sessionId) : undefined;
+        if (!chat || !events.elicit || req.mode !== 'form') return { action: 'decline' };
+        return events.elicit(chat.id, req, signal);
       },
       readTextFile: (req) => files.read(req),
       writeTextFile: (req) => files.write(chatFor(req.sessionId)?.id, req),

@@ -64,7 +64,7 @@ describe('notification text', () => {
 
 describe('commands typed into terminals for an agent', () => {
   it('installs from FriedLiver’s own list, chosen by agent key', () => {
-    expect(installCommandFor('claude')).toBe('npm install -g @zed-industries/claude-agent-acp');
+    expect(installCommandFor('claude')).toBe('npm install -g @agentclientprotocol/claude-agent-acp');
     expect(installCommandFor('gemini')).toBe('npm install -g @google/gemini-cli');
     expect(installCommandFor('demo')).toBeNull();
   });

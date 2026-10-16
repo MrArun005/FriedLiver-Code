@@ -1,7 +1,19 @@
 #!/usr/bin/env node
 // A tiny ACP agent for tests. What it does depends on the prompt text:
-//   "edit <path>"     asks permission with a diff, then writes <path>
+//   "edit <path>"     asks permission with a diff (in Ask mode), then writes <path> through the client
 //   "run"             runs a command in a client terminal and reports its output
+//   "native-edit <p>" edits <p> itself with node:fs, like Claude and Codex: a diff in the
+//                     permission request (Ask mode) and in the tool call, no fs/write_text_file
+//   "native-run"      runs a command itself, like Claude and Codex: no terminal/create, the output
+//                     arrives in the tool call
+//   "perm-edit <p>"   like Codex: a tool call with the diff, then a permission request that names
+//                     only its toolCallId, then a native write
+//   "perm-plan"       a plan approval (kind switch_mode, the plan in rawInput.plan), like Claude's
+//                     ExitPlanMode and Codex's "Implement this plan?"
+//   "plan"            switches to Plan mode, sends a plan, then asks as perm-plan does
+//   "question"        asks a multiple-choice question as a form (elicitation/create), like
+//                     Claude's AskUserQuestion, when the client takes forms
+//   "links"           says which files the message linked (resource_link blocks)
 //   "read-image <p>"  reports a read tool call on an image file
 //   "wait"            keeps working until cancelled
 //   "tour"            the UI demo: a plan, a file read, an edit, a command and an image
@@ -15,9 +27,18 @@
 //                     with lists and code blocks; tool calls and their updates; a plan; a
 //                     file read now and then. Never asks for anything. "stamp" ends each
 //                     sentence and the plan's current step with `t=<ms since epoch>`.
-//   anything else     echoes the text back in two chunks
+//   "/help", "/compact" slash commands (advertised in available_commands_update)
+//   anything else     echoes the text back in two chunks, with the model and effort when they
+//                     aren't the defaults: "You said: hi (demo-small · low)"
 // Only the last text block is read as one of these, so context a client puts
 // in front of the message (a hand-off, a consultation) is echoed but ignored.
+// Sessions advertise config options like Claude's and Codex's: a mode (Ask, Accept edits,
+// Plan, Full access), a model in two groups, an effort level that depends on the model
+// ("thought_level") and a Fast toggle ("model_config"; boolean only for clients that say they
+// take boolean options). session/set_mode, session/set_config_option and session/set_model work.
+// Every turn ends with a usage_update. Steering (_session/steering) works while "wait" runs.
+// FAKE_AGENT_LEGACY=1 sends only the older `modes` and Gemini's unstable `models`, and takes the
+// model through session/set_model, as Gemini does.
 // FAKE_AGENT_LOAD_SESSION=1 makes it offer session/load (it remembers nothing, so
 // a reloaded chat just carries on).
 // FAKE_AGENT_START_MCP=1 makes it start each session's MCP servers (the FriedLiver tools)
@@ -28,7 +49,7 @@
 // --require-login makes it need a terminal login instead, like Claude's: the
 // client runs this script with --cli, which asks for Enter and saves a marker.
 import { spawn } from 'node:child_process';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -63,6 +84,255 @@ const cancels = new Map();
 const sessionCwd = new Map();
 const sessionMcp = new Map();
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
+const legacy = process.env.FAKE_AGENT_LEGACY === '1';
+/** The client takes `type: "boolean"` config options (session.configOptions.boolean). */
+let booleanOptions = false;
+/** The client shows form questions (elicitation.form). */
+let forms = false;
+/** What each session's user chose: mode, model, effort, Fast, and the context used so far. */
+const choices = new Map();
+/** Steered messages waiting for a running "wait", per session. */
+const steered = new Map();
+
+// Shaped like Claude's and Codex's: ids FriedLiver doesn't know, names that say what they do.
+const MODES = [
+  { id: 'default', name: 'Ask', description: 'Asks before it edits a file or runs a command' },
+  { id: 'acceptEdits', name: 'Accept edits', description: 'Edits files without asking; commands still ask' },
+  { id: 'plan', name: 'Plan', description: 'Plans only and changes nothing' },
+  { id: 'bypassPermissions', name: 'Full access', description: 'Never asks' },
+];
+const MODELS = [
+  { id: 'demo-smart', name: 'Smart', description: 'Every effort level', group: 'thorough', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { id: 'demo-small', name: 'Small', description: 'Low and medium effort only', group: 'quick', efforts: ['low', 'medium'] },
+];
+const MODEL_GROUPS = [
+  { group: 'thorough', name: 'Thorough' },
+  { group: 'quick', name: 'Quick' },
+];
+const DEFAULTS = { mode: 'default', model: 'demo-smart', effort: 'medium', fast: false };
+const COMMANDS = [
+  { name: 'help', description: 'What the Demo agent can do' },
+  { name: 'compact', description: 'Clear the context, so usage starts over' },
+  { name: 'review', description: 'Pretend to review a file', input: { hint: 'file to review' } },
+];
+const HELP = [
+  '`tour`, `project`, `edit <path>`, `run`, `read-image <path>`, `wait`, `ask <agent> <question>`, `chats`,',
+  '`native-edit <path>` and `native-run` (the agent acts itself, like Claude and Codex), `perm-edit <path>` (a Codex-style',
+  'permission that names only its tool call), `plan` and `perm-plan` (a plan to approve), `/compact`.',
+].join(' ');
+
+const capitalized = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const stateOf = (sessionId) => choices.get(sessionId) ?? { ...DEFAULTS, used: 0 };
+
+function configOptions(state) {
+  const model = MODELS.find((m) => m.id === state.model) ?? MODELS[0];
+  const fast = { id: 'fast', name: 'Fast mode', description: 'Answers sooner', category: 'model_config' };
+  return [
+    {
+      id: 'mode',
+      name: 'Mode',
+      description: 'When the Demo agent asks you',
+      category: 'mode',
+      type: 'select',
+      currentValue: state.mode,
+      options: MODES.map((m) => ({ value: m.id, name: m.name, description: m.description })),
+    },
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue: state.model,
+      options: MODEL_GROUPS.map((g) => ({
+        group: g.group,
+        name: g.name,
+        options: MODELS.filter((m) => m.group === g.group).map((m) => ({ value: m.id, name: m.name, description: m.description })),
+      })),
+    },
+    {
+      id: 'effort',
+      name: 'Effort',
+      category: 'thought_level',
+      type: 'select',
+      currentValue: state.effort,
+      options: model.efforts.map((e) => ({ value: e, name: capitalized(e) })),
+    },
+    booleanOptions
+      ? { ...fast, type: 'boolean', currentValue: state.fast }
+      : { ...fast, type: 'select', currentValue: state.fast ? 'on' : 'off', options: [{ value: 'on', name: 'On' }, { value: 'off', name: 'Off' }] },
+  ];
+}
+
+const modeState = (state) => ({ currentModeId: state.mode, availableModes: MODES });
+const modelState = (state) => ({ currentModelId: state.model, availableModels: MODELS.map((m) => ({ modelId: m.id, name: m.name, description: m.description })) });
+
+/** What session/new and session/load answer with, besides the id. */
+function sessionSetup(state) {
+  return legacy ? { modes: modeState(state), models: modelState(state) } : { modes: modeState(state), configOptions: configOptions(state) };
+}
+
+function setModel(state, id) {
+  const model = MODELS.find((m) => m.id === id);
+  if (!model) throw acp.RequestError.invalidParams(undefined, `Unknown model ${id}`);
+  state.model = id;
+  // A model with fewer levels moves the effort, as Claude's and Codex's do.
+  if (!model.efforts.includes(state.effort)) state.effort = model.efforts.includes('medium') ? 'medium' : model.efforts[0];
+}
+
+function setMode(state, id) {
+  if (!MODES.some((m) => m.id === id)) throw acp.RequestError.invalidParams(undefined, `Unknown mode ${id}`);
+  state.mode = id;
+}
+
+/** Commands and the starting usage, a moment after the session answer, as Gemini sends them. */
+function announceSession(client, sessionId) {
+  setTimeout(() => {
+    void client.notify(acp.methods.client.session.update, { sessionId, update: { sessionUpdate: 'available_commands_update', availableCommands: COMMANDS } }).catch(() => {});
+  }, 0);
+}
+
+async function announceMode(client, sessionId, state) {
+  await tool(client, sessionId, { sessionUpdate: 'current_mode_update', currentModeId: state.mode });
+  if (!legacy) await tool(client, sessionId, { sessionUpdate: 'config_option_update', configOptions: configOptions(state) });
+}
+
+async function reportUsage(client, sessionId, state, text) {
+  state.used = Math.min(200_000, state.used + 1500 + text.length * 4);
+  await tool(client, sessionId, {
+    sessionUpdate: 'usage_update',
+    used: state.used,
+    size: 200_000,
+    cost: { amount: Math.round(state.used * 3) / 1_000_000, currency: 'USD' },
+  });
+}
+
+/** Asks before a tool runs, in the modes that ask for that kind of tool. Resolves true when allowed. */
+async function allowed(client, sessionId, kind, toolCall, options) {
+  const { mode } = stateOf(sessionId);
+  if (mode === 'bypassPermissions' || (mode === 'acceptEdits' && kind === 'edit')) return true;
+  const answer = await client.request(acp.methods.client.session.requestPermission, { sessionId, toolCall, options });
+  const chosen = answer.outcome.outcome === 'selected' ? options.find((o) => o.optionId === answer.outcome.optionId) : undefined;
+  return chosen?.kind.startsWith('allow') ?? false;
+}
+
+const ASK_OPTIONS = [
+  { optionId: 'allow', name: 'Yes', kind: 'allow_once' },
+  { optionId: 'always', name: "Yes, and don't ask again for this session", kind: 'allow_always' },
+  { optionId: 'reject', name: 'No', kind: 'reject_once' },
+];
+
+/** The proposal for <file>: a new file, or one line added after the first. */
+function nativeChange(file, marker) {
+  const before = existsSync(file) ? readFileSync(file, 'utf8') : null;
+  if (before === null) return { before, after: `${marker}\n`, diff: { type: 'diff', path: file, oldText: null, newText: `${marker}\n` } };
+  const first = before.split('\n')[0];
+  const oldText = `${first}\n`;
+  const newText = `${first}\n${marker}\n`;
+  const after = before.includes(oldText) ? before.replace(oldText, newText) : `${before}${before.endsWith('\n') || !before ? '' : '\n'}${marker}\n`;
+  return { before, after, diff: { type: 'diff', path: file, oldText: before.includes(oldText) ? oldText : before, newText: before.includes(oldText) ? newText : after } };
+}
+
+function writeNative(file, content) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, content, 'utf8');
+}
+
+/** Like Claude's Edit tool: the diff in the tool call and in the permission request, then its own write. */
+async function nativeEdit(client, sessionId, file) {
+  if (stateOf(sessionId).mode === 'plan') return say(client, sessionId, "I'm in Plan mode, so I don't change files.");
+  const change = nativeChange(file, 'edited by the demo agent itself');
+  const call = { toolCallId: 'native-edit-1', title: `Edit ${path.basename(file)}`, kind: 'edit', locations: [{ path: file }], content: [change.diff] };
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', ...call, status: 'pending', rawInput: { file_path: file } });
+  const ok = await allowed(client, sessionId, 'edit', { ...call, rawInput: { file_path: file } }, ASK_OPTIONS);
+  if (ok) writeNative(file, change.after);
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId: call.toolCallId, status: ok ? 'completed' : 'failed' });
+  await say(client, sessionId, ok ? `Edited \`${path.basename(file)}\` myself, without the client's file access.` : 'You said no, so I left the file alone.');
+}
+
+/** Like Codex's apply_patch: a tool call with the diff, then a permission request with only its id. */
+async function permEdit(client, sessionId, file) {
+  if (stateOf(sessionId).mode === 'plan') return say(client, sessionId, "I'm in Plan mode, so I don't change files.");
+  const change = nativeChange(file, 'patched by the demo agent');
+  const toolCallId = 'perm-edit-1';
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', toolCallId, title: 'Edit files', kind: 'edit', status: 'pending', locations: [{ path: file }], content: [change.diff] });
+  const ok = await allowed(client, sessionId, 'edit', { toolCallId }, [
+    { optionId: 'approved', name: 'Yes', kind: 'allow_once' },
+    { optionId: 'approved-for-session', name: "Yes, and don't ask again for these files", kind: 'allow_always' },
+    { optionId: 'abort', name: 'No, and tell the agent what to do differently', kind: 'reject_once' },
+  ]);
+  if (ok) writeNative(file, change.after);
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: ok ? 'completed' : 'failed' });
+  await say(client, sessionId, ok ? `Patched \`${path.basename(file)}\`.` : 'Not patched.');
+}
+
+/** Like Claude's Bash tool: asks (in Ask mode), runs the command itself, and reports its output in the tool call. */
+async function nativeRun(client, sessionId) {
+  const cwd = sessionCwd.get(sessionId) ?? process.cwd();
+  const command = 'node --version';
+  const toolCallId = 'native-run-1';
+  const call = { toolCallId, title: command, kind: 'execute', rawInput: { command, description: 'Show the Node.js version' } };
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', ...call, status: 'pending' });
+  if (!(await allowed(client, sessionId, 'execute', call, ASK_OPTIONS))) {
+    await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'failed' });
+    return say(client, sessionId, 'You said no, so I skipped the command.');
+  }
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress' });
+  const output = await new Promise((resolve) => {
+    let out = '';
+    const child = spawn(process.execPath, ['--version'], { cwd, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, windowsHide: true });
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (out += d));
+    child.on('close', (code) => resolve({ out, code }));
+    child.on('error', (err) => resolve({ out: err.message, code: 127 }));
+  });
+  await tool(client, sessionId, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId,
+    status: output.code === 0 ? 'completed' : 'failed',
+    content: [{ type: 'content', content: { type: 'text', text: output.out } }],
+    rawOutput: { exitCode: output.code },
+  });
+  await say(client, sessionId, `Ran it myself: exit ${output.code}.`);
+}
+
+const PLAN_TEXT = '## Plan\n\n1. Read `README.md`\n2. Add a **Usage** section\n3. Run the tests';
+
+/** Like Claude's ExitPlanMode: the plan to approve, with a mode change in some answers. */
+async function permPlan(client, sessionId) {
+  const state = stateOf(sessionId);
+  const options = [
+    { optionId: 'exit-plan-accept-edits', name: 'Yes, and auto-accept edits', kind: 'allow_always' },
+    { optionId: 'exit-plan-default', name: 'Yes, manually approve edits', kind: 'allow_once' },
+    { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
+  ];
+  const toolCallId = 'perm-plan-1';
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', toolCallId, title: 'Ready to code?', kind: 'switch_mode', status: 'pending', rawInput: { plan: PLAN_TEXT } });
+  const answer = await client.request(acp.methods.client.session.requestPermission, {
+    sessionId,
+    toolCall: { toolCallId, title: 'Ready to code?', kind: 'switch_mode', rawInput: { plan: PLAN_TEXT } },
+    options,
+  });
+  const optionId = answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'reject';
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: optionId === 'reject' ? 'failed' : 'completed' });
+  if (optionId === 'reject') return say(client, sessionId, 'Staying in Plan mode.');
+  state.mode = optionId === 'exit-plan-accept-edits' ? 'acceptEdits' : 'default';
+  await announceMode(client, sessionId, state);
+  await say(client, sessionId, `Plan approved. Mode: ${MODES.find((m) => m.id === state.mode).name}.`);
+}
+
+async function planMode(client, sessionId) {
+  const state = stateOf(sessionId);
+  if (state.mode !== 'plan') {
+    state.mode = 'plan';
+    await announceMode(client, sessionId, state);
+  }
+  await tool(client, sessionId, {
+    sessionUpdate: 'plan',
+    entries: ['Read README.md', 'Add a Usage section', 'Run the tests'].map((content) => ({ content, priority: 'medium', status: 'pending' })),
+  });
+  await say(client, sessionId, "Here's my plan. Approve it to leave Plan mode.\n\n");
+  await permPlan(client, sessionId);
+}
 
 const say = (client, sessionId, text) =>
   client.notify(acp.methods.client.session.update, {
@@ -83,20 +353,16 @@ async function edit(client, sessionId, path) {
     locations: [{ path }],
     content: [{ type: 'diff', path, oldText: null, newText: 'edited by fake agent\n' }],
   });
-  const answer = await client.request(acp.methods.client.session.requestPermission, {
-    sessionId,
-    toolCall: { toolCallId: 'edit-1', title: `Edit ${path}`, kind: 'edit' },
-    options: [
-      { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
-    ],
-  });
-  const allowed = answer.outcome.outcome === 'selected' && answer.outcome.optionId === 'allow';
-  if (allowed) {
+  // Like Gemini in its Default mode: asks first (title only, the diff is on the tool call), then writes through the client.
+  const ok = await allowed(client, sessionId, 'edit', { toolCallId: 'edit-1', title: `Edit ${path}`, kind: 'edit' }, [
+    { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+    { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+  ]);
+  if (ok) {
     await client.request(acp.methods.client.fs.writeTextFile, { sessionId, path, content: 'edited by fake agent\n' });
   }
-  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'edit-1', status: allowed ? 'completed' : 'failed' });
-  await say(client, sessionId, allowed ? 'Edited.' : 'Skipped the edit.');
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'edit-1', status: ok ? 'completed' : 'failed' });
+  await say(client, sessionId, ok ? 'Edited.' : 'Skipped the edit.');
 }
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -543,7 +809,10 @@ async function run(client, sessionId) {
 
 acp
   .agent({ name: 'fake-agent' })
-  .onRequest(acp.methods.agent.initialize, () => ({
+  .onRequest(acp.methods.agent.initialize, ({ params }) => {
+    booleanOptions = params.clientCapabilities?.session?.configOptions?.boolean != null;
+    forms = params.clientCapabilities?.elicitation?.form != null;
+    return {
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession, promptCapabilities: { image: images } },
     authMethods: needsTerminalLogin
@@ -552,7 +821,10 @@ acp
         ? [{ id: 'fake-login', name: 'Fake login' }]
         : [],
     agentInfo: { name: 'fake-agent', version: '0.0.0' },
-  }))
+    // Like Claude's adapter: a message can join a running turn through _session/steering.
+    _meta: { steering: { supported: true } },
+    };
+  })
   .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
     if (params.methodId !== 'fake-login') throw acp.RequestError.invalidParams();
     process.stderr.write('Open https://accounts.google.com/o/oauth2/v2/auth?client_id=demo to sign in\n');
@@ -560,20 +832,65 @@ acp
     authenticated = true;
     return {};
   })
-  .onRequest(acp.methods.agent.session.new, ({ params }) => {
+  .onRequest(acp.methods.agent.session.new, ({ params, client }) => {
     if (needsAuth && !authenticated) throw acp.RequestError.authRequired();
     if (needsTerminalLogin && !existsSync(LOGIN_MARKER)) throw acp.RequestError.authRequired();
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     sessionMcp.set(sessionId, params.mcpServers ?? []);
     if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string') keepMcp(server);
-    return { sessionId };
+    const state = { ...DEFAULTS, used: 0 };
+    choices.set(sessionId, state);
+    announceSession(client, sessionId);
+    return { sessionId, ...sessionSetup(state) };
   })
-  .onRequest(acp.methods.agent.session.load, ({ params }) => {
+  .onRequest(acp.methods.agent.session.load, ({ params, client }) => {
     if (!loadSession) throw acp.RequestError.methodNotFound('session/load');
     sessionCwd.set(params.sessionId, params.cwd);
     sessionMcp.set(params.sessionId, params.mcpServers ?? []);
+    const state = choices.get(params.sessionId) ?? { ...DEFAULTS, used: 0 };
+    choices.set(params.sessionId, state);
+    announceSession(client, params.sessionId);
+    return sessionSetup(state);
+  })
+  .onRequest(acp.methods.agent.session.setMode, async ({ params, client }) => {
+    const state = stateOf(params.sessionId);
+    setMode(state, params.modeId);
+    choices.set(params.sessionId, state);
+    if (!legacy) await tool(client, params.sessionId, { sessionUpdate: 'config_option_update', configOptions: configOptions(state) });
     return {};
+  })
+  .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+    if (legacy) throw acp.RequestError.methodNotFound('session/set_config_option');
+    const state = stateOf(params.sessionId);
+    const value = params.value;
+    if (params.configId === 'mode') setMode(state, String(value));
+    else if (params.configId === 'model') setModel(state, String(value));
+    else if (params.configId === 'effort') {
+      const model = MODELS.find((m) => m.id === state.model) ?? MODELS[0];
+      if (!model.efforts.includes(String(value))) throw acp.RequestError.invalidParams(undefined, `${model.name} has no effort ${value}`);
+      state.effort = String(value);
+    } else if (params.configId === 'fast') {
+      if (typeof value === 'boolean') state.fast = value;
+      else if (value === 'on' || value === 'off') state.fast = value === 'on';
+      else throw acp.RequestError.invalidParams(undefined, `Fast mode is on or off, not ${value}`);
+    } else throw acp.RequestError.invalidParams(undefined, `Unknown option ${params.configId}`);
+    choices.set(params.sessionId, state);
+    return { configOptions: configOptions(state) };
+  })
+  // Gemini's unstable session/set_model, which SDK 1.8's types don't have.
+  .onRequest('session/set_model', (raw) => raw, ({ params }) => {
+    const state = stateOf(params.sessionId);
+    setModel(state, String(params.modelId));
+    choices.set(params.sessionId, state);
+    return {};
+  })
+  .onRequest('_session/steering', (raw) => raw, ({ params }) => {
+    const resolve = steered.get(params.sessionId);
+    if (!resolve) return { outcome: 'promptRequired', reason: 'noRunningTurn' };
+    const text = (params.prompt ?? []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+    resolve(text);
+    return { outcome: 'steered' };
   })
   .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
     cancels.get(params.sessionId)?.();
@@ -588,9 +905,20 @@ acp
     const asked = command.match(/^ask (\w+) ([\s\S]+)$/);
 
     if (command === 'wait') {
-      await new Promise((resolve) => cancels.set(sessionId, resolve));
+      // Works until cancelled, or until a steered message arrives, which it answers.
+      await client.notify(acp.methods.client.session.update, {
+        sessionId,
+        update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Waiting until you stop me.' } },
+      });
+      const steer = await new Promise((resolve) => {
+        cancels.set(sessionId, () => resolve(null));
+        steered.set(sessionId, resolve);
+      });
       cancels.delete(sessionId);
-      return { stopReason: 'cancelled' };
+      steered.delete(sessionId);
+      if (steer === null) return { stopReason: 'cancelled' };
+      await say(client, sessionId, `Steered: ${steer}`);
+      return { stopReason: 'end_turn' };
     }
     if (asked) return { stopReason: await ask(client, sessionId, asked[1], asked[2]) };
     const fromEditor = editorRequest(texts);
@@ -614,6 +942,38 @@ acp
     } else if (command === 'tour') await tour(client, sessionId);
     else if (command === 'project') await project(client, sessionId);
     else if (command.startsWith('edit ')) await edit(client, sessionId, command.slice(5));
+    else if (command.startsWith('native-edit ')) await nativeEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(12).trim()));
+    else if (command.startsWith('perm-edit ')) await permEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(10).trim()));
+    else if (command === 'native-run') await nativeRun(client, sessionId);
+    else if (command === 'perm-plan') await permPlan(client, sessionId);
+    else if (command === 'plan') await planMode(client, sessionId);
+    else if (command === 'question') {
+      if (!forms) await say(client, sessionId, "This client can't show questions as forms, so I'd ask in a message.");
+      else {
+        const answer = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'form',
+          sessionId,
+          message: 'Which database should the store use?',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              db: { type: 'string', title: 'Database', oneOf: [{ const: 'sqlite', title: 'SQLite', description: 'A file next to the app' }, { const: 'postgres', title: 'Postgres' }] },
+              note: { type: 'string', title: 'Other', description: 'Anything to add (optional)' },
+            },
+            required: ['db'],
+          },
+        });
+        await say(client, sessionId, answer.action === 'accept' ? `You picked ${answer.content?.db}${answer.content?.note ? ` (${answer.content.note})` : ''}.` : `You ${answer.action === 'decline' ? 'skipped' : 'cancelled'} the question.`);
+      }
+    } else if (command.startsWith('links')) {
+      const links = params.prompt.filter((b) => b.type === 'resource_link').map((b) => b.name);
+      await say(client, sessionId, links.length ? `Linked: ${links.join(', ')}` : 'No files linked.');
+    }
+    else if (command === '/help') await say(client, sessionId, HELP);
+    else if (command === '/compact') {
+      stateOf(sessionId).used = 0;
+      await say(client, sessionId, 'Context cleared.');
+    } else if (command.startsWith('/review')) await say(client, sessionId, `Reviewed ${command.slice(7).trim() || 'nothing'}: looks fine.`);
     else if (command === 'run') await run(client, sessionId);
     else if (command.startsWith('read-image ')) {
       const path = command.slice(11);
@@ -626,9 +986,13 @@ acp
         locations: [{ path }],
       });
     } else {
+      const state = stateOf(sessionId);
+      // The model and effort show when they aren't the defaults, so tests can see a choice arrive.
+      const chosen = state.model !== DEFAULTS.model || state.effort !== DEFAULTS.effort || state.fast ? ` (${[state.model, state.effort, ...(state.fast ? ['fast'] : [])].join(' · ')})` : '';
       await say(client, sessionId, 'You said: ');
-      await say(client, sessionId, `${text}${imageCount ? ` (+${imageCount} image)` : ''}`);
+      await say(client, sessionId, `${text}${imageCount ? ` (+${imageCount} image)` : ''}${chosen}`);
     }
+    if (choices.has(sessionId)) await reportUsage(client, sessionId, stateOf(sessionId), text);
     return { stopReason: 'end_turn' };
   })
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));

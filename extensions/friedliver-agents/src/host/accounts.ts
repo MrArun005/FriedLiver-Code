@@ -12,7 +12,7 @@ const STATUS_TEXT: Record<AccountStatus['status'], string> = {
   error: 'Problem',
 };
 
-type Node = { agent: AgentKey } | { agent: AgentKey; method: AccountStatus['methods'][number] };
+type Node = { agent: AgentKey } | { agent: AgentKey; method: AccountStatus['methods'][number] } | { other: true };
 
 /**
  * Sign-in, the same flows as the app (docs/adr/0001-agent-login.md): the
@@ -53,6 +53,14 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
+    if ('other' in node) {
+      const item = new vscode.TreeItem('Other agent extensions…');
+      item.description = 'Claude Code, Cline, Roo Code…';
+      item.tooltip = 'Install another agent extension from the gallery, as its publisher ships it. FriedLiver’s reviews and approvals don’t cover it.';
+      item.iconPath = new vscode.ThemeIcon('extensions');
+      item.command = { command: 'friedliver.otherAgents', title: 'Get Another Agent Extension' };
+      return item;
+    }
     if ('method' in node) {
       const item = new vscode.TreeItem(node.method.name);
       item.description = node.method.kind === 'terminal' ? 'in a terminal' : node.method.kind === 'key' ? 'API key' : 'in the browser';
@@ -63,8 +71,9 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     const s = this.status.get(node.agent);
     const item = new vscode.TreeItem(AGENT_FACES[node.agent].name);
     const key = node.agent !== 'demo' && this.keys.has(node.agent) ? ' · API key saved' : '';
-    item.description = (s === 'checking' ? 'Checking…' : s ? STATUS_TEXT[s.status] : 'Not checked') + key;
-    item.tooltip = typeof s === 'object' && s.message ? s.message : 'Click to check. Checking starts the agent.';
+    const version = typeof s === 'object' && s.version ? ` · ${s.update ? `${s.version}, update it` : s.version}` : '';
+    item.description = (s === 'checking' ? 'Checking…' : s ? STATUS_TEXT[s.status] : 'Not checked') + version + key;
+    item.tooltip = typeof s === 'object' && (s.update ?? s.message) ? (s.update ?? s.message) : 'Click to check. Checking starts the agent.';
     item.contextValue = node.agent === 'demo' ? 'agent-demo' : 'agent-vendor';
     item.collapsibleState = typeof s === 'object' && s.methods.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None;
     item.command = { command: 'friedliver.accounts.check', title: 'Check sign-in', arguments: [node] };
@@ -72,7 +81,8 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
   }
 
   getChildren(node?: Node): Node[] {
-    if (!node) return AGENT_KEYS.map((agent) => ({ agent }));
+    if (!node) return [...AGENT_KEYS.map((agent) => ({ agent })), { other: true as const }];
+    if ('other' in node) return [];
     const s = 'method' in node ? undefined : this.status.get(node.agent);
     return typeof s === 'object' ? s.methods.map((method) => ({ agent: node.agent, method })) : [];
   }
@@ -98,7 +108,8 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     if (!pick) return;
     const s = await this.check(pick.agent);
     if (s.status === 'signed-in') {
-      void vscode.window.showInformationMessage(`${pick.label} is signed in.`);
+      if (s.update) void vscode.window.showWarningMessage(`${pick.label} is signed in, but its adapter (${s.version}) is old. ${s.update}`);
+      else void vscode.window.showInformationMessage(`${pick.label} is signed in.`);
     } else if (s.status === 'needs-sign-in') {
       const method = await vscode.window.showQuickPick(
         s.methods.map((m) => ({ label: m.name, description: m.description, id: m.id })),

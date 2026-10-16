@@ -8,7 +8,7 @@ import {
   bridgeTitle,
   fileConflicts,
   formatDuration,
-  isWaiting,
+  waitingItems,
   parseMention,
   shortCommand,
   type AppState,
@@ -35,8 +35,10 @@ import {
   switcherGroups,
   statusOf,
 } from '../shared/view';
-import { DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, memo, send, useHost, useWidth } from './common';
+import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
+import { CopyButton, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
+import { AlwaysAllow, AutoBadge, EditsBar, ModeBadge, PermissionCard, QuestionCard, QueueList, SessionControls, ToolDetails, UsageMeter, decisionKey, hasDetails } from './controls';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -45,13 +47,19 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 type Select = (chatId: string) => void;
 
 function App() {
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Images and code references waiting in each chat's composer, so they go with that chat's next message only.
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
-  // Code references waiting in each chat's composer (Add Selection to Chat).
   const [refs, setRefs] = useState<Record<string, CodeRef[]>>({});
   const [focusTick, setFocusTick] = useState(0);
+  const [found, setFound] = useState<{ chatId: string; query: string; files: string[] } | null>(null);
+  const shown = useRef<string | undefined>(undefined);
   const { state, selected, setSelected } = useHost((m) => {
-    if (m.type === 'attached') setAttachments((list) => [...list, ...m.images].slice(0, 10));
+    if (m.type === 'foundFiles') setFound({ chatId: m.chatId, query: m.query, files: m.files });
+    if (m.type === 'attached') {
+      const to = m.chatId ?? shown.current;
+      if (to) setAttachments((all) => ({ ...all, [to]: [...(all[to] ?? []), ...m.images].slice(0, 10) }));
+    }
     if (m.type === 'reveal') setReveal((r) => ({ id: m.id, n: (r?.n ?? 0) + 1 }));
     if (m.type === 'addRef') {
       setRefs((all) => (all[m.chatId]?.some((r) => sameRef(r, m.ref)) ? all : { ...all, [m.chatId]: [...(all[m.chatId] ?? []), m.ref].slice(-10) }));
@@ -60,6 +68,7 @@ function App() {
   });
   // The selected chat even when archived (opened from History); otherwise the newest open one.
   const chat = state.chats.find((c) => c.id === selected) ?? openChats(state.chats).at(-1);
+  shown.current = chat?.id;
 
   const select = useCallback((chatId: string) => {
     setSelected(chatId);
@@ -84,12 +93,14 @@ function App() {
               onSelect={select}
             />
             <Composer
+              key={chat.id}
               chat={chat}
-              attachments={attachments}
-              setAttachments={setAttachments}
+              attachments={attachments[chat.id] ?? []}
+              setAttachments={(fn) => setAttachments((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
               refs={refs[chat.id] ?? []}
               setRefs={(fn) => setRefs((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
               focusTick={focusTick}
+              found={found?.chatId === chat.id ? found : null}
             />
           </>
         ) : (
@@ -113,6 +124,7 @@ function Switcher({ state, active, onSelect }: { state: AppState; active?: strin
           <button key={c.id} role="tab" class="tab" aria-selected={c.id === active} title={`${c.label}: ${c.title}`} onClick={() => onSelect(c.id)}>
             <Glyph agent={c.agent} size="sm" />
             <span class="tab-title">{c.title}</span>
+            <AutoBadge chat={c} short />
             <Dot state={statusOf(c)} />
           </button>
         ))}
@@ -272,6 +284,8 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             <span class="sep">·</span>
             <Dot state={status} />
             <span>{DOT_LABEL[status]}</span>
+            <ModeBadge session={chat.session} agent={chat.agent} />
+            <AutoBadge chat={chat} />
             {chat.branch && (
               <span class="chip" title={chat.cwd}>
                 <Icon name="branch" />
@@ -345,6 +359,11 @@ function Empty() {
       <p class="hint">
         No sign-in yet? <strong>Demo</strong>, then <code>tour</code> or <code>project</code>.
       </p>
+      <p class="hint">
+        <button class="link" onClick={() => send({ type: 'otherAgents' })}>
+          Get another agent extension…
+        </button>
+      </p>
     </div>
   );
 }
@@ -404,12 +423,12 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   const lastChanges = chat.items.map((i) => i.kind).lastIndexOf('changes');
   const waiting = new Set(chat.items.flatMap((i) => (i.kind === 'permission' && !i.answer && i.toolCallId ? [i.toolCallId] : [])));
   const waitingKey = [...waiting].join('\n');
+  const waitingNow = waitingItems(chat.items).length > 0;
 
   return (
     <div
       class="transcript"
       ref={box}
-      aria-live="polite"
       onScroll={(e) => {
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -432,11 +451,16 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
           />
         ),
       )}
-      {chat.busy && !chat.items.some(isWaiting) && (
+      <QueueList chat={chat} />
+      {chat.busy && !waitingNow && (
         <div class="working">
           <Dot state="working" /> {chat.label} is working…
         </div>
       )}
+      {/* Read out what matters, not every streamed word. */}
+      <div class="sr" aria-live="polite">
+        {waitingNow ? `${chat.label} needs your decision` : chat.busy ? '' : chat.turns ? `${chat.label} finished` : ''}
+      </div>
     </div>
   );
 }
@@ -456,20 +480,32 @@ const Steps = memo(
 );
 
 function StepsView({ tools, waiting, busy }: StepsProps) {
+  // Failed steps show their output; the others open on request.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   return (
     <ol class="steps" aria-label="Steps">
       {tools.map((t) => {
         const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
+        const more = hasDetails(t);
+        const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
         return (
-          <li key={t.id} data-state={state}>
-            <Dot state={state} still={!busy} />
-            <span class="step-title">{t.title}</span>
-            {t.toolKind && <span class="tag">{t.toolKind}</span>}
-            {t.locations.slice(0, 3).map((l) => (
-              <button key={l} class="ref" title={l} onClick={() => send({ type: 'openFile', path: l })}>
-                {basename(l)}
-              </button>
-            ))}
+          <li key={t.id} data-state={state} data-open={isOpen ? '' : undefined}>
+            <div class="step-row">
+              <Dot state={state} still={!busy} />
+              <span class="step-title">{t.title}</span>
+              {t.toolKind && <span class="tag">{t.toolKind}</span>}
+              {t.locations.slice(0, 3).map((l) => (
+                <button key={l} class="ref" title={l} onClick={() => send({ type: 'openFile', path: l })}>
+                  {basename(l)}
+                </button>
+              ))}
+              {more && (
+                <button class="ghost icon-btn sm step-toggle" aria-expanded={isOpen} title={isOpen ? 'Hide what it did' : 'Show what it did'} onClick={() => setOpen({ ...open, [t.id]: !isOpen })}>
+                  <Icon name="chevron" />
+                </button>
+              )}
+            </div>
+            {more && isOpen && <ToolDetails tool={t} />}
           </li>
         );
       })}
@@ -530,6 +566,9 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo }: ItemProps
       return (
         <div class="prose">
           <Markdown text={item.text} />
+          <div class="msg-tools">
+            <CopyButton text={item.text} label="Copy reply" />
+          </div>
         </div>
       );
     case 'thought':
@@ -570,33 +609,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo }: ItemProps
       );
     }
     case 'permission':
-      if (item.answer) {
-        return (
-          <div class="answered">
-            <Icon name="check" /> {item.title} <span class="hint">· {item.answer}</span>
-          </div>
-        );
-      }
-      return (
-        <section class="ask" id={`item-${item.requestId}`} aria-label="The agent asks">
-          <div class="ask-head">
-            <Dot state="needs-you" />
-            <Glyph agent={chat.agent} size="sm" /> {chat.label} asks
-          </div>
-          <div class="ask-body">{item.title}</div>
-          <div class="actions">
-            {item.options.map((o, i) => (
-              <button
-                key={o.optionId}
-                class={`sm ${o.kind.startsWith('allow') && i === item.options.findIndex((x) => x.kind.startsWith('allow')) ? 'decide' : o.kind.startsWith('reject') ? 'ghost danger' : ''}`}
-                onClick={() => send({ type: 'permission', requestId: item.requestId, optionId: o.optionId })}
-              >
-                {o.name}
-              </button>
-            ))}
-          </div>
-        </section>
-      );
+      return <PermissionCard item={item} chat={chat} />;
     case 'review':
       return <Review item={item} chat={chat} state={state} conflicts={conflicts} />;
     case 'command':
@@ -648,6 +661,8 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo }: ItemProps
       return <LinkView item={item} chat={chat} state={state} onSelect={onSelect} />;
     case 'bridge':
       return <BridgeView item={item} chat={chat} state={state} onSelect={onSelect} />;
+    case 'question':
+      return <QuestionCard item={item} chat={chat} />;
   }
 }
 
@@ -799,6 +814,7 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
           {name}
         </button>{' '}
         <Stats item={item} />
+        {item.auto && <span class="hint">· {item.auto}</span>}
         <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
       </div>
     );
@@ -849,12 +865,13 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
         </div>
         {item.outside && <div class="warn">This folder is outside the workspace.</div>}
         <div class="actions">
-          <button class="decide sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: true })}>
+          <button class="decide sm" title="Run (Ctrl+Enter)" onClick={() => send({ type: 'command', commandId: item.commandId, approve: true })}>
             <Icon name="play" /> Run
           </button>
-          <button class="ghost danger sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: false })}>
+          <button class="ghost danger sm" title="Deny (Ctrl+Shift+Backspace)" onClick={() => send({ type: 'command', commandId: item.commandId, approve: false })}>
             Deny
           </button>
+          {!item.outside && <AlwaysAllow line={item.commandLine} target={{ commandId: item.commandId }} />}
         </div>
       </section>
     );
@@ -874,12 +891,16 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
           <span class="prompt">$ </span>
           {shortCommand(item.commandLine, 200)}
         </code>
+        {item.auto && <span class="tag" title="Ran without asking">{item.auto}</span>}
         <span class="hint">{meta}</span>
       </div>
       {item.output && <pre class="output">{item.output}</pre>}
     </section>
   );
 }
+
+/** Drafts kept per chat across reloads of the view: text only, the newest few chats. */
+const MAX_DRAFTS = 30;
 
 function Composer({
   chat,
@@ -888,6 +909,7 @@ function Composer({
   refs,
   setRefs,
   focusTick,
+  found,
 }: {
   chat: ChatView;
   attachments: Attachment[];
@@ -895,22 +917,54 @@ function Composer({
   refs: CodeRef[];
   setRefs(fn: (r: CodeRef[]) => CodeRef[]): void;
   focusTick: number;
+  /** Files the host found for the "#" picker. */
+  found: { query: string; files: string[] } | null;
 }) {
-  const [text, setText] = useState('');
+  const [drafts, setDrafts] = usePersisted<Record<string, string>>('drafts', {});
+  const [text, setTextState] = useState(drafts[chat.id] ?? '');
   const [caret, setCaret] = useState(0);
   const [pick, setPick] = useState(0);
   const [shut, setShut] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
+  const compact = useWidth() < 360;
   useEffect(() => area.current?.focus(), [chat.id, focusTick]);
+
+  const setText = (value: string) => {
+    setTextState(value);
+    const rest = Object.fromEntries(Object.entries(drafts).filter(([id]) => id !== chat.id).slice(-(MAX_DRAFTS - 1)));
+    setDrafts(value ? { ...rest, [chat.id]: value } : rest);
+  };
 
   // "@" at the very start picks an agent to ask; the answer comes back into this chat.
   const query = shut ? null : mentionQuery(text, caret);
-  const options = query === null ? [] : mentionOptions(query);
-  const picking = options.length > 0;
-  const picked = options[Math.min(pick, options.length - 1)];
+  const mentions = query === null ? [] : mentionOptions(query);
+  // "/" at the very start picks one of the agent's own commands.
+  const commands = chat.session?.commands ?? [];
+  const slash = shut || !commands.length ? null : slashQuery(text, caret);
+  const slashes = slash === null ? [] : slashOptions(commands, slash);
+  const menu: { key: string; title: string; label: string; agent?: (typeof mentions)[number]['agent']; choose(): void }[] = mentions.length
+    ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
+    : slashes.map((c) => ({ key: c.name, title: `/${c.name}`, label: c.hint ? `${c.description} · ${c.hint}` : c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
+  // "#" names a workspace file; the agent gets it as a file, not only as words.
+  const hash = shut || mentions.length || slashes.length ? null : hashQuery(text, caret);
+  const asked = useRef('');
+  useEffect(() => {
+    if (!hash || asked.current === hash.query) return;
+    const timer = setTimeout(() => {
+      asked.current = hash.query;
+      send({ type: 'findFiles', chatId: chat.id, query: hash.query });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [hash?.query]);
+  if (hash && found && found.query === hash.query) {
+    for (const f of found.files) menu.push({ key: f, title: f.split('/').pop() ?? f, label: f, choose: () => insert(applyFile(text, hash, f)) });
+  }
+  const picking = menu.length > 0;
+  const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
+  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint;
 
   const reset = () => {
     setText('');
@@ -919,6 +973,7 @@ function Composer({
     setRefs(() => []);
   };
   const withRefs = refs.length ? { refs } : {};
+  const empty = !text.trim() && attachments.length === 0 && refs.length === 0;
   const submit = () => {
     if (asking) {
       if (!question) return;
@@ -928,21 +983,39 @@ function Composer({
       reset();
       return;
     }
-    if (chat.busy || (!text.trim() && attachments.length === 0 && refs.length === 0)) return;
+    if (empty) return;
+    // While the agent works, the message waits in the queue and goes when the turn ends.
     send({ type: 'send', chatId: chat.id, text: text.trim(), images: attachments, ...withRefs });
     reset();
   };
-  const choose = (o: (typeof options)[number]) => {
-    const next = applyMention(text, o);
-    // Write the field now, not on the next render, so keys typed right after land after the mention.
+  function insert(next: { text: string; caret: number }) {
+    // Write the field now, not on the next render, so keys typed right after land after the choice.
     if (area.current) {
       area.current.value = next.text;
       area.current.setSelectionRange(next.caret, next.caret);
     }
     setText(next.text);
     setCaret(next.caret);
-  };
+  }
   const track = (el: HTMLTextAreaElement) => setCaret(el.selectionStart ?? el.value.length);
+  const lastSent = () => [...chat.items].reverse().find((i): i is Extract<Item, { kind: 'user' }> => i.kind === 'user' && !!i.text)?.text;
+  const cycle = () => {
+    const next = nextInCycle(chat.approval ?? 'ask', chat.session);
+    send('plan' in next ? { type: 'plan', chatId: chat.id, on: true } : { type: 'approval', chatId: chat.id, level: next.approval });
+  };
+
+  // The waiting decision's keys work from anywhere in the view, not only the message box.
+  const live = useRef(chat);
+  live.current = chat;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // The box handles its own keys; other fields keep theirs.
+      if (e.defaultPrevented || isTyping(e.target)) return;
+      decisionKey(e, live.current, true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const addFiles = (files: File[]) => {
     for (const file of files) {
@@ -956,132 +1029,152 @@ function Composer({
     }
   };
 
-  const canSend = asking ? !!question : !chat.busy && (!!text.trim() || attachments.length > 0 || refs.length > 0);
+  const canSend = asking ? !!question : !empty;
+  const queueing = chat.busy && !asking;
   return (
-    <div
-      class="composer"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        const files = Array.from(e.dataTransfer?.files ?? []);
-        if (files.length) {
-          e.preventDefault();
-          addFiles(files);
-        }
-      }}
-    >
-      {picking && (
-        <div class="mention-menu" id={listId} role="listbox" aria-label="Ask an agent">
-          {options.map((o) => (
-            <div
-              key={o.agent}
-              id={`${listId}-${o.agent}`}
-              role="option"
-              class="pick-row"
-              aria-selected={o === picked}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                choose(o);
-              }}
-              onMouseMove={() => setPick(options.indexOf(o))}
-            >
-              <Glyph agent={o.agent} size="sm" />
-              <span class="pick-title">{o.name}</span>
-              <span class="pick-label">@{o.insert}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
-      {attachments.length > 0 && (
-        <div class="thumbs">
-          {attachments.map((a, i) => (
-            <button key={i} class="thumb" title={`Remove ${a.name}`} onClick={() => setAttachments((list) => list.filter((_, n) => n !== i))}>
-              <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
-            </button>
-          ))}
-        </div>
-      )}
-      <textarea
-        ref={area}
-        value={text}
-        rows={2}
-        aria-label={`Message ${chat.label}`}
-        aria-autocomplete="list"
-        aria-controls={picking ? listId : undefined}
-        aria-activedescendant={picking && picked ? `${listId}-${picked.agent}` : undefined}
-        placeholder={`Message ${chat.label} · @ asks another agent`}
-        onInput={(e) => {
-          setText(e.currentTarget.value);
-          track(e.currentTarget);
-          setShut(false);
-          setPick(0);
-        }}
-        onKeyUp={(e) => !['ArrowUp', 'ArrowDown'].includes(e.key) && track(e.currentTarget)}
-        onClick={(e) => track(e.currentTarget)}
-        onBlur={() => setShut(true)}
-        onFocus={() => setShut(false)}
-        onPaste={(e) => {
-          const files = Array.from(e.clipboardData?.items ?? [])
-            .filter((i) => i.kind === 'file')
-            .map((i) => i.getAsFile())
-            .filter((f): f is File => f !== null && f.type.startsWith('image/'));
+    <>
+      <EditsBar chat={chat} />
+      <div
+        class="composer"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const files = Array.from(e.dataTransfer?.files ?? []);
           if (files.length) {
             e.preventDefault();
             addFiles(files);
           }
         }}
-        onKeyDown={(e) => {
-          if (picking && picked) {
-            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      >
+        {picking && (
+          <div class="mention-menu" id={listId} role="listbox" aria-label={mentions.length ? 'Ask an agent' : slashes.length ? 'Commands' : 'Files'}>
+            {menu.map((o) => (
+              <div
+                key={o.key}
+                id={`${listId}-${o.key}`}
+                role="option"
+                class="pick-row"
+                aria-selected={o === picked}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  o.choose();
+                }}
+                onMouseMove={() => setPick(menu.indexOf(o))}
+              >
+                {o.agent && <Glyph agent={o.agent} size="sm" />}
+                <span class="pick-title">{o.title}</span>
+                <span class="pick-label">{o.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
+        {attachments.length > 0 && (
+          <div class="thumbs">
+            {attachments.map((a, i) => (
+              <button key={i} class="thumb" title={`Remove ${a.name}`} onClick={() => setAttachments((list) => list.filter((_, n) => n !== i))}>
+                <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
+              </button>
+            ))}
+          </div>
+        )}
+        <textarea
+          ref={area}
+          value={text}
+          rows={2}
+          aria-label={`Message ${chat.label}`}
+          aria-autocomplete="list"
+          aria-controls={picking ? listId : undefined}
+          aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
+          placeholder={chat.busy ? `Message ${chat.label}: it goes when the turn ends · Esc stops` : `Message ${chat.label} · ${commands.length ? '/ commands · ' : ''}# files · @ another agent`}
+          onInput={(e) => {
+            setText(e.currentTarget.value);
+            track(e.currentTarget);
+            setShut(false);
+            setPick(0);
+          }}
+          onKeyUp={(e) => !['ArrowUp', 'ArrowDown'].includes(e.key) && track(e.currentTarget)}
+          onClick={(e) => track(e.currentTarget)}
+          onBlur={() => setShut(true)}
+          onFocus={() => setShut(false)}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData?.items ?? [])
+              .filter((i) => i.kind === 'file')
+              .map((i) => i.getAsFile())
+              .filter((f): f is File => f !== null && f.type.startsWith('image/'));
+            if (files.length) {
               e.preventDefault();
-              setPick((p) => (Math.min(p, options.length - 1) + (e.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length);
+              addFiles(files);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (picking && picked) {
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                setPick((p) => (Math.min(p, menu.length - 1) + (e.key === 'ArrowDown' ? 1 : menu.length - 1)) % menu.length);
+                return;
+              }
+              if ((e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || e.key === 'Tab') {
+                e.preventDefault();
+                picked.choose();
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setShut(true);
+                return;
+              }
+            }
+            if (decisionKey(e, chat, !text.trim())) return;
+            if (e.key === 'Tab' && e.shiftKey) {
+              // Shift+Tab, as in Claude Code: Ask → Auto-accept edits → Plan.
+              e.preventDefault();
+              cycle();
               return;
             }
-            if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+            if (e.key === 'Escape' && !text && chat.busy) {
               e.preventDefault();
-              choose(picked);
+              send({ type: 'stop', chatId: chat.id });
               return;
             }
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              setShut(true);
+            if (e.key === 'ArrowUp' && !text) {
+              const last = lastSent();
+              if (last) {
+                e.preventDefault();
+                insert({ text: last, caret: last.length });
+              }
               return;
             }
-          }
-          if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-      />
-      <div class="composer-bar">
-        <button class="ghost icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach' })}>
-          <Icon name="attach" />
-        </button>
-        <span class="composer-agent">
+            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <div class="composer-bar">
+          <button class="ghost icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
+            <Icon name="attach" />
+          </button>
           {asking ? (
-            <>
+            <span class="composer-agent">
               <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
-            </>
+            </span>
           ) : (
-            <>
-              <Glyph agent={chat.agent} size="sm" /> {chat.label}
-            </>
+            <SessionControls chat={chat} compact={compact} />
           )}
-        </span>
-        <span class="spacer" />
-        {chat.busy && (
-          <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-            <Icon name="stop" /> Stop
+          {hint && <span class="hint composer-hint">{hint}</span>}
+          <span class="spacer" />
+          <UsageMeter usage={chat.session?.usage} compact={compact} />
+          {chat.busy && (
+            <button class="ghost danger sm" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+              <Icon name="stop" /> {!compact && 'Stop'}
+            </button>
+          )}
+          <button class="primary sm" onClick={submit} disabled={!canSend} title={queueing ? `Sends when ${chat.label} finishes this turn` : undefined}>
+            <Icon name={asking ? 'ask' : queueing ? 'queue' : 'send'} /> {asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
           </button>
-        )}
-        {(!chat.busy || asking) && (
-          <button class="primary sm" onClick={submit} disabled={!canSend}>
-            <Icon name={asking ? 'ask' : 'send'} /> {asking ? `Ask ${AGENT_FACES[asking].name}` : 'Send'}
-          </button>
-        )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

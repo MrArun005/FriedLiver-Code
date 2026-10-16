@@ -71,7 +71,7 @@ function page(params) {
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
   const data = params.get('empty') === '1' ? { state: { chats: [], images: [], links: [] } } : fixture(Date.now());
-  const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now() };
+  const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   const saved = params.get('view') ? { view: params.get('view') } : undefined;
   const stub = `
     window.__posted = [];
@@ -187,6 +187,15 @@ async function shoot() {
       await side.keyboard.press('Escape');
       await side.fill('.composer textarea', '@g');
       await save(side, `chat-mention-${theme}`);
+      await side.fill('.composer textarea', '');
+      await side.click('.approval-chip');
+      await save(side, `chat-approval-menu-${theme}`);
+      await side.keyboard.press('Escape');
+      await side.click('.chip-btn:has(.chip-text:text-is("Default"))');
+      await save(side, `chat-model-menu-${theme}`);
+      await side.keyboard.press('Escape');
+      await side.fill('.composer textarea', '/');
+      await save(side, `chat-slash-${theme}`);
     }
     await side.close();
     const center = await open(`surface=chat&theme=${theme}&select=${ids.center}`, 1000, 900);
@@ -274,6 +283,108 @@ async function shoot() {
     check(sent?.text === 'Is this the rounding bug?' && sent.refs?.[0]?.startLine === 3 && sent.refs[0].endLine === 5, 'the message carries the reference');
     check((await p.locator('.composer .code-ref').count()) === 0, 'sending clears the composer’s references');
     await p.close();
+  }
+
+  {
+    // The session controls: approval level, model, effort, Plan, and Shift+Tab.
+    const p = await open('surface=chat&side=1&select=chat-c5', 400, 900);
+    const last = async () => (await posted(p)).at(-1);
+    await p.click('.approval-chip');
+    check(await p.locator('.popover [role="menuitemradio"]:has-text("Auto-accept edits")').isVisible(), 'the approval chip lists the levels');
+    check(await p.locator('.popover .menu-sub:has-text("Claude: Accept edits")').isVisible(), 'each level says which of the agent’s modes it uses');
+    await p.click('.popover [role="menuitemradio"]:has-text("Auto-accept edits")');
+    check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'picking a level posts it');
+    await p.click('.approval-chip');
+    await p.click('.popover [role="menuitemcheckbox"]:has-text("Plan first")');
+    check(JSON.stringify(await last()) === JSON.stringify({ type: 'plan', chatId: 'chat-c5', on: true }), 'Plan first turns Plan mode on');
+    await p.click('.approval-chip');
+    await p.click('.popover [role="menuitemradio"]:has(.menu-label:text-is("Bypass permissions"))');
+    const mode = await last();
+    check(mode?.type === 'setOption' && mode.optionId === 'mode' && mode.value === 'bypassPermissions', 'an agent mode is set as its own option');
+    await p.click('.chip-btn:has(.chip-text:text-is("Default"))');
+    await p.click('.popover [role="menuitemradio"]:has-text("Small")');
+    const model = await last();
+    check(model?.type === 'setOption' && model.optionId === 'model' && model.value === 'small', 'picking a model posts setOption');
+    await p.click('.chip-btn:has(.chip-text:text-is("Medium"))');
+    await p.click('.popover [role="menuitemradio"]:has-text("Max")');
+    const effort = await last();
+    check(effort?.optionId === 'effort' && effort.value === 'max', 'picking an effort level posts setOption');
+    await p.click('.chip-btn:has(.chip-text:text-is("Default"))');
+    await p.click('.popover [role="menuitemcheckbox"]:has-text("Fast mode")');
+    const fast = await last();
+    check(fast?.optionId === 'fast' && fast.value === true, 'Fast mode toggles as a boolean');
+    await p.click('.composer textarea');
+    await p.keyboard.press('Shift+Tab');
+    check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'Shift+Tab moves to the next level');
+    check((await p.locator('.usage').getAttribute('title'))?.includes('12k of 200k tokens') ?? false, 'the usage meter shows the context used');
+
+    await p.keyboard.type('/co');
+    check(await p.locator('.mention-menu [role="option"]:has-text("/compact")').isVisible(), '/ opens the agent’s commands');
+    await p.keyboard.press('Enter');
+    check((await p.inputValue('.composer textarea')) === '/compact ', 'picking a command fills it in');
+
+    // Drafts stay with their own chat.
+    await p.fill('.composer textarea', 'draft for Claude 5');
+    await p.click('.all-btn');
+    await p.keyboard.type('csv export');
+    await p.keyboard.press('Enter');
+    await p.waitForTimeout(50);
+    check((await p.inputValue('.composer textarea')) === '', 'another chat starts with its own empty draft');
+    await p.click('.all-btn');
+    await p.keyboard.type('auth middleware');
+    await p.keyboard.press('Enter');
+    await p.waitForTimeout(50);
+    check((await p.inputValue('.composer textarea')) === 'draft for Claude 5', 'the draft comes back with its chat');
+    await p.fill('.composer textarea', '');
+    await p.keyboard.press('ArrowUp');
+    check((await p.inputValue('.composer textarea')) === 'How does the auth middleware decide a session is valid?', 'Up in an empty box recalls the last message');
+    await p.close();
+  }
+  {
+    // The permission card is the review: the diff, Open diff, the loud yes, keys, and the queue.
+    const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
+    const card = p.locator('#item-perm-c1');
+    check(await card.locator('.diff .dl[data-op="add"]').first().isVisible(), 'the permission card shows the diff');
+    check((await card.locator('button.decide').innerText()).trim() === 'Yes', "the loud button is the one-time yes, not \"don't ask again\"");
+    await card.locator('button:has-text("Open diff")').click();
+    check((await posted(p)).some((m) => m.type === 'permissionDiff' && m.requestId === 'perm-c1'), 'Open diff asks for the whole file');
+    await p.click('.composer textarea');
+    await p.keyboard.press('Control+Enter');
+    const answer = (await posted(p)).filter((m) => m.type === 'bridge' || m.type === 'permission').at(-1);
+    check(answer?.type === 'bridge' && answer.answer === 'allow', 'Ctrl+Enter answers the first waiting decision');
+    check((await p.locator('.composer-bar button.primary').innerText()).includes('Queue'), 'a busy chat queues the message');
+    await p.click('.bubble.queued button[aria-label="Remove from the queue"]');
+    check((await posted(p)).some((m) => m.type === 'unqueue' && m.id === 'queued-c1'), 'a queued message can be removed');
+    check(await p.locator('.edits-bar').isVisible(), 'edits waiting get Accept all');
+    await p.click('.edits-bar button:has-text("Accept all")');
+    check((await posted(p)).some((m) => m.type === 'reviewAll' && m.action === 'accept'), 'Accept all posts for the chat');
+    await p.close();
+  }
+  {
+    // A command card offers "Always allow" for the exact line and for program + subcommand.
+    const p = await open('surface=chat&side=1&select=chat-c2', 400, 900);
+    await p.click('#item-perm-c2 button:has-text("Always allow")');
+    check(await p.locator('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")').isVisible(), 'Always allow offers the exact command');
+    await p.click('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")');
+    const rule = (await posted(p)).find((m) => m.type === 'allowAlways');
+    check(rule?.requestId === 'perm-c2' && rule.rule.kind === 'exact', 'Always allow posts the rule');
+    check(await p.locator('.mode-badge[data-tone="edits"]').isVisible(), 'the header shows the mode the agent reports');
+    await p.close();
+  }
+  {
+    // A new task takes each agent's model and effort and an approval level.
+    const p = await open('surface=tasks&view=board', 1440, 900);
+    check(await p.locator('[data-nav="chat-c6"] .auto-badge').isVisible(), 'a Full auto task shows its badge');
+    await p.click('.approval-seg [data-level="edits"]');
+    await p.selectOption('.task-options select[aria-label="Claude Model"]', 'small');
+    await p.fill('.new-task textarea', 'Tidy the README');
+    await p.press('.new-task textarea', 'Enter');
+    const task = (await posted(p)).find((m) => m.type === 'createTask');
+    check(task?.approval === 'edits' && task.choices?.claude?.model === 'small', 'a new task carries its model and approval level');
+    await p.close();
+    const map = await open('surface=tasks&view=map', 1440, 900);
+    check(await map.locator('[data-nav="chat-c6"] .node-auto').count() === 1, 'the map marks a Full auto chat');
+    await map.close();
   }
 
   await browser.close();

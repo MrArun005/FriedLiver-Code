@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { findOnWindowsPath } from '../agents/processes';
@@ -25,9 +26,15 @@ function gitProgram(): string {
  */
 const SAFE_CONFIG = ['-c', 'core.fsmonitor=false'];
 
-async function git(cwd: string, args: string[]): Promise<string> {
+async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv, timeout?: number): Promise<string> {
   try {
-    const { stdout } = await run(gitProgram(), [...SAFE_CONFIG, ...args], { cwd, maxBuffer: 32 * 1024 * 1024, windowsHide: true });
+    const { stdout } = await run(gitProgram(), [...SAFE_CONFIG, ...args], {
+      cwd,
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true,
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+      ...(timeout ? { timeout } : {}),
+    });
     return stdout;
   } catch (err) {
     const e = err as { stderr?: string; message: string };
@@ -191,4 +198,57 @@ export async function worktreeChanges(root: string, wt: Worktree): Promise<Workt
     if (file) changes.set(file, 'A');
   }
   return [...changes].map(([p, status]) => ({ path: p, status })).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+// ---- Checkpoints ----
+
+/** How long a snapshot may take before the turn goes without one. */
+const SNAPSHOT_TIMEOUT_MS = 8_000;
+
+/**
+ * The working tree as a git tree object: tracked and untracked files, minus
+ * ignored ones. Built in a temporary index (a copy of the real one, so
+ * unchanged files aren't hashed again), so the user's index, stash and
+ * branches stay as they are; only unreachable objects are added, which git
+ * prunes in time. Hooks don't run for these commands.
+ */
+export async function snapshot(root: string): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'friedliver-snap-'));
+  const index = path.join(dir, 'index');
+  try {
+    const real = path.resolve(root, (await git(root, ['rev-parse', '--git-path', 'index'])).trim());
+    await copyFile(real, index).catch(() => {});
+    const env = { GIT_INDEX_FILE: index };
+    await git(root, ['add', '-A', '--', '.'], env, SNAPSHOT_TIMEOUT_MS);
+    return (await git(root, ['write-tree'], env, SNAPSHOT_TIMEOUT_MS)).trim();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** Files that differ between two snapshots, relative to the repository root with `/`. */
+export async function changedBetween(root: string, before: string, after: string): Promise<WorktreeChange[]> {
+  if (before === after) return [];
+  const parts = (await git(root, ['diff-tree', '-r', '--no-renames', '--name-status', '-z', '--no-ext-diff', before, after, '--'])).split('\0');
+  const out: WorktreeChange[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const s = parts[i];
+    if (s) out.push({ path: parts[i + 1], status: s === 'A' ? 'A' : s === 'D' ? 'D' : 'M' });
+  }
+  return out;
+}
+
+/** A file's bytes in a snapshot, or null when the snapshot doesn't have it. */
+export async function blobAt(root: string, tree: string, relPath: string): Promise<Buffer | null> {
+  try {
+    const { stdout } = await run(gitProgram(), [...SAFE_CONFIG, 'cat-file', 'blob', `${tree}:${relPath}`], {
+      cwd: root,
+      encoding: 'buffer',
+      maxBuffer: 256 * 1024 * 1024,
+      windowsHide: true,
+    });
+    return stdout;
+  } catch {
+    return null;
+  }
 }

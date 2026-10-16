@@ -1,18 +1,38 @@
 import { existsSync } from 'node:fs';
-import { readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentStartError } from '@friedliver/main/agents/agentConnection';
 import { readIfExists, readTextFile, writeTextFile } from '@friedliver/main/agents/fileAccess';
-import { AgentHub, AuthRequiredError } from '@friedliver/main/agents/hub';
+import { AgentHub, AuthRequiredError, NoSessionError, type SessionStart } from '@friedliver/main/agents/hub';
 import { DEFAULT_AGENTS, demoAgentSpec, type AgentSpec, type VendorAgentId } from '@friedliver/main/agents/registry';
 import { allowedSignInUrl, signInMethods } from '@friedliver/main/agents/signIn';
-import type { TerminalListener } from '@friedliver/main/agents/terminals';
+import { visibleText, type TerminalListener } from '@friedliver/main/agents/terminals';
 import { TurnLog } from '@friedliver/main/agents/turnLog';
 import * as git from '@friedliver/main/workspace/git';
 import { BRIDGE_ENV, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
 import type { Attachment } from '../shared/messages';
+import { describeRule, matchesRule, type CommandRule } from '../shared/rules';
+import {
+  APPROVAL_NAMES,
+  EMPTY_SESSION,
+  levelOfMode,
+  modeFor,
+  modeOption,
+  offers,
+  optionKey,
+  planToggle,
+  planning,
+  sessionOptions,
+  type AgentDefaults,
+  type ApprovalLevel,
+  type ChatSession,
+  type SessionOption,
+} from '../shared/session';
+import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
+import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
 import {
   AGENT_FACES,
   EMPTY_STATE,
@@ -32,13 +52,16 @@ import {
   type Decision,
   type Item,
   type NoticeAction,
+  type QueuedMessage,
 } from '../shared/model';
 import { BridgeServer } from './bridge';
+import { Checkpoints } from './checkpoints';
 import { BridgeRequests, type AgentToAgent } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
 import { inGitFolder, insideRoots } from './paths';
 import { settleRestored, type SavedState } from './persist';
+import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
 import { loginExtras } from './signin';
 import { relativeFile } from './transcript';
 
@@ -51,6 +74,13 @@ export const KEY_ENV: Record<VendorAgentId, string> = {
 export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini'];
 
 const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
+/** Files larger than this aren't read to show a permission request's whole diff. */
+const MAX_PROPOSAL_BYTES = 4 * 1024 * 1024;
+/** Tool calls remembered per chat until they finish, to fill in permission requests that name only an id. */
+const MAX_OPEN_TOOLS = 200;
+/** Messages that can wait for a busy chat. */
+const MAX_QUEUE = 10;
+
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const OUTPUT_FLUSH_MS = 50;
 const IMAGE_TYPES: Record<string, string> = {
@@ -66,6 +96,8 @@ const IMAGE_TYPES: Record<string, string> = {
 export interface PendingReview {
   reviewId: string;
   chatId?: string;
+  /** Opened by itself, not from an editor command: reuses the chat's diff tab. */
+  auto?: boolean;
   path: string;
   /** Null when the agent creates the file. */
   before: string | null;
@@ -78,9 +110,20 @@ export interface CoreUi {
   showReview(review: PendingReview): void;
   closeReview(reviewId: string): void;
   askCommand?(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string }): void;
-  askPermission?(ask: { chatId: string; requestId: string; agentLabel: string; title: string }): void;
+  /** `allow`/`deny`: the agent's own options a notification may offer, by id. */
+  askPermission?(ask: { chatId: string; requestId: string; agentLabel: string; title: string; allow?: { optionId: string; name: string }; deny?: { optionId: string; name: string } }): void;
+  /** A read-only diff of what a permission request would write. */
+  showProposal?(p: { id: string; path: string; before: string | null; after: string; agentLabel: string; chatId: string }): void;
+  /** A turn ended: the editor may say so when the chat isn't on screen. */
+  turnEnded?(t: { chatId: string; label: string; title: string; stopReason: acp.StopReason | null; failure?: Item; files: number; byUser: boolean }): void;
+  /** Asks once per chat before Full auto. */
+  confirmFullAuto?(ask: { label: string; agent: string; mode?: string }): Promise<boolean>;
+  /** Asks before adding an "Always allow" rule. */
+  confirmRule?(rule: CommandRule): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
   askBridge?(ask: { chatId: string; requestId: string; title: string }): void;
+  /** An agent asks a question as a small form, answered in the chat. */
+  askQuestion?(ask: { chatId: string; requestId: string; agentLabel: string; message: string }): void;
   signInUrl?(agent: AgentKey, url: string): void;
   fileChanged?(file: string): void;
   /** The text of an open editor with unsaved changes, so agents read what the user sees. */
@@ -98,6 +141,14 @@ export interface CoreOptions {
   bridgeScript?: string;
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
+  /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
+  approvalDefault?(): Exclude<ApprovalLevel, 'full'>;
+  /** Each agent's last known options and the user's last choices, kept in the user's own storage. */
+  defaults?: { get(agent: AgentKey): AgentDefaults | undefined; set(agent: AgentKey, value: AgentDefaults): void };
+  /** "Always allow" command rules, from the user's own workspace storage. */
+  rules?: { get(): CommandRule[]; add(rule: CommandRule): void };
+  /** Starts a new chat's agent and session at once, before its first message. On unless false. */
+  warmStart?: boolean;
   ui: CoreUi;
   log?(line: string): void;
 }
@@ -107,6 +158,9 @@ export interface AccountStatus {
   methods: ReturnType<typeof signInMethods>;
   message?: string;
   installCommand?: string;
+  /** The adapter's version, and what to do when it is too old to have model, effort or plan options. */
+  version?: string;
+  update?: string;
 }
 
 /** Extras for a message sent from the editor (src/host/editor.ts). */
@@ -120,6 +174,9 @@ export interface SendOptions {
 }
 
 type Pending<T> = { chatId?: string; resolve(value: T): void };
+type Queued = QueuedMessage & { attachments: Attachment[]; options: SendOptions; done(): void; failed(err: unknown): void };
+/** A tool call as the agent last described it, before compaction, while it is open. */
+type OpenTool = Partial<Pick<acp.ToolCall, 'title' | 'kind' | 'status' | 'content' | 'locations' | 'rawInput'>>;
 type TaskWorktree = git.Worktree & { repo: string; title: string };
 
 /**
@@ -137,6 +194,7 @@ export class AgentCore {
   private readonly permissions = new Map<string, Pending<acp.RequestPermissionResponse> & { options: acp.PermissionOption[] }>();
   private readonly reviews = new Map<string, PendingReview & Pending<{ accept: boolean; content?: string }>>();
   private readonly commands = new Map<string, Pending<boolean>>();
+  private readonly questions = new Map<string, Pending<acp.CreateElicitationResponse> & { fields: QuestionField[] }>();
   private readonly worktrees = new Map<string, TaskWorktree>();
   private readonly lastPrompt = new Map<string, acp.ContentBlock[]>();
   private readonly chatCount: Partial<Record<AgentKey, number>> = {};
@@ -147,6 +205,21 @@ export class AgentCore {
   private readonly preambles = new Map<string, string>();
   /** Chats whose Stop came while their turn was still on its way to the agent. */
   private readonly stopping = new Set<string>();
+  private readonly checkpoints: Checkpoints;
+  /** Settings the user chose in each chat (optionKey → value), applied again when its agent restarts. */
+  private readonly chosen = new Map<string, Record<string, string | boolean>>();
+  /** Chats where the user confirmed Full auto once. */
+  private readonly confirmedFull = new Set<string>();
+  private readonly queues = new Map<string, Queued[]>();
+  private readonly openTools = new Map<string, Map<string, OpenTool>>();
+  /** What a permission request would write, for "Open diff", by request. */
+  private readonly proposals = new Map<string, Proposal[]>();
+  /** Content the user approved on a permission card that showed its diff: the write that follows isn't asked again. */
+  private readonly approvedWrites = new Map<string, Map<string, string>>();
+  /** Accept all / Reject all: the rest of the turn's edits go the same way. */
+  private readonly turnDecision = new Map<string, 'accept' | 'reject'>();
+  /** Files each chat's running turn said it touches, for checkpoints shared with another chat. */
+  private readonly reported = new Map<string, Set<string>>();
   private readonly links: Connections;
   private readonly requests: BridgeRequests;
   private bridge?: BridgeServer;
@@ -156,6 +229,7 @@ export class AgentCore {
 
   constructor(private readonly options: CoreOptions) {
     const limits = options.limits();
+    this.checkpoints = new Checkpoints(options.log);
     this.hub = new AgentHub({
       cwd: options.folders()[0] ?? os.homedir(),
       clientVersion: options.clientVersion,
@@ -165,9 +239,11 @@ export class AgentCore {
       log: options.log,
       events: {
         update: (chatId, update) => {
+          this.noteTool(chatId, update);
           this.dispatch({ t: 'update', chatId, update: compactUpdate(update), at: Date.now() });
           void this.collectImages(update);
         },
+        session: (chatId, start) => this.sessionStarted(chatId, start),
         notice: (chatId, text) => this.items(chatId, [{ kind: 'notice', text, tone: 'info' }]),
         agentsChanged: () => {},
         agentStderr: (agentId, line) => {
@@ -177,6 +253,7 @@ export class AgentCore {
           }
         },
         permission: (chatId, req, signal) => this.askPermission(chatId, req, signal),
+        elicit: (chatId, req, signal) => this.askQuestion(chatId, req, signal),
       },
       files: {
         read: (req) => this.readForAgent(req),
@@ -299,8 +376,33 @@ export class AgentCore {
       lastActivity: Date.now(),
       turns: 0,
     };
+    const level = options.approval ?? this.options.defaults?.get(agent)?.approval ?? this.options.approvalDefault?.() ?? 'ask';
+    if (level !== 'ask') view.approval = level;
+    if (level === 'full') this.confirmedFull.add(chat.id);
+    if (options.choices) this.chosen.set(chat.id, { ...options.choices });
+    // Pickers show the agent's last known options until its session answers.
+    const known = this.options.defaults?.get(agent);
+    if (known?.options.length) view.session = { ...EMPTY_SESSION, options: known.options, live: false };
     this.dispatch({ t: 'created', chat: view });
+    if (this.options.warmStart !== false) void this.warmStart(chat.id);
     return view;
+  }
+
+  /**
+   * Starts the chat's agent and session now, without a model turn, so its
+   * settings show at once and a sign-in problem shows before the first message.
+   */
+  private async warmStart(chatId: string): Promise<void> {
+    try {
+      await this.ensureBridge();
+      if (this.hub.getChat(chatId)) await this.hub.startSession(chatId);
+    } catch (err) {
+      const chat = this.chat(chatId);
+      // A turn that started meanwhile reports the same failure itself.
+      if (chat && !chat.busy && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link' || i.kind === 'notice')) {
+        this.items(chatId, [this.failureNotice(chat.agent, err)]);
+      }
+    }
   }
 
   /**
@@ -318,7 +420,7 @@ export class AgentCore {
 
   private async sendMessage(chatId: string, text: string, images: Attachment[] = [], options: SendOptions = {}): Promise<void> {
     const chat = this.requireChat(chatId);
-    if (chat.busy) throw new Error('This chat is still working on the last message.');
+    if (chat.busy) return this.enqueue(chatId, text, images, options);
     const ids: string[] = [];
     for (const img of images) {
       const src = imageDataUri(img.mimeType, img.data);
@@ -334,7 +436,248 @@ export class AgentCore {
     if (options.context) blocks.push({ type: 'text', text: options.context });
     if (text) blocks.push({ type: 'text', text });
     for (const img of images) blocks.push({ type: 'image', data: img.data, mimeType: img.mimeType });
+    blocks.push(...this.fileLinks(chat.cwd, text));
     await this.promptBlocks(chatId, blocks);
+  }
+
+  /**
+   * Files named with "#path" in a message, as ACP resource links, so the agent
+   * gets them as files and not only as words. Only files inside the workspace;
+   * the text keeps the names for agents that ignore links.
+   */
+  private fileLinks(cwd: string, text: string): acp.ContentBlock[] {
+    const out: acp.ContentBlock[] = [];
+    const seen = new Set<string>();
+    for (const m of text.matchAll(/(?:^|\s)#([\w./@+-]+[\w/])/g)) {
+      const file = insideRoots(path.resolve(cwd, m[1]), this.roots());
+      if (!file || seen.has(file) || !existsSync(file) || out.length >= 10) continue;
+      seen.add(file);
+      out.push({ type: 'resource_link', uri: pathToFileURL(file).href, name: path.basename(file) });
+    }
+    return out;
+  }
+
+  /** A message for a busy chat waits in its queue and goes when the turn ends; resolves when its own turn ends. */
+  private enqueue(chatId: string, text: string, images: Attachment[], options: SendOptions): Promise<void> {
+    const queue = this.queues.get(chatId) ?? [];
+    if (queue.length >= MAX_QUEUE) throw new Error(`${MAX_QUEUE} messages are already waiting for this chat.`);
+    for (const img of images) if (!imageDataUri(img.mimeType, img.data)) throw new Error(`${img.name || 'An attachment'} is not an image FriedLiver can send.`);
+    return new Promise<void>((resolve, reject) => {
+      queue.push({ id: this.id('queued'), text, images: images.length, ...(options.refs?.length ? { refs: options.refs.length } : {}), attachments: images, options, done: resolve, failed: reject });
+      this.queues.set(chatId, queue);
+      this.publishQueue(chatId);
+    });
+  }
+
+  private publishQueue(chatId: string): void {
+    const queue = this.queues.get(chatId) ?? [];
+    if (!queue.length) this.queues.delete(chatId);
+    this.dispatch({ t: 'queue', chatId, queue: queue.map(({ id, text, images, refs }) => ({ id, text, images, ...(refs ? { refs } : {}) })) });
+  }
+
+  /** Drops a queued message; its sender hears it was not sent. */
+  unqueue(chatId: string, id: string): void {
+    const queue = this.queues.get(chatId) ?? [];
+    const at = queue.findIndex((q) => q.id === id);
+    if (at < 0) return;
+    const [item] = queue.splice(at, 1);
+    this.publishQueue(chatId);
+    item.done();
+  }
+
+  /**
+   * Sends a queued message now: into the running turn when the agent takes
+   * that (steering), or as the next turn when the chat is idle.
+   */
+  async sendNow(chatId: string, id: string): Promise<void> {
+    const queue = this.queues.get(chatId) ?? [];
+    const item = queue.find((q) => q.id === id);
+    if (!item) return;
+    const chat = this.requireChat(chatId);
+    if (chat.busy) {
+      const blocks: acp.ContentBlock[] = [
+        ...(item.options.context ? [{ type: 'text' as const, text: item.options.context }] : []),
+        ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
+        ...item.attachments.map((img) => ({ type: 'image' as const, data: img.data, mimeType: img.mimeType })),
+      ];
+      if (!chat.session?.steering) {
+        this.items(chatId, [{ kind: 'notice', tone: 'info', text: `${chat.label} can't take a message while it works, so this one waits for the turn to end.` }]);
+        return;
+      }
+      // False while the turn is still on its way to the agent: the message keeps its place and goes after it.
+      if (!(await this.hub.steer(chatId, blocks).catch(() => false))) return;
+      queue.splice(queue.indexOf(item), 1);
+      this.publishQueue(chatId);
+      this.items(chatId, [{ kind: 'user', text: item.text, images: [], ...(item.options.refs?.length ? { refs: item.options.refs } : {}) }]);
+      item.done();
+      return;
+    }
+    queue.splice(queue.indexOf(item), 1);
+    this.publishQueue(chatId);
+    await this.sendMessage(chatId, item.text, item.attachments, item.options).then(item.done, item.failed);
+  }
+
+  /** The next queued message, once a turn ended normally. */
+  private drainQueue(chatId: string): void {
+    const queue = this.queues.get(chatId);
+    const next = queue?.shift();
+    if (!next) return;
+    this.publishQueue(chatId);
+    void this.sendMessage(chatId, next.text, next.attachments, next.options).then(next.done, next.failed);
+  }
+
+  // ---- Session settings and approvals ----
+
+  /** Each agent's last known options and the user's last choices, for new chats and new tasks. */
+  agentDefaults(): Partial<Record<AgentKey, AgentDefaults>> {
+    const out: Partial<Record<AgentKey, AgentDefaults>> = {};
+    for (const agent of Object.keys(AGENT_FACES) as AgentKey[]) {
+      const d = this.options.defaults?.get(agent);
+      if (d) out[agent] = d;
+    }
+    return out;
+  }
+
+  /**
+   * Sets one of the chat's session settings to a value its agent offers. A
+   * mode that runs without asking (bypass, full access) counts as Full auto and
+   * asks once. Without a live session the choice waits for the next one.
+   */
+  async setOption(chatId: string, optionId: string, value: string | boolean): Promise<void> {
+    const chat = this.requireChat(chatId);
+    const option = chat.session?.options.find((o) => o.id === optionId);
+    if (!option || !offers(option, value)) return;
+    if (option.category === 'mode' && typeof value === 'string') {
+      const level = levelOfMode(chat.agent, option, value);
+      if (level === 'full' && !(await this.confirmFull(chat))) return;
+      if (level && level !== (chat.approval ?? 'ask')) this.setLevel(chat, level);
+    } else {
+      this.remember(chat, option, value);
+    }
+    await this.applyOption(chatId, option, value);
+  }
+
+  /** FriedLiver's approval level for the chat, and the agent's matching mode. */
+  async setApproval(chatId: string, level: ApprovalLevel): Promise<void> {
+    const chat = this.requireChat(chatId);
+    if (level === 'full' && !(await this.confirmFull(chat))) return;
+    this.setLevel(chat, level);
+    await this.applyLevel(chatId, true);
+  }
+
+  /** Plan mode on or off: a Plan entry in the agent's modes, or Codex's collaboration mode. */
+  async setPlan(chatId: string, on: boolean): Promise<void> {
+    const chat = this.requireChat(chatId);
+    const plan = planToggle(chat.session);
+    if (!plan) return;
+    const off = plan.option.category === 'mode' ? modeFor(chat.agent, plan.option, chat.approval ?? 'ask') : plan.off;
+    const value = on ? plan.on : off;
+    if (value !== undefined && value !== plan.option.current) await this.applyOption(chatId, plan.option, value);
+  }
+
+  private setLevel(chat: ChatView, level: ApprovalLevel): void {
+    this.dispatch({ t: 'approval', chatId: chat.id, level });
+    if (level !== 'full') this.saveDefaults(chat.agent, { approval: level });
+  }
+
+  private async confirmFull(chat: ChatView): Promise<boolean> {
+    if (this.confirmedFull.has(chat.id)) return true;
+    const mode = modeFor(chat.agent, modeOption(chat.session), 'full');
+    const name = modeOption(chat.session)?.choices.find((c) => c.value === mode)?.name;
+    if (!(await this.options.ui.confirmFullAuto?.({ label: chat.label, agent: this.label(chat.agent), mode: name }))) return false;
+    this.confirmedFull.add(chat.id);
+    return true;
+  }
+
+  /** Remembers a choice for this chat and for the agent's next chats. Modes aren't remembered; levels are. */
+  private remember(chat: ChatView, option: SessionOption, value: string | boolean): void {
+    const key = optionKey(option);
+    this.chosen.set(chat.id, { ...this.chosen.get(chat.id), [key]: value });
+    const d = this.options.defaults?.get(chat.agent);
+    this.saveDefaults(chat.agent, { chosen: { ...d?.chosen, [key]: value } });
+  }
+
+  private saveDefaults(agent: AgentKey, patch: Partial<AgentDefaults>): void {
+    const store = this.options.defaults;
+    if (!store) return;
+    const d = store.get(agent) ?? { options: [], chosen: {} };
+    store.set(agent, { ...d, ...patch });
+  }
+
+  /** Sends one setting to the agent the way it takes it, and shows the agent's answer. */
+  private async applyOption(chatId: string, option: SessionOption, value: string | boolean): Promise<void> {
+    const show = (session: ChatSession | undefined) => this.dispatch({ t: 'session', chatId, session });
+    const local = (s: ChatSession | undefined) => s && { ...s, options: s.options.map((o) => (o.id === option.id ? { ...o, current: value } : o)) };
+    if (!this.hub.hasSession(chatId)) {
+      // Applied when the session starts: the mode through the approval level, the rest as chosen.
+      show(local(this.chat(chatId)?.session));
+      return;
+    }
+    try {
+      if (option.via === 'mode') {
+        await this.hub.setMode(chatId, String(value));
+        show(local(this.chat(chatId)?.session));
+      } else if (option.via === 'model') {
+        await this.hub.setModel(chatId, String(value));
+        show(local(this.chat(chatId)?.session));
+      } else {
+        const list = await this.hub.setConfigOption(chatId, option.id, value);
+        const prev = this.chat(chatId)?.session ?? EMPTY_SESSION;
+        const fresh = sessionOptions({ configOptions: list });
+        show({ ...prev, options: [...prev.options.filter((o) => o.via !== 'option' && !fresh.some((n) => n.category === o.category)), ...fresh] });
+      }
+      this.updateKnown(chatId);
+    } catch (err) {
+      if (err instanceof NoSessionError) return;
+      this.items(chatId, [{ kind: 'notice', tone: 'error', text: `Couldn't change ${option.name}: ${messageOf(err)}` }]);
+    }
+  }
+
+  /** Puts the agent in the mode for the chat's level. Leaves Plan mode alone unless the user chose a level just now. */
+  private async applyLevel(chatId: string, chosenNow: boolean): Promise<void> {
+    const chat = this.chat(chatId);
+    const mode = modeOption(chat?.session);
+    if (!chat || !mode || (!chosenNow && planning(chat.session) && planToggle(chat.session)?.option === mode)) return;
+    const want = modeFor(chat.agent, mode, chat.approval ?? 'ask');
+    if (want !== undefined && want !== mode.current) await this.applyOption(chatId, mode, want);
+  }
+
+  /** The agent's options, kept as its defaults for the next chat's pickers. */
+  private updateKnown(chatId: string): void {
+    const chat = this.chat(chatId);
+    if (chat?.session?.live) this.saveDefaults(chat.agent, { options: chat.session.options.filter((o) => o.category !== 'mode') });
+  }
+
+  /**
+   * A session started or came back: show what it offers, then apply the chat's
+   * choices (or, for a new chat, the user's last choices for this agent), then
+   * the mode for its approval level. FriedLiver decides the mode, so Codex's
+   * "Auto review" default or a user's ~/.claude defaultMode doesn't carry over.
+   */
+  private async sessionStarted(chatId: string, start: SessionStart): Promise<void> {
+    const chat = this.chat(chatId);
+    if (!chat) return;
+    const prev = chat.session;
+    const session: ChatSession = {
+      options: sessionOptions(start),
+      // Commands may arrive before the session's answer; the agent sends a fresh list soon anyway.
+      commands: prev?.commands ?? [],
+      ...(prev?.usage && start.loaded ? { usage: prev.usage } : {}),
+      steering: start.steering || undefined,
+      live: true,
+      ...(start.agentInfo ? { agent: start.agentInfo } : {}),
+    };
+    this.dispatch({ t: 'session', chatId, session });
+    const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...this.options.defaults?.get(chat.agent)?.chosen, ...this.chosen.get(chatId) };
+    // The model first: it decides which effort levels there are.
+    const keys = Object.keys(wanted).sort((a, b) => (a === 'model' ? -1 : b === 'model' ? 1 : 0));
+    for (const key of keys) {
+      const option = this.chat(chatId)?.session?.options.find((o) => optionKey(o) === key);
+      const value = wanted[key];
+      if (option && option.category !== 'mode' && offers(option, value) && option.current !== value) await this.applyOption(chatId, option, value);
+    }
+    await this.applyLevel(chatId, false);
+    this.updateKnown(chatId);
   }
 
   async retry(chatId: string): Promise<void> {
@@ -388,7 +731,12 @@ export class AgentCore {
    * a group, each in its own worktree when asked. `done` resolves when every
    * turn has ended.
    */
-  async fanout(agents: AgentKey[], prompt: string, worktree: boolean): Promise<{ group: string; chats: ChatView[]; done: Promise<void> }> {
+  async fanout(
+    agents: AgentKey[],
+    prompt: string,
+    worktree: boolean,
+    extras: { choices?: Partial<Record<AgentKey, Record<string, string | boolean>>>; approval?: ApprovalLevel } = {},
+  ): Promise<{ group: string; chats: ChatView[]; done: Promise<void> }> {
     const folder = this.options.folders()[0];
     if (!folder) throw new Error('Open a folder first. Agents work inside the folder you open.');
     const group = this.id('group');
@@ -401,7 +749,7 @@ export class AgentCore {
     const chats: ChatView[] = [];
     for (const agent of agents) {
       // The agent's name keeps branch names apart when chats start in the same millisecond.
-      chats.push(await this.createChat(agent, { worktree: separate, title: prompt, worktreeName: `${agent} ${prompt}`, group }));
+      chats.push(await this.createChat(agent, { worktree: separate, title: prompt, worktreeName: `${agent} ${prompt}`, group, choices: extras.choices?.[agent], approval: extras.approval }));
     }
     if (shared) for (const c of chats) this.items(c.id, [{ kind: 'notice', tone: 'info', text: shared }]);
     const done = Promise.all(chats.map((c) => this.sendMessage(c.id, prompt).catch((err: unknown) => this.items(c.id, [this.failureNotice(c.agent, err)])))).then(() => {});
@@ -427,6 +775,10 @@ export class AgentCore {
     this.preambles.delete(chatId);
     this.lastPrompt.delete(chatId);
     this.turns.forget(chatId);
+    this.checkpoints.forget(chatId);
+    for (const q of this.queues.get(chatId) ?? []) q.done();
+    for (const map of [this.queues, this.chosen, this.openTools, this.approvedWrites, this.turnDecision, this.reported]) map.delete(chatId);
+    this.confirmedFull.delete(chatId);
     this.hub.removeChat(chatId);
     this.dispatch({ t: 'closed', chatId });
   }
@@ -448,8 +800,11 @@ export class AgentCore {
   }
 
   /** A file's content before the chat changed it: null if the chat created it, undefined if unknown. */
-  beforeChat(chatId: string, file: string): string | null | undefined {
-    return this.turns.firstBefore(chatId, file);
+  async beforeChat(chatId: string, file: string): Promise<string | null | undefined> {
+    const logged = this.turns.firstBefore(chatId, file);
+    if (logged !== undefined) return logged;
+    const snap = await this.checkpoints.firstBefore(chatId, file);
+    return snap === undefined ? undefined : snap === null ? null : snap.toString('utf8');
   }
 
   // ---- Saving and restoring ----
@@ -465,6 +820,7 @@ export class AgentCore {
         sessionId: this.hub.sessionId(c.id),
         worktree: wt && { path: wt.path, branch: wt.branch, repo: wt.repo, title: wt.title },
         preamble: this.preambles.get(c.id),
+        choices: this.chosen.get(c.id),
       };
     }
     return { version: 1, state: this.state, chats, nextId: this.nextId, chatCount: { ...this.chatCount } };
@@ -491,6 +847,7 @@ export class AgentCore {
         view = { ...chat, branch: undefined, items: [...chat.items, gone] };
       }
       if (host.preamble) this.preambles.set(chat.id, host.preamble);
+      if (host.choices) this.chosen.set(chat.id, host.choices);
       chats.push(view);
     }
     this.nextId = Math.max(this.nextId, saved.nextId);
@@ -507,6 +864,18 @@ export class AgentCore {
     pending.resolve(optionId ? { outcome: { outcome: 'selected', optionId } } : { outcome: { outcome: 'cancelled' } });
   }
 
+  /** The user's answer to an agent's form: only values that fit what it asked go back. */
+  answerQuestion(requestId: string, action: 'accept' | 'decline', values: Record<string, unknown> = {}): void {
+    const pending = this.questions.get(requestId);
+    if (!pending) return;
+    if (action === 'decline') {
+      pending.resolve({ action: 'decline' });
+      return;
+    }
+    const answer = checkAnswer(pending.fields, values);
+    if (answer) pending.resolve({ action: 'accept', content: answer });
+  }
+
   /** Accept writes `content` (the proposal as the user left it); reject tells the agent no. */
   decideReview(reviewId: string, accept: boolean, content?: string): void {
     this.reviews.get(reviewId)?.resolve({ accept, content });
@@ -516,15 +885,39 @@ export class AgentCore {
     this.commands.get(commandId)?.resolve(approve);
   }
 
-  /** Restores the files the chat's latest turn changed. */
+  /**
+   * Restores the files the chat's latest turn changed: from the turn's git
+   * checkpoint for files the agent changed itself, and from FriedLiver's own
+   * record for the rest. A file changed again since the turn is left alone.
+   */
   async undo(chatId: string, turnId: string): Promise<string[]> {
     if (this.requireChat(chatId).busy) throw new Error('Wait for the agent to finish, or stop it, before undoing.');
+    if (this.turns.current(chatId) !== turnId) throw new Error('Only the most recent turn can be undone.');
     // Checked again: a symlink may have appeared since the turn wrote these files.
-    const files = await this.turns.undo(chatId, turnId, {
-      write: (f, c) => writeTextFile(this.checkWrite(f), c),
+    const snap = await this.checkpoints.undo(chatId, turnId, {
+      write: async (f, c) => {
+        const file = this.checkWrite(f);
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, c);
+      },
       remove: (f) => rm(this.checkWrite(f), { force: true }),
     });
+    const handled = new Set([...snap.restored, ...snap.kept]);
+    const logged =
+      this.turns.current(chatId) === turnId
+        ? await this.turns.undo(
+            chatId,
+            turnId,
+            { write: (f, c) => writeTextFile(this.checkWrite(f), c), remove: (f) => rm(this.checkWrite(f), { force: true }) },
+            (f) => handled.has(f),
+          )
+        : [];
+    const files = [...snap.restored, ...logged];
     this.dispatch({ t: 'undone', chatId, turnId });
+    if (snap.kept.length) {
+      const names = snap.kept.map((f) => path.basename(f)).join(', ');
+      this.items(chatId, [{ kind: 'notice', tone: 'info', text: `Left ${names} as ${snap.kept.length === 1 ? 'it is: it' : 'they are: they'} changed after the turn.` }]);
+    }
     for (const f of files) this.options.ui.fileChanged?.(f);
     return files;
   }
@@ -604,7 +997,11 @@ export class AgentCore {
   async checkAccount(agent: AgentKey): Promise<AccountStatus> {
     try {
       const r = await this.hub.checkSignIn(agent);
-      return r.signedIn ? { status: 'signed-in', methods: [] } : { status: 'needs-sign-in', methods: signInMethods(r.methods) };
+      const info = this.hub.agentInfo(agent);
+      const spec = this.spec(agent);
+      const old = info && ((spec.minVersion && olderThan(info.version, spec.minVersion)) || info.name.startsWith('@zed-industries/'));
+      const extra = { ...(info ? { version: info.version } : {}), ...(old ? { update: `Update it: ${spec.installCommand}` } : {}) };
+      return r.signedIn ? { status: 'signed-in', methods: [], ...extra } : { status: 'needs-sign-in', methods: signInMethods(r.methods), ...extra };
     } catch (err) {
       if (err instanceof AgentStartError && err.failure === 'not_installed') {
         return { status: 'not-installed', methods: [], installCommand: err.spec.installCommand, message: err.message };
@@ -714,16 +1111,22 @@ export class AgentCore {
   }
 
   private async runPrompt(chatId: string, blocks: acp.ContentBlock[]): Promise<TurnResult> {
-    const agent = this.requireChat(chatId).agent;
+    const start = this.requireChat(chatId);
+    const agent = start.agent;
+    // A consultation or a pipe gives a chat its turn; the user started the rest.
+    const byUser = start.origin?.kind !== 'consult';
     this.dispatch({ t: 'busy', chatId, busy: true, at: Date.now() });
     const turnId = this.turns.begin(chatId);
+    this.reported.set(chatId, new Set());
     let notice: Item | null = null;
     let stopReason: acp.StopReason | null = null;
     try {
+      // Before the agent can change anything: the checkpoint Undo goes back to.
+      await this.checkpoints.begin(chatId, start.cwd, turnId);
       await this.ensureBridge();
       const result: acp.PromptResponse = this.stopping.has(chatId) ? { stopReason: 'cancelled' } : await this.hub.prompt(chatId, blocks);
       stopReason = result.stopReason;
-      if (result.stopReason !== 'end_turn') notice = { kind: 'notice', tone: 'info', text: `Stopped (${result.stopReason}).` };
+      if (result.stopReason !== 'end_turn') notice = stopNotice(result.stopReason, this.label(agent));
     } catch (err) {
       this.settleChat(chatId);
       notice = this.failureNotice(agent, err);
@@ -732,19 +1135,179 @@ export class AgentCore {
       this.flushOutput();
       // Nothing the agent asked for through the FriedLiver tools waits past its turn.
       this.requests.settle(chatId, false);
-      this.dispatch({ t: 'busy', chatId, busy: false, at: Date.now() });
-      const changed = this.turns.latest(chatId);
-      if (changed?.turnId === turnId) {
-        this.dispatch({ t: 'changes', chatId, turnId, files: changed.files });
-        this.touch(chatId, changed.files);
-      }
-      if (notice) this.items(chatId, [notice]);
     }
+    // The chat stays busy until the turn's changes are known, so a new turn can't start in between.
+    const files = await this.turnFiles(chatId, turnId);
+    for (const map of [this.turnDecision, this.approvedWrites, this.reported]) map.delete(chatId);
+    this.dispatch({ t: 'busy', chatId, busy: false, at: Date.now() });
+    if (files.length) {
+      this.dispatch({ t: 'changes', chatId, turnId, files });
+      this.touch(chatId, files);
+    }
+    if (notice) this.items(chatId, [notice]);
     const chat = this.chat(chatId);
+    if (chat) {
+      this.options.ui.turnEnded?.({ chatId, label: chat.label, title: chat.title, stopReason, failure: notice?.kind === 'notice' && notice.tone === 'error' ? notice : undefined, files: files.length, byUser });
+    }
     // Read the reply before pipes or held forwards give the chat its next message.
     const result: TurnResult = { stopReason, reply: chat ? lastReply(chat) : '' };
     this.links.turnEnded(chatId, result);
+    // Queued messages go on after a turn that ended normally; after Stop or a failure they wait.
+    if (stopReason !== null && stopReason !== 'cancelled') setTimeout(() => this.drainQueue(chatId), 0);
     return result;
+  }
+
+  /**
+   * What the turn changed: the git checkpoint's files (every agent, however it
+   * writes), and files FriedLiver recorded before a write or an edit request
+   * whose content did change (folders outside git).
+   */
+  private async turnFiles(chatId: string, turnId: string): Promise<string[]> {
+    const snap = await this.checkpoints.end(chatId, turnId, this.reported.get(chatId) ?? new Set()).catch(() => []);
+    const logged = this.turns.current(chatId) === turnId ? (this.turns.latest(chatId)?.files ?? []) : [];
+    const changed: string[] = [];
+    for (const f of logged) {
+      const now = await readIfExists(f).catch(() => undefined);
+      if (now === this.turns.before(chatId, f)) this.turns.drop(chatId, f);
+      else changed.push(f);
+    }
+    return [...new Set([...snap, ...changed])];
+  }
+
+  /** Keeps open tool calls whole (a permission request may name only the id), and notes files edit tools touch. */
+  private noteTool(chatId: string, update: acp.SessionUpdate): void {
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
+    const tools = this.openTools.get(chatId) ?? new Map<string, OpenTool>();
+    this.openTools.set(chatId, tools);
+    const prev = tools.get(update.toolCallId) ?? {};
+    const next: OpenTool = { ...prev };
+    if (update.title != null) next.title = update.title;
+    if (update.kind != null) next.kind = update.kind;
+    if (update.status != null) next.status = update.status;
+    if (update.content != null) next.content = update.content;
+    if (update.locations != null) next.locations = update.locations;
+    if (update.rawInput !== undefined) next.rawInput = update.rawInput;
+    tools.delete(update.toolCallId);
+    if (next.status === 'completed' || next.status === 'failed') {
+      // Done: nothing will ask about it any more.
+    } else {
+      tools.set(update.toolCallId, next);
+      if (tools.size > MAX_OPEN_TOOLS) tools.delete(tools.keys().next().value!);
+    }
+    const diffs = (update.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.path] : []));
+    if (next.kind === 'edit' || next.kind === 'delete' || next.kind === 'move' || diffs.length) {
+      for (const file of [...(update.locations ?? []).map((l) => l.path), ...diffs]) this.noteFile(chatId, file);
+    }
+  }
+
+  /**
+   * A file the running turn says it changes: counts for its checkpoint, and its
+   * content now is kept for Undo outside git. `before` is what a permission
+   * request saw, read while the agent waited for the answer.
+   */
+  private noteFile(chatId: string, file: string, before?: string | null): void {
+    const resolved = typeof file === 'string' && path.isAbsolute(file) ? insideRoots(file, this.roots()) : null;
+    const turn = this.reported.get(chatId);
+    if (!resolved || !turn) return;
+    turn.add(resolved);
+    if (this.turns.before(chatId, resolved) !== undefined) return;
+    if (before !== undefined) {
+      this.turns.record(chatId, resolved, before);
+      return;
+    }
+    void readIfExists(resolved)
+      .then((before) => this.reported.get(chatId) === turn && this.turns.record(chatId, resolved, before))
+      .catch(() => {});
+  }
+
+  /** A permission request's tool call, filled in from the tool call of the same id that came before it. */
+  private mergedTool(chatId: string, call: acp.ToolCallUpdate): OpenTool {
+    const prev = this.openTools.get(chatId)?.get(call.toolCallId) ?? {};
+    const pick = <K extends keyof OpenTool>(k: K) => (call[k as keyof acp.ToolCallUpdate] ?? prev[k] ?? undefined) as OpenTool[K];
+    return {
+      title: pick('title'),
+      kind: pick('kind'),
+      status: pick('status'),
+      content: call.content?.length ? call.content : prev.content,
+      locations: call.locations?.length ? call.locations : prev.locations,
+      rawInput: call.rawInput !== undefined ? call.rawInput : prev.rawInput,
+    };
+  }
+
+  /** The whole files a request would write, from the files on disk and its diffs; only inside the workspace. */
+  private async proposalsFor(tool: OpenTool): Promise<Proposal[]> {
+    const out: Proposal[] = [];
+    const replaceAll = !!(tool.rawInput && typeof tool.rawInput === 'object' && (tool.rawInput as Record<string, unknown>).replace_all === true);
+    for (const [file, entries] of diffsByFile(tool.content)) {
+      const inside = path.isAbsolute(file) ? insideRoots(file, this.roots()) : null;
+      let before: string | null = null;
+      let readable = false;
+      if (inside) {
+        try {
+          const info = await stat(inside);
+          readable = info.isFile() && info.size <= MAX_PROPOSAL_BYTES;
+          if (readable) before = await readFile(inside, 'utf8');
+        } catch (err) {
+          readable = (err as NodeJS.ErrnoException).code === 'ENOENT';
+        }
+      }
+      const after = readable ? applyDiffs(before, entries, replaceAll) : undefined;
+      out.push({ path: inside ?? file, before, after, entries });
+    }
+    return out;
+  }
+
+  private permissionDetail(tool: OpenTool, proposals: Proposal[], chat: ChatView | undefined): PermissionDetail {
+    const detail: PermissionDetail = {};
+    const command = commandOf(tool.rawInput);
+    if (command) detail.command = { line: visibleText(command.line), cwd: command.cwd ?? chat?.cwd };
+    const plan = planOf(tool.rawInput);
+    if (plan) detail.plan = plan;
+    if (proposals.length) {
+      detail.files = proposals.map((p) => proposedFile(p.path, p.before, p.entries, p.after));
+    }
+    const text = (tool.content ?? [])
+      .flatMap((c) => (c.type === 'content' && c.content.type === 'text' ? [c.content.text] : []))
+      .join('\n')
+      .trim();
+    if (text && !plan) detail.text = text.slice(0, 4000);
+    const locations = (tool.locations ?? []).map((l) => l.path).filter((l) => !proposals.some((p) => p.path === l));
+    if (locations.length && !detail.files) detail.locations = locations.slice(0, 10);
+    return detail;
+  }
+
+  /**
+   * Answers a request for the user when the chat's level or an "Always allow"
+   * rule covers it. Only ever with a one-time allow that doesn't change the
+   * agent's mode, and never for a plan or a mode switch.
+   */
+  private autoAnswer(chat: ChatView | undefined, kind: string | undefined, detail: PermissionDetail, options: acp.PermissionOption[]): { option: acp.PermissionOption; reason: string } | undefined {
+    if (!chat || kind === 'switch_mode' || detail.plan) return undefined;
+    const once = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
+    const no = options.find((o) => o.kind === 'reject_once');
+    const edit = kind === 'edit' || kind === 'delete' || kind === 'move' || !!detail.files?.length;
+    const level = chat.approval ?? 'ask';
+    const all = this.turnDecision.get(chat.id);
+    if (edit && all === 'reject' && no) return { option: no, reason: 'Reject all' };
+    if (!once) return undefined;
+    if (edit && all === 'accept') return { option: once, reason: 'Accept all' };
+    if (edit && level !== 'ask') return { option: once, reason: APPROVAL_NAMES[level] };
+    const outside = detail.command?.cwd !== undefined && insideRoots(detail.command.cwd, this.roots()) === null;
+    if (level === 'full' && !outside) return { option: once, reason: APPROVAL_NAMES.full };
+    if (kind === 'execute' && detail.command && !outside) {
+      const rule = matchesRule(detail.command.line, this.options.rules?.get() ?? []);
+      if (rule) return { option: once, reason: `Always allowed: ${describeRule(rule)}` };
+    }
+    return undefined;
+  }
+
+  /** The user (or the level) allowed exactly these files: the writes that follow aren't asked again. */
+  private approveWrites(chatId: string, proposals: Proposal[]): void {
+    const full = proposals.filter((p) => p.after !== undefined);
+    if (!full.length) return;
+    const map = this.approvedWrites.get(chatId) ?? new Map<string, string>();
+    for (const p of full) map.set(p.path, p.after!);
+    this.approvedWrites.set(chatId, map);
   }
 
   private failureNotice(agent: AgentKey, err: unknown): Item {
@@ -771,6 +1334,7 @@ export class AgentCore {
 
   /** A cancelled or failed turn must not leave reviews, commands or tool requests waiting forever. */
   private settleChat(chatId: string): void {
+    for (const q of [...this.questions.values()]) if (q.chatId === chatId) q.resolve({ action: 'cancel' });
     for (const p of [...this.permissions.values()]) if (p.chatId === chatId) p.resolve({ outcome: { outcome: 'cancelled' } });
     for (const p of [...this.reviews.values()]) if (p.chatId === chatId) p.resolve({ accept: false });
     for (const p of [...this.commands.values()]) if (p.chatId === chatId) p.resolve(false);
@@ -806,43 +1370,182 @@ export class AgentCore {
     return { content: lines.slice(start, req.limit == null ? lines.length : start + req.limit).join('\n') };
   }
 
-  private askPermission(chatId: string, req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse> {
+  /**
+   * An agent's permission request is the review for agents that act on their
+   * own (Claude, Codex): its card shows the diff, the command and its folder,
+   * or the plan, filled in from the tool call it refers to.
+   */
+  private async askPermission(chatId: string, req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse> {
     const requestId = this.id('perm');
-    const title = req.toolCall.title ?? 'The agent wants to use a tool';
+    const tool = this.mergedTool(chatId, req.toolCall);
+    const proposals = await this.proposalsFor(tool).catch(() => [] as Proposal[]);
+    if (signal.aborted) return { outcome: { outcome: 'cancelled' } };
+    const chat = this.chat(chatId);
+    const kind = tool.kind ?? undefined;
+    const detail = this.permissionDetail(tool, proposals, chat);
+    for (const p of proposals) this.noteFile(chatId, p.path, p.before);
+    const title = tool.title?.trim() || fallbackTitle(kind, detail);
+    const options = req.options;
+    const item: Item = {
+      kind: 'permission',
+      requestId,
+      toolCallId: req.toolCall.toolCallId,
+      title,
+      options: options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
+      ...(kind ? { toolKind: kind } : {}),
+      ...(Object.keys(detail).length ? { detail } : {}),
+    };
+    const auto = this.autoAnswer(chat, kind, detail, options);
+    if (auto) {
+      this.items(chatId, [{ ...item, answer: auto.option.name, auto: auto.reason }]);
+      if (auto.option.kind.startsWith('allow')) this.approveWrites(chatId, proposals);
+      return { outcome: { outcome: 'selected', optionId: auto.option.optionId } };
+    }
+    if (proposals.some((p) => p.after !== undefined)) {
+      this.proposals.set(requestId, proposals);
+      if (this.proposals.size > 50) this.proposals.delete(this.proposals.keys().next().value!);
+    }
     return new Promise((resolve) => {
-      const options = req.options;
       this.permissions.set(requestId, {
         chatId,
         options,
         resolve: (answer) => {
           if (!this.permissions.delete(requestId)) return;
           const chosen = answer.outcome.outcome === 'selected' ? options.find((o) => o.optionId === (answer.outcome as { optionId: string }).optionId) : undefined;
+          if (chosen?.kind.startsWith('allow')) this.approveWrites(chatId, proposals);
           this.dispatch({ t: 'permissionAnswered', requestId, answer: chosen?.name ?? 'Cancelled' });
           resolve(answer);
         },
       });
       signal.addEventListener('abort', () => this.answerPermission(requestId, null), { once: true });
-      this.items(chatId, [
-        {
-          kind: 'permission',
-          requestId,
-          toolCallId: req.toolCall.toolCallId,
-          title,
-          options: options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
-        },
-      ]);
-      const chat = this.chat(chatId);
-      this.options.ui.askPermission?.({ chatId, requestId, agentLabel: chat?.label ?? 'The agent', title });
+      this.items(chatId, [item]);
+      const allow = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
+      const deny = options.find((o) => o.kind === 'reject_once');
+      this.options.ui.askPermission?.({
+        chatId,
+        requestId,
+        agentLabel: chat?.label ?? 'The agent',
+        title,
+        ...(allow ? { allow: { optionId: allow.optionId, name: allow.name } } : {}),
+        ...(deny ? { deny: { optionId: deny.optionId, name: deny.name } } : {}),
+      });
     });
   }
 
-  /** Every agent write waits for review in a diff, and is recorded so the turn can be undone. */
+  /** A question as a small form in the chat. One FriedLiver can't show is declined, so the agent asks another way. */
+  private askQuestion(chatId: string, req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse> {
+    const fields = questionFields(req);
+    if (!fields || signal.aborted) return Promise.resolve({ action: 'decline' });
+    const requestId = this.id('question');
+    const message = String(req.message ?? '').slice(0, 4000) || 'The agent has a question.';
+    return new Promise((resolve) => {
+      this.questions.set(requestId, {
+        chatId,
+        fields,
+        resolve: (answer) => {
+          if (!this.questions.delete(requestId)) return;
+          const summary = answer.action === 'accept' && 'content' in answer && answer.content ? answerSummary(fields, answer.content as Record<string, never>) : undefined;
+          this.dispatch({ t: 'question', requestId, state: answer.action === 'accept' ? 'answered' : 'declined', ...(summary ? { summary } : {}) });
+          resolve(answer);
+        },
+      });
+      signal.addEventListener('abort', () => this.questions.get(requestId)?.resolve({ action: 'cancel' }), { once: true });
+      this.items(chatId, [{ kind: 'question', requestId, message, fields, state: 'awaiting' }]);
+      this.options.ui.askQuestion?.({ chatId, requestId, agentLabel: this.chat(chatId)?.label ?? 'The agent', message });
+    });
+  }
+
+  /** Workspace files whose path contains `query`, for the composer's "#" picker; relative to the chat's folder. */
+  fileMatches(chatId: string, files: string[], query: string): string[] {
+    const chat = this.chat(chatId);
+    if (!chat) return [];
+    const q = query.toLowerCase();
+    return files
+      .filter((f) => insideRoots(f, this.roots()))
+      .map((f) => relativeFile(chat.cwd, f))
+      .filter((rel) => !rel.startsWith('..') && rel.toLowerCase().includes(q))
+      .sort((a, b) => a.length - b.length || a.localeCompare(b))
+      .slice(0, 12);
+  }
+
+  /** "Open diff" on a permission card: the whole proposed file against the file on disk, read-only. */
+  showProposal(requestId: string, file: string): boolean {
+    const p = this.proposals.get(requestId)?.find((x) => x.path === file && x.after !== undefined);
+    const chat = this.state.chats.find((c) => c.items.some((i) => i.kind === 'permission' && i.requestId === requestId));
+    if (!p || !chat || !this.options.ui.showProposal) return false;
+    this.options.ui.showProposal({ id: requestId, path: p.path, before: p.before, after: p.after!, agentLabel: chat.label, chatId: chat.id });
+    return true;
+  }
+
+  /** "Always allow": adds the rule after the user confirms, then allows the command that asked. */
+  async allowAlways(target: { requestId: string } | { commandId: string }, rule: CommandRule): Promise<void> {
+    let line: string | undefined;
+    for (const chat of this.state.chats) {
+      for (const i of chat.items) {
+        if ('requestId' in target && i.kind === 'permission' && i.requestId === target.requestId && !i.answer) line = i.detail?.command?.line;
+        if ('commandId' in target && i.kind === 'command' && i.commandId === target.commandId && i.state === 'awaiting' && !i.outside) line = i.commandLine;
+      }
+    }
+    // The rule must cover the very command on screen.
+    if (!line || !matchesRule(line, [rule]) || !this.options.rules) return;
+    if (!(await this.options.ui.confirmRule?.(rule))) return;
+    this.options.rules.add(rule);
+    if ('commandId' in target) {
+      this.decideCommand(target.commandId, true);
+      return;
+    }
+    const pending = this.permissions.get(target.requestId);
+    const once = pending?.options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
+    if (once) this.answerPermission(target.requestId, once.optionId);
+  }
+
+  /** Accept all / Reject all: the edits waiting now (the editor decides its reviews) and the rest of this turn's. */
+  decideAll(chatId: string, action: 'accept' | 'reject'): string[] {
+    const chat = this.requireChat(chatId);
+    if (chat.busy) this.turnDecision.set(chatId, action);
+    for (const [id, p] of this.permissions) {
+      if (p.chatId !== chatId) continue;
+      const item = chat.items.find((i) => i.kind === 'permission' && i.requestId === id);
+      if (item?.kind !== 'permission' || !(item.toolKind === 'edit' || item.detail?.files?.length)) continue;
+      const option = p.options.find((o) => (action === 'accept' ? o.kind === 'allow_once' && !ESCALATING.test(o.name) : o.kind === 'reject_once'));
+      if (option) this.answerPermission(id, option.optionId);
+    }
+    return [...this.reviews.values()].filter((r) => r.chatId === chatId).map((r) => r.reviewId);
+  }
+
+  /**
+   * Every agent write waits for review in a diff, unless the chat's level
+   * accepts edits or the user just approved this very content on a permission
+   * card. Either way it is recorded, so the turn can be undone.
+   */
   private async reviewWrite(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void> {
     const file = this.checkWrite(req.path);
     const before = await readIfExists(file);
     const reviewId = this.id('review');
     const chat = chatId ? this.chat(chatId) : undefined;
-    const review: PendingReview = { reviewId, chatId, path: file, before, proposed: req.content, agentLabel: chat?.label ?? 'Agent' };
+    if (chatId && chat) {
+      this.reported.get(chatId)?.add(file);
+      const approved = this.approvedWrites.get(chatId)?.get(file) === req.content;
+      const all = this.turnDecision.get(chatId);
+      const level = chat.approval ?? 'ask';
+      const stats = lineStats(before, req.content);
+      if (all === 'reject') {
+        this.items(chatId, [{ kind: 'review', reviewId, path: file, ...stats, isNew: before === null, state: 'rejected', auto: 'Reject all' }]);
+        throw new Error(`The user rejected the change to ${file}.`);
+      }
+      const reason = approved ? 'Approved above' : all === 'accept' ? 'Accept all' : level !== 'ask' ? APPROVAL_NAMES[level] : undefined;
+      if (reason) {
+        if (approved) this.approvedWrites.get(chatId)?.delete(file);
+        this.items(chatId, [{ kind: 'review', reviewId, path: file, ...stats, isNew: before === null, state: 'accepted', auto: reason }]);
+        this.touch(chatId, [file]);
+        this.checkWrite(file);
+        this.turns.record(chatId, file, before);
+        await writeTextFile(file, req.content);
+        this.options.ui.fileChanged?.(file);
+        return;
+      }
+    }
+    const review: PendingReview = { reviewId, chatId, path: file, before, proposed: req.content, agentLabel: chat?.label ?? 'Agent', auto: true };
     const decision = await new Promise<{ accept: boolean; content?: string }>((resolve) => {
       this.reviews.set(reviewId, {
         ...review,
@@ -877,6 +1580,14 @@ export class AgentCore {
         const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
         known.set(info.terminalId, { commandId });
         const outside = insideRoots(info.cwd, this.roots()) === null;
+        // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.
+        const chat = chatId ? this.chat(chatId) : undefined;
+        const rule = outside ? undefined : matchesRule(info.commandLine, this.options.rules?.get() ?? []);
+        const auto = outside || !chat ? undefined : chat.approval === 'full' ? APPROVAL_NAMES.full : rule ? `Always allowed: ${describeRule(rule)}` : undefined;
+        if (chatId && auto) {
+          this.items(chatId, [{ kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'running', output: '', auto }]);
+          return Promise.resolve(true);
+        }
         if (chatId) this.items(chatId, [{ kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'awaiting', output: '' }]);
         const agentLabel = (chatId && this.chat(chatId)?.label) || this.label(agentId);
         this.options.ui.askCommand?.({ chatId, commandId, agentLabel, commandLine: info.commandLine });
@@ -966,4 +1677,42 @@ export class AgentCore {
 
 export function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** How a turn that didn't end normally reads. */
+function stopNotice(reason: acp.StopReason, agent: string): Item {
+  switch (reason) {
+    case 'cancelled':
+      return { kind: 'notice', tone: 'info', text: 'Stopped.' };
+    case 'max_tokens':
+      return { kind: 'notice', tone: 'info', text: `${agent} reached its output limit. Send "continue" to go on.`, actions: [{ label: 'Try again', do: 'retry' }] };
+    case 'max_turn_requests':
+      return { kind: 'notice', tone: 'info', text: `${agent} reached its limit of steps for one message. Send "continue" to go on.` };
+    case 'refusal':
+      return { kind: 'notice', tone: 'info', text: `${agent} declined this request.` };
+    default:
+      return { kind: 'notice', tone: 'info', text: `Stopped (${reason}).` };
+  }
+}
+
+/** A title for a permission request that came without one. */
+function fallbackTitle(kind: string | undefined, detail: PermissionDetail): string {
+  if (kind === 'execute') return detail.command ? `Run ${detail.command.line.split('\n')[0].slice(0, 80)}` : 'Run a command';
+  if (detail.files?.length) return `Edit ${detail.files.map((f) => path.basename(f.path)).join(', ')}`;
+  if (kind === 'edit') return 'Edit files';
+  if (kind === 'switch_mode' || detail.plan) return 'Approve the plan';
+  if (kind === 'fetch') return 'Fetch from the web';
+  return 'Use a tool';
+}
+
+/** Whether a dotted version is older than another (numbers only; anything else isn't). */
+export function olderThan(version: string, min: string): boolean {
+  const a = version.split(/[.-]/).map(Number);
+  const b = min.split(/[.-]/).map(Number);
+  for (let i = 0; i < b.length; i++) {
+    const x = a[i] ?? 0;
+    if (!Number.isFinite(x) || !Number.isFinite(b[i])) return false;
+    if (x !== b[i]) return x < b[i];
+  }
+  return false;
 }
