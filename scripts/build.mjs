@@ -132,6 +132,38 @@ if (args.has('--no-compile')) {
 }
 
 /**
+ * Removes what a FriedLiver user never runs, before installers and signing: source maps
+ * (about 300 MB; Microsoft's release pipeline uploads them elsewhere) and the Copilot SDK
+ * runtime (about 150 MB; packaged because the agent-host code imports it, but built-in AI
+ * features are off and Copilot is gone, see patches 0010 and 0020).
+ */
+function trimPackagedApp(appDir) {
+	const app = process.platform === 'darwin'
+		? path.join(appDir, fs.readdirSync(appDir).find(name => name.endsWith('.app')) ?? '', 'Contents', 'Resources', 'app')
+		: path.join(appDir, 'resources', 'app');
+	let bytes = 0;
+	const remove = target => {
+		const stat = fs.statSync(target);
+		bytes += stat.isDirectory()
+			? fs.readdirSync(target, { recursive: true }).reduce((sum, rel) => sum + (fs.statSync(path.join(target, rel)).isFile() ? fs.statSync(path.join(target, rel)).size : 0), 0)
+			: stat.size;
+		fs.rmSync(target, { recursive: true, force: true });
+	};
+	for (const rel of fs.readdirSync(app, { recursive: true })) {
+		if (rel.endsWith('.map') && fs.existsSync(path.join(app, rel))) {
+			remove(path.join(app, rel));
+		}
+	}
+	const unpackedGithub = path.join(app, 'node_modules.asar.unpacked', '@github');
+	if (fs.existsSync(unpackedGithub)) {
+		for (const name of fs.readdirSync(unpackedGithub).filter(n => n.startsWith('copilot-sdk'))) {
+			remove(path.join(unpackedGithub, name));
+		}
+	}
+	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps and the Copilot SDK runtime from the app`);
+}
+
+/**
  * The installer for this OS, into code/installers/: a per-user setup .exe on Windows (no admin
  * rights needed), a .dmg on macOS, a .deb on Linux. Unsigned: signing needs certificates.
  */
@@ -179,6 +211,7 @@ if (wantPackage) {
 	run('npm', ['run', 'gulp', '--', task], { env });
 	const out = path.join(path.dirname(fs.realpathSync(VSCODE_DIR)), `VSCode-${process.platform}-${arch}`);
 	log(`packaged app: ${out} (${Math.round((Date.now() - started) / 60000)} min)`);
+	trimPackagedApp(out);
 	if (args.has('--installer')) {
 		buildInstaller(arch, out);
 	}
