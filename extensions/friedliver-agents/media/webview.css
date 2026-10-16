@@ -1,0 +1,855 @@
+/*
+ * "Control Room": one loud color, and it means only "you must decide".
+ * Everything else comes from the VS Code theme (--vscode-*), so these views
+ * follow any theme. Surfaces separate by tone, not lines; high-contrast
+ * themes get their contrast border back.
+ */
+:root {
+  --decision: var(--vscode-friedliver-decision, #7cc4ff);
+  --decision-fg: var(--vscode-friedliver-decisionForeground, #03121f);
+  --decision-tint: color-mix(in srgb, var(--decision) 13%, transparent);
+  --hue-claude: var(--vscode-friedliver-agentClaude, #e8b48c);
+  --hue-codex: var(--vscode-friedliver-agentCodex, #86d8c4);
+  --hue-gemini: var(--vscode-friedliver-agentGemini, #a9b4ff);
+  --hue-demo: var(--vscode-descriptionForeground, #9d9d9d);
+  --fg: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --tone-1: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+  --tone-2: color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
+  --tone-3: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  --hc-line: var(--vscode-contrastBorder, transparent);
+  --ok: var(--vscode-testing-iconPassed, #73c991);
+  --bad: var(--vscode-errorForeground, #f48771);
+  --working: var(--vscode-progressBar-background, #0e70c0);
+  --added: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+  --removed: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+  --mono: var(--vscode-editor-font-family, monospace);
+  --radius: 6px;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--fg);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: var(--vscode-button-secondaryForeground, var(--fg));
+  background: var(--vscode-button-secondaryBackground, var(--tone-2));
+  border: 1px solid var(--vscode-button-border, var(--hc-line));
+  border-radius: 4px;
+  padding: var(--space-1) var(--space-4);
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, var(--tone-3));
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+/* The loud color: only for "you must decide" (Accept, Run, the allow answer). */
+button.decide {
+  background: var(--decision);
+  color: var(--decision-fg);
+  font-weight: 600;
+}
+button.decide:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--decision) 85%, var(--fg));
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--tone-2);
+}
+button.danger {
+  color: var(--bad);
+}
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  color: var(--vscode-textLink-foreground);
+}
+button.link:hover {
+  background: none;
+  text-decoration: underline;
+}
+.icon-btn {
+  padding: var(--space-1);
+  width: 24px;
+  justify-content: center;
+}
+.icon {
+  flex: none;
+}
+
+textarea,
+input[type='text'] {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--hc-line));
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  width: 100%;
+  resize: vertical;
+}
+textarea::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+code,
+pre {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+code {
+  background: var(--vscode-textCodeBlock-background, var(--tone-2));
+  padding: 0 var(--space-2);
+  border-radius: 3px;
+}
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hint {
+  color: var(--muted);
+}
+.spacer {
+  flex: 1;
+}
+.warn {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+.tag {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--tone-2);
+  border-radius: 999px;
+  padding: 0 var(--space-3);
+}
+.chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--tone-2);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+button.chip.link {
+  color: var(--fg);
+}
+
+/* Every agent has a face: a letter on a 16% tint of its hue. */
+.glyph {
+  --hue: var(--hue-demo);
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--vscode-font-family);
+  line-height: 1;
+  color: var(--hue);
+  background: color-mix(in srgb, var(--hue) 16%, transparent);
+}
+.glyph.sm {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  border-radius: 4px;
+}
+.glyph.lg {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+  border-radius: 8px;
+}
+.glyph[data-agent='claude'] {
+  --hue: var(--hue-claude);
+}
+.glyph[data-agent='codex'] {
+  --hue: var(--hue-codex);
+}
+.glyph[data-agent='gemini'] {
+  --hue: var(--hue-gemini);
+}
+
+/* Status dots: idle, working (pulses), needs-you, done, error; "next" for steps ahead. */
+.dot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+.dot[data-state='working'] {
+  background: var(--working);
+  box-shadow: none;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.dot[data-state='needs-you'] {
+  background: var(--decision);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--decision) 25%, transparent);
+}
+.dot[data-state='done'] {
+  background: var(--ok);
+  box-shadow: none;
+}
+.dot[data-state='error'] {
+  background: var(--bad);
+  box-shadow: none;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot[data-state='working'] {
+    animation: none;
+  }
+}
+
+/* ---- Chat ---- */
+
+.chat-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.tabbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--tone-1);
+  position: relative;
+}
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: thin;
+}
+.tab {
+  background: transparent;
+  border-color: transparent;
+  max-width: 200px;
+  flex: none;
+  color: var(--muted);
+}
+.tab[aria-selected='true'] {
+  background: var(--tone-3);
+  color: var(--fg);
+}
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tabbar-end {
+  display: flex;
+  gap: var(--space-1);
+}
+.menu {
+  position: absolute;
+  right: var(--space-3);
+  top: 100%;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: var(--space-2);
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--fg));
+  border: 1px solid var(--vscode-menu-border, var(--hc-line));
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+.menu button {
+  background: transparent;
+  border: none;
+  justify-content: flex-start;
+  color: inherit;
+}
+.menu button:hover {
+  background: var(--vscode-menu-selectionBackground, var(--tone-2));
+  color: var(--vscode-menu-selectionForeground, inherit);
+}
+.chat-meta {
+  padding: var(--space-2) var(--space-5);
+  color: var(--muted);
+  font-size: 12px;
+}
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.transcript > * {
+  /* Items that clip their content (command output) would otherwise shrink to nothing in the scroller. */
+  flex-shrink: 0;
+}
+.bubble {
+  align-self: flex-end;
+  max-width: 88%;
+  background: var(--tone-3);
+  border: 1px solid var(--hc-line);
+  border-radius: 12px 12px 4px 12px;
+  padding: var(--space-3) var(--space-5);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.thumbs img {
+  max-height: 72px;
+  max-width: 120px;
+  border-radius: 4px;
+  display: block;
+}
+.thumb {
+  padding: 0;
+  background: none;
+  border: none;
+}
+.prose .md > :first-child {
+  margin-top: 0;
+}
+.md p,
+.md ul,
+.md ol {
+  margin: 0 0 var(--space-4);
+}
+.md h3,
+.md h4 {
+  margin: var(--space-5) 0 var(--space-3);
+}
+.md pre {
+  background: var(--vscode-textCodeBlock-background, var(--tone-2));
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
+}
+.md pre code {
+  background: none;
+  padding: 0;
+}
+.md a {
+  color: var(--vscode-textLink-foreground);
+}
+.thought summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+.thought-text {
+  color: var(--muted);
+  white-space: pre-wrap;
+  padding-left: var(--space-5);
+}
+
+/* Steps timeline: tool calls and plan entries. */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-1) 0 var(--space-1) var(--space-1);
+  position: relative;
+  min-height: 24px;
+}
+.steps li + li::before {
+  /* The thread joining the steps: a tone, not a rule line. */
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: -9px;
+  height: 14px;
+  width: 1px;
+  background: var(--tone-3);
+}
+.steps li[data-state='next'] .step-title,
+.steps li[data-state='idle'] .step-title {
+  color: var(--muted);
+}
+.steps li[data-state='needs-you'] .step-title {
+  color: var(--decision);
+  font-weight: 600;
+}
+.step-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card {
+  background: var(--tone-1);
+  border: 1px solid var(--hc-line);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 12px;
+}
+.card-head .hint {
+  font-weight: normal;
+}
+.progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--tone-2);
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.changes[data-undone] {
+  opacity: 0.7;
+}
+
+/* Ask boxes: everything here waits on the user, so it carries the decision tint. */
+.ask {
+  background: var(--decision-tint);
+  border: 1px solid var(--hc-line);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-weight: 600;
+  color: var(--decision);
+}
+.ask-body {
+  overflow-wrap: anywhere;
+}
+.file-row {
+  background: var(--tone-1);
+  justify-content: flex-start;
+  border-color: transparent;
+}
+.file-name {
+  font-family: var(--mono);
+}
+.stats {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.plus {
+  color: var(--added);
+}
+.minus {
+  color: var(--removed);
+}
+.cmdline {
+  background: var(--vscode-terminal-background, var(--tone-2));
+  color: var(--vscode-terminal-foreground, var(--fg));
+  padding: var(--space-3) var(--space-4);
+  border-radius: 4px;
+}
+.prompt {
+  color: var(--muted);
+}
+.answered {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+.command {
+  background: var(--tone-1);
+  border: 1px solid var(--hc-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.command-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  font-size: 12px;
+}
+.command-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+}
+.output {
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  background: var(--vscode-terminal-background, var(--tone-2));
+  color: var(--vscode-terminal-foreground, var(--fg));
+  font-size: 12px;
+}
+.notice {
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  background: var(--tone-1);
+  border: 1px solid var(--hc-line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.notice[data-tone='error'] {
+  background: var(--vscode-inputValidation-errorBackground, color-mix(in srgb, var(--bad) 14%, transparent));
+}
+.detail {
+  display: block;
+  white-space: pre-wrap;
+}
+.working {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--muted);
+}
+.composer {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  background: var(--tone-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.composer textarea {
+  min-height: 56px;
+  max-height: 40vh;
+}
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.composer-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+.empty {
+  padding: var(--space-6);
+  color: var(--muted);
+  text-align: center;
+}
+.pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+}
+.pick-agent {
+  flex-direction: column;
+  padding: var(--space-5) var(--space-3);
+  background: var(--tone-1);
+  border-color: var(--hc-line);
+  color: var(--fg);
+}
+
+/* ---- Task board ---- */
+
+.board-app {
+  height: 100%;
+  overflow: auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.board-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+.board-head h1 {
+  font-size: 18px;
+  margin: 0;
+  font-weight: 600;
+}
+.new-task {
+  background: var(--tone-1);
+  border: 1px solid var(--hc-line);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.agent-pick {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.agent-option {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.agent-option[aria-checked='true'] {
+  background: var(--tone-3);
+  color: var(--fg);
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+.column {
+  background: var(--tone-1);
+  border: 1px solid var(--hc-line);
+  border-radius: 8px;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 120px;
+}
+.column h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+  padding: var(--space-2) var(--space-2) 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--muted);
+}
+.count {
+  font-variant-numeric: tabular-nums;
+  background: var(--tone-2);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 0 var(--space-3);
+  font-size: 11px;
+}
+/* The waiting badge. */
+.count.loud {
+  background: var(--decision);
+  color: var(--decision-fg);
+  font-weight: 700;
+}
+.column-empty {
+  padding: var(--space-2);
+  font-size: 12px;
+}
+.task-card {
+  background: var(--tone-2);
+  border: 1px solid var(--hc-line);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.task-card[data-status='needs-you'] {
+  background: var(--decision-tint);
+}
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  min-width: 0;
+}
+.card-top > .hint {
+  white-space: nowrap;
+}
+.card-top .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.task-title {
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.state-line {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.state-line[data-decision] {
+  color: var(--decision);
+  font-weight: 600;
+}
+.state-code {
+  font-weight: normal;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.task-card .actions button {
+  font-size: 12px;
+}
+
+/* ---- Images ---- */
+
+.images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-4);
+  overflow-y: auto;
+  height: 100%;
+  align-content: start;
+}
+.images figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.images .thumb {
+  background: var(--tone-1);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  aspect-ratio: 4 / 3;
+  justify-content: center;
+}
+.images .thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.images figcaption {
+  font-size: 11px;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+.caption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--vscode-editor-background, #000) 88%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  cursor: zoom-out;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: calc(100% - 40px);
+  object-fit: contain;
+  border-radius: var(--radius);
+}
