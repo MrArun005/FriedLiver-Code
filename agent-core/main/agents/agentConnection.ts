@@ -37,6 +37,7 @@ export interface StartOptions {
 
 const STDERR_TAIL_LINES = 40;
 const STOP_GRACE_MS = 2000;
+const EXIT_GRACE_MS = 1000;
 
 /** One agent process and its ACP connection. */
 export class AgentConnection {
@@ -148,9 +149,13 @@ export class AgentConnection {
       ]);
       return new AgentConnection(spec, child, connection, info, terminals, stderrTail);
     } catch (err) {
-      connection.close(err);
+      // The connection often closes a moment before the process reports its
+      // exit (always on Windows, where a missing command exits through
+      // cmd.exe). The exit explains more, e.g. "not installed", so prefer it.
+      const reason = await Promise.race([failed.catch((e: unknown) => e), new Promise((r) => setTimeout(() => r(err), EXIT_GRACE_MS))]);
+      connection.close(reason);
       if (child.pid && child.exitCode === null) killProcessTree(child.pid);
-      throw err;
+      throw reason;
     }
   }
 
