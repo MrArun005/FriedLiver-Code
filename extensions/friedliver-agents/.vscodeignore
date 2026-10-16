@@ -1,0 +1,7 @@
+# Only the bundles and media ship; everything else is source, tests or tooling.
+**
+!package.json
+!dist/extension.js
+!dist/demo-agent.js
+!media/**
+media/dist/*.map
