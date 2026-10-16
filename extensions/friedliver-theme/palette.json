@@ -9,7 +9,7 @@
         "sunken": "#03060b", "ground": "#060a12", "panel": "#0a101b", "raised": "#111a29",
         "line": "#18233a", "line-strong": "#26354f",
         "text": "#e4ecfa", "text-2": "#aab9d3", "muted": "#8092b0",
-        "accent": "#7cc4ff", "accent-ink": "#03121f", "accent-soft": "#7cc4ff1f", "accent-line": "#7cc4ff73",
+        "accent": "#7cc4ff", "accent-ink": "#03121f", "accent-soft": "#7cc4ff1f", "accent-line": "#7cc4ffa6",
         "ok": "#6fd6a8", "warn": "#f2c35e", "bad": "#ff7f90", "info": "#b6a6ff", "shadow": "#000000b3"
       },
       "syntax": {
@@ -25,7 +25,7 @@
         "sunken": "#eef3fa", "ground": "#ffffff", "panel": "#f5f8fc", "raised": "#e9f0f9",
         "line": "#d8e2ef", "line-strong": "#c2d0e2",
         "text": "#0e1a2c", "text-2": "#33435c", "muted": "#556580",
-        "accent": "#0a68c7", "accent-ink": "#ffffff", "accent-soft": "#0a68c714", "accent-line": "#0a68c766",
+        "accent": "#0a68c7", "accent-ink": "#ffffff", "accent-soft": "#0a68c714", "accent-line": "#0a68c7cc",
         "ok": "#0a7653", "warn": "#8a5200", "bad": "#c0283a", "info": "#6447d1", "shadow": "#0e1a2c2e"
       },
       "syntax": {
@@ -41,7 +41,7 @@
         "sunken": "#080e1a", "ground": "#0b1220", "panel": "#0f1729", "raised": "#17223b",
         "line": "#1f2c49", "line-strong": "#2c3c5e",
         "text": "#dbe3f6", "text-2": "#adbad5", "muted": "#8795b4",
-        "accent": "#5ccbf7", "accent-ink": "#04131c", "accent-soft": "#5ccbf71f", "accent-line": "#5ccbf773",
+        "accent": "#5ccbf7", "accent-ink": "#04131c", "accent-soft": "#5ccbf71f", "accent-line": "#5ccbf7a6",
         "ok": "#55d6a2", "warn": "#f6c453", "bad": "#ff858b", "info": "#b8a8ff", "shadow": "#000000a6"
       },
       "syntax": {
@@ -57,7 +57,7 @@
         "sunken": "#111113", "ground": "#161619", "panel": "#1b1b1f", "raised": "#242429",
         "line": "#2d2d33", "line-strong": "#3b3b43",
         "text": "#e7e7eb", "text-2": "#babac2", "muted": "#9a9aa4",
-        "accent": "#7ab8ff", "accent-ink": "#04121f", "accent-soft": "#7ab8ff1f", "accent-line": "#7ab8ff73",
+        "accent": "#7ab8ff", "accent-ink": "#04121f", "accent-soft": "#7ab8ff1f", "accent-line": "#7ab8ffa6",
         "ok": "#6fd39a", "warn": "#f2c75c", "bad": "#ff8389", "info": "#b9a6ff", "shadow": "#000000a6"
       },
       "syntax": {

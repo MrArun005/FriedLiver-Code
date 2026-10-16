@@ -141,6 +141,47 @@ const TEXT_PAIRS: [string, string, string?][] = [
   ['gitDecoration.deletedResourceForeground', 'list.activeSelectionBackground'],
   ['list.errorForeground', 'sideBar.background'],
   ['list.warningForeground', 'sideBar.background'],
+  // Upstream's Modern UI (on by default in 1.142): tabs, activity items, the framed cards.
+  ['modernEditorTab.activeForeground', 'modernEditorTab.activeBackground'],
+  ['modernEditorTab.hoverForeground', 'modernEditorTab.hoverBackground', 'editorGroupHeader.connectedTabsBackground'],
+  ['tab.inactiveForeground', 'editorGroupHeader.connectedTabsBackground'],
+  ['modernTab.activeForeground', 'modernTab.activeBackground'],
+  ['modernTab.hoverForeground', 'modernTab.hoverBackground', 'panel.background'],
+  ['modernActivityBarItem.activeForeground', 'modernActivityBarItem.activeBackground'],
+  ['modernActivityBarItem.hoverForeground', 'modernActivityBarItem.hoverBackground', 'modernActivityBar.background'],
+  ['activityBar.inactiveForeground', 'modernActivityBar.background'],
+  ['surface.foreground', 'surface.background'],
+  ['titleBar.activeForeground', 'modernUI.shellBackground'],
+];
+
+/** Keyboard focus rings (WCAG 2.4.13 / 1.4.11 ask 3:1 against what they sit on). */
+const FOCUS_PAIRS: [string, string][] = [
+  ['focusBorder', 'editor.background'],
+  ['focusBorder', 'sideBar.background'],
+  ['focusBorder', 'input.background'],
+  ['focusBorder', 'button.secondaryBackground'],
+  ['list.focusOutline', 'list.activeSelectionBackground'],
+  ['list.focusOutline', 'sideBar.background'],
+  ['list.focusAndSelectionOutline', 'list.activeSelectionBackground'],
+];
+
+/**
+ * Tone, not lines: these regions already differ in surface tone from their neighbours, so the
+ * border between them is transparent (and the Modern UI resting sash grips are hidden).
+ */
+const TRANSPARENT_REGION_BORDERS = [
+  'sideBar.border', 'activityBar.border', 'panel.border', 'editorGroupHeader.tabsBorder', 'editorGroupHeader.border',
+  'tab.border', 'titleBar.border', 'statusBar.border', 'editor.border', 'surface.border', 'modernPanel.border',
+  'modernActivityBar.border', 'modernSash.gripForeground',
+];
+
+/** ...and the tones themselves stay distinguishable: [surface, the chrome it sits on]. */
+const TONE_STEPS: [string, string][] = [
+  ['editor.background', 'sideBar.background'],
+  ['modernEditorTab.activeBackground', 'editorGroupHeader.connectedTabsBackground'],
+  ['list.activeSelectionBackground', 'sideBar.background'],
+  ['input.background', 'sideBar.background'],
+  ['modernActivityBarItem.activeBackground', 'modernActivityBar.background'],
 ];
 
 /** Icons and squiggles are graphics: WCAG 1.4.11 asks 3:1. */
@@ -193,6 +234,19 @@ describe.each(THEMES)('$contribution.label', ({ contribution, theme }) => {
     expect(contrast(flatten(color(fg), back), back)).toBeGreaterThanOrEqual(3);
   });
 
+  it.each(FOCUS_PAIRS)('focus ring %s on %s meets 3:1', (fg, bg) => {
+    const back = flatten(color(bg), color('editor.background'));
+    expect(contrast(flatten(color(fg), back), back)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('separates regions by tone, with transparent borders between them', () => {
+    for (const key of TRANSPARENT_REGION_BORDERS) expect(color(key).slice(7), key).toBe('00');
+    for (const [surface, chrome] of TONE_STEPS) {
+      const back = color(chrome);
+      expect(contrast(flatten(color(surface), back), back), `${surface} on ${chrome}`).toBeGreaterThanOrEqual(1.04);
+    }
+  });
+
   it('every terminal ANSI color is readable on the terminal background', () => {
     const back = color('terminal.background');
     for (const key of ANSI) {
@@ -241,6 +295,25 @@ it('contributes four themes, with Black Blue as the default and Light Blue as th
   expect(defaults['workbench.preferredLightColorTheme']).toBe('FriedLiver Light Blue');
   expect(defaults['editor.fontFamily']).toBe("'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace");
   expect(defaults['terminal.integrated.fontFamily']).toBe(defaults['editor.fontFamily']);
+});
+
+it('sets the modern editor defaults and keeps the memory-related ones (docs/DEFAULTS.md)', () => {
+  const defaults = manifest.contributes.configurationDefaults;
+  expect(defaults).toMatchObject({
+    'editor.cursorBlinking': 'smooth',
+    'editor.cursorSmoothCaretAnimation': 'on',
+    'editor.smoothScrolling': true,
+    'editor.guides.bracketPairs': 'active',
+    'editor.stickyScroll.enabled': true,
+    'editor.padding.top': 8,
+    'window.commandCenter': true,
+    'workbench.tree.indent': 12,
+    'workbench.list.smoothScrolling': true,
+    'terminal.integrated.smoothScrolling': true,
+    'editor.minimap.enabled': false,
+    'typescript.disableAutomaticTypeAcquisition': true,
+    'files.watcherExclude': { '**/node_modules/*/**': true },
+  });
 });
 
 it('the committed theme files match palette.json', () => {

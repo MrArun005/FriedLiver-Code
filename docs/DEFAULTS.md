@@ -18,8 +18,10 @@ contributes four color themes and a set of `configurationDefaults`.
 The theme JSONs are generated. Edit `palette.json`, then run
 `node extensions/friedliver-theme/scripts/generate-themes.mjs`.
 `test/themes.test.ts` fails if the JSONs drift from the palette, if any
-text pair drops below WCAG AA (4.5:1), if an icon or squiggle drops below 3:1,
-or if any token color drops below 4.5:1 on the editor background.
+text pair drops below WCAG AA (4.5:1), if an icon, squiggle or keyboard focus
+ring drops below 3:1, if any token color drops below 4.5:1 on the editor
+background, if a border between two differently toned regions stops being
+transparent, or if neighbouring surfaces stop differing in tone (1.04:1).
 `.vscodeignore` keeps `scripts/` and `palette.json` out of the packaged
 extension.
 
@@ -32,12 +34,12 @@ color registry. The keys were checked against every `registerColor(...)` in
 | Token | Used for |
 |---|---|
 | `sunken` | inputs, dropdowns, checkboxes, command center, peek editor, notebook cell editors |
-| `ground` | editor, terminal, active tab, breadcrumbs, output |
-| `panel` | side bars, activity bar, panel, status bar, title bar, tab strip, menus, widgets, notifications, quick input |
-| `raised` | selected and focused rows, hovered tabs, the selected activity item, secondary buttons, quiet badges, status bar remote/debug/error/warning items |
-| `line` / `line-strong` | borders. Structural borders between surfaces of different tones are transparent: side bar, activity bar, panel, tabs |
+| `ground` | editor, terminal, active tab (classic and Modern UI connected tabs), breadcrumbs, output |
+| `panel` | chrome: side bars, activity bar, panel, status bar, title bar, tab strip, and Modern UI's shell and cards (`modernUI.shellBackground`, `surface.background`); also menus, widgets, notifications, quick input |
+| `raised` | selected and focused rows, the selected activity item and pane tab (`modernActivityBarItem.*`, `modernTab.*`), secondary buttons, quiet badges, status bar remote/debug/error/warning items. Hover is `raised` at 60% |
+| `line` / `line-strong` | seams inside one tone only: split editors, stacked views, menu separators, overlay outlines. Borders between surfaces of different tones are transparent: side bar, activity bar, panel, tab strip, title bar, status bar, sticky scroll headers, and Modern UI's card frames (`surface.border`, `modernPanel.border`, `modernActivityBar.border`, `editor.border`) |
 | `accent` | only: primary button, prominent extension button, activity badge, chat "needs input" indicator |
-| `accent-line` | focus rings (`focusBorder`, list focus outline, input focus) |
+| `accent-line` | focus rings (`focusBorder`, list focus outline, input focus). Alpha `a6` in dark themes and `cc` in Light Blue, so a ring is at least 3:1 against every surface |
 | `info` | an agent working: progress bar, chat in-progress border, queued tests, running notebook cells |
 | `warn` | git modified (decorations, gutter, overview ruler, minimap) and terminal yellow. Exception: warning diagnostics also use it, because VS Code needs a hue for warnings that is distinct from errors, and the palette has no other |
 | `ok` / `bad` | git added and deleted, diff inserted and removed, test pass and fail, errors |
@@ -46,14 +48,26 @@ Other decisions:
 - The cursor is `text`, not `accent`. Selection, word highlight and bracket
   match use `text-2` at low alpha, so nothing blue appears unless something
   needs a decision. Find matches use the syntax `type` hue.
-- Active tab: `ground` with a top border in `text` at 35–40% alpha. Inactive
-  tabs: `muted` on `panel`. The panel's active title uses the same subtle
-  border.
-- Activity bar: the selected item is `raised` with `text` and no indicator
-  bar (`activityBar.activeBorder` is transparent).
-- Status bar: `panel` with `text-2`. Debugging, remote, offline, error and
-  warning items are `raised` chips with readable text. There is no colored
-  bar.
+- Tone, not lines. Upstream's Modern UI (`workbench.experimental.modernUI`,
+  on by default in 1.142) draws the side bars and panel as floating cards.
+  Its shell and the cards are all `panel`, with transparent frames, so the
+  chrome reads as one quiet surface and the editor is a `ground` well inside
+  it. The resting sash grips are hidden (`modernSash.gripForeground` is
+  transparent): a splitter shows only on hover, as a `muted` bar
+  (`sash.hoverBorder`).
+- Active tab: `ground`, connected to the editor by tone alone (no top
+  border, `tab.activeBorderTop` is transparent). Inactive tabs: `muted` on
+  `panel`, with a `raised` hover. The panel's active title keeps a subtle
+  `text` underline in the classic layout.
+- Activity bar: the selected item is `raised` with `text`.
+  `activityBar.activeBorder` is `text-2`; the workbench stylesheet (patch
+  0110) draws it as a short pill at the bar's edge instead of the full-height
+  stripe.
+- Status bar: `panel` with `muted` text and no top border. Debugging, remote,
+  offline, error and warning items are `raised` chips with readable text.
+  There is no colored bar.
+- Scrollbar sliders are `muted` at 25/45/60% (rest, hover, drag); the
+  stylesheet paints them thin and rounded.
 - Comments are upright, with no italic anywhere except `markup.italic`.
 - Functions use `identifier`, because the syntax palette has no function hue.
   The upstream Electron app's Monaco theme did the same.
@@ -91,14 +105,31 @@ Every key below was checked against its registration.
 | `terminal.integrated.fontLigatures.enabled` | `false` | window (`:195`) | fonts |
 | `editor.minimap.enabled` | `false` | window (`editorOptions.ts:3505`) | quieter, and one canvas fewer per editor |
 | `editor.overviewRulerBorder` | `false` | language-overridable (`editorOptions.ts:6584`) | quieter |
-| `editor.guides.bracketPairs` | `false` | language-overridable | quieter (already the upstream default; pinned) |
+| `editor.guides.bracketPairs` | `active` | language-overridable (`editorOptions.ts:4915`) | a guide only for the bracket pair the cursor is in: shows structure where you work, nothing elsewhere |
 | `editor.renderLineHighlight` | `line` | language-overridable | pinned |
+| `editor.cursorBlinking` | `smooth` | language-overridable (`editorOptions.ts:6251`) | the caret fades instead of flashing; a CSS animation on one element |
+| `editor.cursorSmoothCaretAnimation` | `on` | language-overridable (`editorOptions.ts:6258`) | the caret glides to its new position; a CSS transition, no extra rendering |
+| `editor.smoothScrolling` | `true` | language-overridable (`editorOptions.ts:6780`) | animated scrolling; only runs while scrolling |
+| `editor.stickyScroll.enabled` | `true` | language-overridable (`editorOptions.ts:3204`) | keeps the enclosing scopes in view; already the upstream default, pinned |
+| `editor.padding.top` | `8` | language-overridable (`editorOptions.ts:3665`) | the first line doesn't touch the tab strip |
+| `window.commandCenter` | `true` | window (`browser/workbench.contribution.ts:917`) | the pill search field in the title bar; already the upstream default, pinned |
+| `workbench.tree.indent` | `12` | window (`platform/list/browser/listService.ts:1417`) | nesting is easier to follow than with 8px |
+| `workbench.list.smoothScrolling` | `true` | window (`listService.ts:1430`) | lists and trees scroll like the editor |
+| `terminal.integrated.smoothScrolling` | `true` | window (`contrib/terminal/common/terminalConfiguration.ts:660`) | the terminal scrolls like the editor; wheel scrolling only |
 | `workbench.fontAliasing` | `antialiased` | window (`browser/workbench.contribution.ts:727`) | macOS only; thinner text on dark surfaces |
 | `workbench.layoutControl.enabled` | `false` | window (`workbench.contribution.ts:803`) | quieter title bar |
 | `workbench.tips.enabled` | `false` | window (`workbench.contribution.ts:823`) | quieter empty editor |
 | `extensions.ignoreRecommendations` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:197`) | no recommendation toasts |
 | `typescript.disableAutomaticTypeAcquisition` | `true` | window (`extensions/typescript-language-features/package.json`) | memory, see memory-plan.md item 5 |
 | `files.watcherExclude` | adds `**/node_modules/*/**` (merged with the upstream defaults) | resource (`contrib/files/browser/files.contribution.ts:294`) | memory, see memory-plan.md item 4 |
+
+The editor and list defaults above cost no memory: smooth scrolling and the
+caret animations only run while something moves, and sticky scroll and the
+command center were already on upstream. The memory-related defaults
+(minimap off, no automatic type acquisition, `node_modules` out of the file
+watcher) are unchanged. A comfortable row height is not among them: list and
+tree rows are virtualized at fixed heights in code (22px), so the stylesheet
+rounds and insets rows instead of resizing them.
 
 The custom title bar is already upstream's default:
 `window.titleBarStyle` defaults to `custom` in 1.142

@@ -138,6 +138,42 @@ again after changing the artwork.
   defaults to true. This stops the agent host process and its
   `copilot-runtime` child. The patch also hides the built-in Chat view in that
   case, so the secondary side bar belongs to FriedLiver Agents.
+- **`0110-modern-workbench.patch`**: adds
+  `src/vs/workbench/browser/media/friedliver.css` and imports it from
+  `src/vs/workbench/browser/style.ts`, right after upstream's `style.css`. Dev
+  and transpile builds copy it to `out/` and load it through the CSS import
+  map; `--package` bundles it into `workbench.desktop.main.css`, so no build
+  script changes. It builds on upstream's Modern UI
+  (`workbench.experimental.modernUI`, on by default) and works with it off.
+  Every rule is scoped to `.monaco-workbench:not(.hc-black):not(.hc-light)`,
+  uses only `--vscode-*` theme colors and size tokens, and avoids `:has()`
+  and class-substring selectors (upstream's
+  `contrib/modernUI/CSS_PERFORMANCE.md`). What it does: redefines
+  `--vscode-shadow-lg` and `--vscode-shadow-xl` from `widget.shadow`, so every
+  overlay (palette, hovers, suggest, menus, notifications, dialogs, find,
+  peek) gets a soft deep shadow; rounds the palette and dialogs at 12px,
+  menus, hovers and suggest at 8px, rows, inputs and buttons at 6px; makes the
+  command center a pill; draws the selected activity item's
+  `activityBar.activeBorder` as a short pill at the bar's edge; narrows
+  scrollbar sliders with a transparent border (the hit area stays the same);
+  gives buttons a 2px focus ring; fades hover colors only when motion is
+  enabled and never under `prefers-reduced-motion`. The colors that make
+  regions separate by tone (transparent borders, no resting sash grips) are
+  in the themes, see [DEFAULTS.md](DEFAULTS.md).
+
+  To iterate on the stylesheet without a full compile, edit the file in the
+  prepared checkout, copy it to `out/vs/workbench/browser/media/` and reload
+  the window (Developer: Reload Window). Then regenerate the patch, adding
+  the new file to the diff:
+
+  ```bash
+  git -C vscode add -N src/vs/workbench/browser/media/friedliver.css
+  git -C vscode diff -- src/vs/workbench/browser/style.ts src/vs/workbench/browser/media/friedliver.css > patches/0110-modern-workbench.patch
+  git -C vscode reset -q -- src/vs/workbench/browser/media/friedliver.css
+  ```
+
+  A clean dev rebuild of `out/` is `npm run transpile-client` in the
+  checkout (about 20 s, no type check).
 - **Built-in extensions**: `friedliver-agents` (`npm ci` + `npm run build`
   first) and `friedliver-theme` are copied without `node_modules` and
   `.vscode-test`. On the copy, the Agents view container moves from
@@ -225,6 +261,22 @@ editor hasn't been checked yet.
 - [dev-folder-open.png](screenshots/dev-folder-open.png): `bench/fixture`
   open, the FriedLiver Black Blue theme, the FriedLiver Agents panel on the
   right, no Copilot.
+
+### Workbench look (patch 0110 and the themes)
+
+Packaged build, `bench/fixture`, 1440×900, under xvfb with software rendering
+(so upstream's frosted glass, which needs GPU compositing, is off), in
+[screenshots/workbench/](screenshots/workbench/):
+
+| Black Blue (default) | Light Blue | What it shows |
+| --- | --- | --- |
+| `black-blue-editor.png` | `light-blue-editor.png` | explorer, editor and the Agents panel: one chrome tone, the editor a rounded well, no lines between regions, the activity pill |
+| `black-blue-command-palette.png` | `light-blue-command-palette.png` | the palette with its soft shadow and the pill command center |
+| `black-blue-suggest.png` | `light-blue-suggest.png` | the suggest widget and its details |
+| `black-blue-hover.png` | `light-blue-hover.png` | an editor hover |
+| `black-blue-context-menu.png` | `light-blue-context-menu.png` | a context menu |
+| `black-blue-notification.png` | `light-blue-notification.png` | notification toasts, the primary button in the decision color |
+| `black-blue-walkthrough.png` | `light-blue-walkthrough.png` | the first-run walkthrough with its theme-aware illustration |
 
 ## Known gaps
 

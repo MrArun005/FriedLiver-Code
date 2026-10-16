@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 320" fill="none" role="img" aria-label="In a Claude chat, a message starting with @gemini asks Gemini, and its reply comes back to the same chat">
+	<rect width="520" height="320" rx="14" fill="var(--vscode-sideBar-background, #0a101b)"/>
+	<rect x="16" y="14" width="150" height="26" rx="7" fill="var(--vscode-list-activeSelectionBackground, #111a29)"/>
+	<rect x="22" y="19" width="16" height="16" rx="4" fill="var(--vscode-friedliver-agentClaude, #e8b48c)" fill-opacity="0.16"/>
+	<text x="30" y="31" text-anchor="middle" font-size="10" font-weight="700" fill="var(--vscode-friedliver-agentClaude, #e8b48c)">C</text>
+	<text x="46" y="31" font-size="12" fill="var(--vscode-foreground, #e4ecfa)">Fix formatCents</text>
+	<rect x="16" y="54" width="488" height="42" rx="10" fill="var(--vscode-list-activeSelectionBackground, #111a29)"/>
+	<text x="30" y="70" font-size="10" font-weight="600" fill="var(--vscode-descriptionForeground, #8092b0)">You</text>
+	<rect x="29" y="76" width="54" height="15" rx="4" fill="var(--vscode-friedliver-agentGemini, #a9b4ff)" fill-opacity="0.16"/>
+	<text x="33" y="87" font-size="12" font-family="var(--vscode-editor-font-family, monospace)" fill="var(--vscode-friedliver-agentGemini, #a9b4ff)">@gemini</text>
+	<text x="90" y="87" font-size="12" fill="var(--vscode-foreground, #e4ecfa)">review Claude's change before I accept it</text>
+	<rect x="16" y="112" width="18" height="18" rx="5" fill="var(--vscode-friedliver-agentGemini, #a9b4ff)" fill-opacity="0.16"/>
+	<text x="25" y="125" text-anchor="middle" font-size="10" font-weight="700" fill="var(--vscode-friedliver-agentGemini, #a9b4ff)">G</text>
+	<text x="42" y="125" font-size="12" font-weight="600" fill="var(--vscode-foreground, #e4ecfa)">Gemini</text>
+	<text x="86" y="125" font-size="11" fill="var(--vscode-descriptionForeground, #8092b0)">answered in this chat</text>
+	<text x="42" y="150" font-size="12" fill="var(--vscode-sideBar-foreground, #aab9d3)">The sign now comes before the currency symbol, and the new</text>
+	<text x="42" y="168" font-size="12" fill="var(--vscode-sideBar-foreground, #aab9d3)">locale argument is optional, so existing calls are unchanged.</text>
+	<text x="42" y="186" font-size="12" fill="var(--vscode-sideBar-foreground, #aab9d3)">Looks safe to accept.</text>
+	<rect x="16" y="226" width="488" height="78" rx="12" fill="var(--vscode-input-background, #03060b)" stroke="var(--vscode-widget-border, #26354f)"/>
+	<text x="32" y="250" font-size="12" fill="var(--vscode-descriptionForeground, #8092b0)">Ask Claude, or start with @claude, @codex or @gemini</text>
+	<rect x="460" y="264" width="32" height="28" rx="7" fill="var(--vscode-button-background, #7cc4ff)"/>
+	<path d="M476 285V271M470 277l6-6 6 6" stroke="var(--vscode-button-foreground, #03121f)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

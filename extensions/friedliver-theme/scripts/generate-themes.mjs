@@ -8,7 +8,11 @@
 //   buttons, the activity badge, focus rings. Nothing else is accent-colored.
 // - Panels separate by surface tone, not lines: sunken (inputs) < ground
 //   (editor, terminal) < panel (chrome) < raised (selected rows, buttons).
-//   Borders use `line`, which sits barely above its surface.
+//   Where two regions already differ in tone (side bar, activity bar, panel,
+//   title bar, status bar, tab strip, the Modern UI cards) the border between
+//   them is transparent. `line` is left for seams inside one tone (split
+//   editors, stacked views), where it sits barely above its surface.
+// - A splitter is invisible until you hover it: no resting grip dots.
 // - `info` means an agent is working (progress); `warn` is git-modified and
 //   terminal yellow (and, because VS Code needs a distinct hue for them,
 //   warning diagnostics).
@@ -41,7 +45,9 @@ export function buildTheme(def) {
   const selectionInactive = dark ? a(c['text-2'], 0x1f) : a(c['text-2'], 0x17);
   const find = s.type;
   const accentHover = dark ? mix(c.accent, c.text, 0.25) : mix(c.accent, '#000000', 0.15);
-  const subtleBorder = a(c.text, dark ? 0x59 : 0x66); // the "subtle text-colored border" on the active tab
+  const subtleBorder = a(c.text, dark ? 0x59 : 0x66); // the "subtle text-colored border" under the active panel title
+  const hover = a(c.raised, 0x99); // hovered rows, tabs and activity items: a lighter step of the raised surface
+  const hoverOpaque = mix(c.panel, c.raised, 0x99 / 0xff); // the same, flattened over the chrome (tab action buttons need opaque colors)
   const bright = (hex) => (dark ? mix(hex, '#ffffff', 0.25) : mix(hex, '#000000', 0.15));
   const orange = mix(c.warn, c.bad, 0.5);
 
@@ -57,7 +63,7 @@ export function buildTheme(def) {
     'widget.border': c['line-strong'],
     'widget.shadow': c.shadow,
     'selection.background': selection,
-    'sash.hoverBorder': c['line-strong'],
+    'sash.hoverBorder': c.muted,
     'textLink.foreground': s.keyword,
     'textLink.activeForeground': c.text,
     'textPreformat.foreground': c['text-2'],
@@ -150,14 +156,14 @@ export function buildTheme(def) {
     'keybindingLabel.border': c['line-strong'],
     'keybindingLabel.bottomBorder': c['line-strong'],
 
-    // Scrollbars
+    // Scrollbars: thin sliders (the workbench stylesheet narrows them), so a bit more opaque.
     'scrollbar.shadow': NONE,
-    'scrollbarSlider.background': a(c.muted, 0x33),
-    'scrollbarSlider.hoverBackground': a(c.muted, 0x59),
-    'scrollbarSlider.activeBackground': a(c.muted, 0x80),
+    'scrollbarSlider.background': a(c.muted, 0x40),
+    'scrollbarSlider.hoverBackground': a(c.muted, 0x73),
+    'scrollbarSlider.activeBackground': a(c.muted, 0x99),
 
     // Lists and trees: hover and selection are the raised surface.
-    'list.hoverBackground': a(c.raised, 0x99),
+    'list.hoverBackground': hover,
     'list.hoverForeground': c.text,
     'list.activeSelectionBackground': c.raised,
     'list.activeSelectionForeground': c.text,
@@ -190,12 +196,13 @@ export function buildTheme(def) {
     'tree.tableColumnsBorder': c.line,
     'tree.tableOddRowsBackground': a(c.raised, 0x40),
 
-    // Activity bar: panel tone; the selected view is raised with text color, no loud indicator.
+    // Activity bar: panel tone; the selected view is raised with text color. The workbench
+    // stylesheet draws `activeBorder` as a short pill beside it instead of a full-height stripe.
     'activityBar.background': c.panel,
     'activityBar.foreground': c.text,
     'activityBar.inactiveForeground': c.muted,
     'activityBar.activeBackground': c.raised,
-    'activityBar.activeBorder': NONE,
+    'activityBar.activeBorder': c['text-2'],
     'activityBar.activeFocusBorder': c['accent-line'],
     'activityBar.border': NONE,
     'activityBar.dropBorder': c['text-2'],
@@ -205,6 +212,28 @@ export function buildTheme(def) {
     'activityBarTop.activeBorder': NONE,
     'activityBarTop.background': c.panel,
     'activityBarTop.dropBorder': c['text-2'],
+    'modernActivityBar.background': c.panel,
+    'modernActivityBar.inactiveBackground': c.panel,
+    'modernActivityBar.border': NONE,
+    'modernActivityBarItem.activeBackground': c.raised,
+    'modernActivityBarItem.activeForeground': c.text,
+    'modernActivityBarItem.hoverBackground': hover,
+    'modernActivityBarItem.hoverForeground': c.text,
+
+    // Modern UI (upstream's floating cards, on by default in 1.142). The shell around the
+    // cards is chrome, so the side bars and panel read as one surface with it and the
+    // editor is a ground-toned well. No card borders and no resting sash grips.
+    'modernUI.shellBackground': c.panel,
+    'modernUI.inactiveShellBackground': c.panel,
+    'surface.background': c.panel,
+    'surface.foreground': c['text-2'],
+    'surface.border': NONE,
+    'modernPanel.border': NONE,
+    'modernSash.gripForeground': NONE,
+    'modernTab.activeBackground': c.raised,
+    'modernTab.activeForeground': c.text,
+    'modernTab.hoverBackground': hover,
+    'modernTab.hoverForeground': c.text,
 
     // Side bars (primary and secondary use the same colors).
     'sideBar.background': c.panel,
@@ -217,12 +246,13 @@ export function buildTheme(def) {
     'sideBarSectionHeader.background': c.panel,
     'sideBarSectionHeader.foreground': c['text-2'],
     'sideBarSectionHeader.border': c.line,
-    'sideBarActivityBarTop.border': c.line,
+    'sideBarActivityBarTop.border': NONE,
     'sideBarStickyScroll.background': c.panel,
-    'sideBarStickyScroll.border': c.line,
+    'sideBarStickyScroll.border': NONE,
     'sideBarStickyScroll.shadow': c.shadow,
 
-    // Editor groups and tabs: the active tab is the editor's own ground.
+    // Editor groups and tabs: the active tab is the editor's own ground, marked by tone alone
+    // (no top line); inactive tabs sit on the chrome and get a raised pill on hover.
     'editorGroup.border': c.line,
     'editorGroup.dropBackground': a(c['text-2'], 0x1f),
     'editorGroup.emptyBackground': c.ground,
@@ -236,22 +266,22 @@ export function buildTheme(def) {
     'tab.activeBackground': c.ground,
     'tab.activeForeground': c.text,
     'tab.activeBorder': c.ground,
-    'tab.activeBorderTop': subtleBorder,
+    'tab.activeBorderTop': NONE,
     'tab.selectedBackground': c.ground,
     'tab.selectedForeground': c.text,
-    'tab.selectedBorderTop': subtleBorder,
+    'tab.selectedBorderTop': NONE,
     'tab.inactiveBackground': c.panel,
     'tab.inactiveForeground': c.muted,
-    'tab.hoverBackground': c.raised,
+    'tab.hoverBackground': hover,
     'tab.hoverForeground': c.text,
     'tab.hoverBorder': NONE,
     'tab.unfocusedActiveBackground': c.ground,
     'tab.unfocusedActiveForeground': c['text-2'],
     'tab.unfocusedActiveBorder': c.ground,
-    'tab.unfocusedActiveBorderTop': a(c.text, 0x26),
+    'tab.unfocusedActiveBorderTop': NONE,
     'tab.unfocusedInactiveBackground': c.panel,
     'tab.unfocusedInactiveForeground': c.muted,
-    'tab.unfocusedHoverBackground': c.raised,
+    'tab.unfocusedHoverBackground': hover,
     'tab.unfocusedHoverForeground': c['text-2'],
     'tab.border': NONE,
     'tab.lastPinnedBorder': c.line,
@@ -262,6 +292,16 @@ export function buildTheme(def) {
     'tab.unfocusedInactiveModifiedBorder': c.muted,
     'sideBySideEditor.horizontalBorder': c.line,
     'sideBySideEditor.verticalBorder': c.line,
+    'modernEditorTab.activeBackground': c.ground,
+    'modernEditorTab.activeForeground': c.text,
+    'modernEditorTab.activeHoverBackground': c.ground,
+    'modernEditorTab.activeActionBackground': c.ground,
+    'modernEditorTab.activeHoverActionBackground': c.ground,
+    'modernEditorTab.selectedActionBackground': c.ground,
+    'modernEditorTab.inactiveBackground': NONE,
+    'modernEditorTab.hoverBackground': hover,
+    'modernEditorTab.hoverActionBackground': hoverOpaque,
+    'modernEditorTab.hoverForeground': c.text,
 
     // Breadcrumbs
     'breadcrumb.background': c.ground,
@@ -270,12 +310,13 @@ export function buildTheme(def) {
     'breadcrumb.activeSelectionForeground': c.text,
     'breadcrumbPicker.background': c.panel,
 
-    // Title bar (custom) and command center
+    // Title bar (custom) and command center: the title bar is chrome, the command center a
+    // sunken pill that lifts to raised on hover.
     'titleBar.activeBackground': c.panel,
     'titleBar.activeForeground': c['text-2'],
     'titleBar.inactiveBackground': c.panel,
     'titleBar.inactiveForeground': c.muted,
-    'titleBar.border': c.line,
+    'titleBar.border': NONE,
     'menubar.selectionBackground': c.raised,
     'menubar.selectionForeground': c.text,
     'menubar.selectionBorder': NONE,
@@ -313,23 +354,24 @@ export function buildTheme(def) {
     'panelSectionHeader.foreground': c['text-2'],
     'panelSectionHeader.border': c.line,
     'panelStickyScroll.background': c.panel,
-    'panelStickyScroll.border': c.line,
+    'panelStickyScroll.border': NONE,
     'panelStickyScroll.shadow': c.shadow,
     'outputView.background': c.ground,
     'outputViewStickyScroll.background': c.ground,
 
-    // Status bar: panel-colored, not a bright bar. Remote and debug stay readable.
+    // Status bar: panel-colored and quiet (muted text, no top line), not a bright bar.
+    // Remote, debug, error and warning items are raised chips that stay readable.
     'statusBar.background': c.panel,
-    'statusBar.foreground': c['text-2'],
-    'statusBar.border': c.line,
+    'statusBar.foreground': c.muted,
+    'statusBar.border': NONE,
     'statusBar.focusBorder': c['accent-line'],
     'statusBar.inactiveBackground': c.panel,
     'statusBar.noFolderBackground': c.panel,
-    'statusBar.noFolderForeground': c['text-2'],
-    'statusBar.noFolderBorder': c.line,
+    'statusBar.noFolderForeground': c.muted,
+    'statusBar.noFolderBorder': NONE,
     'statusBar.debuggingBackground': c.raised,
     'statusBar.debuggingForeground': c.text,
-    'statusBar.debuggingBorder': c['line-strong'],
+    'statusBar.debuggingBorder': NONE,
     'statusBarItem.activeBackground': c['line-strong'],
     'statusBarItem.hoverBackground': c.raised,
     'statusBarItem.hoverForeground': c.text,
@@ -435,7 +477,7 @@ export function buildTheme(def) {
     'editorUnicodeHighlight.border': c.warn,
     'editorWordWrapIndicator.foreground': c.muted,
     'editorStickyScroll.background': c.ground,
-    'editorStickyScroll.border': c.line,
+    'editorStickyScroll.border': NONE,
     'editorStickyScroll.shadow': c.shadow,
     'editorStickyScrollGutter.background': c.ground,
     'editorStickyScrollHover.background': c.panel,
@@ -654,7 +696,7 @@ export function buildTheme(def) {
     'terminalOverviewRuler.cursorForeground': a(c.text, 0x80),
     'terminalOverviewRuler.findMatchForeground': a(find, 0xb3),
     'terminalStickyScroll.background': c.ground,
-    'terminalStickyScroll.border': c.line,
+    'terminalStickyScroll.border': NONE,
     'terminalStickyScrollHover.background': c.panel,
     'terminal.ansiBlack': dark ? c.raised : c.text,
     'terminal.ansiRed': c.bad,
@@ -851,9 +893,6 @@ export function buildTheme(def) {
     'editorCommentsWidget.resolvedBorder': c.muted,
     'editorCommentsWidget.unresolvedBorder': c['text-2'],
     'editorCommentsWidget.replyInputBackground': c.sunken,
-    'surface.background': c.panel,
-    'surface.foreground': c.text,
-    'surface.border': c.line,
     'agents.background': c.ground,
     'agentsPanel.background': c.panel,
     'agentsPanel.foreground': c.text,
