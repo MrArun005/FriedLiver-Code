@@ -460,8 +460,13 @@ export function parseMention(text: string): { agent: AgentKey; text: string } | 
 }
 
 /** A chat's text from the agent's last turn: its message chunks after the last message it was given. */
+/** A message the chat's agent was given: one the user typed, or one that came over a link. */
+function givenToAgent(i: Item): boolean {
+  return i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from'));
+}
+
 export function lastReply(chat: ChatView): string {
-  const given = chat.items.map((i) => i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from')));
+  const given = chat.items.map(givenToAgent);
   return chat.items
     .slice(given.lastIndexOf(true) + 1)
     .flatMap((i) => (i.kind === 'agent' ? [i.text] : []))
@@ -474,7 +479,8 @@ export function chatStatus(chat: ChatView): ChatStatus {
   if (chat.busy) return 'working';
   const last = chat.items.at(-1);
   if (last?.kind === 'notice' && last.tone === 'error') return 'error';
-  return chat.items.some((i) => i.kind === 'user') ? 'done' : 'idle';
+  // A consulted, piped or handed-off chat may never get a message from the user.
+  return chat.turns > 0 || chat.items.some(givenToAgent) ? 'done' : 'idle';
 }
 
 export type BoardColumn = 'needs-you' | 'working' | 'done';
@@ -506,6 +512,7 @@ export function stateLine(chat: ChatView): StateLine {
     if (item?.kind === 'review') return { text: `Edit to review: ${basename(item.path)} +${item.added} −${item.removed}`, decision: waiting };
     if (item?.kind === 'command') return { text: 'Wants to run a command', code: item.commandLine, decision: waiting };
     if (item?.kind === 'permission') return { text: `Asks: ${item.title}`, decision: waiting };
+    if (waiting.kind === 'bridge') return { text: waiting.title, decision: waiting };
   }
   const status = chatStatus(chat);
   if (status === 'working') {

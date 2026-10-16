@@ -3,5 +3,6 @@
 !package.json
 !dist/extension.js
 !dist/demo-agent.js
+!dist/bridge.js
 !media/**
 media/dist/*.map

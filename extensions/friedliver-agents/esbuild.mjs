@@ -36,6 +36,8 @@ const builds = [
   { ...node, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js' },
   // The offline demo agent, started with the editor's own runtime.
   { ...node, entryPoints: [path.join(core, 'demo/fakeAgent.mjs')], outfile: 'dist/demo-agent.js' },
+  // The FriedLiver tools: an MCP server each agent session starts, which talks to the editor over a local socket.
+  { ...node, entryPoints: ['src/bridge/server.ts'], outfile: 'dist/bridge.js' },
   { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx' }, outdir: 'media/dist' },
   // Integration tests that run inside the editor (see src/test).
   { ...node, entryPoints: { run: 'src/test/run.ts', suite: 'src/test/suite.ts' }, outdir: 'dist/test', external: ['vscode'] },

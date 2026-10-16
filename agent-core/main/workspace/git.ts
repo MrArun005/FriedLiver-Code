@@ -149,3 +149,30 @@ export async function removeWorktree(root: string, wt: Worktree): Promise<void> 
   await git(root, ['worktree', 'remove', '--force', '--', wt.path]);
   await git(root, ['branch', '-D', '--', wt.branch]).catch(() => '');
 }
+
+export interface WorktreeChange {
+  /** Relative to the worktree (and the main checkout), with `/`. */
+  path: string;
+  status: 'A' | 'M' | 'D';
+}
+
+/**
+ * What a task's worktree changed since it branched from the main checkout:
+ * commits on its branch, uncommitted edits and new files. Commits made in the
+ * main checkout since then don't count, so they don't show as reverted.
+ */
+export async function worktreeChanges(root: string, wt: Worktree): Promise<WorktreeChange[]> {
+  const main = (await git(root, ['rev-parse', 'HEAD'])).trim();
+  const base = (await git(wt.path, ['merge-base', 'HEAD', main])).trim();
+  const changes = new Map<string, WorktreeChange['status']>();
+  // -z: NUL-separated "status\0path\0" pairs; --no-renames keeps one path per entry.
+  const parts = (await git(wt.path, ['diff', '--name-status', '--no-renames', '-z', base, '--'])).split('\0');
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const s = parts[i];
+    if (s) changes.set(parts[i + 1], s === 'A' ? 'A' : s === 'D' ? 'D' : 'M');
+  }
+  for (const file of (await git(wt.path, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0')) {
+    if (file) changes.set(file, 'A');
+  }
+  return [...changes].map(([p, status]) => ({ path: p, status })).sort((a, b) => a.path.localeCompare(b.path));
+}

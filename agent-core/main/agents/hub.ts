@@ -36,6 +36,8 @@ export interface HubOptions {
   events: HubEvents;
   files: FileHost;
   terminalListener?(agentId: AgentId): TerminalListener;
+  /** MCP servers a chat's session gets, e.g. FriedLiver's own tools. Asked whenever the chat gets a session. */
+  mcpServersFor?(chatId: string): acp.McpServer[];
   log?(line: string): void;
 }
 
@@ -53,6 +55,8 @@ interface ChatState extends Chat {
   sessionGeneration?: number;
   /** While `session/load` replays history, its updates are dropped: the panel already shows them. */
   loading: boolean;
+  /** Stop was pressed before the turn reached the agent, e.g. while it was still starting. */
+  cancelled?: boolean;
 }
 
 interface RunningAgent {
@@ -101,8 +105,37 @@ export class AgentHub {
     return chat;
   }
 
+  /**
+   * Brings back a chat from an earlier window under its old id. Given the
+   * session it had, the next prompt reloads that session when the agent can,
+   * and otherwise starts a new one and says so.
+   */
+  restoreChat(id: string, agentId: AgentId, cwd: string, sessionId?: string): Chat {
+    if (this.chats.has(id)) throw new Error(`Chat ${id} already exists.`);
+    const chat: ChatState = { id, agentId, cwd, busy: false, loading: false, sessionId };
+    this.chats.set(id, chat);
+    if (sessionId) this.sessionToChat.set(sessionKey(agentId, sessionId), id);
+    // New chats must not take a restored chat's id.
+    const n = Number(/^chat-(\d+)$/.exec(id)?.[1]);
+    if (n >= this.nextChat) this.nextChat = n + 1;
+    return chat;
+  }
+
+  /** Forgets a chat. Its agent keeps running for the others; stop a busy chat's turn first. */
+  removeChat(chatId: string): void {
+    const chat = this.chats.get(chatId);
+    if (!chat) return;
+    this.chats.delete(chatId);
+    if (chat.sessionId) this.sessionToChat.delete(sessionKey(chat.agentId, chat.sessionId));
+  }
+
   getChat(chatId: string): Chat | undefined {
     return this.chats.get(chatId);
+  }
+
+  /** The agent's id for the chat's session, kept so a later window can reload it. */
+  sessionId(chatId: string): string | undefined {
+    return this.chats.get(chatId)?.sessionId;
   }
 
   /** The chat a session belongs to, only if that agent owns it. */
@@ -114,12 +147,14 @@ export class AgentHub {
     const chat = this.requireChat(chatId);
     if (chat.busy) throw new Error('This chat is still working on the last message.');
     chat.busy = true;
+    chat.cancelled = false;
     let agent: RunningAgent | undefined;
     try {
       agent = await this.ensureAgent(chat.agentId);
       agent.activeTurns++;
       this.clearIdleStop(agent);
       await this.ensureSession(chat, agent);
+      if (chat.cancelled) return { stopReason: 'cancelled' };
       return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, blocks));
     } catch (err) {
       if (agent && isAuthRequired(err)) throw new AuthRequiredError(agent.conn.spec, agent.conn.authMethods);
@@ -136,6 +171,8 @@ export class AgentHub {
 
   async cancel(chatId: string): Promise<void> {
     const chat = this.requireChat(chatId);
+    // Before the session exists there is nothing to tell the agent; the turn stops once it does.
+    if (chat.busy) chat.cancelled = true;
     const agent = this.agents.get(chat.agentId);
     if (chat.sessionId && agent?.conn.running) await agent.conn.cancel(chat.sessionId);
   }
@@ -268,11 +305,12 @@ export class AgentHub {
     if (chat.sessionId && chat.sessionGeneration === agent.generation) return;
     const previous = chat.sessionId;
     const { cwd } = chat;
+    const mcpServers = this.options.mcpServersFor?.(chat.id) ?? [];
 
     if (previous && agent.conn.supportsLoadSession) {
       chat.loading = true;
       try {
-        await agent.conn.loadSession(previous, cwd);
+        await agent.conn.loadSession(previous, cwd, mcpServers);
         chat.sessionGeneration = agent.generation;
         return;
       } catch (err) {
@@ -283,7 +321,7 @@ export class AgentHub {
       }
     }
 
-    const session = await agent.conn.newSession(cwd);
+    const session = await agent.conn.newSession(cwd, mcpServers);
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(
