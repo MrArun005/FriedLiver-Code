@@ -1,0 +1,334 @@
+{
+  "name": "friedliver-agents",
+  "displayName": "FriedLiver Agents",
+  "description": "Claude, Codex and Gemini coding agents over ACP: chat, reviewed edits, approved commands and a task board.",
+  "version": "0.1.0",
+  "publisher": "friedliver",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "enabledApiProposals": [
+    "contribSecondarySidebar"
+  ],
+  "activationEvents": [
+    "onFileSystem:friedliver-proposed",
+    "onWebviewPanel:friedliver.tasks",
+    "onWebviewPanel:friedliver.chatPanel"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Agents read, write and run commands in the workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "test:integration": "node esbuild.mjs && node dist/test/run.js"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "friedliver",
+          "title": "Agents",
+          "icon": "media/agents.svg"
+        }
+      ]
+    },
+    "views": {
+      "friedliver": [
+        {
+          "type": "webview",
+          "id": "friedliver.agents",
+          "name": "Agents"
+        },
+        {
+          "type": "webview",
+          "id": "friedliver.images",
+          "name": "Images",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "friedliver.accounts",
+          "name": "Accounts",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "friedliver.newChat",
+        "title": "New Chat",
+        "category": "FriedLiver",
+        "icon": "$(add)"
+      },
+      {
+        "command": "friedliver.moveToCenter",
+        "title": "Move Agents to the Center",
+        "category": "FriedLiver",
+        "icon": "$(layout-centered)"
+      },
+      {
+        "command": "friedliver.moveToSide",
+        "title": "Move Agents to the Side",
+        "category": "FriedLiver",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "friedliver.openTasks",
+        "title": "Agent Manager (Tasks)",
+        "category": "FriedLiver",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "friedliver.nextDecision",
+        "title": "Go to Next Decision",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.review.accept",
+        "title": "Accept Edit",
+        "category": "FriedLiver",
+        "icon": "$(check)"
+      },
+      {
+        "command": "friedliver.review.reject",
+        "title": "Reject Edit",
+        "category": "FriedLiver",
+        "icon": "$(close)"
+      },
+      {
+        "command": "friedliver.accounts",
+        "title": "Accounts: Check Sign-in",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.accounts.check",
+        "title": "Check Sign-in",
+        "category": "FriedLiver",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friedliver.setApiKey",
+        "title": "Set API Key",
+        "category": "FriedLiver",
+        "icon": "$(key)"
+      },
+      {
+        "command": "friedliver.stopAgents",
+        "title": "Stop All Agents",
+        "category": "FriedLiver"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "friedliver.newChat",
+          "when": "view == friedliver.agents",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friedliver.openTasks",
+          "when": "view == friedliver.agents",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friedliver.moveToCenter",
+          "when": "view == friedliver.agents",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "friedliver.accounts.check",
+          "when": "view == friedliver.accounts && viewItem =~ /^agent/",
+          "group": "inline@1"
+        },
+        {
+          "command": "friedliver.setApiKey",
+          "when": "view == friedliver.accounts && viewItem == agent-vendor",
+          "group": "inline@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "friedliver.review.accept",
+          "when": "resourceScheme == friedliver-proposed",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friedliver.review.reject",
+          "when": "resourceScheme == friedliver-proposed",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "friedliver.review.accept",
+          "when": "friedliver.reviewActive"
+        },
+        {
+          "command": "friedliver.review.reject",
+          "when": "friedliver.reviewActive"
+        },
+        {
+          "command": "friedliver.accounts.check",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "friedliver.review.accept",
+        "key": "ctrl+alt+y",
+        "mac": "cmd+alt+y",
+        "when": "friedliver.reviewActive"
+      },
+      {
+        "command": "friedliver.review.reject",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "friedliver.reviewActive"
+      },
+      {
+        "command": "friedliver.moveToCenter",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "!terminalFocus"
+      }
+    ],
+    "colors": [
+      {
+        "id": "friedliver.decision",
+        "description": "The one loud color: something waits for your decision (waiting badge, Accept, Run).",
+        "defaults": {
+          "dark": "#7cc4ff",
+          "light": "#0a68c7",
+          "highContrast": "#ffffff",
+          "highContrastLight": "#0a68c7"
+        }
+      },
+      {
+        "id": "friedliver.decisionForeground",
+        "description": "Text on the decision color.",
+        "defaults": {
+          "dark": "#03121f",
+          "light": "#ffffff",
+          "highContrast": "#000000",
+          "highContrastLight": "#ffffff"
+        }
+      },
+      {
+        "id": "friedliver.agentClaude",
+        "description": "Claude's hue, used for its letter glyph.",
+        "defaults": {
+          "dark": "#e8b48c",
+          "light": "#8a4c24",
+          "highContrast": "#e8b48c",
+          "highContrastLight": "#8a4c24"
+        }
+      },
+      {
+        "id": "friedliver.agentCodex",
+        "description": "Codex's hue, used for its letter glyph.",
+        "defaults": {
+          "dark": "#86d8c4",
+          "light": "#0b6e60",
+          "highContrast": "#86d8c4",
+          "highContrastLight": "#0b6e60"
+        }
+      },
+      {
+        "id": "friedliver.agentGemini",
+        "description": "Gemini's hue, used for its letter glyph.",
+        "defaults": {
+          "dark": "#a9b4ff",
+          "light": "#4450c4",
+          "highContrast": "#a9b4ff",
+          "highContrastLight": "#4450c4"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "FriedLiver Agents",
+      "properties": {
+        "friedliver.agents.claude.command": {
+          "type": "string",
+          "default": "claude-agent-acp",
+          "description": "Program that runs Claude over ACP. Changing it restarts Claude."
+        },
+        "friedliver.agents.claude.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Arguments for the Claude program."
+        },
+        "friedliver.agents.codex.command": {
+          "type": "string",
+          "default": "codex-acp",
+          "description": "Program that runs Codex over ACP. Changing it restarts Codex."
+        },
+        "friedliver.agents.codex.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Arguments for the Codex program."
+        },
+        "friedliver.agents.gemini.command": {
+          "type": "string",
+          "default": "gemini",
+          "description": "Program that runs Gemini over ACP. Changing it restarts Gemini."
+        },
+        "friedliver.agents.gemini.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "--acp"
+          ],
+          "description": "Arguments for the Gemini program."
+        },
+        "friedliver.maxRunningAgents": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 6,
+          "description": "How many agent processes may run at once. The least recently used idle one stops first."
+        },
+        "friedliver.idleStopMinutes": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 240,
+          "description": "Stop an agent after this many minutes without a turn, to free its memory. 0 keeps agents running."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "^1.8.0",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "~1.104.0",
+    "@vscode/test-electron": "^3.1.0",
+    "esbuild": "^0.28.2",
+    "preact": "^11.0.1",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  }
+}
