@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type * as acp from '@agentclientprotocol/sdk';
-import { killProcessTree } from './processes';
+import { killProcessTree, launchFor, quoteWindowsArg } from './processes';
 
 const DEFAULT_OUTPUT_LIMIT = 1_000_000;
 
@@ -107,12 +107,16 @@ export class TerminalManager {
       throw new Error(`The user denied this command: ${commandLine}`);
     }
 
-    // A bare command string ("npm test") needs a shell; Windows needs one for
-    // .cmd shims such as npm and npx.
-    const useShell = args.length === 0 || process.platform === 'win32';
-    const child = useShell
-      ? spawn(commandLine, { cwd, env, shell: true, detached: process.platform !== 'win32', windowsHide: true })
-      : spawn(req.command, args, { cwd, env, detached: process.platform !== 'win32', windowsHide: true });
+    // A bare command string ("npm test") goes to the shell; a command with
+    // arguments starts directly, so nothing re-splits them (see launchFor).
+    const detached = process.platform !== 'win32';
+    let child: ChildProcess;
+    if (args.length === 0) {
+      child = spawn(commandLine, { cwd, env, shell: true, detached, windowsHide: true });
+    } else {
+      const launch = launchFor(req.command, args);
+      child = spawn(launch.file, launch.args, { cwd, env, detached, windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+    }
 
     this.listener?.onStart(info);
     this.commands.set(terminalId, new RunningCommand(info, child, req.outputByteLimit ?? DEFAULT_OUTPUT_LIMIT, this.listener));
@@ -158,8 +162,9 @@ export class TerminalManager {
   }
 }
 
+/** Shell-style quoting, for the command line shown to the user. */
 function quoteArg(arg: string): string {
   if (/^[\w@%+=:,./-]+$/.test(arg)) return arg;
-  if (process.platform === 'win32') return `"${arg.replace(/"/g, '\\"')}"`;
+  if (process.platform === 'win32') return quoteWindowsArg(arg);
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }

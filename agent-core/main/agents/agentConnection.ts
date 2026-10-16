@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import type { AgentSpec } from './registry';
-import { killProcessTree } from './processes';
+import { killProcessTree, launchFor } from './processes';
 import { TerminalManager, type TerminalListener } from './terminals';
 
 /** What the editor provides to a running agent. */
@@ -66,12 +66,12 @@ export class AgentConnection {
 
   static async start(spec: AgentSpec, options: StartOptions): Promise<AgentConnection> {
     const { cwd, host, log, onStderr } = options;
-    const child = spawn(spec.command, spec.args, {
+    const launch = launchFor(spec.command, spec.args);
+    const child = spawn(launch.file, launch.args, {
       cwd,
       env: { ...process.env, ...spec.env },
       stdio: ['pipe', 'pipe', 'pipe'],
-      // npm installs CLIs as .cmd shims on Windows, which need a shell.
-      shell: process.platform === 'win32',
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       detached: process.platform !== 'win32',
       windowsHide: true,
     });
@@ -97,7 +97,7 @@ export class AgentConnection {
       });
       child.once('exit', (code) => {
         const tail = stderrTail.join('\n');
-        // With `shell: true` a missing command is reported by the shell, not as ENOENT.
+        // Through cmd.exe (npm's .cmd wrappers) a missing command is reported by the shell, not as ENOENT.
         if (code === 127 || /not recognized as an internal|command not found|No such file/i.test(tail)) {
           reject(notInstalled(spec));
         } else {
