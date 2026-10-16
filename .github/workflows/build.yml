@@ -12,9 +12,11 @@ on:
       - '.github/workflows/code.yml'
   workflow_dispatch:
 
+# A build takes most of an hour: a newer push waits for the running build instead of
+# cancelling it, and GitHub keeps only the newest waiting push.
 concurrency:
   group: fork-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
