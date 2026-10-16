@@ -1,0 +1,72 @@
+name: FriedLiver fork
+
+# The VS Code fork: fetch the pinned upstream, apply FriedLiver's branding and
+# patches, add the built-in extensions, build the minified app for each OS and
+# upload it. About an hour per OS, so it runs only when the fork changes.
+on:
+  push:
+    branches: [vscode-fork]
+    paths:
+      - 'code/**'
+      - 'src/main/agents/**'
+      - '.github/workflows/code.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: fork-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: win32-x64, artifact: friedliver-fork-windows-x64 }
+          - { os: macos-latest, target: darwin-arm64, artifact: friedliver-fork-macos-arm64 }
+          - { os: ubuntu-latest, target: linux-x64, artifact: friedliver-fork-linux-x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space (the upstream checkout and build need about 10 GB)
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      # Long paths: upstream's node_modules nest deeply. No CRLF conversion: the patches are LF.
+      - name: Git settings for Windows
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      # The agents extension bundles the app's ACP core from src/, which resolves the root packages.
+      - run: npm ci
+      - run: node code/scripts/fetch.mjs
+      - run: node code/scripts/prepare.mjs
+      # Downloads the Node version upstream's .nvmrc asks for, installs, then runs gulp vscode-<os>-<arch>-min.
+      - run: node code/scripts/build.mjs --package
+
+      - name: Archive (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf ${{ matrix.artifact }}.tar.gz -C code VSCode-${{ matrix.target }}
+      - name: Archive (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app=$(ls -d code/VSCode-${{ matrix.target }}/*.app | head -1)
+          # Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
+          codesign --force --deep --sign - "$app"
+          ditto -c -k --keepParent "$app" ${{ matrix.artifact }}.zip
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path code/VSCode-${{ matrix.target }}/* -DestinationPath ${{ matrix.artifact }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.zip
+          if-no-files-found: error
