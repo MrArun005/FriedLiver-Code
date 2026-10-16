@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type * as acp from '@agentclientprotocol/sdk';
@@ -6,7 +6,7 @@ import { AgentStartError } from '@friedliver/main/agents/agentConnection';
 import { readIfExists, readTextFile, writeTextFile } from '@friedliver/main/agents/fileAccess';
 import { AgentHub, AuthRequiredError } from '@friedliver/main/agents/hub';
 import { DEFAULT_AGENTS, demoAgentSpec, type AgentSpec, type VendorAgentId } from '@friedliver/main/agents/registry';
-import { allowedExternal, signInMethods } from '@friedliver/main/agents/signIn';
+import { allowedSignInUrl, signInMethods } from '@friedliver/main/agents/signIn';
 import type { TerminalListener } from '@friedliver/main/agents/terminals';
 import { TurnLog } from '@friedliver/main/agents/turnLog';
 import * as git from '@friedliver/main/workspace/git';
@@ -14,6 +14,7 @@ import type { Attachment } from '../shared/messages';
 import {
   AGENT_FACES,
   EMPTY_STATE,
+  MAX_COMMAND_OUTPUT,
   decisions,
   lineStats,
   reduce,
@@ -26,7 +27,9 @@ import {
   type Item,
   type NoticeAction,
 } from '../shared/model';
-import { insideRoots } from './paths';
+import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
+import { inGitFolder, insideRoots } from './paths';
+import { loginExtras } from './signin';
 
 /** Each vendor's key goes only to that vendor's agent process. */
 export const KEY_ENV: Record<VendorAgentId, string> = {
@@ -125,7 +128,7 @@ export class AgentCore {
       log: options.log,
       events: {
         update: (chatId, update) => {
-          this.dispatch({ t: 'update', chatId, update });
+          this.dispatch({ t: 'update', chatId, update: compactUpdate(update) });
           void this.collectImages(update);
         },
         notice: (chatId, text) => this.dispatch({ t: 'items', chatId, items: [{ kind: 'notice', text, tone: 'info' }] }),
@@ -133,7 +136,7 @@ export class AgentCore {
         agentStderr: (agentId, line) => {
           if (!this.signingIn.has(agentId)) return;
           for (const url of line.match(/https:\/\/[^\s"'<>)]+/g) ?? []) {
-            if (allowedExternal(url)) options.ui.signInUrl?.(agentId, url);
+            if (allowedSignInUrl(agentId, url)) options.ui.signInUrl?.(agentId, url);
           }
         },
         permission: (chatId, req, signal) => this.askPermission(chatId, req, signal),
@@ -240,9 +243,11 @@ export class AgentCore {
     if (chat.busy) throw new Error('This chat is still working on the last message.');
     const ids: string[] = [];
     for (const img of images) {
+      const src = imageDataUri(img.mimeType, img.data);
+      if (!src) throw new Error(`${img.name || 'An attachment'} is not an image FriedLiver can send.`);
       const id = this.id('you');
       ids.push(id);
-      this.addImage(id, `data:${img.mimeType};base64,${img.data}`, img.name || 'Attached image', 'you');
+      this.addImage(id, src, img.name || 'Attached image', 'you');
     }
     if (!chat.items.some((i) => i.kind === 'user') && text.trim()) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
     this.dispatch({ t: 'items', chatId, items: [{ kind: 'user', text, images: ids }] });
@@ -264,7 +269,10 @@ export class AgentCore {
   }
 
   answerPermission(requestId: string, optionId: string | null): void {
-    this.permissions.get(requestId)?.resolve(optionId ? { outcome: { outcome: 'selected', optionId } } : { outcome: { outcome: 'cancelled' } });
+    const pending = this.permissions.get(requestId);
+    // Only an option the agent offered; anything else from a view is ignored.
+    if (!pending || (optionId !== null && !pending.options.some((o) => o.optionId === optionId))) return;
+    pending.resolve(optionId ? { outcome: { outcome: 'selected', optionId } } : { outcome: { outcome: 'cancelled' } });
   }
 
   /** Accept writes `content` (the proposal as the user left it); reject tells the agent no. */
@@ -279,9 +287,10 @@ export class AgentCore {
   /** Restores the files the chat's latest turn changed. */
   async undo(chatId: string, turnId: string): Promise<string[]> {
     if (this.requireChat(chatId).busy) throw new Error('Wait for the agent to finish, or stop it, before undoing.');
+    // Checked again: a symlink may have appeared since the turn wrote these files.
     const files = await this.turns.undo(chatId, turnId, {
-      write: (f, c) => writeTextFile(f, c),
-      remove: (f) => rm(f, { force: true }),
+      write: (f, c) => writeTextFile(this.checkWrite(f), c),
+      remove: (f) => rm(this.checkWrite(f), { force: true }),
     });
     this.dispatch({ t: 'undone', chatId, turnId });
     for (const f of files) this.options.ui.fileChanged?.(f);
@@ -322,8 +331,11 @@ export class AgentCore {
     const methods = (await this.hub.authMethods(agent)) as (acp.AuthMethod & { args?: string[]; env?: Record<string, string> })[];
     const method = methods.find((m) => m.id === methodId);
     if (!method) return null;
+    const extras = loginExtras(method);
+    if (!extras) throw new Error(`${this.label(agent)} offered a sign-in command FriedLiver won't run (its arguments aren't plain text).`);
     const spec = this.spec(agent);
-    return { command: spec.command, args: [...spec.args, ...(method.args ?? [])], env: { ...spec.env, ...method.env } };
+    // The agent's own settings (and its API key) win over what the sign-in method asks for.
+    return { command: spec.command, args: [...spec.args, ...extras.args], env: { ...extras.env, ...spec.env } };
   }
 
   /** ACP authenticate: the agent opens the vendor's page and waits. Five minutes, or until cancelled. */
@@ -436,7 +448,7 @@ export class AgentCore {
         tone: 'error',
         text: err.message.split(' Install it with:')[0],
         detail: err.spec.installCommand,
-        actions: [{ label: 'Install in terminal', do: 'install', command: err.spec.installCommand }, retry],
+        actions: [...(agent !== 'demo' ? [{ label: 'Install in terminal', do: 'install', agent } satisfies NoticeAction] : []), retry],
       };
     }
     return { kind: 'notice', tone: 'error', text: messageOf(err), actions: [retry] };
@@ -455,10 +467,23 @@ export class AgentCore {
     return resolved;
   }
 
+  /** Writes also stay out of `.git`, whose config and hooks run programs and never show in a diff. */
+  private checkWrite(file: string): string {
+    const resolved = this.checkPath(file);
+    if (inGitFolder(resolved, this.roots())) throw new Error(`${file} is inside a .git folder. FriedLiver doesn't let agents write there; use a git command instead.`);
+    return resolved;
+  }
+
   private async readForAgent(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
     const file = this.checkPath(req.path);
     const unsaved = this.options.ui.unsavedText?.(file);
-    if (unsaved === undefined) return readTextFile({ ...req, path: file });
+    if (unsaved === undefined) {
+      // Regular files of a sane size only: not a FIFO that never ends, not gigabytes into memory.
+      const info = await stat(file);
+      if (!info.isFile()) throw new Error(`${file} is not a regular file.`);
+      if (info.size > MAX_AGENT_READ_BYTES) throw new Error(`${file} is ${Math.round(info.size / 1048576)} MB, more than an agent can read through FriedLiver at once.`);
+      return readTextFile({ ...req, path: file });
+    }
     if (req.line == null && req.limit == null) return { content: unsaved };
     const lines = unsaved.split('\n');
     const start = Math.max(0, (req.line ?? 1) - 1);
@@ -501,7 +526,7 @@ export class AgentCore {
 
   /** Every agent write waits for review in a diff, and is recorded so the turn can be undone. */
   private async reviewWrite(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void> {
-    const file = this.checkPath(req.path);
+    const file = this.checkWrite(req.path);
     const before = await readIfExists(file);
     const reviewId = this.id('review');
     const chat = chatId ? this.chat(chatId) : undefined;
@@ -523,6 +548,8 @@ export class AgentCore {
       this.options.ui.showReview(review);
     });
     if (!decision.accept) throw new Error(`The user rejected the change to ${file}.`);
+    // A review can take minutes: check again, in case a symlink appeared in the meantime.
+    this.checkWrite(file);
     if (chatId) this.turns.record(chatId, file, before);
     await writeTextFile(file, decision.content ?? req.content);
     this.options.ui.fileChanged?.(file);
@@ -534,7 +561,7 @@ export class AgentCore {
     return {
       approve: (info) => {
         const commandId = this.id('cmd');
-        const chatId = this.hub.chatIdForSession(info.sessionId);
+        const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
         known.set(info.terminalId, { commandId });
         const outside = insideRoots(info.cwd, this.roots()) === null;
         if (chatId) {
@@ -581,7 +608,8 @@ export class AgentCore {
 
   // Output arrives in many small chunks; batch them so webviews get a few messages a second.
   private queueOutput(commandId: string, data: string): void {
-    this.output.set(commandId, (this.output.get(commandId) ?? '') + data);
+    // The transcript keeps only the last MAX_COMMAND_OUTPUT characters, so nothing more is held between flushes.
+    this.output.set(commandId, ((this.output.get(commandId) ?? '') + data).slice(-MAX_COMMAND_OUTPUT));
     this.outputTimer ??= setTimeout(() => this.flushOutput(), OUTPUT_FLUSH_MS);
   }
 
@@ -599,14 +627,17 @@ export class AgentCore {
 
   /** Images the agent sends or reads go to the Images view. */
   private async collectImages(update: acp.SessionUpdate): Promise<void> {
+    // The agent names the type; only the image types the views show are taken (see imageDataUri).
     if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'image') {
-      this.addImage(this.id('msg'), `data:${update.content.mimeType};base64,${update.content.data}`, 'From the agent', 'agent');
+      const src = imageDataUri(update.content.mimeType, update.content.data);
+      if (src) this.addImage(this.id('msg'), src, 'From the agent', 'agent');
       return;
     }
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
     for (const item of update.content ?? []) {
       if (item.type === 'content' && item.content.type === 'image') {
-        this.addImage(this.id('tool'), `data:${item.content.mimeType};base64,${item.content.data}`, update.title ?? 'Tool output', 'agent');
+        const src = imageDataUri(item.content.mimeType, item.content.data);
+        if (src) this.addImage(this.id('tool'), src, update.title ?? 'Tool output', 'agent');
       }
     }
     for (const loc of update.locations ?? []) {
@@ -614,6 +645,9 @@ export class AgentCore {
       const file = type && insideRoots(loc.path, this.roots());
       if (!file || this.shownImages.has(file)) continue;
       try {
+        // Size first: a huge file named .png must not be read into memory.
+        const info = await stat(file);
+        if (!info.isFile() || info.size > MAX_IMAGE_BYTES) continue;
         const bytes = await readFile(file);
         if (bytes.length <= MAX_IMAGE_BYTES) this.addImage(file, `data:${type};base64,${bytes.toString('base64')}`, path.basename(file), 'agent');
       } catch {

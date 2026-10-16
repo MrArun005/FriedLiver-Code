@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { VSCODE_DIR, fail, isWindows, log, nodeEnv, readJson, run } from './lib.mjs';
+import { VSCODE_DIR, checkSha256, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File } from './lib.mjs';
 
 const args = new Set(process.argv.slice(2));
 const wantPackage = args.has('--package');
@@ -67,15 +67,29 @@ env.npm_config_jobs = env.npm_config_jobs || String(os.cpus().length);
 // rate-limits anonymous calls (and is blocked behind some proxies, token or not). It
 // skips the API when the asset is already in $TMPDIR/vscode-ripgrep-cache-<pkg version>/,
 // so we put it there from the plain release-download URL first.
+//
+// Both downloads are verified: the npm tarball against upstream's package-lock.json
+// integrity, and the binary against its pin in scripts/checksums.json (ripgrep-prebuilt
+// publishes no checksums, and @vscode/ripgrep's own download checks nothing).
 function seedRipgrepCache() {
 	const lock = readJson(path.join(VSCODE_DIR, 'package-lock.json'));
-	const pkgVersion = lock.packages?.['node_modules/@vscode/ripgrep']?.version;
+	const entry = lock.packages?.['node_modules/@vscode/ripgrep'];
+	const pkgVersion = entry?.version;
 	if (!pkgVersion) {
 		return;
 	}
+	if (!/^\d+\.\d+\.\d+$/.test(pkgVersion)) {
+		fail(`@vscode/ripgrep version ${JSON.stringify(pkgVersion)} in package-lock.json is not a plain version`);
+	}
 	const cache = path.join(os.tmpdir(), `vscode-ripgrep-cache-${pkgVersion}`);
 	const work = fs.mkdtempSync(path.join(os.tmpdir(), 'friedliver-rg-'));
-	run('curl', ['-fsSL', '-o', path.join(work, 'rg.tgz'), `https://registry.npmjs.org/@vscode/ripgrep/-/ripgrep-${pkgVersion}.tgz`], { cwd: work });
+	const tgz = path.join(work, 'rg.tgz');
+	run('curl', ['-fsSL', '--retry', '3', '-o', tgz, `https://registry.npmjs.org/@vscode/ripgrep/-/ripgrep-${pkgVersion}.tgz`], { cwd: work });
+	if (!matchesIntegrity(tgz, entry.integrity)) {
+		fs.rmSync(work, { recursive: true, force: true });
+		fail(`@vscode/ripgrep ${pkgVersion} from the npm registry does not match the integrity in upstream's package-lock.json`);
+	}
+	log(`@vscode/ripgrep ${pkgVersion}: npm integrity verified`);
 	run('tar', ['-xzf', 'rg.tgz'], { cwd: work });
 	const postinstall = fs.readFileSync(path.join(work, 'package', 'lib', 'postinstall.js'), 'utf8');
 	fs.rmSync(work, { recursive: true, force: true });
@@ -91,9 +105,22 @@ function seedRipgrepCache() {
 	}
 	const asset = `ripgrep-${rgVersion}-${target}${isWindows ? '.zip' : '.tar.gz'}`;
 	const file = path.join(cache, asset);
+	const pin = pinnedSha256(asset);
+	if (!pin && process.env.FRIEDLIVER_REQUIRE_PINS) {
+		fail(`${asset} has no SHA-256 pin in scripts/checksums.json, and this build requires one`);
+	}
+	// Anyone on this machine can write to the temp folder: a file already there is used only if it matches its pin.
+	if (fs.existsSync(file) && (!pin || sha256File(file) !== pin)) {
+		fs.rmSync(file, { force: true });
+	}
 	if (!fs.existsSync(file)) {
 		fs.mkdirSync(cache, { recursive: true });
 		run('curl', ['-fsSL', '--retry', '3', '-o', file, `https://github.com/microsoft/ripgrep-prebuilt/releases/download/${rgVersion}/${asset}`], { cwd: cache });
+	}
+	if (pin) {
+		checkSha256(file, pin, `ripgrep ${asset}`);
+	} else {
+		log(`ripgrep: ${asset} has no SHA-256 pin in scripts/checksums.json; using it unverified, as @vscode/ripgrep would. Add the pin.`);
 	}
 	log(`ripgrep cache seeded: ${file}`);
 }

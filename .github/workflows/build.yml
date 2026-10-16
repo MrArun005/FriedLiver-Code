@@ -3,15 +3,23 @@ name: Build FriedLiver
 # Fetch the pinned upstream, apply FriedLiver's branding and patches, add the
 # built-in extensions, build the minified app and its installer for each OS and
 # upload them. About an hour per OS, so docs-only changes don't start it.
+# A pushed tag vX.Y.Z or vX.Y.Z-N (the upstream version, then FriedLiver's own
+# build number) builds the same way and then publishes a GitHub release.
 on:
   push:
     branches: [main]
+    # Path filters don't apply to tag pushes: a release tag always builds.
+    tags: ['v*']
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'test/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
+
+# Read-only everywhere; only the release job below can write, and only releases.
+permissions:
+  contents: read
 
 # A build takes most of an hour: a newer push waits for the running build instead of
 # cancelling it, and GitHub keeps only the newest waiting push.
@@ -30,6 +38,14 @@ jobs:
           - { os: ubuntu-latest, target: linux-x64, artifact: friedliver-fork-linux-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
+    env:
+      # Scripts read these as variables, never as ${{ }} pasted into a script.
+      ARTIFACT: ${{ matrix.artifact }}
+      TARGET: ${{ matrix.target }}
+      # Tag builds stamp the release version into product.json, which the update check compares with GitHub's latest release.
+      FRIEDLIVER_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      # Release builds refuse a download that has no pinned checksum (scripts/checksums.json).
+      FRIEDLIVER_REQUIRE_PINS: ${{ github.ref_type == 'tag' && '1' || '' }}
     steps:
       - name: Free disk space (the upstream checkout and build need about 10 GB)
         if: runner.os == 'Linux'
@@ -51,42 +67,83 @@ jobs:
           if (-not $tool) { throw 'signtool.exe not found in the Windows SDK' }
           "Using $($tool.FullName)"
           $tool.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      # Pinned to commits; the build never pushes, so the token isn't left in .git/config.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-          cache: npm
+          # Release builds start from an empty npm cache.
+          cache: ${{ github.ref_type != 'tag' && 'npm' || '' }}
       # Root packages: the ACP SDK that agent-core/ and the demo agent import.
       - run: npm ci
       - run: node scripts/fetch.mjs
       - run: node scripts/prepare.mjs
-      # Downloads the Node version upstream's .nvmrc asks for, installs, runs gulp vscode-<os>-<arch>-min,
-      # then makes the installer: per-user setup .exe, .dmg or .deb, in installers/.
+      # Downloads the Node version upstream's .nvmrc asks for (checked against nodejs.org's SHASUMS256.txt),
+      # installs, runs gulp vscode-<os>-<arch>-min, then makes the installer: per-user setup .exe, .dmg or
+      # .deb, in installers/.
       - run: node scripts/build.mjs --package --installer
 
       - name: Archive (Linux)
         if: runner.os == 'Linux'
-        run: tar -czf ${{ matrix.artifact }}.tar.gz VSCode-${{ matrix.target }}
+        run: tar -czf "$ARTIFACT.tar.gz" "VSCode-$TARGET"
       - name: Archive (macOS)
         if: runner.os == 'macOS'
         run: |
           # build.mjs already ad-hoc signed the app for the .dmg.
-          app=$(ls -d VSCode-${{ matrix.target }}/*.app | head -1)
-          ditto -c -k --keepParent "$app" ${{ matrix.artifact }}.zip
+          app=$(ls -d "VSCode-$TARGET"/*.app | head -1)
+          ditto -c -k --keepParent "$app" "$ARTIFACT.zip"
       - name: Archive (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path VSCode-${{ matrix.target }}/* -DestinationPath ${{ matrix.artifact }}.zip
+        run: Compress-Archive -Path "VSCode-$($env:TARGET)/*" -DestinationPath "$($env:ARTIFACT).zip"
 
       # Portable app (unzip and run) and the installer, as separate downloads.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}-installer
           path: installers/*
           if-no-files-found: error
+
+  # For tags only: the installers and portable apps of this run, with their SHA-256 sums,
+  # attached to a GitHub release. The agents extension's weekly check points people here.
+  release:
+    needs: build
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: friedliver-fork-*
+          path: release
+          merge-multiple: true
+      - name: Checksums
+        working-directory: release
+        run: |
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
+            echo "::error::Release tags look like v1.142.0 or v1.142.0-2, not $TAG"
+            exit 1
+          fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --verify-tag --title "FriedLiver ${TAG#v}" --generate-notes
+          fi

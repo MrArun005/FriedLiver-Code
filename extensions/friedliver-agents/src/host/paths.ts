@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -5,13 +6,102 @@ import path from 'node:path';
  * `roots` (the workspace folders and task worktrees). Relative paths resolve
  * against the first root. Returns null when it falls outside all of them.
  * Ported from the app's `AppController.inside()`.
+ *
+ * Being inside by name is not enough: a symlink in the workspace (a cloned
+ * repository's `keys -> ~/.ssh`) leads somewhere else. So the real location
+ * is checked too, with every symlink resolved: the file's own when it exists,
+ * otherwise its nearest existing folder's, following dangling links to where
+ * a write would land. The returned path is the one asked for (not the real
+ * one), so it matches open editors and the review; callers check again right
+ * before they write, in case a link appeared since.
+ *
+ * `p` other than the native `path` checks names only (tests of Windows rules on Linux).
  */
 export function insideRoots(file: unknown, roots: readonly string[], p: path.PlatformPath = path): string | null {
   if (typeof file !== 'string' || !file || file.includes('\0') || roots.length === 0) return null;
   const resolved = p.resolve(roots[0], file);
-  const ok = roots.some((root) => {
-    const rel = p.relative(p.resolve(root), resolved);
-    return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel));
+  if (!roots.some((root) => contains(p, p.resolve(root), resolved))) return null;
+  if (p !== path) return resolved;
+  const real = realPath(resolved);
+  if (real === null) return null;
+  return roots.some((root) => {
+    const realRoot = realPath(path.resolve(root));
+    return realRoot !== null && contains(path, realRoot, real);
+  })
+    ? resolved
+    : null;
+}
+
+/**
+ * Whether `file` (already inside `roots`) is in a repository's `.git` folder, or is a
+ * worktree's `.git` file. Agents may read there but not write: git config and hooks
+ * run programs, and nothing there shows up in a diff or a commit.
+ */
+export function inGitFolder(file: string, roots: readonly string[], p: path.PlatformPath = path): boolean {
+  return roots.some((root) => {
+    const base = p.resolve(root);
+    return contains(p, base, file) && p.relative(base, file).split(/[\\/]/).some((part) => part.toLowerCase() === '.git');
   });
-  return ok ? resolved : null;
+}
+
+function contains(p: path.PlatformPath, root: string, file: string): boolean {
+  const rel = p.relative(root, file);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel));
+}
+
+const MAX_LINKS = 40;
+
+/**
+ * Where `file` really is, with every symlink resolved, also when the file (or
+ * the folders above it) don't exist yet: then the nearest existing folder is
+ * resolved and the missing names are added back. A dangling link is followed
+ * to its target, since writing through it would create the target. Null when
+ * that can't be told (a link loop, no permission): callers then refuse.
+ */
+export function realPath(file: string): string | null {
+  let current = path.resolve(file);
+  const missing: string[] = [];
+  for (let links = 0; links <= MAX_LINKS; ) {
+    const real = realpathOrMissing(current);
+    if (real === null) return null;
+    if (real !== MISSING) return missing.length ? path.join(real, ...missing) : real;
+    let target: string | undefined;
+    try {
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink()) target = fs.readlinkSync(current);
+    } catch (err) {
+      if (!isMissing(err)) return null;
+    }
+    if (target !== undefined) {
+      current = path.resolve(path.dirname(current), target);
+      links++;
+      continue;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return missing.length ? path.join(current, ...missing) : current;
+    missing.unshift(path.basename(current));
+    current = parent;
+  }
+  return null;
+}
+
+const MISSING = Symbol('missing');
+
+function realpathOrMissing(file: string): string | null | typeof MISSING {
+  try {
+    return fs.realpathSync.native(file);
+  } catch (err) {
+    if (isMissing(err)) return MISSING;
+  }
+  // The native call fails on some Windows file systems (RAM disks, some network shares).
+  try {
+    return fs.realpathSync(file);
+  } catch (err) {
+    return isMissing(err) ? MISSING : null;
+  }
+}
+
+function isMissing(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }

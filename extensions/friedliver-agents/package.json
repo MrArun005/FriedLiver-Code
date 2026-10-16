@@ -262,11 +262,13 @@
       "title": "FriedLiver Agents",
       "properties": {
         "friedliver.agents.claude.command": {
+          "scope": "machine",
           "type": "string",
           "default": "claude-agent-acp",
-          "description": "Program that runs Claude over ACP. Changing it restarts Claude."
+          "description": "Program that runs Claude over ACP. Changing it restarts Claude. Read from user settings only, never from a workspace."
         },
         "friedliver.agents.claude.args": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
@@ -275,11 +277,13 @@
           "description": "Arguments for the Claude program."
         },
         "friedliver.agents.codex.command": {
+          "scope": "machine",
           "type": "string",
           "default": "codex-acp",
-          "description": "Program that runs Codex over ACP. Changing it restarts Codex."
+          "description": "Program that runs Codex over ACP. Changing it restarts Codex. Read from user settings only, never from a workspace."
         },
         "friedliver.agents.codex.args": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
@@ -288,11 +292,13 @@
           "description": "Arguments for the Codex program."
         },
         "friedliver.agents.gemini.command": {
+          "scope": "machine",
           "type": "string",
           "default": "gemini",
-          "description": "Program that runs Gemini over ACP. Changing it restarts Gemini."
+          "description": "Program that runs Gemini over ACP. Changing it restarts Gemini. Read from user settings only, never from a workspace."
         },
         "friedliver.agents.gemini.args": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
@@ -308,6 +314,12 @@
           "minimum": 1,
           "maximum": 6,
           "description": "How many agent processes may run at once. The least recently used idle one stops first."
+        },
+        "friedliver.updates.check": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "In the FriedLiver app, once a week ask GitHub whether a newer FriedLiver build is out, and say so. Sends nothing but that request."
         },
         "friedliver.idleStopMinutes": {
           "type": "integer",

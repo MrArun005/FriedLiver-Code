@@ -38,7 +38,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="${media('webview.css')}">
-<title>${title}</title>
+<title>${escapeHtml(title)}</title>
 </head>
 <body data-surface="${script}">
 <div id="root"></div>
@@ -69,4 +69,8 @@ export function attachSurface(
 
 export function post(surface: Surface, message: HostMessage): void {
   if (surface.ready) void surface.webview.postMessage(message).then(undefined, () => {});
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }

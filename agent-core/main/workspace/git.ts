@@ -2,12 +2,32 @@ import { execFile } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { findOnWindowsPath } from '../agents/processes';
 
 const run = promisify(execFile);
 
+/**
+ * Git by absolute path on Windows: started by bare name with the repository as
+ * its working folder, Windows would run a `git.exe` the repository contains.
+ */
+function gitProgram(): string {
+  if (process.platform !== 'win32') return 'git';
+  const found = findOnWindowsPath('git.exe');
+  if (!found) throw new Error('Git is not installed (git.exe is not on PATH).');
+  return found;
+}
+
+/**
+ * A repository's own config can name an fsmonitor program, which status, add,
+ * commit and merge would run. It only speeds git up, so FriedLiver's calls turn
+ * it off. Hooks still run: committing and merging a task is meant to behave
+ * like git does for you.
+ */
+const SAFE_CONFIG = ['-c', 'core.fsmonitor=false'];
+
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    const { stdout } = await run('git', args, { cwd, maxBuffer: 32 * 1024 * 1024, windowsHide: true });
+    const { stdout } = await run(gitProgram(), [...SAFE_CONFIG, ...args], { cwd, maxBuffer: 32 * 1024 * 1024, windowsHide: true });
     return stdout;
   } catch (err) {
     const e = err as { stderr?: string; message: string };
@@ -111,7 +131,7 @@ export async function createWorktree(root: string, name: string): Promise<Worktr
   const dir = path.join(path.dirname(root), `.${path.basename(root)}-worktrees`);
   await mkdir(dir, { recursive: true });
   const wt = path.join(dir, branch.split('/')[1]);
-  await git(root, ['worktree', 'add', '-b', branch, wt]);
+  await git(root, ['worktree', 'add', '-b', branch, '--', wt]);
   return { path: wt, branch };
 }
 
@@ -126,6 +146,6 @@ export async function mergeWorktree(root: string, wt: Worktree, message: string)
 }
 
 export async function removeWorktree(root: string, wt: Worktree): Promise<void> {
-  await git(root, ['worktree', 'remove', '--force', wt.path]);
-  await git(root, ['branch', '-D', wt.branch]).catch(() => '');
+  await git(root, ['worktree', 'remove', '--force', '--', wt.path]);
+  await git(root, ['branch', '-D', '--', wt.branch]).catch(() => '');
 }

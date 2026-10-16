@@ -66,10 +66,18 @@ export class AgentConnection {
 
   static async start(spec: AgentSpec, options: StartOptions): Promise<AgentConnection> {
     const { cwd, host, log, onStderr } = options;
-    const launch = launchFor(spec.command, spec.args);
+    let launch: ReturnType<typeof launchFor>;
+    try {
+      launch = launchFor(spec.command, spec.args);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw notInstalled(spec);
+      throw new AgentStartError(`${spec.label} could not start: ${(err as Error).message}`, spec, 'crashed');
+    }
     const child = spawn(launch.file, launch.args, {
       cwd,
-      env: { ...process.env, ...spec.env },
+      // On Windows, npm's .cmd wrappers run `node` by bare name, and cmd.exe would look for it in the
+      // current folder (the workspace) first. This variable turns that lookup off.
+      env: { ...process.env, ...spec.env, ...(process.platform === 'win32' ? { NoDefaultCurrentDirectoryInExePath: '1' } : {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsVerbatimArguments: launch.windowsVerbatimArguments,
       detached: process.platform !== 'win32',

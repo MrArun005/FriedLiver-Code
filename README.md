@@ -21,16 +21,25 @@ What changes from stock VS Code:
   benchmarks.
 - **Black Blue theme and Geist fonts** built in, plus Light Blue, Midnight Blue
   and Graphite.
-- **No telemetry, no experiments, no update service.** It has its own
+- **No telemetry, no experiments, no update service.** Once a week the Agents
+  extension asks GitHub whether a newer FriedLiver release is out and tells
+  you (`friedliver.updates.check` turns that off). It has its own
   `.friedliver` settings folder, so it doesn't touch an installed VS Code.
+- **Agents ask first.** Writes are reviewed, commands approved, files outside
+  the workspace (symlinks included) are off limits, and a repository's
+  settings can't change which program runs as an agent. What that does and
+  doesn't protect: [SECURITY.md](SECURITY.md).
 
 The Electron app, a separate and lighter editor (about 370 MB against about
 840 MB here), lives in [FriedLiver](https://github.com/MrArun005/FriedLiver).
 
 ## Install
 
-The **Build FriedLiver** workflow builds every push to `main`. Open its latest
-run under **Actions** and download from **Artifacts**:
+Releases (tags like `v1.142.0` or `v1.142.0-2`) are on the
+[Releases](https://github.com/MrArun005/FriedLiver-Code/releases) page with
+the same files and a `SHA256SUMS.txt` to check them against. The **Build
+FriedLiver** workflow also builds every push to `main`: open its latest run
+under **Actions** and download from **Artifacts**:
 
 | System | Installer | Portable |
 |---|---|---|
@@ -60,6 +69,11 @@ Anyway**.
 
 The command palette has the rest under "FriedLiver": Agent Manager (Tasks), Move
 Agents to the Center (Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents.
+
+The program each agent runs (`friedliver.agents.<agent>.command` and `.args`)
+is read from your user settings only, never from a workspace's
+`.vscode/settings.json`. API keys stay in the editor's secret storage and go
+only to their own vendor's agent.
 
 ### In VS Code or Antigravity instead
 
@@ -91,8 +105,9 @@ prerequisites per OS, time, disk and memory: [docs/BUILD.md](docs/BUILD.md).
 | `extensions/friedliver-agents/` | The Agents panel, Agent Manager and reviews |
 | `extensions/friedliver-theme/` | Color themes generated from `palette.json`, and the workbench defaults |
 | `agent-core/` | The ACP client the agents extension bundles, and the offline Demo agent ([README](agent-core/README.md)) |
-| `scripts/` | `fetch`, `prepare`, `build`, `dev`, `screenshot` (plain Node, any OS) |
+| `scripts/` | `fetch`, `prepare`, `build`, `dev`, `screenshot`, `check-upstream` (plain Node, any OS); `checksums.json` pins downloads that publish no checksums |
 | `docs/` | [BUILD.md](docs/BUILD.md), [DEFAULTS.md](docs/DEFAULTS.md), [memory-plan.md](docs/memory-plan.md), [benchmarks.md](docs/benchmarks.md) |
+| `SECURITY.md` | Threat model, how to report a vulnerability, audit findings |
 
 Patches:
 
@@ -101,7 +116,7 @@ Patches:
 | `0010-drop-builtin-copilot` | No built-in Copilot extension; runs without `defaultChatAgent` |
 | `0020-disable-builtin-ai-by-default` | `chat.disableAIFeatures` defaults to true, and the Chat view hides with it |
 | `0030-installers-without-microsoft-only-parts` | Installers build without the Windows appx package and the tunnel CLI |
-| `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary |
+| `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 
 ### Writing a patch
