@@ -5,6 +5,7 @@
 //   "read-image <p>"  reports a read tool call on an image file
 //   "wait"            keeps working until cancelled
 //   "tour"            the UI demo: a plan, a file read, an edit, a command and an image
+//   "project"         builds calc/, runs its tests, fixes the failing one, reruns, runs the app
 //   anything else     echoes the text back in two chunks
 // FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first.
 import { Readable, Writable } from 'node:stream';
@@ -117,6 +118,104 @@ async function tour(client, sessionId) {
   await say(client, sessionId, '\n\nThat\'s the tour: a plan, a reviewed edit, an approved command, and an image in the panel on the right.');
 }
 
+/** Runs a shell command through the client and returns its exit code and output, or null if denied. */
+async function shell(client, sessionId, toolCallId, title, command, cwd) {
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', toolCallId, title, kind: 'execute', status: 'pending' });
+  let terminalId;
+  try {
+    ({ terminalId } = await client.request(acp.methods.client.terminal.create, { sessionId, command, cwd }));
+  } catch {
+    await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'failed' });
+    return null;
+  }
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', content: [{ type: 'terminal', terminalId }] });
+  const exit = await client.request(acp.methods.client.terminal.waitForExit, { sessionId, terminalId });
+  const { output } = await client.request(acp.methods.client.terminal.output, { sessionId, terminalId });
+  await client.request(acp.methods.client.terminal.release, { sessionId, terminalId });
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: exit.exitCode === 0 ? 'completed' : 'failed' });
+  return { code: exit.exitCode, output };
+}
+
+const CALC_FILES = {
+  'package.json': `${JSON.stringify(
+    { name: 'calc', version: '1.0.0', type: 'module', scripts: { test: 'node --test', start: 'node src/cli.js' } },
+    null,
+    2,
+  )}\n`,
+  'src/calc.js': `export const add = (a, b) => a + b;
+export const subtract = (a, b) => a - b;
+export const multiply = (a, b) => a + b;
+`,
+  'src/cli.js': `import { add, multiply, subtract } from './calc.js';
+
+const ops = { '+': add, '-': subtract, '*': multiply };
+const [, a, op, b] = (process.argv[2] ?? '').match(/^(-?\\d+)([+*-])(-?\\d+)$/) ?? [];
+if (!op) {
+  console.error('Usage: npm start -- 6*7');
+  process.exit(1);
+}
+console.log(\`\${a} \${op} \${b} = \${ops[op](Number(a), Number(b))}\`);
+`,
+  'test/calc.test.js': `import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { add, multiply, subtract } from '../src/calc.js';
+
+test('add', () => assert.equal(add(2, 3), 5));
+test('subtract', () => assert.equal(subtract(5, 3), 2));
+test('multiply', () => assert.equal(multiply(6, 7), 42));
+`,
+};
+
+async function project(client, sessionId) {
+  const cwd = sessionCwd.get(sessionId) ?? process.cwd();
+  const dir = `${cwd}/calc`;
+  const steps = ['Create a small calculator project', 'Run its tests', 'Fix what fails', 'Run the tests again', 'Run the app'];
+  const plan = (done) =>
+    tool(client, sessionId, {
+      sessionUpdate: 'plan',
+      entries: steps.map((content, i) => ({ content, priority: 'medium', status: i < done ? 'completed' : i === done ? 'in_progress' : 'pending' })),
+    });
+  const write = async (rel, content) => {
+    try {
+      await client.request(acp.methods.client.fs.writeTextFile, { sessionId, path: `${dir}/${rel}`, content });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  await say(client, sessionId, "I'll build a tiny calculator with tests in `calc/`, run the tests, fix whatever fails, and run it.\n\n");
+  await plan(0);
+  for (const [rel, content] of Object.entries(CALC_FILES)) {
+    if (!(await write(rel, content))) {
+      await say(client, sessionId, `You rejected \`calc/${rel}\`, so I stopped there.`);
+      return;
+    }
+  }
+  await plan(1);
+  const first = await shell(client, sessionId, 'test-1', 'npm test', 'npm test', dir);
+  if (!first) return say(client, sessionId, 'You denied `npm test`, so I stopped.');
+  if (first.code === 0) {
+    await say(client, sessionId, 'All tests passed on the first run.\n\n');
+  } else {
+    const failing = [...first.output.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
+    await say(client, sessionId, `Tests failed: ${failing.length ? failing.map((f) => `\`${f}\``).join(', ') : 'see the output'}. \`multiply\` adds instead of multiplying. Fixing it.\n\n`);
+    await plan(2);
+    if (!(await write('src/calc.js', CALC_FILES['src/calc.js'].replace('export const multiply = (a, b) => a + b;', 'export const multiply = (a, b) => a * b;')))) {
+      return say(client, sessionId, 'You rejected the fix, so the test still fails.');
+    }
+    await plan(3);
+    const second = await shell(client, sessionId, 'test-2', 'npm test', 'npm test', dir);
+    if (!second) return say(client, sessionId, 'You denied the second test run.');
+    await say(client, sessionId, second.code === 0 ? 'All 3 tests pass now.\n\n' : 'Tests still fail; check the commands panel.\n\n');
+  }
+  await plan(4);
+  const app = await shell(client, sessionId, 'start', 'npm start -- 6*7', "npm start -- '6*7'", dir);
+  const result = app?.output.match(/^-?\d+ [+*-] -?\d+ = -?\d+$/m)?.[0];
+  await plan(5);
+  await say(client, sessionId, result ? `The app works: \`${result}\`.` : 'The app did not print a result; check the commands panel.');
+}
+
 async function run(client, sessionId) {
   let terminalId;
   try {
@@ -182,6 +281,7 @@ acp
       return { stopReason: 'cancelled' };
     }
     if (text === 'tour') await tour(client, sessionId);
+    else if (text === 'project') await project(client, sessionId);
     else if (text.startsWith('edit ')) await edit(client, sessionId, text.slice(5));
     else if (text === 'run') await run(client, sessionId);
     else if (text.startsWith('read-image ')) {
