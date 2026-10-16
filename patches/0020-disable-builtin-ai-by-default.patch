@@ -1,0 +1,28 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts b/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts
+index 4c350900..2f88d80d 100644
+--- a/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts
++++ b/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts
+@@ -2423,7 +2423,8 @@ configurationRegistry.registerConfiguration({
+ 		[ChatAIDisabledSettingId]: {
+ 			type: 'boolean',
+ 			description: nls.localize('chat.disableAIFeatures', "Disable and hide built-in AI features provided by GitHub Copilot, including chat and inline suggestions."),
+-			default: false,
++			// FriedLiver: its own Agents panel replaces the built-in chat; this also keeps the agent host from starting.
++			default: true,
+ 			scope: ConfigurationScope.WINDOW,
+ 		},
+ 		[ChatConfiguration.TitleBarSignInEnabled]: {
+diff --git a/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts b/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts
+index 89200842..87b2b83b 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts
++++ b/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts
+@@ -72,6 +72,9 @@ const chatViewDescriptor: IViewDescriptor = {
+ 	ctorDescriptor: new SyncDescriptor(ChatViewPane),
+ 	when: ContextKeyExpr.and(
+ 		ChatContextKeys.accountPolicyGateActive.negate(),
++		// FriedLiver: with chat.disableAIFeatures (default true) the Chat view is gone, so the Agents view owns the
++		// secondary side bar. Uses the config key: the entitlement context's `hidden` misses the registered default.
++		ContextKeyExpr.notEquals('config.chat.disableAIFeatures', true),
+ 		ContextKeyExpr.or(
+ 			ContextKeyExpr.and(
+ 				ChatContextKeys.Setup.hidden.negate(),
