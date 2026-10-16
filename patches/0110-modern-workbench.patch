@@ -1,0 +1,312 @@
+diff --git a/src/vs/workbench/browser/media/friedliver.css b/src/vs/workbench/browser/media/friedliver.css
+new file mode 100644
+index 00000000..c10f9b64
+--- /dev/null
++++ b/src/vs/workbench/browser/media/friedliver.css
+@@ -0,0 +1,294 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver: the workbench look. Quiet chrome, loud decisions.
++ *
++ *  - Tone, not lines: regions separate by surface tone (the themes make the borders between
++ *    them transparent), a splitter is invisible until hovered, overlays float on soft shadows.
++ *  - Colors only through theme variables (--vscode-*), sizes through the registered size
++ *    tokens, so every theme keeps working.
++ *  - High contrast themes are untouched: every rule is scoped to
++ *    .monaco-workbench:not(.hc-black):not(.hc-light).
++ *  - Builds on upstream's Modern UI (workbench.experimental.modernUI, on by default) and still
++ *    reads well with it off.
++ *  - No :has() and no class-substring selectors (see contrib/modernUI/CSS_PERFORMANCE.md), and
++ *    no transitions on virtualized list rows.
++ *  - The bundled build may order this sheet before or after upstream's Modern UI modules, so no
++ *    rule here ties with one of theirs on specificity.
++ *--------------------------------------------------------------------------------------------*/
++
++/* ---- Tokens ---------------------------------------------------------------------------- */
++
++.monaco-workbench:not(.hc-black):not(.hc-light) {
++	--friedliver-radius-control: var(--vscode-cornerRadius-medium);	/* rows, inputs, buttons: 6px */
++	--friedliver-radius-overlay: var(--vscode-cornerRadius-large);	/* menus, hovers, suggest: 8px */
++	--friedliver-radius-surface: var(--vscode-cornerRadius-xLarge);	/* palette, dialogs: 12px */
++	--friedliver-shadow-color: var(--vscode-widget-shadow, transparent);
++	--friedliver-shadow-soft: color-mix(in srgb, var(--friedliver-shadow-color) 45%, transparent);
++
++	/* Every overlay (hover, find, peek, rename, notifications, palette, dialogs) reads these. */
++	--vscode-shadow-lg: 0 10px 28px -8px var(--friedliver-shadow-color), 0 2px 6px -2px var(--friedliver-shadow-soft);
++	--vscode-shadow-xl: 0 22px 56px -16px var(--friedliver-shadow-color), 0 4px 14px -6px var(--friedliver-shadow-soft);
++}
++
++/* ---- Overlays: rounded, softly shadowed ------------------------------------------------ */
++
++/* Command palette and quick open (its shadow is --vscode-shadow-xl) */
++.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget {
++	border-radius: var(--friedliver-radius-surface);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox {
++	border-radius: var(--friedliver-radius-overlay);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .monaco-list-row {
++	border-radius: var(--friedliver-radius-control);
++}
++
++/* Hovers, editor and workbench (their shadow is --vscode-shadow-lg) */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-hover {
++	border-radius: var(--friedliver-radius-overlay);
++}
++
++/* Suggest widget and its details pane: upstream gives them a fixed small shadow */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-widget {
++	border-radius: var(--friedliver-radius-overlay);
++	box-shadow: var(--vscode-shadow-lg);
++	overflow: hidden;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-details-container {
++	border-radius: var(--friedliver-radius-overlay);
++	box-shadow: var(--vscode-shadow-lg);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-details-container .suggest-details {
++	border-radius: var(--friedliver-radius-overlay);
++}
++
++/* Context menus and menubar menus: the menu stylesheet reads its shadow from this variable. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .context-view.monaco-menu-container {
++	--vscode-context-view-menu-motion-shadow: var(--vscode-shadow-lg);
++	border-radius: var(--friedliver-radius-overlay);
++}
++
++/* Notifications (toasts and the center), the find widget, peek and rename already read
++   --vscode-shadow-lg and get Modern UI's radius. */
++
++/* Dialogs: the box carries the shadow, not the square wrapper behind it. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-modal-block .dialog-shadow {
++	border-radius: var(--friedliver-radius-surface);
++	box-shadow: var(--vscode-shadow-xl) !important;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box {
++	border-radius: var(--friedliver-radius-surface);
++}
++
++/* ---- Splitters: invisible until hovered, still grabbable -------------------------------- */
++
++/* The themes set no resting grip (modernSash.gripForeground); this keeps the hover line a
++   rounded bar and the hit area at its usual size. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-sash::before {
++	border-radius: var(--vscode-cornerRadius-circle);
++}
++
++/* ---- Title bar and command center ----------------------------------------------------- */
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
++	height: 24px;
++	border-radius: var(--vscode-cornerRadius-circle);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-icon {
++	margin: auto var(--vscode-spacing-size60) auto 0;
++}
++
++/* ---- Activity bar: rounded item background, a short pill instead of the stripe --------- */
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked:not(:focus) .active-item-indicator::before {
++	border-left-color: transparent !important;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator {
++	overflow: visible;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
++	content: '';
++	position: absolute;
++	top: 50%;
++	left: 0;
++	width: 4px;
++	height: 16px;
++	border-radius: var(--vscode-cornerRadius-circle);
++	background-color: var(--vscode-activityBar-activeBorder, var(--vscode-activityBar-foreground));
++	transform: translateY(-50%);
++	pointer-events: none;
++}
++
++/* Upstream Modern UI insets the item background from the bar edge (the bar's 4px padding
++   plus the indicator's own inset); keep the pill on the edge. */
++.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
++	left: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + 4px) / 2);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
++	left: auto;
++	right: 0;
++}
++
++.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
++	right: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + 4px) / 2);
++}
++
++/* Without Modern UI, round the item background the same way. */
++.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item .action-label {
++	border-radius: var(--friedliver-radius-overlay);
++}
++
++/* ---- Editor tabs ---------------------------------------------------------------------- */
++
++/* Without Modern UI's connected tabs, give tabs a rounded top so the active one reads as
++   part of the editor by tone alone. */
++.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
++	border-top-left-radius: var(--friedliver-radius-overlay);
++	border-top-right-radius: var(--friedliver-radius-overlay);
++}
++
++/* ---- Lists and trees ------------------------------------------------------------------ */
++
++/* Specificity (0,5,0) on purpose: above Modern UI's generic 4px row radius, below its special
++   cases (suggest boundary rows, notification rows), whichever order the bundle puts them in. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-list .monaco-list-row:where(:not(.separator)) {
++	border-radius: var(--friedliver-radius-control);
++}
++
++/* Upstream Modern UI insets rows in side bar views by 4px; do the same without it. */
++.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .monaco-pane-view .pane-body:not(.chat-viewpane) .monaco-list-row {
++	left: 4px;
++	right: 4px;
++	width: auto;
++}
++
++/* ---- Controls ------------------------------------------------------------------------- */
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button {
++	border-radius: var(--friedliver-radius-control);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button.monaco-text-button {
++	border-radius: var(--friedliver-radius-control) 0 0 var(--friedliver-radius-control);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button.monaco-dropdown-button {
++	border-radius: 0 var(--friedliver-radius-control) var(--friedliver-radius-control) 0;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox,
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box {
++	border-radius: var(--friedliver-radius-control);
++}
++
++/* Count badges are quiet pills. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-count-badge.long {
++	border-radius: var(--vscode-cornerRadius-circle);
++}
++
++/* ---- Scrollbars: thin rounded sliders inside the usual hit area ------------------------- */
++
++/* The slider keeps its size, so it is as easy to grab as before; a transparent border across
++   it narrows the painted part (about 6px), which widens a little while hovered or dragged.
++   Lists use 10px scrollbars, the editor 14px vertical and 12px horizontal ones. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar > .slider {
++	box-sizing: border-box;
++	border: 0 solid transparent;
++	background-clip: padding-box;
++	border-radius: var(--vscode-cornerRadius-circle);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider {
++	border-left-width: var(--vscode-spacing-size20);
++	border-right-width: var(--vscode-spacing-size20);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider {
++	border-top-width: var(--vscode-spacing-size20);
++	border-bottom-width: var(--vscode-spacing-size20);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider {
++	border-left-width: var(--vscode-spacing-size40);
++	border-right-width: var(--vscode-spacing-size40);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider {
++	border-top-width: var(--vscode-spacing-size40);
++	border-bottom-width: var(--vscode-spacing-size40);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
++	border-left-width: 1px;
++	border-right-width: 1px;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
++	border-top-width: 1px;
++	border-bottom-width: 1px;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
++	border-left-width: 3px;
++	border-right-width: 3px;
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
++	border-top-width: var(--vscode-spacing-size20);
++	border-bottom-width: var(--vscode-spacing-size20);
++}
++
++.monaco-workbench:not(.hc-black):not(.hc-light) .xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
++	box-sizing: border-box;
++	left: 0;
++	width: 100%;
++	border: 0 solid transparent;
++	border-left-width: var(--vscode-spacing-size40);
++	border-right-width: var(--vscode-spacing-size40);
++	background-clip: padding-box;
++	border-radius: var(--vscode-cornerRadius-circle);
++}
++
++/* ---- Status bar: quiet (muted text from the themes) ------------------------------------ */
++
++/* Compact item pairs keep upstream's square seams. */
++.monaco-workbench:not(.hc-black):not(.hc-light) .part.statusbar > .items-container > .statusbar-item:not(.compact-left):not(.compact-right) > .statusbar-item-label {
++	border-radius: var(--friedliver-radius-control);
++}
++
++/* ---- Focus: always visible for the keyboard ------------------------------------------- */
++
++/* Buttons get a 2px ring that clears their own fill; inputs, list rows and tabs keep
++   upstream's outline (focusBorder / list.focusOutline, at least 3:1 against every surface
++   in the FriedLiver themes, see test/themes.test.ts). */
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button:focus-visible,
++.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button:focus-visible {
++	outline: 2px solid var(--vscode-focusBorder);
++	outline-offset: 2px;
++}
++
++/* ---- Motion: short fades on hover-only chrome, never with reduced motion -------------- */
++
++.monaco-workbench.monaco-enable-motion:not(.hc-black):not(.hc-light) .monaco-text-button,
++.monaco-workbench.monaco-enable-motion:not(.hc-black):not(.hc-light) .part.titlebar .command-center .action-item.command-center-center {
++	transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
++}
++
++@media (prefers-reduced-motion: reduce) {
++	.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button,
++	.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar .command-center .action-item.command-center-center {
++		transition: none;
++	}
++}
+diff --git a/src/vs/workbench/browser/style.ts b/src/vs/workbench/browser/style.ts
+index 9250ef3f..d700a770 100644
+--- a/src/vs/workbench/browser/style.ts
++++ b/src/vs/workbench/browser/style.ts
+@@ -4,6 +4,7 @@
+  *--------------------------------------------------------------------------------------------*/
+ 
+ import './media/style.css';
++import './media/friedliver.css'; // FriedLiver: the workbench look, after upstream's base styles
+ import { registerThemingParticipant } from '../../platform/theme/common/themeService.js';
+ import { WORKBENCH_BACKGROUND, TITLE_BAR_ACTIVE_BACKGROUND } from '../common/theme.js';
+ import { isWeb, isIOS } from '../../base/common/platform.js';

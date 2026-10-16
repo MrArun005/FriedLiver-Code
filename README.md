@@ -20,7 +20,11 @@ What changes from stock VS Code:
   Remote - SSH, Copilot) aren't there. Open replacements are listed in the
   benchmarks.
 - **Black Blue theme and Geist fonts** built in, plus Light Blue, Midnight Blue
-  and Graphite.
+  and Graphite. Quiet chrome, loud decisions: regions separate by tone instead
+  of lines, overlays float on soft shadows, and only a decision gets the
+  accent color ([screenshots](docs/screenshots/workbench/)). A first-run
+  walkthrough (Help → Welcome) shows the Demo agent, sign-in, the Agent
+  Manager and `@gemini`.
 - **No telemetry, no experiments, no update service.** Once a week the Agents
   extension asks GitHub whether a newer FriedLiver release is out and tells
   you (`friedliver.updates.check` turns that off). It has its own
@@ -118,6 +122,7 @@ Patches:
 | `0030-installers-without-microsoft-only-parts` | Installers build without the Windows appx package and the tunnel CLI |
 | `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
+| `0110-modern-workbench` | The FriedLiver workbench stylesheet: regions separate by tone, soft rounded overlays, an activity pill, thin scrollbars, a pill command center. Theme variables only; high contrast untouched |
 
 ### Writing a patch
 

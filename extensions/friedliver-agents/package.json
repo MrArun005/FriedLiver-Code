@@ -370,7 +370,77 @@
           "description": "Bring this folder's chats back when the window opens again. They are kept in the editor's storage for the folder, without images, API keys or tokens. Turning this off deletes the saved chats."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "friedliver.gettingStarted",
+        "title": "Get Started with Agents",
+        "description": "Agents propose, you decide. Every file an agent writes is a diff you accept, and every command waits for you.",
+        "steps": [
+          {
+            "id": "openFolder",
+            "title": "Open a folder",
+            "description": "Agents read, write and run commands only inside the folder you open.\n[Open Folder](command:workbench.action.files.openFolder)",
+            "media": {
+              "svg": "media/walkthrough/open-folder.svg",
+              "altText": "A FriedLiver window with a folder open in the Explorer."
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.files.openFolder",
+              "onContext:workspaceFolderCount > 0"
+            ]
+          },
+          {
+            "id": "demoAgent",
+            "title": "Try the Demo agent",
+            "description": "The Demo agent runs offline and needs no sign-in. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
+            "media": {
+              "svg": "media/walkthrough/demo-agent.svg",
+              "altText": "A Demo agent chat with a plan and an edit waiting for review, with Accept and Reject buttons."
+            },
+            "completionEvents": [
+              "onCommand:friedliver.newChat"
+            ]
+          },
+          {
+            "id": "signIn",
+            "title": "Sign in to Claude, GPT or Gemini",
+            "description": "Each agent signs in through its own official CLI, so your logins stay with the company that runs it. FriedLiver never sees your credentials.\n[Check Sign-in](command:friedliver.accounts)",
+            "media": {
+              "svg": "media/walkthrough/sign-in.svg",
+              "altText": "The Agents accounts list: one agent signed in, one not installed, one waiting for sign-in."
+            },
+            "completionEvents": [
+              "onCommand:friedliver.accounts"
+            ]
+          },
+          {
+            "id": "agentManager",
+            "title": "Run a task on several agents",
+            "description": "The Agent Manager sends one task to several agents at once and sorts their work into Needs you, Working and Done.\n[Open the Agent Manager](command:friedliver.openTasks)",
+            "media": {
+              "svg": "media/walkthrough/agent-manager.svg",
+              "altText": "The Agent Manager board with one task sent to three agents."
+            },
+            "completionEvents": [
+              "onCommand:friedliver.openTasks"
+            ]
+          },
+          {
+            "id": "mention",
+            "title": "Ask another agent with @gemini",
+            "description": "In any chat, start a message with **@gemini**, **@claude** or **@codex** to ask that agent. Its answer comes back to the same chat, so a second agent can review the first one's work.\n[Open a Chat](command:friedliver.newChat)",
+            "media": {
+              "svg": "media/walkthrough/mention.svg",
+              "altText": "A chat where a message starting with @gemini gets an answer from Gemini in the same chat."
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.8.0",
