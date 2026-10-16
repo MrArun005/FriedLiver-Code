@@ -69,6 +69,9 @@ Anyway**.
 
 ## Use the agents
 
+First time with real accounts? [docs/TRY-IT.md](docs/TRY-IT.md) is a 10-minute
+check from install to two agents talking to each other.
+
 1. Open a folder. The Agents panel opens on the right.
 2. Pick **Demo** and type `tour` to try it offline: a plan, an edit you review as
    a diff, a command you approve, an image. Accept is Ctrl/Cmd+Alt+Y and Reject
