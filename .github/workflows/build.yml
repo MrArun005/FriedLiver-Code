@@ -57,8 +57,9 @@ jobs:
       - run: npm ci
       - run: node code/scripts/fetch.mjs
       - run: node code/scripts/prepare.mjs
-      # Downloads the Node version upstream's .nvmrc asks for, installs, then runs gulp vscode-<os>-<arch>-min.
-      - run: node code/scripts/build.mjs --package
+      # Downloads the Node version upstream's .nvmrc asks for, installs, runs gulp vscode-<os>-<arch>-min,
+      # then makes the installer: per-user setup .exe, .dmg or .deb, in code/installers/.
+      - run: node code/scripts/build.mjs --package --installer
 
       - name: Archive (Linux)
         if: runner.os == 'Linux'
@@ -66,18 +67,23 @@ jobs:
       - name: Archive (macOS)
         if: runner.os == 'macOS'
         run: |
+          # build.mjs already ad-hoc signed the app for the .dmg.
           app=$(ls -d code/VSCode-${{ matrix.target }}/*.app | head -1)
-          # Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
-          codesign --force --deep --sign - "$app"
           ditto -c -k --keepParent "$app" ${{ matrix.artifact }}.zip
       - name: Archive (Windows)
         if: runner.os == 'Windows'
         run: Compress-Archive -Path code/VSCode-${{ matrix.target }}/* -DestinationPath ${{ matrix.artifact }}.zip
 
+      # Portable app (unzip and run) and the installer, as separate downloads.
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-installer
+          path: code/installers/*
           if-no-files-found: error
