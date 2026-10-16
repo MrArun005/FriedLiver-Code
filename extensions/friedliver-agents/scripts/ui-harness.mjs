@@ -250,6 +250,31 @@ async function shoot() {
     check((await posted(p)).some((m) => m.type === 'select' && m.chatId === ids.center), 'All chats searches and selects');
     await p.close();
   }
+  {
+    // Code references from the editor: a chip on the message, and Add Selection to Chat in the composer.
+    const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
+    const file = '/home/dev/inventory-app/src/format.ts';
+    await p.click('.bubble .code-ref button.ref:has-text("format.ts:12–18")');
+    check((await posted(p)).some((m) => m.type === 'openFile' && m.path === file && m.line === 12 && m.endLine === 18), 'a code reference chip opens its lines');
+    await p.close();
+  }
+  {
+    // An idle chat, so its composer can send.
+    const p = await open('surface=chat&side=1&select=chat-c5', 400, 900);
+    const file = '/home/dev/inventory-app/src/format.ts';
+    await p.evaluate((ref) => window.postMessage({ type: 'addRef', chatId: 'chat-c5', ref }, '*'), { path: file, startLine: 3, endLine: 5 });
+    await p.waitForSelector('.composer .code-ref');
+    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'adding a reference focuses the composer');
+    await p.evaluate((ref) => window.postMessage({ type: 'addRef', chatId: 'chat-c5', ref }, '*'), { path: file, startLine: 3, endLine: 5 });
+    await p.waitForTimeout(50);
+    check((await p.locator('.composer .code-ref').count()) === 1, 'the same reference is added once');
+    await p.keyboard.type('Is this the rounding bug?');
+    await p.keyboard.press('Enter');
+    const sent = (await posted(p)).find((m) => m.type === 'send');
+    check(sent?.text === 'Is this the rounding bug?' && sent.refs?.[0]?.startLine === 3 && sent.refs[0].endLine === 5, 'the message carries the reference');
+    check((await p.locator('.composer .code-ref').count()) === 0, 'sending clears the composer’s references');
+    await p.close();
+  }
 
   await browser.close();
   if (problems.length) {

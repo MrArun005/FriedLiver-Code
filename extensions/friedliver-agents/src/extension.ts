@@ -7,6 +7,7 @@ import { ActionBatcher } from './host/batch';
 import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
+import { EditorAgent } from './host/editor';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { StateFile } from './host/persist';
@@ -15,10 +16,12 @@ import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, type Script, type Surface } from './host/webviews';
-import { LIMITS, type Attachment, type WebviewMessage } from './shared/messages';
-import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type NoticeAction } from './shared/model';
+import { LIMITS, type Attachment, type HostMessage, type WebviewMessage } from './shared/messages';
+import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type NoticeAction } from './shared/model';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** How long a code reference for a composer waits for a chat view to load. */
+const COMPOSER_WAIT_MS = 10_000;
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 
 let controller: Controller | undefined;
@@ -59,6 +62,8 @@ export class Controller {
   readonly core: AgentCore;
   readonly reviews: ReviewUi;
   readonly accounts: Accounts;
+  /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
+  editor?: EditorAgent;
   readonly log = vscode.window.createOutputChannel('FriedLiver Agents', { log: true });
   private readonly surfaces = new Set<Surface>();
   private readonly statusItem = vscode.window.createStatusBarItem('friedliver.decisions', vscode.StatusBarAlignment.Right, 100);
@@ -78,6 +83,8 @@ export class Controller {
   /** This folder's saved chats; unset when restoring is off or no folder is open. */
   private stateFile?: StateFile;
   private warnedAgentToAgent = false;
+  /** References for a composer, sent again to a chat view that (re)loads soon after; the view drops duplicates. */
+  private composerRefs: { message: HostMessage; until: number }[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.accounts = new Accounts(
@@ -100,7 +107,7 @@ export class Controller {
       },
       log: (line) => this.log.info(line),
       ui: {
-        showReview: (review) => void this.reviews.show(review),
+        showReview: (review) => void this.reviews.show(review, this.editor?.reviewPlacement(review)),
         closeReview: (id) => void this.reviews.close(id),
         askCommand: (ask) => void this.askCommand(ask),
         askPermission: (ask) => void this.askPermission(ask),
@@ -181,6 +188,14 @@ export class Controller {
     command('friedliver.consult', (chatId?: unknown) => this.consultCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.fanout', () => this.fanoutCommand());
     command('friedliver.pipe', (chatId?: unknown) => this.pipeCommand(typeof chatId === 'string' ? chatId : undefined));
+    this.editor = new EditorAgent(context, {
+      core: this.core,
+      showChat: (chatId, revealItem) => this.showChat(chatId, revealItem),
+      currentChat: () => this.lastSelected,
+      addToComposer: (chatId, ref) => this.addToComposer(chatId, ref),
+      error: (err) => this.error(err),
+    });
+    context.subscriptions.push(this.editor);
     this.updateDecisions();
   }
 
@@ -299,6 +314,10 @@ export class Controller {
           this.batcher.flush();
           surface.ready = true;
           post(surface, { type: 'snapshot', state: this.core.snapshot, selected: surface.selected ?? this.lastSelected, now: Date.now() });
+          if (surface.kind === 'chat') {
+            this.composerRefs = this.composerRefs.filter((r) => r.until > Date.now());
+            for (const r of this.composerRefs) post(surface, r.message);
+          }
           return;
         case 'newChat':
           await this.newChat(m.agent, surface);
@@ -307,9 +326,12 @@ export class Controller {
           surface.selected = m.chatId;
           this.lastSelected = m.chatId;
           return;
-        case 'send':
-          void this.core.send(m.chatId, m.text, m.images).catch((err: unknown) => this.error(err));
+        case 'send': {
+          const extra = m.refs && (await this.editor?.referencesFor(m.chatId, m.refs));
+          if (!extra && !m.text.trim() && !m.images.length) return;
+          void this.core.send(m.chatId, m.text, m.images, extra || undefined).catch((err: unknown) => this.error(err));
           return;
+        }
         case 'stop':
           await this.core.cancel(m.chatId);
           return;
@@ -337,7 +359,7 @@ export class Controller {
           return;
         case 'openFile': {
           const file = insideRoots(m.path, this.core.roots());
-          if (file) await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true });
+          if (file) await (this.editor ? this.editor.open(file, m.line, m.endLine) : vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true }));
           return;
         }
         case 'createTask': {
@@ -405,6 +427,17 @@ export class Controller {
     } catch (err) {
       this.error(err);
     }
+  }
+
+  /**
+   * Puts a code reference into a chat's composer. A view that is still loading
+   * gets it once it is ready, and so does one that reloads in the next seconds
+   * (a hidden view loses its content); the view ignores one it already has.
+   */
+  private addToComposer(chatId: string, ref: CodeRef): void {
+    const message: HostMessage = { type: 'addRef', chatId, ref };
+    for (const s of this.chatSurfaces()) if (s.visible()) post(s, message);
+    this.composerRefs = [...this.composerRefs.filter((r) => r.until > Date.now()), { message, until: Date.now() + COMPOSER_WAIT_MS }];
   }
 
   /** Shows a chat on the surface that asked for it. */

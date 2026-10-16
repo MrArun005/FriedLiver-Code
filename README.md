@@ -96,7 +96,7 @@ check from install to two agents talking to each other.
 The command palette has the rest under "FriedLiver": Agent Manager (Tasks), Run
 a Task on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a
 Chat's Replies to Another Chat, Go to Next Decision, Move Agents to the Center
-(Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents.
+(Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents, and the editor commands below.
 `friedliver.connections.agentToAgent` (ask, allow or off; user settings only)
 decides whether agents may reach each other.
 
@@ -104,6 +104,25 @@ The program each agent runs (`friedliver.agents.<agent>.command` and `.args`)
 is read from your user settings only, never from a workspace's
 `.vscode/settings.json`. API keys stay in the editor's secret storage and go
 only to their own vendor's agent.
+
+### Agents in the editor
+
+Agents also work right where the code is, with the same reviewed diffs and
+approved commands ([details](docs/EDITOR.md)):
+
+- **Edit with Agent** (Ctrl/Cmd+I, or right-click): select code, describe the
+  change, and the edit opens there as a diff to accept or reject. Start with
+  `@claude`, `@gpt`, `@gemini` or `@demo` to pick the agent; otherwise it's
+  the one you last used for edits. Errors and warnings get **Fix with Agent**
+  in their quick fixes.
+- **Ask About Selection** sends your question with the code to a chat, and
+  **Add Selection to Chat** puts the code in its message box. The code shows
+  as a chip (`format.ts:12–18`) that opens those lines.
+- **Review My Changes** (Source Control title bar) gives an agent your
+  uncommitted diff in a new "Review: \<branch\>" chat. Say "fix it" there to
+  get the fixes as reviewed edits.
+
+With the Demo agent, try `@demo uppercase` on a selection.
 
 ### In VS Code or Antigravity instead
 
@@ -136,7 +155,7 @@ prerequisites per OS, time, disk and memory: [docs/BUILD.md](docs/BUILD.md).
 | `extensions/friedliver-theme/` | Color themes generated from `palette.json`, and the workbench defaults |
 | `agent-core/` | The ACP client the agents extension bundles, and the offline Demo agent ([README](agent-core/README.md)) |
 | `scripts/` | `fetch`, `prepare`, `build`, `dev`, `screenshot`, `check-upstream` (plain Node, any OS); `checksums.json` pins downloads that publish no checksums |
-| `docs/` | [BUILD.md](docs/BUILD.md), [DEFAULTS.md](docs/DEFAULTS.md), [memory-plan.md](docs/memory-plan.md), [benchmarks.md](docs/benchmarks.md) |
+| `docs/` | [BUILD.md](docs/BUILD.md), [DEFAULTS.md](docs/DEFAULTS.md), [EDITOR.md](docs/EDITOR.md), [memory-plan.md](docs/memory-plan.md), [benchmarks.md](docs/benchmarks.md) |
 | `SECURITY.md` | Threat model, how to report a vulnerability, audit findings |
 
 Patches:

@@ -107,6 +107,22 @@ export async function headContent(root: string, relPath: string): Promise<string
   }
 }
 
+/**
+ * Staged and unstaged changes to tracked files, as one patch against HEAD (or,
+ * before the first commit, what is staged followed by what isn't). External
+ * diff programs and textconv filters stay off: a repository's config or
+ * `.gitattributes` would otherwise run them.
+ */
+export async function workingDiff(root: string): Promise<string> {
+  const opts = ['--no-color', '--no-ext-diff', '--no-textconv', '-M'];
+  const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD']).then(
+    () => true,
+    () => false,
+  );
+  if (head) return git(root, ['diff', ...opts, 'HEAD', '--']);
+  return (await git(root, ['diff', '--cached', ...opts, '--'])) + (await git(root, ['diff', ...opts, '--']));
+}
+
 /** Stages everything and commits. Returns the short commit hash. */
 export async function commitAll(root: string, message: string): Promise<string> {
   if (!message.trim()) throw new Error('Write a commit message first.');

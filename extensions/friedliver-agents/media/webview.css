@@ -444,6 +444,41 @@ button.ref:hover:not(:disabled) {
   color: var(--fg);
   border-color: var(--line-strong);
 }
+/* Code references from the editor: a message's, and the composer's before sending. */
+.refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  white-space: normal;
+}
+.bubble-text + .refs {
+  margin-top: 6px;
+}
+.composer > .refs {
+  padding: var(--sp-2) var(--sp-3) 0;
+}
+.code-ref {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 2px;
+}
+.code-ref button.ref {
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-ref .ref .icon {
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+.code-ref .badge-x {
+  margin-right: 0;
+  color: var(--muted);
+}
 
 /* Badges: links between chats, shared files. */
 .badge {

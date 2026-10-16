@@ -147,6 +147,32 @@
         "command": "friedliver.pipe",
         "title": "Pipe a Chat's Replies to Another Chat",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.editSelection",
+        "title": "Edit with Agent",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.askSelection",
+        "title": "Ask About Selection",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.addSelectionToChat",
+        "title": "Add Selection to Chat",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.reviewChanges",
+        "title": "Review My Changes",
+        "category": "FriedLiver",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "friedliver.edit.stop",
+        "title": "Stop Editing with Agent",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
@@ -203,10 +229,44 @@
         {
           "command": "friedliver.accounts.check",
           "when": "false"
+        },
+        {
+          "command": "friedliver.edit.stop",
+          "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "friedliver.editSelection",
+          "when": "resourceScheme == file && !editorReadonly",
+          "group": "friedliver@1"
+        },
+        {
+          "command": "friedliver.askSelection",
+          "when": "resourceScheme == file",
+          "group": "friedliver@2"
+        },
+        {
+          "command": "friedliver.addSelectionToChat",
+          "when": "resourceScheme == file",
+          "group": "friedliver@3"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "friedliver.reviewChanges",
+          "when": "scmProvider == git",
+          "group": "navigation@9"
         }
       ]
     },
     "keybindings": [
+      {
+        "command": "friedliver.editSelection",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorTextFocus && !editorReadonly && resourceScheme == file && !inlineChatHasProvider && !inlineChatHasEditsAgent"
+      },
       {
         "command": "friedliver.review.accept",
         "key": "ctrl+alt+y",
@@ -275,6 +335,16 @@
           "light": "#4450c4",
           "highContrast": "#a9b4ff",
           "highContrastLight": "#4450c4"
+        }
+      },
+      {
+        "id": "friedliver.agentEditBackground",
+        "description": "Background of the lines an agent is working on after Edit with Agent.",
+        "defaults": {
+          "dark": "#b6a6ff14",
+          "light": "#6447d10f",
+          "highContrast": "#b6a6ff26",
+          "highContrastLight": "#6447d11a"
         }
       }
     ],
@@ -368,6 +438,24 @@
           "type": "boolean",
           "default": true,
           "description": "Bring this folder's chats back when the window opens again. They are kept in the editor's storage for the folder, without images, API keys or tokens. Turning this off deletes the saved chats."
+        },
+        "friedliver.edit.defaultAgent": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "gemini",
+            "demo"
+          ],
+          "enumItemLabels": [
+            "Claude",
+            "Codex (GPT)",
+            "Gemini",
+            "Demo"
+          ],
+          "default": "claude",
+          "scope": "machine",
+          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @gpt, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
         }
       }
     },
@@ -436,6 +524,18 @@
             },
             "completionEvents": [
               "onStepSelected"
+            ]
+          },
+          {
+            "id": "editInPlace",
+            "title": "Edit code where it is",
+            "description": "Select code and press **Ctrl/Cmd+I** (or right-click, **Edit with Agent**), then describe the change. The edit opens right there as a diff you accept or reject. Right-click also has **Ask About Selection**, and Source Control has **Review My Changes**.\n[Edit with Agent](command:friedliver.editSelection)",
+            "media": {
+              "svg": "media/walkthrough/edit-in-place.svg",
+              "altText": "Lines selected in format.ts, the Edit with Claude box asking for the change, and the status bar saying Claude is editing format.ts."
+            },
+            "completionEvents": [
+              "onCommand:friedliver.editSelection"
             ]
           }
         ]

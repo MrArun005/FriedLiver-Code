@@ -34,7 +34,9 @@ An agent can:
 - Read files in the open workspace folders and its task worktree. It sees
   unsaved editor text the way you do.
 - Propose a write. It opens as a diff and is written only if you accept, with
-  the content you leave in the diff. You can undo the latest turn.
+  the content you leave in the diff. You can undo the latest turn. Edits you
+  ask for from the editor (Edit with Agent, Fix with Agent; docs/EDITOR.md)
+  are ordinary chat turns and go through the same review.
 - Ask to run a command. It runs only after you approve it. You see the whole
   command line, including any environment variables the agent sets, with
   invisible and direction-changing characters spelled out.
@@ -91,7 +93,12 @@ It can't:
 - Lead agents out of the workspace through symlinks.
 - Get a planted `claude-agent-acp.exe`, `node.exe` or `git.exe` run in place of
   the real one on Windows.
-- Run a program through FriedLiver's own git calls via `core.fsmonitor`.
+- Run a program through FriedLiver's own git calls via `core.fsmonitor`, or,
+  for Review My Changes, through an external diff program or a textconv
+  filter (`--no-ext-diff --no-textconv`).
+- Choose which agent gets your code from Edit with Agent.
+  `friedliver.edit.defaultAgent` is machine-scoped and read from your user
+  settings only.
 
 ### What a malicious agent can and can't do
 

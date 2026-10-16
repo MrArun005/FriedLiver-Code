@@ -1,6 +1,6 @@
 // Messages between the webviews and the extension host. Webview content is
 // treated as untrusted: every message is checked here before it is acted on.
-import { isAgentKey, type Action, type AgentKey, type AppState, type NoticeAction } from './model';
+import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 
 export interface Attachment {
   name: string;
@@ -13,7 +13,8 @@ export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'newChat'; agent: AgentKey }
   | { type: 'select'; chatId: string }
-  | { type: 'send'; chatId: string; text: string; images: Attachment[] }
+  /** `refs`: code from the editor the message is about (Add Selection to Chat); optional. */
+  | { type: 'send'; chatId: string; text: string; images: Attachment[]; refs?: CodeRef[] }
   | { type: 'stop'; chatId: string }
   | { type: 'permission'; requestId: string; optionId: string | null }
   | { type: 'review'; reviewId: string; action: 'open' | 'accept' | 'reject' }
@@ -21,7 +22,8 @@ export type WebviewMessage =
   | { type: 'undo'; chatId: string; turnId: string }
   | { type: 'notice'; chatId: string; action: NoticeAction }
   | { type: 'attach' }
-  | { type: 'openFile'; path: string }
+  /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
+  | { type: 'openFile'; path: string; line?: number; endLine?: number }
   | { type: 'createTask'; agent: AgentKey; prompt: string; worktree: boolean }
   | { type: 'openChat'; chatId: string }
   | { type: 'merge'; chatId: string }
@@ -55,7 +57,9 @@ export type HostMessage =
   | { type: 'actions'; actions: Action[] }
   | { type: 'select'; chatId: string }
   | { type: 'attached'; images: Attachment[] }
-  | { type: 'reveal'; chatId: string; id: string };
+  | { type: 'reveal'; chatId: string; id: string }
+  /** Put a code reference into that chat's composer, to go with the next message. */
+  | { type: 'addRef'; chatId: string; ref: CodeRef };
 
 export const LIMITS = {
   text: 100_000,
@@ -66,6 +70,10 @@ export const LIMITS = {
   command: 4096,
   /** Agents one fan-out may start: each vendor once, plus the demo. */
   fanout: 4,
+  /** Code references one message may carry. */
+  refs: 10,
+  /** Highest line number a reference may name. */
+  line: 10_000_000,
 };
 
 export const IMAGE_MIME = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -84,6 +92,13 @@ function attachment(v: unknown): Attachment | null {
   if (!str(name, 256) || typeof mimeType !== 'string' || !IMAGE_MIME.test(mimeType)) return null;
   if (!str(data, LIMITS.imageData) || !data || !BASE64.test(data)) return null;
   return { name, mimeType, data };
+}
+
+const line = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= LIMITS.line;
+
+function codeRef(v: unknown): CodeRef | null {
+  if (!isObj(v) || !str(v.path, LIMITS.path) || !v.path || !line(v.startLine) || !line(v.endLine) || v.endLine < v.startLine) return null;
+  return { path: v.path, startLine: v.startLine, endLine: v.endLine };
 }
 
 function noticeAction(v: unknown): NoticeAction | null {
@@ -153,8 +168,11 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       if (!id(m.chatId) || !str(m.text, LIMITS.text) || !Array.isArray(m.images) || m.images.length > LIMITS.images) return null;
       const images = m.images.map(attachment);
       if (images.some((i) => i === null)) return null;
-      if (!m.text.trim() && images.length === 0) return null;
-      return { type: 'send', chatId: m.chatId, text: m.text, images: images as Attachment[] };
+      if (m.refs !== undefined && (!Array.isArray(m.refs) || m.refs.length > LIMITS.refs)) return null;
+      const refs = m.refs === undefined ? [] : m.refs.map(codeRef);
+      if (refs.some((r) => r === null)) return null;
+      if (!m.text.trim() && images.length === 0 && refs.length === 0) return null;
+      return { type: 'send', chatId: m.chatId, text: m.text, images: images as Attachment[], ...(refs.length ? { refs: refs as CodeRef[] } : {}) };
     }
     case 'permission':
       return id(m.requestId) && (m.optionId === null || id(m.optionId)) ? { type: 'permission', requestId: m.requestId, optionId: m.optionId } : null;
@@ -171,7 +189,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.chatId) && action ? { type: 'notice', chatId: m.chatId, action } : null;
     }
     case 'openFile':
-      return str(m.path, LIMITS.path) && m.path ? { type: 'openFile', path: m.path } : null;
+      if (!str(m.path, LIMITS.path) || !m.path) return null;
+      if (m.line === undefined) return { type: 'openFile', path: m.path };
+      if (!line(m.line) || (m.endLine !== undefined && (!line(m.endLine) || m.endLine < m.line))) return null;
+      return { type: 'openFile', path: m.path, line: m.line, ...(m.endLine !== undefined ? { endLine: m.endLine } : {}) };
     case 'createTask':
       return isAgentKey(m.agent) && str(m.prompt, LIMITS.text) && m.prompt.trim() && typeof m.worktree === 'boolean'
         ? { type: 'createTask', agent: m.agent, prompt: m.prompt, worktree: m.worktree }

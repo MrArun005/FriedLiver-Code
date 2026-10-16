@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 320" fill="none" role="img" aria-label="Lines selected in format.ts, the Edit with Claude box asking to describe the change, and the status bar saying Claude is editing format.ts">
+	<rect width="520" height="320" rx="14" fill="var(--vscode-editor-background, #060a12)"/>
+	<rect x="16" y="12" width="104" height="26" rx="7" fill="var(--vscode-tab-activeBackground, #111a29)"/>
+	<text x="30" y="29" font-size="12" fill="var(--vscode-tab-activeForeground, #e4ecfa)">format.ts</text>
+	<g font-size="12" font-family="var(--vscode-editor-font-family, monospace)">
+		<text x="28" y="132" text-anchor="end" fill="var(--vscode-editorLineNumber-foreground, #8092b0)">1</text>
+		<text x="28" y="152" text-anchor="end" fill="var(--vscode-editorLineNumber-foreground, #8092b0)">2</text>
+		<rect x="36" y="160" width="468" height="60" rx="3" fill="var(--vscode-friedliver-agentEditBackground, #b6a6ff14)"/>
+		<rect x="36" y="160" width="2" height="60" fill="var(--vscode-progressBar-background, #b6a6ff)"/>
+		<text x="28" y="172" text-anchor="end" fill="var(--vscode-editorLineNumber-activeForeground, #e4ecfa)">3</text>
+		<text x="28" y="192" text-anchor="end" fill="var(--vscode-editorLineNumber-activeForeground, #e4ecfa)">4</text>
+		<text x="28" y="212" text-anchor="end" fill="var(--vscode-editorLineNumber-activeForeground, #e4ecfa)">5</text>
+		<text x="28" y="232" text-anchor="end" fill="var(--vscode-editorLineNumber-foreground, #8092b0)">6</text>
+		<text x="46" y="132" fill="var(--vscode-editor-foreground, #e4ecfa)">export function formatCents(cents: number) {</text>
+		<text x="60.4" y="152" fill="var(--vscode-editor-foreground, #e4ecfa)">const units = Math.floor(cents / 100);</text>
+		<text x="60.4" y="172" fill="var(--vscode-editor-foreground, #e4ecfa)">const rest = String(cents % 100);</text>
+		<text x="60.4" y="192" fill="var(--vscode-editor-foreground, #e4ecfa)">return '$' + units + '.' +</text>
+		<text x="74.8" y="212" fill="var(--vscode-editor-foreground, #e4ecfa)">rest.padStart(2, '0');</text>
+		<text x="46" y="232" fill="var(--vscode-editor-foreground, #e4ecfa)">}</text>
+	</g>
+	<rect x="96" y="46" width="328" height="64" rx="10" fill="var(--vscode-quickInput-background, #0a101b)" stroke="var(--vscode-widget-border, #26354f)"/>
+	<text x="260" y="64" text-anchor="middle" font-size="11" fill="var(--vscode-descriptionForeground, #8092b0)">Edit with Claude · format.ts:3–5</text>
+	<rect x="106" y="74" width="308" height="26" rx="6" fill="var(--vscode-input-background, #03060b)" stroke="var(--vscode-focusBorder, #7cc4ff)"/>
+	<text x="116" y="91" font-size="12" fill="var(--vscode-input-foreground, #e4ecfa)">keep the sign for negative amounts</text>
+	<path d="M0 288h520v18a14 14 0 0 1-14 14H14A14 14 0 0 1 0 306z" fill="var(--vscode-statusBar-background, #0a101b)"/>
+	<circle cx="26" cy="304" r="5" stroke="var(--vscode-progressBar-background, #b6a6ff)" stroke-width="1.6" stroke-dasharray="20 8"/>
+	<text x="38" y="308" font-size="12" fill="var(--vscode-statusBar-foreground, #aab9d3)">Claude is editing format.ts…</text>
+	<text x="500" y="308" text-anchor="end" font-size="11" fill="var(--vscode-descriptionForeground, #8092b0)">the edit opens as a diff to accept or reject</text>
+</svg>

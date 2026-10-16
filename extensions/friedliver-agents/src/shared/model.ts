@@ -126,8 +126,19 @@ export interface LinkItem {
   by: 'user' | 'agent';
 }
 
+/**
+ * Code a message is about: lines of a file, 1-based and inclusive. The path is
+ * absolute, like a review's. Chats show it as a chip that opens the lines.
+ */
+export interface CodeRef {
+  path: string;
+  startLine: number;
+  endLine: number;
+}
+
 export type Item =
-  | { kind: 'user'; text: string; images: string[] }
+  /** `refs` (optional, added with the editor commands) is the code the message points at. */
+  | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[] }
   | { kind: 'agent'; text: string }
   | { kind: 'thought'; text: string }
   | { kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[] }
@@ -441,7 +452,7 @@ export function fileConflicts(state: Pick<AppState, 'chats'>): FileConflict[] {
 }
 
 /** Names people type after @ to reach an agent. */
-const MENTIONS: Record<string, AgentKey> = {
+export const MENTIONS: Record<string, AgentKey> = {
   claude: 'claude',
   codex: 'codex',
   gpt: 'codex',

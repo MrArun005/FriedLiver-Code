@@ -13,6 +13,7 @@ import {
   type AppState,
   type BridgeItem,
   type ChatView,
+  type CodeRef,
   type CommandItem,
   type FileConflict,
   type Item,
@@ -34,6 +35,7 @@ import {
 } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, Markdown, Popover, basename, send, useHost, useWidth } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
+import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -43,9 +45,16 @@ type Select = (chatId: string) => void;
 function App() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
+  // Code references waiting in each chat's composer (Add Selection to Chat).
+  const [refs, setRefs] = useState<Record<string, CodeRef[]>>({});
+  const [focusTick, setFocusTick] = useState(0);
   const { state, selected, setSelected } = useHost((m) => {
     if (m.type === 'attached') setAttachments((list) => [...list, ...m.images].slice(0, 10));
     if (m.type === 'reveal') setReveal((r) => ({ id: m.id, n: (r?.n ?? 0) + 1 }));
+    if (m.type === 'addRef') {
+      setRefs((all) => (all[m.chatId]?.some((r) => sameRef(r, m.ref)) ? all : { ...all, [m.chatId]: [...(all[m.chatId] ?? []), m.ref].slice(-10) }));
+      setFocusTick((n) => n + 1);
+    }
   });
   // The selected chat even when archived (opened from History); otherwise the newest open one.
   const chat = state.chats.find((c) => c.id === selected) ?? openChats(state.chats).at(-1);
@@ -62,7 +71,14 @@ function App() {
         <>
           <ChatHeader chat={chat} state={state} onSelect={select} />
           <Transcript chat={chat} state={state} reveal={reveal} onSelect={select} />
-          <Composer chat={chat} attachments={attachments} setAttachments={setAttachments} />
+          <Composer
+            chat={chat}
+            attachments={attachments}
+            setAttachments={setAttachments}
+            refs={refs[chat.id] ?? []}
+            setRefs={(fn) => setRefs((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
+            focusTick={focusTick}
+          />
         </>
       ) : (
         <Empty />
@@ -430,6 +446,7 @@ function ItemView({
       return (
         <div class="bubble">
           {item.text && <div class="bubble-text">{item.text}</div>}
+          <RefList refs={refsOf(item)} cwd={chat.cwd} />
           {item.images.length > 0 && (
             <div class="thumbs">
               {item.images.map((id) => {
@@ -795,14 +812,28 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
   );
 }
 
-function Composer({ chat, attachments, setAttachments }: { chat: ChatView; attachments: Attachment[]; setAttachments(fn: (a: Attachment[]) => Attachment[]): void }) {
+function Composer({
+  chat,
+  attachments,
+  setAttachments,
+  refs,
+  setRefs,
+  focusTick,
+}: {
+  chat: ChatView;
+  attachments: Attachment[];
+  setAttachments(fn: (a: Attachment[]) => Attachment[]): void;
+  refs: CodeRef[];
+  setRefs(fn: (r: CodeRef[]) => CodeRef[]): void;
+  focusTick: number;
+}) {
   const [text, setText] = useState('');
   const [caret, setCaret] = useState(0);
   const [pick, setPick] = useState(0);
   const [shut, setShut] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
-  useEffect(() => area.current?.focus(), [chat.id]);
+  useEffect(() => area.current?.focus(), [chat.id, focusTick]);
 
   // "@" at the very start picks an agent to ask; the answer comes back into this chat.
   const query = shut ? null : mentionQuery(text, caret);
@@ -816,18 +847,20 @@ function Composer({ chat, attachments, setAttachments }: { chat: ChatView; attac
     setText('');
     setCaret(0);
     setAttachments(() => []);
+    setRefs(() => []);
   };
+  const withRefs = refs.length ? { refs } : {};
   const submit = () => {
     if (asking) {
       if (!question) return;
       // Images go with an ordinary message; the host reads the leading @ there too.
-      if (attachments.length) send({ type: 'send', chatId: chat.id, text: text.trim(), images: attachments });
+      if (attachments.length || refs.length) send({ type: 'send', chatId: chat.id, text: text.trim(), images: attachments, ...withRefs });
       else send({ type: 'consult', chatId: chat.id, agent: question.agent, text: question.text });
       reset();
       return;
     }
-    if (chat.busy || (!text.trim() && attachments.length === 0)) return;
-    send({ type: 'send', chatId: chat.id, text: text.trim(), images: attachments });
+    if (chat.busy || (!text.trim() && attachments.length === 0 && refs.length === 0)) return;
+    send({ type: 'send', chatId: chat.id, text: text.trim(), images: attachments, ...withRefs });
     reset();
   };
   const choose = (o: (typeof options)[number]) => {
@@ -854,7 +887,7 @@ function Composer({ chat, attachments, setAttachments }: { chat: ChatView; attac
     }
   };
 
-  const canSend = asking ? !!question : !chat.busy && (!!text.trim() || attachments.length > 0);
+  const canSend = asking ? !!question : !chat.busy && (!!text.trim() || attachments.length > 0 || refs.length > 0);
   return (
     <div
       class="composer"
@@ -889,6 +922,7 @@ function Composer({ chat, attachments, setAttachments }: { chat: ChatView; attac
           ))}
         </div>
       )}
+      <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
       {attachments.length > 0 && (
         <div class="thumbs">
           {attachments.map((a, i) => (
