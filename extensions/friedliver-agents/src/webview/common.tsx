@@ -217,6 +217,7 @@ const ICONS = {
   history: 'M2.75 8a5.25 5.25 0 1 0 1.55-3.7M2.75 2.75v2.5h2.5M8 5.25V8l2 1.5',
   grid: 'M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z',
   keep: 'M3.5 8.5l3 3 6-7',
+  code: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5',
 };
 export type IconName = keyof typeof ICONS;
 

@@ -1,16 +1,19 @@
 // Drives the demo agent through the real editor: chat, edit review in the
 // diff editor, command approval, undo, then a task in its own worktree that
 // is merged into main, then connected chats: a hand-off, an @mention, and an
-// agent asking another through the FriedLiver tools. Takes screenshots when
+// agent asking another through the FriedLiver tools, then the editor commands:
+// Edit with Agent on a selection, Ask About Selection, a code reference from
+// the composer, Review My Changes and Fix with Agent. Takes screenshots when
 // an X display is available.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import type { Controller } from '../extension';
+import type { EditOutcome } from '../host/editFlow';
 import type { Surface } from '../host/webviews';
-import { lastReply } from '../shared/model';
+import { lastReply, type ChatView } from '../shared/model';
 
 const shots = process.env.FRIEDLIVER_SCREENSHOTS;
 const workspace = process.env.FRIEDLIVER_WORKSPACE!;
@@ -111,6 +114,8 @@ export async function run(): Promise<void> {
   await c.handle(fake, { type: 'bridge', requestId: c.core.decisions()[0].id, answer: 'allow' });
   await waitFor(() => lastReply(c.core.chat(main)!).startsWith('Demo says:'), 'the answer through the FriedLiver tools', 30_000);
 
+  await editorCommands(c, fake, main, step);
+
   step('center panel and images');
   await c.moveToCenter();
   await pause(1500);
@@ -120,6 +125,71 @@ export async function run(): Promise<void> {
   await pause(1200);
   await screenshot('08-images');
   step('all passed');
+}
+
+/** Edit with Agent, Ask About Selection, references, Review My Changes and Fix with Agent, with the demo agent. */
+async function editorCommands(c: Controller, fake: Surface, askChat: string, step: (text: string) => void): Promise<void> {
+  step('Edit with Agent on a selection');
+  const src = path.join(workspace, 'src', 'format.ts');
+  await mkdir(path.dirname(src), { recursive: true });
+  await writeFile(src, 'export function format(name: string) {\n  const greeting = "hello";\n  return `${greeting}, ${name}`;\n}\n');
+  const doc = await vscode.workspace.openTextDocument(src);
+  const editor = await vscode.window.showTextDocument(doc);
+  editor.selection = new vscode.Selection(1, 0, 2, doc.lineAt(2).text.length);
+  const edited = vscode.commands.executeCommand<EditOutcome | undefined>('friedliver.editSelection', { instruction: 'uppercase', agent: 'demo' });
+  await waitFor(() => c.core.decisions()[0]?.kind === 'review', 'the edit to review');
+  const reviewId = c.core.decisions()[0].id;
+  await waitFor(() => c.reviews.activeReviewId() === reviewId, 'the diff where the user is looking');
+  // Focused, so Accept and Reject work from the keyboard right away.
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'friedliver-proposed', `the diff to take focus (on ${vscode.window.activeTextEditor?.document.uri.toString()})`, 5000);
+  if ((await readFile(src, 'utf8')).includes('GREETING')) throw new Error('Written before Accept');
+  await pause(800);
+  await screenshot('10-edit-with-agent-review');
+  await vscode.commands.executeCommand('friedliver.review.accept');
+  const outcome = await edited;
+  if (outcome?.reviews[0]?.state !== 'accepted') throw new Error(`Edit not accepted: ${JSON.stringify(outcome)}`);
+  const after = await readFile(src, 'utf8');
+  if (!after.includes('  CONST GREETING = "HELLO";') || !after.startsWith('export function format')) throw new Error(`Wrong edit: ${after}`);
+  const editChat = c.core.chat(outcome.chatId)!;
+  if (editChat.title !== 'uppercase' || !editChat.items.some((i) => i.kind === 'user' && i.refs?.[0]?.startLine === 2)) throw new Error('Edit chat without its title or reference');
+
+  step('Ask About Selection');
+  // The editor shows the accepted edit once VS Code sees the file change.
+  await waitFor(() => doc.getText().includes('CONST GREETING'), 'the editor to show the edit');
+  const again = await vscode.window.showTextDocument(doc);
+  again.selection = new vscode.Selection(0, 0, 0, 10);
+  await vscode.commands.executeCommand('friedliver.askSelection', { question: 'Why export it?', chatId: askChat });
+  const asked = (chat?: ChatView) => chat?.items.some((i) => i.kind === 'user' && i.text === 'Why export it?' && i.refs?.[0]?.path === src);
+  await waitFor(() => !!asked(c.core.chat(askChat)) && !c.core.chat(askChat)!.busy, 'the question with its reference');
+  const answer = lastReply(c.core.chat(askChat)!);
+  if (!answer.includes('src/format.ts:1\n```typescript\nexport function format')) throw new Error(`The agent did not get the code: ${answer}`);
+
+  step('a code reference sent from the composer');
+  await c.handle(fake, { type: 'send', chatId: askChat, text: 'And this?', images: [], refs: [{ path: src, startLine: 3, endLine: 3 }] });
+  await waitFor(() => lastReply(c.core.chat(askChat)!).includes('src/format.ts:3\n```typescript\n  RETURN'), 'the reference read from the file');
+
+  step('Review My Changes');
+  const reviewChat = await vscode.commands.executeCommand<string | undefined>('friedliver.reviewChanges', { agent: 'demo' });
+  if (!reviewChat) throw new Error('No review chat');
+  await waitFor(() => lastReply(c.core.chat(reviewChat)!).includes('I read the diff of'), 'the review');
+  if (c.core.chat(reviewChat)!.title !== 'Review: main') throw new Error(`Review chat is titled ${c.core.chat(reviewChat)!.title}`);
+
+  step('Fix with Agent on a problem');
+  const problems = vscode.languages.createDiagnosticCollection('friedliver-test');
+  const problem = new vscode.Diagnostic(new vscode.Range(1, 2, 1, 7), 'Unexpected const.', vscode.DiagnosticSeverity.Error);
+  problems.set(doc.uri, [problem]);
+  await vscode.window.showTextDocument(doc);
+  const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>('vscode.executeCodeActionProvider', doc.uri, new vscode.Range(1, 3, 1, 3));
+  const fix = actions.find((a) => a.title === 'Fix with Agent');
+  if (!fix?.command?.arguments) throw new Error(`No Fix with Agent: ${actions.map((a) => a.title).join(', ')}`);
+  const fixing = vscode.commands.executeCommand<EditOutcome | undefined>(fix.command.command, ...fix.command.arguments);
+  await waitFor(() => c.core.decisions()[0]?.kind === 'review', 'the fix to review');
+  const proposed = c.core.review(c.core.decisions()[0].id)!.proposed;
+  if (!proposed.includes('  // Fix this error: Unexpected const.')) throw new Error(`Wrong fix: ${proposed}`);
+  await vscode.commands.executeCommand('friedliver.review.reject');
+  if ((await fixing)?.reviews[0]?.state !== 'rejected') throw new Error('Fix not rejected');
+  problems.dispose();
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 }
 
 function pause(ms: number): Promise<void> {

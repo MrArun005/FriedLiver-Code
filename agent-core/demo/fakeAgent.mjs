@@ -9,6 +9,7 @@
 //   "ask <agent> <q>" asks another agent through the session's FriedLiver tools (MCP) and
 //                     replies "<Agent> says: <answer>"; "ask demo hello" needs no sign-in
 //   "chats"           lists FriedLiver's chats through the same tools
+//   an editor request (Edit with Agent, Review My Changes): see editorRequests.mjs
 //   anything else     echoes the text back in two chunks
 // Only the last text block is read as one of these, so context a client puts
 // in front of the message (a hand-off, a consultation) is echoed but ignored.
@@ -25,6 +26,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
+import { editorRequest, handleEditorRequest } from './editorRequests.mjs';
 
 const LOGIN_MARKER = process.env.FAKE_AGENT_LOGIN_MARKER ?? path.join(os.tmpdir(), 'friedliver-demo-login');
 
@@ -419,6 +421,16 @@ acp
       return { stopReason: 'cancelled' };
     }
     if (asked) return { stopReason: await ask(client, sessionId, asked[1], asked[2]) };
+    const fromEditor = editorRequest(texts);
+    if (fromEditor) {
+      await handleEditorRequest(fromEditor, command, {
+        cwd: sessionCwd.get(sessionId) ?? process.cwd(),
+        read: (p) => client.request(acp.methods.client.fs.readTextFile, { sessionId, path: p }).then((r) => r.content),
+        write: (p, content) => client.request(acp.methods.client.fs.writeTextFile, { sessionId, path: p, content }),
+        say: (t) => say(client, sessionId, t),
+      });
+      return { stopReason: 'end_turn' };
+    }
     if (command === 'chats') {
       try {
         await say(client, sessionId, await useTool(sessionId, 'list_chats', {}));

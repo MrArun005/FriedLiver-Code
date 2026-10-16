@@ -55,7 +55,7 @@ export function fixture(now = Date.now()) {
       turns: 1,
       files: ['src/format.ts'],
       items: [
-        user('formatCents breaks on negative values and always uses en-US. Fix it, and keep existing calls working.'),
+        { ...user('formatCents breaks on negative values and always uses en-US. Fix it, and keep existing calls working.'), refs: [{ path: `${ROOT}/src/format.ts`, startLine: 12, endLine: 18 }] },
         plan(['Read format.ts and its callers', 'Keep the sign, add a locale argument', 'Run the format tests', 'Summarize the change'], 1),
         tool('t-c1-1', 'Read src/format.ts', 'completed', [`${ROOT}/src/format.ts`], 'read'),
         tool('t-c1-2', 'Search for formatCents', 'completed', [], 'search'),

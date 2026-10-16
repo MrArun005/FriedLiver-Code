@@ -106,6 +106,12 @@ export function reviewIdOf(uri: vscode.Uri | undefined): string | undefined {
   return uri.path.split('/')[1] || undefined;
 }
 
+/** Where a review's diff opens. */
+export interface ReviewPlacement {
+  viewColumn?: vscode.ViewColumn;
+  focus?: boolean;
+}
+
 /** Agent edits in VS Code's own diff editor: original on the left, the editable proposal on the right. */
 export class ReviewUi implements vscode.Disposable {
   readonly fs = new ProposedFs();
@@ -122,14 +128,18 @@ export class ReviewUi implements vscode.Disposable {
     void vscode.window.tabGroups.close(this.tabs(() => true)).then(undefined, () => {});
   }
 
-  /** Registers the proposal and opens the diff without taking focus from the chat. */
-  async show(review: PendingReview): Promise<void> {
+  /**
+   * Registers the proposal and opens the diff. By default it doesn't take focus
+   * from the chat; an edit asked for from the editor passes where the user is
+   * looking, so the diff opens there, focused, ready for Accept or Reject.
+   */
+  async show(review: PendingReview, placement?: ReviewPlacement): Promise<void> {
     this.fs.set(proposedUri(review.reviewId, review.path), review.proposed, false);
     if (review.before === null) this.fs.set(originalUri(review), '', true);
-    await this.open(review.reviewId, true);
+    await this.open(review.reviewId, !placement?.focus, placement?.viewColumn);
   }
 
-  async open(reviewId: string, preserveFocus = false): Promise<void> {
+  async open(reviewId: string, preserveFocus = false, viewColumn?: vscode.ViewColumn): Promise<void> {
     const review = this.core().review(reviewId);
     if (!review) return;
     const name = path.basename(review.path);
@@ -137,6 +147,7 @@ export class ReviewUi implements vscode.Disposable {
     await vscode.commands.executeCommand('vscode.diff', originalUri(review), proposedUri(reviewId, review.path), title, {
       preview: false,
       preserveFocus,
+      viewColumn,
     } satisfies vscode.TextDocumentShowOptions);
   }
 

@@ -28,6 +28,7 @@ import {
   type AppState,
   type ChatLink,
   type ChatView,
+  type CodeRef,
   type Decision,
   type Item,
   type NoticeAction,
@@ -106,6 +107,16 @@ export interface AccountStatus {
   methods: ReturnType<typeof signInMethods>;
   message?: string;
   installCommand?: string;
+}
+
+/** Extras for a message sent from the editor (src/host/editor.ts). */
+export interface SendOptions {
+  /** Code the message is about, shown as chips with the message. */
+  refs?: CodeRef[];
+  /** Text the agent gets in front of the message but the chat doesn't show: the file, the selection, a diff. */
+  context?: string;
+  /** Names the chat after this rather than its first message. */
+  title?: string;
 }
 
 type Pending<T> = { chatId?: string; resolve(value: T): void };
@@ -296,16 +307,16 @@ export class AgentCore {
    * Sends a message and resolves when the agent's turn ends. A message that
    * starts with an @mention ("@gemini review this") asks that agent instead.
    */
-  async send(chatId: string, text: string, images: Attachment[] = []): Promise<void> {
+  async send(chatId: string, text: string, images: Attachment[] = [], options: SendOptions = {}): Promise<void> {
     const mention = parseMention(text);
     if (mention) {
-      await this.consult(chatId, mention.agent, mention.text, 'user', images);
+      await this.consult(chatId, mention.agent, options.context ? `${mention.text}\n\n${options.context}` : mention.text, 'user', images);
       return;
     }
-    await this.sendMessage(chatId, text, images);
+    await this.sendMessage(chatId, text, images, options);
   }
 
-  private async sendMessage(chatId: string, text: string, images: Attachment[] = []): Promise<void> {
+  private async sendMessage(chatId: string, text: string, images: Attachment[] = [], options: SendOptions = {}): Promise<void> {
     const chat = this.requireChat(chatId);
     if (chat.busy) throw new Error('This chat is still working on the last message.');
     const ids: string[] = [];
@@ -316,9 +327,11 @@ export class AgentCore {
       ids.push(id);
       this.addImage(id, src, img.name || 'Attached image', 'you');
     }
-    if (!chat.items.some((i) => i.kind === 'user' || i.kind === 'link') && text.trim()) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
-    this.items(chatId, [{ kind: 'user', text, images: ids }]);
+    if (options.title) this.dispatch({ t: 'title', chatId, title: titleFrom(options.title) });
+    else if (!chat.items.some((i) => i.kind === 'user' || i.kind === 'link') && text.trim()) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
+    this.items(chatId, [{ kind: 'user', text, images: ids, ...(options.refs?.length ? { refs: options.refs } : {}) }]);
     const blocks: acp.ContentBlock[] = [];
+    if (options.context) blocks.push({ type: 'text', text: options.context });
     if (text) blocks.push({ type: 'text', text });
     for (const img of images) blocks.push({ type: 'image', data: img.data, mimeType: img.mimeType });
     await this.promptBlocks(chatId, blocks);

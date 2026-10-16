@@ -44,6 +44,39 @@ describe('webview message validation', () => {
   });
 });
 
+describe('code references in messages (additive fields)', () => {
+  const ref = { path: '/work/app/src/a.ts', startLine: 3, endLine: 5 };
+
+  it('keeps a message without them exactly as before', () => {
+    expect(parseWebviewMessage({ type: 'send', chatId: 'chat-1', text: 'hi', images: [] })).toEqual({ type: 'send', chatId: 'chat-1', text: 'hi', images: [] });
+    expect(parseWebviewMessage({ type: 'openFile', path: 'src/a.ts' })).toEqual({ type: 'openFile', path: 'src/a.ts' });
+  });
+
+  it('takes well-formed references, also as the whole message', () => {
+    expect(parseWebviewMessage({ type: 'send', chatId: 'chat-1', text: 'why?', images: [], refs: [ref] })).toEqual({ type: 'send', chatId: 'chat-1', text: 'why?', images: [], refs: [ref] });
+    expect(parseWebviewMessage({ type: 'send', chatId: 'chat-1', text: '', images: [], refs: [{ ...ref, extra: 1 }] })).toEqual({ type: 'send', chatId: 'chat-1', text: '', images: [], refs: [ref] });
+    expect(parseWebviewMessage({ type: 'openFile', path: ref.path, line: 3, endLine: 5 })).toEqual({ type: 'openFile', path: ref.path, line: 3, endLine: 5 });
+    expect(parseWebviewMessage({ type: 'openFile', path: ref.path, line: 3 })).toEqual({ type: 'openFile', path: ref.path, line: 3 });
+  });
+
+  it('refuses malformed ones', () => {
+    const bad: unknown[] = [
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: 'a.ts' },
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: [{ ...ref, startLine: 0 }] },
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: [{ ...ref, startLine: 6 }] },
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: [{ ...ref, endLine: 2.5 }] },
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: [{ ...ref, path: '' }] },
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: [{ ...ref, path: 'x'.repeat(5000) }] },
+      { type: 'send', chatId: 'chat-1', text: 'x', images: [], refs: Array.from({ length: 11 }, () => ref) },
+      { type: 'send', chatId: 'chat-1', text: '', images: [], refs: [] },
+      { type: 'openFile', path: 'a.ts', line: -1 },
+      { type: 'openFile', path: 'a.ts', line: '3' },
+      { type: 'openFile', path: 'a.ts', line: 5, endLine: 4 },
+    ];
+    for (const m of bad) expect(parseWebviewMessage(m), JSON.stringify(m).slice(0, 120)).toBeNull();
+  });
+});
+
 describe('workspace path check', () => {
   const roots = ['/work/app', '/work/.app-worktrees/task-1'];
 

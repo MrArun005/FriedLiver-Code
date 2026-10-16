@@ -46,8 +46,12 @@ function messages(chat: ChatView, max: number): string[] {
 
 function messageLine(chat: ChatView, i: Item, max: number): string | null {
   switch (i.kind) {
-    case 'user':
-      return i.text.trim() ? `User: ${clip(i.text, max)}` : null;
+    case 'user': {
+      // Code the message pointed at, by place: the agent that takes over can read it.
+      const refs = (i.refs ?? []).map((r) => `${relativeFile(chat.cwd, r.path)}:${r.startLine === r.endLine ? r.startLine : `${r.startLine}-${r.endLine}`}`);
+      const about = refs.length ? ` (about ${refs.join(', ')})` : '';
+      return i.text.trim() || about ? `User: ${clip(i.text, max)}${about}` : null;
+    }
     case 'link':
       switch (i.role) {
         case 'asked':
