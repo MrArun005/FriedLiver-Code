@@ -169,6 +169,10 @@ body,
 #root {
   height: 100%;
 }
+/* The view never scrolls as a whole (scrollIntoView included): its parts do. */
+html {
+  overflow: hidden;
+}
 body {
   margin: 0;
   padding: 0;
@@ -296,6 +300,8 @@ pre {
 }
 .sr {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
