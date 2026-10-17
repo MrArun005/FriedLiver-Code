@@ -35,6 +35,12 @@ export type BridgeCall =
 
 export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
 
+/**
+ * The caller id of a client outside FriedLiver (the Claude Code extension or CLI) holding the
+ * external token. Never a chat id (those match `chat-<n>`); it may use the browser_* tools only.
+ */
+export const EXTERNAL_CLIENT = ':external';
+
 export const isBrowserCall = (call: BridgeCall): call is BrowserCall => call.tool.startsWith('browser_');
 
 export interface BridgeRequest {

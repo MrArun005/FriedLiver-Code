@@ -11,7 +11,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PROTOCOL_VERSIONS, handle, progress, toolReply, type ToolResult } from './mcp';
-import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
+import { BRIDGE_LIMITS, EXTERNAL_CLIENT, parseCall, type BridgeCall } from './protocol';
 
 export const MCP_PATH = '/mcp';
 
@@ -142,6 +142,8 @@ async function answer(req: IncomingMessage, res: ServerResponse, chatId: string,
   res.on('close', () => {
     if (!res.writableFinished) gone.abort();
   });
+  const external = chatId === EXTERNAL_CLIENT;
+  const handleOne = (m: unknown) => handle(m, external);
   const run = async (handled: Exclude<ReturnType<typeof handle>, null>): Promise<object> => {
     if ('reply' in handled) return handled.reply;
     const call = parseCall(handled.call, handled.args);
@@ -149,11 +151,11 @@ async function answer(req: IncomingMessage, res: ServerResponse, chatId: string,
   };
 
   if (Array.isArray(parsed)) {
-    const handled = parsed.map(handle).filter((h) => h !== null);
+    const handled = parsed.map(handleOne).filter((h) => h !== null);
     if (!handled.length) return send(res, 202);
     return send(res, 200, await Promise.all(handled.map(run)));
   }
-  const handled = handle(parsed);
+  const handled = handleOne(parsed);
   // A notification or a response: nothing to say back.
   if (!handled) return send(res, 202);
   const streams = /\btext\/event-stream\b/.test(req.headers.accept ?? '');

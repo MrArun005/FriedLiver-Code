@@ -2,7 +2,8 @@ import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { HttpTools } from '../src/bridge/http';
-import { BRIDGE_ENV, TOKEN_ENV } from '../src/bridge/protocol';
+import { BROWSER_TOOLS } from '../src/bridge/mcp';
+import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV } from '../src/bridge/protocol';
 import { BridgeServer, type BridgeHandler } from '../src/host/bridge';
 import { lastReply } from '../src/shared/model';
 import { buildBridge, disposeCores, gitRepo, makeCore } from './helpers';
@@ -62,6 +63,31 @@ describe('the FriedLiver tools over HTTP', () => {
     const { url } = await start();
     expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
     expect(await server!.httpUrl()).toBe(url);
+  });
+
+  it('gives the external token the browser tools only, and refuses a missing or wrong token', async () => {
+    const calls: string[] = [];
+    const { url } = await start(async (chatId, call) => (calls.push(`${chatId} ${call.tool}`), 'ok'));
+    const ext = server!.token(EXTERNAL_CLIENT);
+    const listed = json(await post(url, ext, rpc(1, 'tools/list')));
+    expect(listed.result.tools.map((t: { name: string }) => t.name)).toEqual(BROWSER_TOOLS.map((t) => t.name));
+    expect(BROWSER_TOOLS.length).toBeGreaterThan(5);
+    expect(listed.result.tools.every((t: { name: string }) => t.name.startsWith('browser_'))).toBe(true);
+    const refused = json(await post(url, ext, rpc(2, 'tools/call', { name: 'list_chats' }), { accept: 'application/json' }));
+    expect(refused.result).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/not found/) }] });
+    await post(url, ext, rpc(3, 'tools/call', { name: 'browser_snapshot' }), { accept: 'application/json' });
+    expect(calls).toEqual([`${EXTERNAL_CLIENT} browser_snapshot`]);
+    for (const headers of [{ authorization: '' }, { authorization: `Bearer ${'0'.repeat(64)}` }, { authorization: `Bearer ${ext}x` }]) {
+      const a = await request(url, { headers: { ...auth(ext), ...headers }, body: JSON.stringify(rpc(4, 'tools/list')) });
+      expect(a !== 'closed' && a.status).toBe(401);
+    }
+    // A new server (a new launch) mints a new token; the old one stops working.
+    const old = ext;
+    await server!.dispose();
+    const again = await start();
+    expect(server!.token(EXTERNAL_CLIENT)).not.toBe(old);
+    const a = await post(again.url, old, rpc(5, 'tools/list'));
+    expect(a !== 'closed' && a.status).toBe(401);
   });
 
   it('answers what the stdio server answers, byte for byte', async () => {

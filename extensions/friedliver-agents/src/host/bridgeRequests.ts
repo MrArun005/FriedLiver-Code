@@ -1,4 +1,4 @@
-import { isBrowserCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
+import { EXTERNAL_CLIENT, isBrowserCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
 import { bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { agentList, chatList, renderChat } from './transcript';
@@ -28,6 +28,8 @@ export interface ToolHost {
   cancel(chatId: string): Promise<void>;
   /** Does a browser tool call for the chat (browser.ts); absent when the editor has no built-in browser. */
   browser?(chatId: string, call: BrowserCall, signal: AbortSignal): Promise<string>;
+  /** Whether browser actions by the external client (EXTERNAL_CLIENT) skip the user's OK. Default no. */
+  externalAutoApprove?(): boolean;
 }
 
 type ChatCall = Exclude<BridgeCall, BrowserCall | { tool: 'list_agents' | 'list_chats' }>;
@@ -52,6 +54,12 @@ export class BridgeRequests {
 
   async call(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {
     if (this.host.policy() === 'off') throw new Error('The user turned off agent-to-agent connections in FriedLiver.');
+    if (chatId === EXTERNAL_CLIENT) {
+      if (!isBrowserCall(call)) throw new Error('Only the browser_* tools are open to clients outside FriedLiver.');
+      // Not a chat: it asks like one on "Ask", and skips asking only when the user opted in.
+      const external = { id: EXTERNAL_CLIENT, label: 'Claude Code', approval: this.host.externalAutoApprove?.() ? 'full' : undefined } as ChatView;
+      return this.browser(external, call, signal);
+    }
     const caller = this.chat(chatId);
     if (!caller) throw new Error('This chat was closed in FriedLiver.');
     if (call.tool === 'list_agents') return agentList();
@@ -116,7 +124,7 @@ export class BridgeRequests {
     settled(await this.approve(caller, item, auto, signal));
     // Either can change while the user decides.
     if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
-    if (!this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
+    if (caller.id !== EXTERNAL_CLIENT && !this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
     return this.host.browser(caller.id, call, signal);
   }
 
