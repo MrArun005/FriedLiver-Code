@@ -450,7 +450,7 @@
         },
         "friedliver.maxRunningAgents": {
           "type": "integer",
-          "default": 2,
+          "default": 3,
           "minimum": 1,
           "maximum": 6,
           "description": "How many agent processes may run at once. The least recently used idle one stops first."
