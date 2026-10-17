@@ -1,273 +1,44 @@
 // The chat's session controls (approval level, model, effort, the agent's own
 // modes), the usage meter, and the cards that show what an agent asks to do
 // and what its tools did. Shared by the chat view and the Agent Manager.
-import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import type { DiffLine } from '../shared/diff';
 import { AGENT_FACES, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { describeRule, ruleCandidates } from '../shared/rules';
 import {
-  APPROVAL_HINTS,
-  APPROVAL_LEVELS,
-  APPROVAL_NAMES,
-  choiceName,
-  formatCost,
-  formatTokens,
-  modeClass,
-  modeFor,
-  modeOption,
-  optionGroups,
   optionKey,
-  planToggle,
-  planning,
   reportedMode,
-  usagePercent,
   type AgentDefaults,
-  type ApprovalLevel,
   type ChatSession,
-  type SessionOption,
-  type Usage,
 } from '../shared/session';
 import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
-import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, memo, send } from './common';
+import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
-const LEVEL_TONE: Record<ApprovalLevel, string> = { ask: 'quiet', edits: 'edits', full: 'full' };
 
-type ControlsProps = { chat: ChatView; compact?: boolean };
 
-/** Approval level, model and effort, as chips under the message box. Drawn again only when they change, not per streamed chunk. */
-export const SessionControls = memo(
-  SessionControlsView,
-  (a: ControlsProps, b: ControlsProps) =>
-    a.compact === b.compact &&
-    a.chat.id === b.chat.id &&
-    a.chat.session === b.chat.session &&
-    a.chat.approval === b.chat.approval &&
-    a.chat.label === b.chat.label &&
-    a.chat.agent === b.chat.agent,
-);
 
-function SessionControlsView({ chat, compact }: ControlsProps) {
-  const session = chat.session;
-  const { model, effort, modelConfig, other } = optionGroups(session);
-  const later = session && !session.live ? ` Applies when ${chat.label} starts.` : '';
-  return (
-    <span class="session-controls">
-      <ApprovalMenu chat={chat} compact={compact} />
-      {model && <OptionMenu chat={chat} option={model} extra={[...modelConfig, ...other]} icon="model" later={later} />}
-      {!model && (modelConfig.length > 0 || other.length > 0) && <OptionMenu chat={chat} option={[...modelConfig, ...other][0]} extra={[...modelConfig, ...other].slice(1)} icon="model" later={later} />}
-      {effort && <OptionMenu chat={chat} option={effort} extra={[]} icon="gauge" later={later} />}
-    </span>
-  );
-}
+
+
+
+const samplesByChat = new Map<string, { turns: number; samples: number[] }>();
 
 /**
- * FriedLiver's levels (Ask, Auto-accept edits, Full auto), Plan, and the
- * agent's own modes. The chip reads the level; its color, the mode the agent
- * reports, so a mode FriedLiver didn't choose can't go unseen.
+ * The context used after each finished turn of a chat, seen by this webview
+ * (it starts over when the view reloads). The same array until a turn ends.
  */
-export function ApprovalMenu({ chat, compact }: { chat: ChatView; compact?: boolean }) {
-  const level = chat.approval ?? 'ask';
-  const mode = modeOption(chat.session);
-  const reported = reportedMode(chat.session);
-  const plan = planToggle(chat.session);
-  const inPlan = planning(chat.session);
-  const name = inPlan ? 'Plan' : APPROVAL_NAMES[level];
-  const agent = AGENT_FACES[chat.agent].name;
-  const title = `${name}: ${inPlan ? 'plans first, changes nothing' : APPROVAL_HINTS[level]}.${reported ? ` ${agent}'s mode: ${reported.name}.` : ''} Shift+Tab switches.`;
-  const tone = inPlan ? 'plan' : reported?.tone === 'full' || reported?.tone === 'auto' ? reported.tone : LEVEL_TONE[level];
-  return (
-    <Popover
-      label="How much the agent may do without asking"
-      title={title}
-      buttonClass="chip-btn approval-chip"
-      class="chip-pop"
-      trigger={
-        <>
-          <span class="chip-tone" data-tone={tone} aria-hidden="true" />
-          <Icon name={level === 'full' && !inPlan ? 'bolt' : 'shield'} />
-          {!compact && <span class="chip-text">{name}</span>}
-          <Icon name="chevron" />
-        </>
-      }
-    >
-      {(close) => (
-        <>
-          <div class="pop-title" aria-hidden="true">
-            How much {chat.label} may do without asking
-          </div>
-          {APPROVAL_LEVELS.map((l) => {
-            const agentMode = modeFor(chat.agent, mode, l);
-            const modeName = mode?.choices.find((c) => c.value === agentMode)?.name;
-            return (
-              <button
-                key={l}
-                role="menuitemradio"
-                aria-checked={!inPlan && level === l}
-                class={l === 'full' ? 'menu-full' : undefined}
-                onClick={() => {
-                  close();
-                  send({ type: 'approval', chatId: chat.id, level: l });
-                }}
-              >
-                <span class="menu-check" aria-hidden="true">
-                  {!inPlan && level === l && <Icon name="check" />}
-                </span>
-                <span class="menu-label">{APPROVAL_NAMES[l]}</span>
-                <span class="menu-sub">{modeName ? `${agent}: ${modeName}` : APPROVAL_HINTS[l]}</span>
-              </button>
-            );
-          })}
-          {plan && (
-            <button
-              role="menuitemcheckbox"
-              aria-checked={inPlan}
-              onClick={() => {
-                close();
-                send({ type: 'plan', chatId: chat.id, on: !inPlan });
-              }}
-            >
-              <span class="menu-check" aria-hidden="true">
-                {inPlan && <Icon name="check" />}
-              </span>
-              <span class="menu-label">Plan first</span>
-              <span class="menu-sub">Plans and asks before it changes anything</span>
-            </button>
-          )}
-          {mode && mode.type === 'select' && mode.choices.length > 0 && (
-            <>
-              <div class="pop-title" aria-hidden="true">
-                {agent}'s own modes
-              </div>
-              {mode.choices.map((c) => {
-                const cls = modeClass(c);
-                return (
-                  <button
-                    key={c.value}
-                    role="menuitemradio"
-                    aria-checked={mode.current === c.value}
-                    title={c.description}
-                    class={cls === 'full' || cls === 'auto' ? 'menu-full' : undefined}
-                    onClick={() => {
-                      close();
-                      send({ type: 'setOption', chatId: chat.id, optionId: mode.id, value: c.value });
-                    }}
-                  >
-                    <span class="menu-check" aria-hidden="true">
-                      {mode.current === c.value && <Icon name="check" />}
-                    </span>
-                    <span class="menu-label">{c.name}</span>
-                    {c.description && <span class="menu-sub">{c.description}</span>}
-                  </button>
-                );
-              })}
-            </>
-          )}
-        </>
-      )}
-    </Popover>
-  );
-}
-
-/** One setting as a chip (Model, Effort), with related ones (Fast mode) in the same menu. */
-function OptionMenu({ chat, option, extra, icon, later }: { chat: ChatView; option: SessionOption; extra: SessionOption[]; icon: 'model' | 'gauge'; later: string }) {
-  const current = choiceName(option) ?? '';
-  const on = extra.filter((o) => (o.type === 'boolean' ? o.current === true : /^on$/i.test(String(o.current))));
-  return (
-    <Popover
-      label={option.name}
-      title={`${option.name}: ${current}${on.length ? ` · ${on.map((o) => o.name).join(', ')}` : ''}.${later}`}
-      buttonClass="chip-btn"
-      class="chip-pop"
-      trigger={
-        <>
-          <Icon name={icon} />
-          <span class="chip-text">{current}</span>
-          {on.length > 0 && <Icon name="bolt" />}
-          <Icon name="chevron" />
-        </>
-      }
-    >
-      {(close) => (
-        <div class="pop-scroll">
-          <OptionChoices chat={chat} option={option} close={close} />
-          {extra.map((o) => (
-            <div key={o.id} class="pop-section">
-              <OptionChoices chat={chat} option={o} close={close} titled />
-            </div>
-          ))}
-        </div>
-      )}
-    </Popover>
-  );
-}
-
-function OptionChoices({ chat, option, close, titled }: { chat: ChatView; option: SessionOption; close(refocus?: boolean): void; titled?: boolean }) {
-  const set = (value: string | boolean) => {
-    close();
-    send({ type: 'setOption', chatId: chat.id, optionId: option.id, value });
-  };
-  if (option.type === 'boolean') {
-    return (
-      <button role="menuitemcheckbox" aria-checked={option.current === true} title={option.description} onClick={() => set(option.current !== true)}>
-        <span class="menu-check" aria-hidden="true">
-          {option.current === true && <Icon name="check" />}
-        </span>
-        <span class="menu-label">{option.name}</span>
-        {option.description && <span class="menu-sub">{option.description}</span>}
-      </button>
-    );
+export function usageSamples(chat: Pick<ChatView, 'id' | 'turns' | 'session'>): number[] {
+  const used = chat.session?.usage?.used;
+  const seen = samplesByChat.get(chat.id) ?? { turns: chat.turns, samples: chat.turns > 0 && used !== undefined ? [used] : [] };
+  if (chat.turns !== seen.turns && used !== undefined) {
+    seen.turns = chat.turns;
+    seen.samples = [...seen.samples, used].slice(-6);
   }
-  const rows: ComponentChildren[] = [];
-  let group: string | undefined;
-  for (const c of option.choices) {
-    if (c.group && c.group !== group && !titled) {
-      rows.push(
-        <div key={`g:${c.group}`} class="pop-group" aria-hidden="true">
-          {c.group}
-        </div>,
-      );
-    }
-    group = c.group;
-    rows.push(
-      <button key={c.value} role="menuitemradio" aria-checked={option.current === c.value} title={c.description} onClick={() => set(c.value)}>
-        <span class="menu-check" aria-hidden="true">
-          {option.current === c.value && <Icon name="check" />}
-        </span>
-        <span class="menu-label">{c.name}</span>
-        {c.description && <span class="menu-sub">{c.description}</span>}
-      </button>,
-    );
-  }
-  return (
-    <>
-      <div class="pop-title" aria-hidden="true" title={option.description}>
-        {option.name}
-      </div>
-      {rows}
-    </>
-  );
+  samplesByChat.set(chat.id, seen);
+  return seen.samples;
 }
 
-/** How full the agent's context is, and what the session cost, when the agent says. */
-export const UsageMeter = memo(function UsageMeter({ usage, compact }: { usage?: Usage; compact?: boolean }) {
-  if (!usage) return null;
-  const pct = usagePercent(usage);
-  const level = pct >= 90 ? 'high' : pct >= 75 ? 'warn' : undefined;
-  const cost = usage.cost ? formatCost(usage.cost) : '';
-  const title = `Context: ${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens (${pct}%)${cost ? ` · ${cost} so far` : ''}${level ? '. Nearly full: /compact or a new chat clears it.' : ''}`;
-  return (
-    <span class="usage" data-level={level} title={title} role="img" aria-label={title}>
-      <span class="usage-bar" aria-hidden="true">
-        <i style={{ width: `${pct}%` }} />
-      </span>
-      {!compact && <span>{pct}%</span>}
-      {!compact && cost && <span class="usage-cost">{cost}</span>}
-    </span>
-  );
-});
 
 /** The mode the agent says it is in, loud when it runs without asking. */
 export function ModeBadge({ session, agent }: { session?: ChatSession; agent: AgentKey }) {

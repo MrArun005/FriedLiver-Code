@@ -1,34 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
-import { DICTATION_SETTINGS, startDictation } from '../src/host/dictation';
+import { describe, expect, it } from 'vitest';
 import { parseWebviewMessage } from '../src/shared/messages';
-
-const deps = (over: Partial<Parameters<typeof startDictation>[0]> = {}) => ({
-  platform: 'darwin' as NodeJS.Platform,
-  run: vi.fn(async () => undefined),
-  toast: vi.fn(async () => undefined as string | undefined),
-  openUrl: vi.fn(),
-  ...over,
-});
+import { turnsLeft } from '../src/shared/session';
 
 describe('dictation', () => {
-  it('the webview may ask for it', () => {
-    expect(parseWebviewMessage({ type: 'dictate' })).toEqual({ type: 'dictate' });
+  it('the mic hint may open Dictation settings', () => {
+    expect(parseWebviewMessage({ type: 'dictationSettings' })).toEqual({ type: 'dictationSettings' });
   });
-  it('runs the app command on macOS', async () => {
-    const d = deps();
-    expect(await startDictation(d)).toBe('started');
-    expect(d.run).toHaveBeenCalledWith('friedliver.startDictation');
-    expect(d.toast).not.toHaveBeenCalled();
+  it('the old programmatic start is gone (it beeped)', () => {
+    expect(parseWebviewMessage({ type: 'dictate' })).toBeNull();
   });
-  it('does nothing off macOS', async () => {
-    const d = deps({ platform: 'linux' });
-    expect(await startDictation(d)).toBe('unsupported');
-    expect(d.run).not.toHaveBeenCalled();
+});
+
+describe('turnsLeft (the usage popover estimate)', () => {
+  it('uses growth per turn, not the total (the system prompt is not a turn)', () => {
+    // The light fixture: 76% of 200k used, 12k a turn lately: 48k left is 4 turns, not ~0.
+    expect(turnsLeft([116_000, 128_000, 140_000, 152_000], 200_000)).toBe(4);
   });
-  it('without the command, says Fn Fn and can open the settings', async () => {
-    const d = deps({ run: vi.fn(async () => Promise.reject(new Error("command 'friedliver.startDictation' not found"))), toast: vi.fn(async () => 'Open Dictation Settings') });
-    expect(await startDictation(d)).toBe('fallback');
-    expect(d.toast).toHaveBeenCalledWith('Press Fn twice to dictate.', 'Open Dictation Settings');
-    expect(d.openUrl).toHaveBeenCalledWith(DICTATION_SETTINGS);
+  it('looks at the last 5 turns only', () => {
+    expect(turnsLeft([10_000, 90_000, 100_000, 110_000, 120_000, 130_000, 140_000], 200_000)).toBe(6);
+  });
+  it('needs 2 finished turns; caps at >50; never negative', () => {
+    expect(turnsLeft([], 200_000)).toBeUndefined();
+    expect(turnsLeft([30_000], 200_000)).toBeUndefined();
+    expect(turnsLeft([30_000, 31_000], 200_000)).toBe('>50');
+    expect(turnsLeft([30_000, 30_000], 200_000)).toBe('>50');
+    expect(turnsLeft([190_000, 210_000], 200_000)).toBe(0);
   });
 });
