@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global performance, requestAnimationFrame, Event, getComputedStyle -- used inside page.evaluate */
+/* global performance, MutationObserver, NodeFilter -- used inside page.evaluate */
 // Regression checks for the QA findings (~/code/FriedLiver-Code-design/qa/QA-REPORT.md),
 // one block per finding id, each written to fail before its fix. Runs the UI
 // harness server, Dark 2026, headless Chrome. Not shipped.
