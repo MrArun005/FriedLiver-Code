@@ -445,9 +445,11 @@ export function statusGroups(chats: ChatView[], all = false): StatusGroup[] {
   return STATUS_ORDER.map((status) => ({ status, title: STATUS_TITLES[status], chats: shown.filter((c) => statusOf(c) === status) })).filter((g) => all || g.chats.length > 0);
 }
 
-/** Open chats matching the query, grouped by status. */
-export function switcherGroups(chats: ChatView[], query: string): StatusGroup[] {
-  return statusGroups(filterChats(openChats(chats), query));
+/** Open chats matching the query, grouped by status; starred ones first, in a group of their own. */
+export function switcherGroups(chats: ChatView[], query: string): (StatusGroup | { status: 'starred'; title: string; chats: ChatView[] })[] {
+  const shown = filterChats(openChats(chats), query);
+  const starred = sortChats(shown.filter((c) => c.starred), { key: 'activity', dir: 'asc' });
+  return [...(starred.length ? [{ status: 'starred' as const, title: 'Starred', chats: starred }] : []), ...statusGroups(shown.filter((c) => !c.starred))];
 }
 
 /** "Needs you · 42s ago" under a chat's title in the switcher. */

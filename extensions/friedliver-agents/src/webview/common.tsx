@@ -38,6 +38,14 @@ export function usePersisted<T>(key: string, initial: T): [T, (value: T) => void
 }
 
 /** The webview's width, for laying out by the room there is (side bar or editor). */
+// friedliver.chat.fontFamily: Inter (bundled) is the stylesheet's default; empty means the editor's UI font.
+{
+  const font = document.body?.dataset.font?.trim();
+  if (font !== undefined && font !== 'Inter') {
+    document.documentElement.style.setProperty('--ui', font ? `"${font.replace(/["\\]/g, '')}", var(--vscode-font-family), sans-serif` : 'var(--vscode-font-family), sans-serif');
+  }
+}
+
 export function useWidth(): number {
   const [width, setWidth] = useState(window.innerWidth);
   useEffect(() => {
@@ -472,6 +480,8 @@ const ICONS = {
   model: 'M8 2.5l1.4 3.1 3.1 1.4-3.1 1.4L8 11.5 6.6 8.4 3.5 7l3.1-1.4zM12.5 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
   shield: 'M8 2.5l4.75 1.75v3.5c0 3-2 5-4.75 5.75C5.25 12.75 3.25 10.75 3.25 7.75v-3.5z',
   rename: 'M10.5 3 13 5.5 6 12.5H3.5V10zM9 4.5 11.5 7',
+  star: 'M8 2.5l1.7 3.5 3.8.5-2.8 2.6.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.6 3.8-.5z',
+  up: 'M8 13V3.5M4 7.5l4-4 4 4',
   queue: 'M2.75 4.5h10.5M2.75 8h10.5M2.75 11.5h6M11 10v3l2-1.5z',
 };
 export type IconName = keyof typeof ICONS;

@@ -40,7 +40,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <link rel="stylesheet" href="${media('webview.css')}">
 <title>${escapeHtml(title)}</title>
 </head>
-<body data-surface="${script}">
+<body data-surface="${script}" data-font="${escapeHtml(vscode.workspace.getConfiguration('friedliver.chat').get<string>('fontFamily', 'Inter'))}">
 <div id="root"></div>
 <script nonce="${nonce}" src="${media(`dist/${script}.js`)}"></script>
 </body>

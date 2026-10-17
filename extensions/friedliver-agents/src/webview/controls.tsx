@@ -642,7 +642,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
     <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`}>
       <div class="ask-head">
         <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" /> {chat.label} asks you
+        <Glyph agent={chat.agent} size="sm" /> {AGENT_FACES[chat.agent].name} asks you
       </div>
       <div class="ask-body">
         <Markdown text={item.message} />
