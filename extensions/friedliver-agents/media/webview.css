@@ -1151,6 +1151,20 @@ button.count-item .icon {
   text-align: left;
   cursor: pointer;
 }
+/* "34 done · show": the folded done ones, quieter than a card. */
+.sub-card.sub-fold {
+  border-style: dashed;
+  color: var(--fg-2);
+}
+button.sub-fold.link {
+  color: var(--fg-2);
+}
+.map-fold .box {
+  stroke-dasharray: 4 3;
+}
+.map-fold .node-label {
+  fill: var(--fg-2);
+}
 .sub-card:hover {
   border-color: var(--border);
 }

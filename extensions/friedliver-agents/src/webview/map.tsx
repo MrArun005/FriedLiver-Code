@@ -2,7 +2,7 @@
 // connection between chats (hand-offs, consultations, pipes, fan-outs, files
 // two chats both changed) as an edge, so you can see how the agents are joined.
 import type { ComponentChildren } from 'preact';
-import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
 import type { ClaudeSession } from '../shared/messages';
 import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
@@ -13,7 +13,10 @@ const TIP_W = 288;
 export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state: AppState; outside?: ClaudeSession[]; now: number; focusId?: string; onFocus(id: string): void }) {
   // Laid out again only when something the map shows changed, not for every streamed chunk.
   const key = mapKey(state, outside, now);
-  const map = useMemo(() => mapLayout(state, outside, now), [key]);
+  // Chats whose done subagents are shown one by one; folded into one node by default.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const toggleDone = useCallback((parent: string) => setExpanded((e) => (e.has(parent) ? new Set([...e].filter((x) => x !== parent)) : new Set([...e, parent]))), []);
+  const map = useMemo(() => mapLayout(state, outside, now, expanded), [key, expanded]);
   const [tip, setTip] = useState<string | null>(null);
   // A subagent you clicked: highlighted with its chat, its details beside the map. Never a jump to some chat.
   const [sel, setSel] = useState<string | null>(null);
@@ -31,7 +34,7 @@ export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state
       <div class="map-body">
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
-          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={setSel} onFocus={onFocus} />
+          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={setSel} onFocus={onFocus} toggleDone={toggleDone} />
           {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} />}
         </div>
       </div>
@@ -53,15 +56,17 @@ interface CanvasProps {
   setTip(id: string | null): void;
   setSel(id: string | null): void;
   onFocus(id: string): void;
+  /** Shows or folds a chat's done subagents. */
+  toggleDone(parent: string): void;
 }
 
 /** The drawing itself: drawn again when the layout, the highlighted chat or the decision count changes. */
 const MapCanvas = memo(
   MapCanvasView,
-  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.sel === b.sel && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus,
+  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.sel === b.sel && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus && a.toggleDone === b.toggleDone,
 );
 
-function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, onFocus }: CanvasProps) {
+function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, onFocus, toggleDone }: CanvasProps) {
   const lit = tip ? new Set([tip, ...map.edges.flatMap((e) => (e.from === tip || e.to === tip ? [e.id, e.from, e.to] : []))]) : null;
   return (
           <svg class="map" width={map.width} height={map.height} viewBox={`0 0 ${map.width} ${map.height}`} role="group" aria-label="Agent map" data-lit={lit ? '' : undefined}>
@@ -159,6 +164,34 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
               </g>
             ))}
             {map.subs.map((n) => {
+              if (n.count) {
+                const toggle = () => toggleDone(n.chatId);
+                return (
+                  <g
+                    key={n.id}
+                    class={`map-node map-sub map-fold ${lit && !lit.has(n.id) ? 'dim' : ''}`}
+                    data-status="done"
+                    transform={`translate(${n.x} ${n.y})`}
+                    tabIndex={0}
+                    role="button"
+                    aria-expanded={n.title.endsWith('hide')}
+                    aria-label={`${n.count} done subagents: ${n.title.endsWith('hide') ? 'hide' : 'show'}`}
+                    onClick={toggle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggle();
+                      }
+                    }}
+                  >
+                    <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
+                    <circle class="node-dot" data-state="done" cx="18" cy={MAP.nodeH / 2} r="4" />
+                    <text class="node-label" x="32" y={MAP.nodeH / 2 + 4}>
+                      {n.title}
+                    </text>
+                  </g>
+                );
+              }
               const pick = () => setSel(sel === n.id ? null : n.id);
               return (
                 <g
