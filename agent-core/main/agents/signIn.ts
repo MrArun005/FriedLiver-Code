@@ -60,3 +60,41 @@ export function signInMethods(methods: acp.AuthMethod[]): SignInMethod[] {
     })
     .sort((a, b) => Number(a.kind === 'key') - Number(b.kind === 'key'));
 }
+
+/**
+ * Which identity the agent runs as, from its `_auth/status_update`
+ * notification (Claude's and Codex's adapters send it after `initialize`, a
+ * sign-in, a sign-out and each session). Only these fields, cut short: it is
+ * shown, never acted on.
+ */
+export interface AuthStatus {
+  /** none, account, api_key, external (a cloud provider) or gateway. */
+  kind: string;
+  label: string;
+  detail?: string;
+  email?: string;
+  plan?: string;
+  organization?: string;
+}
+
+const AUTH_KINDS = new Set(['none', 'account', 'api_key', 'external', 'gateway']);
+
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/;
+const shortText = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.trim() && !CONTROL.test(v) ? v.trim().slice(0, max) : undefined);
+
+export function authStatusOf(raw: unknown): AuthStatus | undefined {
+  const s = (raw as { authStatus?: unknown } | null | undefined)?.authStatus as Record<string, unknown> | undefined;
+  if (!s || typeof s !== 'object' || typeof s.kind !== 'string' || !AUTH_KINDS.has(s.kind)) return undefined;
+  const account = s.account && typeof s.account === 'object' ? (s.account as Record<string, unknown>) : {};
+  const out: AuthStatus = { kind: s.kind, label: shortText(s.label, 80) ?? s.kind };
+  const detail = shortText(s.detail, 120);
+  const email = shortText(account.email, 254);
+  const plan = shortText(account.plan, 60);
+  const organization = shortText(account.organization, 120);
+  if (detail) out.detail = detail;
+  if (email) out.email = email;
+  if (plan) out.plan = plan;
+  if (organization) out.organization = organization;
+  return out;
+}

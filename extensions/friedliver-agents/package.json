@@ -18,7 +18,8 @@
     "onStartupFinished",
     "onFileSystem:friedliver-proposed",
     "onWebviewPanel:friedliver.tasks",
-    "onWebviewPanel:friedliver.chatPanel"
+    "onWebviewPanel:friedliver.chatPanel",
+    "onWebviewPanel:friedliver.accountsPanel"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -130,8 +131,9 @@
       },
       {
         "command": "friedliver.accounts",
-        "title": "Accounts: Check Sign-in",
-        "category": "FriedLiver"
+        "title": "Agents & Accounts",
+        "category": "FriedLiver",
+        "icon": "$(account)"
       },
       {
         "command": "friedliver.accounts.check",
@@ -141,7 +143,7 @@
       },
       {
         "command": "friedliver.setApiKey",
-        "title": "Set API Key",
+        "title": "Set API Key…",
         "category": "FriedLiver",
         "icon": "$(key)"
       },
@@ -286,6 +288,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "friedliver.accounts",
+          "when": "view == friedliver.accounts",
+          "group": "navigation@0"
+        },
         {
           "command": "friedliver.newChat",
           "when": "view == friedliver.agents",
@@ -618,6 +625,12 @@
           ],
           "description": "Arguments for the Gemini program."
         },
+        "friedliver.showDemoAgent": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show the Demo agent in the agent pickers, New Chat and the Agent Manager. Demo is a fake agent that runs locally inside FriedLiver, with no account and no network, for trying the chat, reviews and approvals; it isn't an AI model. Chats you already have with it still open. Read from your user settings only."
+        },
         "friedliver.maxRunningAgents": {
           "type": "integer",
           "default": 3,
@@ -795,8 +808,8 @@
           },
           {
             "id": "demoAgent",
-            "title": "Try the Demo agent",
-            "description": "The Demo agent runs offline and needs no sign-in. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Under the message box pick the model, the effort and how much it may do without asking (Shift+Tab switches). Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
+            "title": "Try it with the Demo agent (no account)",
+            "description": "The Demo agent is a fake local agent: no account, no network, not an AI. It shows how FriedLiver works. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Under the message box pick the model, the effort and how much it may do without asking (Shift+Tab switches). Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N. It stays out of the agent pickers unless you turn on `friedliver.showDemoAgent`.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
             "media": {
               "svg": "media/walkthrough/demo-agent.svg",
               "altText": "A Demo agent chat with a plan and an edit waiting for review, with Accept and Reject buttons."
@@ -808,7 +821,7 @@
           {
             "id": "signIn",
             "title": "Sign in to Claude, Codex or Gemini",
-            "description": "Install an agent once (`npm install -g @agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp` or `@google/gemini-cli`). Each signs in through its own official CLI, so your logins stay with the company that runs it. FriedLiver never sees your credentials. Prefer another agent extension, such as Claude Code or Cline? Get it from the gallery as it is.\n[Check Sign-in](command:friedliver.accounts)\n[Get Another Agent Extension](command:friedliver.otherAgents)",
+            "description": "**Agents & Accounts** has a card per agent: install it, sign in with its own login (Google, ChatGPT, Claude) or an API key kept in the editor's secret storage (Gemini also takes Vertex AI), see which account is in use, sign out, and pick the model and effort new chats start with. Your logins stay with the company that runs each agent. Prefer another agent extension, such as Claude Code or Cline? Get it from the gallery as it is.\n[Open Agents & Accounts](command:friedliver.accounts)\n[Get Another Agent Extension](command:friedliver.otherAgents)",
             "media": {
               "svg": "media/walkthrough/sign-in.svg",
               "altText": "The Agents accounts list: one agent signed in, one not installed, one waiting for sign-in."

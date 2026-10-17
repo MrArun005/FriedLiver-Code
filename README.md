@@ -80,21 +80,26 @@ First time with real accounts? [docs/TRY-IT.md](docs/TRY-IT.md) is a 10-minute
 check from install to two agents talking to each other.
 
 1. Open a folder. The Agents panel opens on the right.
-2. Pick **Demo** and type `tour` to try it offline: a plan, an edit you review as
-   a diff, a command you approve, an image. Accept is Ctrl/Cmd+Alt+Y and Reject
-   is Ctrl/Cmd+Alt+N. The "decisions waiting" item in the status bar jumps to
-   whatever waits on you.
-3. For the real agents, install a CLI once, then sign in from **Accounts** in
-   the same panel:
+2. No account yet? Turn on `friedliver.showDemoAgent`, pick **Demo** (a fake
+   local agent, no account, no network) and type `tour`: a plan, an edit you
+   review as a diff, a command you approve, an image. Accept is Ctrl/Cmd+Alt+Y
+   and Reject is Ctrl/Cmd+Alt+N. The "decisions waiting" item in the status bar
+   jumps to whatever waits on you.
+3. For the real agents, install a CLI once, then sign in from **FriedLiver:
+   Agents & Accounts** (also in the New chat menu and the Accounts view). It has
+   a card per agent: its status and version, its own sign-in methods, an API key
+   kept in the editor's secret storage (Gemini also takes Vertex AI), which
+   account is in use, sign-out, and the model and effort new chats start with
+   ([details](docs/ACCOUNTS.md)):
 
 | Agent | Install | Sign-in |
 |---|---|---|
-| Claude | `npm install -g @agentclientprotocol/claude-agent-acp` | Claude Code's own login in a terminal: `/login`, approve on claude.ai, `/exit` |
-| Codex | `npm install -g @agentclientprotocol/codex-acp` | Your browser opens OpenAI's sign-in page |
-| Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page |
+| Claude | `npm install -g @agentclientprotocol/claude-agent-acp` | Claude Code's own login in a terminal (subscription or Anthropic Console): approve on claude.ai; or an Anthropic API key |
+| Codex | `npm install -g @agentclientprotocol/codex-acp` | Your browser opens OpenAI's sign-in page (ChatGPT), or an OpenAI API key |
+| Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page, or a Gemini API key, or Vertex AI |
 
    The older `@zed-industries/*` packages are deprecated and lack the effort
-   and plan options; Accounts says when an installed adapter is too old.
+   and plan options; Agents & Accounts says when an installed adapter is too old.
 
 4. Choose how the agent works, under the message box: the **approval** chip
    (Ask, Auto-accept edits, Full auto, Plan first, and the agent's own modes;
@@ -115,7 +120,7 @@ The command palette has the rest under "FriedLiver": Agent Manager, Run a Task
 on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a Chat's
 Replies to Another Chat, Go to Next Decision (Ctrl+Alt+D), Accept All Agent
 Edits, Always-Allowed Commands, Get Another Agent Extension…, Move Agents to
-the Center (Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents, and the editor
+the Center (Ctrl/Cmd+Shift+A), Agents & Accounts, Set API Key…, Stop All Agents, and the editor
 commands below. `friedliver.connections.agentToAgent` (ask, allow or off) and
 `friedliver.approvals.default` (ask or edits) are read from your user settings
 only. `friedliver.notify.decisions` and `.finished` choose the notifications.

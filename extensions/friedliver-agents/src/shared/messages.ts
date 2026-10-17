@@ -1,5 +1,6 @@
 // Messages between the webviews and the extension host. Webview content is
 // treated as untrusted: every message is checked here before it is acted on.
+import type { AgentRoster } from './accounts';
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import { isRule, type CommandRule } from './rules';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
@@ -100,12 +101,14 @@ export type WebviewMessage =
   | { type: 'findFiles'; chatId: string; query: string }
   /** Claude Code, Cline, Roo Code, Kilo Code or Continue, from the extension gallery. */
   | { type: 'otherAgents' }
+  /** Agents & Accounts, on the agent's card when given. */
+  | { type: 'openAccounts'; agent?: AgentKey }
   /** Continue a Claude Code session started outside FriedLiver in a new chat. */
   | { type: 'openClaudeSession'; sessionId: string };
 
 export type HostMessage =
   /** `defaults` (optional): each agent's last known options and the user's last choices. */
-  | { type: 'snapshot'; state: AppState; selected?: string; now: number; defaults?: Partial<Record<AgentKey, AgentDefaults>> }
+  | { type: 'snapshot'; state: AppState; selected?: string; now: number; defaults?: Partial<Record<AgentKey, AgentDefaults>>; roster?: AgentRoster }
   | { type: 'defaults'; defaults: Partial<Record<AgentKey, AgentDefaults>> }
   | { type: 'action'; action: Action }
   /** Several actions in order; the host batches them when agents stream fast. */
@@ -120,7 +123,9 @@ export type HostMessage =
   /** Put a code reference into that chat's composer, to go with the next message. */
   | { type: 'addRef'; chatId: string; ref: CodeRef }
   /** The workspace's Claude Code sessions FriedLiver didn't start, for the Manager. */
-  | { type: 'claudeSessions'; sessions: ClaudeSession[] };
+  | { type: 'claudeSessions'; sessions: ClaudeSession[] }
+  /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
+  | { type: 'roster'; roster: AgentRoster };
 
 /** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
 export interface ClaudeSession {
@@ -191,6 +196,8 @@ function noticeAction(v: unknown): NoticeAction | null {
       return isAgentKey(v.agent) && id(v.methodId) ? { label, do: 'signIn', agent: v.agent, methodId: v.methodId } : null;
     case 'apiKey':
       return isAgentKey(v.agent) ? { label, do: 'apiKey', agent: v.agent } : null;
+    case 'accounts':
+      return isAgentKey(v.agent) ? { label, do: 'accounts', agent: v.agent } : null;
     case 'install':
       // Only which agent to install; the host chooses the command itself.
       return isAgentKey(v.agent) && v.agent !== 'demo' ? { label, do: 'install', agent: v.agent } : null;
@@ -316,6 +323,9 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
         : null;
     case 'openRules':
       return { type: 'openRules' };
+    case 'openAccounts':
+      if (m.agent === undefined) return { type: 'openAccounts' };
+      return isAgentKey(m.agent) ? { type: 'openAccounts', agent: m.agent } : null;
     case 'star':
       return id(m.chatId) && typeof m.starred === 'boolean' ? { type: 'star', chatId: m.chatId, starred: m.starred } : null;
     case 'renameChat':

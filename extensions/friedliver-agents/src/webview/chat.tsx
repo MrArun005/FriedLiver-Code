@@ -3,7 +3,6 @@ import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, us
 import type { Attachment } from '../shared/messages';
 import {
   AGENT_FACES,
-  AGENT_KEYS,
   boardColumn,
   bridgeTitle,
   fileConflicts,
@@ -42,7 +41,7 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
+import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, send, useHost, usePersisted, useRoster, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -146,6 +145,7 @@ function App() {
 /** Recent chats as tabs, and every open chat one click away in "All chats", for fifteen agents and more. */
 function Switcher({ state, active, onSelect }: { state: AppState; active?: string; onSelect: Select }) {
   const width = useWidth();
+  const agents = useRoster().agents;
   const strip = recentChats(state.chats, active, Math.max(1, Math.min(6, Math.floor((width - 140) / 128))));
   const open = openChats(state.chats);
   const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
@@ -194,7 +194,7 @@ function Switcher({ state, active, onSelect }: { state: AppState; active?: strin
         {(close) => (
           <>
             <div class="pop-title" aria-hidden="true">New chat with</div>
-            {AGENT_KEYS.map((agent) => (
+            {agents.map((agent) => (
               <button
                 key={agent}
                 role="menuitem"
@@ -205,9 +205,15 @@ function Switcher({ state, active, onSelect }: { state: AppState; active?: strin
               >
                 <Glyph agent={agent} size="sm" />
                 <span class="grow">{AGENT_FACES[agent].name}</span>
-                {agent === 'demo' && <span class="hint">offline</span>}
+                {agent === 'demo' && <span class="hint">fake, local</span>}
+                <SignInMark agent={agent} />
               </button>
             ))}
+            <div class="pop-sep" role="separator" />
+            <button role="menuitem" onClick={() => (close(false), send({ type: 'openAccounts' }))}>
+              <Icon name="key" />
+              <span class="grow">Agents &amp; Accounts…</span>
+            </button>
           </>
         )}
       </Popover>
@@ -344,6 +350,7 @@ const IS_MAC = /Mac/.test(navigator.platform);
 /** The open chat: who and what, its connections, and the actions that join it to other agents. */
 function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState; onSelect: Select }) {
   const status = statusOf(chat);
+  const agents = useRoster().agents;
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
   // The banner covers where this chat came from, and a handoff has its card in the transcript; chips cover the rest.
@@ -401,7 +408,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             {(close) => (
               <>
                 <div class="pop-title" aria-hidden="true">Hand off to</div>
-                {AGENT_KEYS.map((agent) => (
+                {agents.map((agent) => (
                   <button
                     key={agent}
                     role="menuitem"
@@ -479,21 +486,33 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
 }
 
 function Empty() {
+  const { agents, signIn } = useRoster();
   return (
     <div class="empty">
       <h2>Start a chat</h2>
       <div class="pick">
-        {AGENT_KEYS.map((agent) => (
+        {agents.map((agent) => (
           <button key={agent} class="pick-agent" onClick={() => send({ type: 'newChat', agent })}>
             <Glyph agent={agent} size="lg" />
-            <span>{AGENT_FACES[agent].name}</span>
-            {agent === 'demo' && <span class="hint">offline</span>}
+            <span>
+              {AGENT_FACES[agent].name} <SignInMark agent={agent} />
+            </span>
+            {agent === 'demo' && <span class="hint">fake, local</span>}
           </button>
         ))}
       </div>
       <p class="hint">
-        No sign-in yet? <strong>Demo</strong>, then <code>tour</code> or <code>project</code>.
+        {agents.some((a) => signIn[a] === 'signed-in') ? 'Sign-in, API keys and models' : 'Not signed in yet? Sign in, add an API key or install an agent'} in{' '}
+        <button class="link" onClick={() => send({ type: 'openAccounts' })}>
+          Agents &amp; Accounts
+        </button>
+        .
       </p>
+      {agents.includes('demo') && (
+        <p class="hint">
+          No account? <strong>Demo</strong>, then <code>tour</code> or <code>project</code>.
+        </p>
+      )}
       <p class="hint">
         <button class="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…
@@ -1107,7 +1126,8 @@ function Composer({
 
   // "@" at the very start picks an agent to ask; the answer comes back into this chat.
   const query = shut ? null : mentionQuery(text, caret);
-  const mentions = query === null ? [] : mentionOptions(query);
+  const shownAgents = useRoster().agents;
+  const mentions = query === null ? [] : mentionOptions(query, shownAgents);
   // "/" at the very start picks one of the agent's own commands, or one of FriedLiver's.
   const state = useContext(LiveState);
   const agentCommands = chat.session?.commands ?? [];
