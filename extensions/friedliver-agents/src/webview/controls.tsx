@@ -242,18 +242,35 @@ function OptionChoices({ chat, option, close, titled }: { chat: ChatView; option
   );
 }
 
+const samplesByChat = new Map<string, { turns: number; samples: number[] }>();
+
+/**
+ * The context used after each finished turn of a chat, seen by this webview
+ * (it starts over when the view reloads). The same array until a turn ends.
+ */
+export function usageSamples(chat: Pick<ChatView, 'id' | 'turns' | 'session'>): number[] {
+  const used = chat.session?.usage?.used;
+  const seen = samplesByChat.get(chat.id) ?? { turns: chat.turns, samples: chat.turns > 0 && used !== undefined ? [used] : [] };
+  if (chat.turns !== seen.turns && used !== undefined) {
+    seen.turns = chat.turns;
+    seen.samples = [...seen.samples, used].slice(-6);
+  }
+  samplesByChat.set(chat.id, seen);
+  return seen.samples;
+}
+
 /**
  * One button for usage, model and effort: hovering or clicking opens a small
  * dialog with the context and cost, the model, and the effort (or speed).
  */
-export function UsageSettings({ chat }: { chat: ChatView }) {
+export function UsageSettings({ chat, samples }: { chat: ChatView; samples: number[] }) {
   const usage = chat.session?.usage;
   const { model, effort, modelConfig, other } = optionGroups(chat.session);
   const pick = model ?? [...modelConfig, ...other][0];
   const extra = model ? [...modelConfig, ...other] : [...modelConfig, ...other].slice(1);
   const later = chat.session && !chat.session.live ? ` Applies when ${chat.label} starts.` : '';
   const pct = usage ? usagePercent(usage) : undefined;
-  const turns = usage ? turnsLeft(usage, chat.turns) : undefined;
+  const turns = usage ? turnsLeft(samples, usage.size) : undefined;
   const title = [pct !== undefined && `Context ${pct}%`, pick && choiceName(pick), effort && choiceName(effort)].filter(Boolean).join(' · ') || 'Usage and model';
   return (
     <Popover label="Usage, model and effort" title={title} kind="dialog" hover align="end" buttonClass="chip-btn icon-btn usage-btn" class="usage-pop" trigger={<Icon name="gauge" />}>
@@ -266,7 +283,7 @@ export function UsageSettings({ chat }: { chat: ChatView }) {
                   Context {pct}% · {formatTokens(Math.max(0, usage.size - usage.used))} of {formatTokens(usage.size)} tokens left
                 </div>
                 {usage.cost && <div>{formatCost(usage.cost)} this chat</div>}
-                {turns !== undefined && <div class="hint">Context lasts ~{turns} more turns (estimate)</div>}
+                <div class="hint">{turns === undefined ? 'Context lasts — (needs a couple of turns to estimate)' : `Context lasts ~${turns} more turns (estimate)`}</div>
               </>
             ) : (
               <div class="hint">No usage reported yet</div>

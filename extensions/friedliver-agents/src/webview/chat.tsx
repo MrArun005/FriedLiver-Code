@@ -44,7 +44,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, ApprovalMenu, AutoBadge, UsageSettings, approvalTone, composerMode, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
+import { AlwaysAllow, ApprovalMenu, AutoBadge, UsageSettings, approvalTone, usageSamples, composerMode, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -1175,6 +1175,7 @@ function Composer({
 
   const canSend = asking ? !!question : !empty;
   const [micHint, setMicHint] = useState(false);
+  const samples = usageSamples(chat);
   const queueing = chat.busy && !asking;
   return (
     <>
@@ -1349,7 +1350,7 @@ function Composer({
               </button>
             )}
             <AgentsButton chat={chat} linked={linked} />
-            <UsageSettings chat={chat} />
+            <UsageSettings chat={chat} samples={samples} />
             <ApprovalMenu chat={chat} bare />
             <button
               class="primary send-btn"

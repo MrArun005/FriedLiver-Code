@@ -346,10 +346,20 @@ export function usagePercent(u: Usage): number {
   return Math.max(0, Math.min(100, Math.round((u.used / u.size) * 100)));
 }
 
-/** Turns left before the context fills, at this chat's average tokens per finished turn; undefined before the first turn. An estimate. */
-export function turnsLeft(u: Usage, turns: number): number | undefined {
-  if (turns < 1 || u.used <= 0) return undefined;
-  return Math.max(0, Math.floor((u.size - u.used) / (u.used / turns)));
+/**
+ * Turns left before the context fills, from how much it grew per turn over the
+ * last (up to) 5 turns: `samples` are the tokens used after each finished turn,
+ * oldest first. Growth, not the total, so the fixed system prompt and tools
+ * don't count. undefined below 2 samples; '>50' past 50. An estimate.
+ */
+export function turnsLeft(samples: number[], size: number): number | '>50' | undefined {
+  if (samples.length < 2) return undefined;
+  const recent = samples.slice(-6);
+  const now = recent[recent.length - 1];
+  const growth = (now - recent[0]) / (recent.length - 1);
+  if (growth <= 0) return '>50';
+  const left = Math.max(0, Math.round((size - now) / growth));
+  return left > 50 ? '>50' : left;
 }
 
 export function formatTokens(n: number): string {

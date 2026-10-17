@@ -448,7 +448,7 @@ async function shoot() {
     const pop = p.locator('.usage-pop .popover[role="dialog"]');
     check(await pop.isVisible(), 'hovering the usage button opens the popover');
     const rows = await pop.locator('.usage-row').evaluateAll((r) => r.map((e) => e.dataset.row + ':' + e.innerText.replace(/\s+/g, ' ')));
-    check(/usage:Context \d+% · [\d.]+k of 200k tokens left/.test(rows[0] ?? '') && /this chat/.test(rows[0]) && /more turns \(estimate\)/.test(rows[0]), `row 1: context left, cost, turns estimate [${rows[0]}]`);
+    check(/usage:Context \d+% · [\d.]+k of 200k tokens left/.test(rows[0] ?? '') && /this chat/.test(rows[0]) && /Context lasts (— \(needs a couple of turns to estimate\)|~(\d+|>50) more turns \(estimate\))/.test(rows[0]), `row 1: context left, cost, turns estimate [${rows[0]}]`);
     check(rows[1]?.startsWith('model:') && rows[2]?.startsWith('effort:') && (await pop.locator('.segmented [role="radio"]').count()) >= 2, 'rows 2 and 3: model picker, effort segmented control');
     await p.mouse.move(5, 5);
     await p.waitForTimeout(400);
