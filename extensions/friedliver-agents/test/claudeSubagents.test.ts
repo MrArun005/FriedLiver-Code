@@ -174,3 +174,50 @@ describe('Claude Code subagents', () => {
     expect(list[0].subagents.length).toBe(5);
   });
 });
+
+describe('a window with no folder', () => {
+  const day = 86_400_000;
+  /** Sessions in two projects, as the Claude Code extension writes them; `cwd` is on every record. */
+  function projects(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-ccall-'));
+    const add = (cwd: string, id: string, age: number, body: string) => {
+      const dir = path.join(home, '.claude', 'projects', encodeCwd(cwd));
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${id}.jsonl`);
+      fs.writeFileSync(file, body.split('\n').filter(Boolean).map((l) => JSON.stringify({ ...JSON.parse(l), cwd })).join('\n') + '\n');
+      fs.utimesSync(file, new Date(NOW - age), new Date(NOW - age));
+    };
+    const work = (title: string) => j({ type: 'ai-title', aiTitle: title }) + user(NOW - day, 'Fix the payslip rounding for arrears') + assistant(NOW - day, 'm1', [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]);
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000001', 2 * min, work('Payroll rounding'));
+    add('/Users/a/code/FriedLiver-Code', '70000000-0000-4000-8000-000000000002', 1 * min, work('Map layout'));
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000003', 3 * min, work('Leave carry-over'));
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000004', 9 * day, work('Old one'));
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000005', 1 * min, user(NOW, 'hi'));
+    // A transcript whose recorded folder isn't the one its project folder names: it can't be resumed from here.
+    const odd = path.join(home, '.claude', 'projects', '-Users-a-Other');
+    fs.mkdirSync(odd, { recursive: true });
+    fs.writeFileSync(path.join(odd, '70000000-0000-4000-8000-000000000006.jsonl'), JSON.stringify({ type: 'ai-title', aiTitle: 'Odd', cwd: '/Users/a/HRMS' }) + '\n' + work('Odd'));
+    return home;
+  }
+
+  it('lists recent sessions from every project, grouped by project, newest project first', async () => {
+    const list = await listClaudeSessions({ home: projects(), folders: [], now: NOW });
+    expect(list.map((s) => [s.project, s.title, s.cwd])).toEqual([
+      ['FriedLiver-Code', 'Map layout', '/Users/a/code/FriedLiver-Code'],
+      ['HRMS', 'Payroll rounding', '/Users/a/HRMS'],
+      ['HRMS', 'Leave carry-over', '/Users/a/HRMS'],
+    ]);
+  });
+
+  it('keeps older and trivial ones with showAll', async () => {
+    const list = await listClaudeSessions({ home: projects(), folders: [], now: NOW, showAll: true });
+    expect(list.map((s) => s.title)).toEqual(expect.arrayContaining(['Old one', 'HRMS · 2026-10-17']));
+    expect(list).toHaveLength(5);
+  });
+
+  it('names no project for a window that has folders', async () => {
+    const { home } = build();
+    const [s] = await listClaudeSessions({ home, folders: [WS], now: NOW });
+    expect(s.project).toBeUndefined();
+  });
+});

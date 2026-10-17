@@ -1417,9 +1417,11 @@ export class Controller {
   /**
    * Watches the folders' Claude Code project folders while the Manager is open, subfolders included: subagents write to
    * <session>/subagents/. A watcher stays while its folder does; a project folder made later is picked up on the next read.
+   * A window with no folder lists every project's sessions, so it watches all of ~/.claude/projects ('' below).
    */
   private watchClaudeSessions(on: boolean): void {
-    const want = new Set(on ? this.folders() : []);
+    const folders = this.folders();
+    const want = new Set(on ? (folders.length ? folders : ['']) : []);
     for (const [folder, w] of this.claudeWatchers) {
       if (want.has(folder)) continue;
       w.close();
@@ -1428,7 +1430,8 @@ export class Controller {
     for (const folder of want) {
       if (this.claudeWatchers.has(folder)) continue;
       try {
-        const w = watch(path.join(os.homedir(), '.claude', 'projects', encodeCwd(folder)), { recursive: true }, () => this.refreshClaudeSessions());
+        const dir = path.join(os.homedir(), '.claude', 'projects', folder ? encodeCwd(folder) : '');
+        const w = watch(dir, { recursive: true }, () => this.refreshClaudeSessions());
         w.on('error', () => {
           w.close();
           if (this.claudeWatchers.get(folder) === w) this.claudeWatchers.delete(folder);
