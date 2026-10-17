@@ -76,6 +76,18 @@ describe('transcript reducer', () => {
     ]);
   });
 
+  it("keeps a subagent's own words out of the chat's reply", () => {
+    const sub = { _meta: { claudeCode: { parentToolUseId: 'task' } } };
+    const s = run([
+      { t: 'created', chat: chat() },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Spawning. ' } } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'inner chatter' }, ...sub } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'inner thought' }, ...sub } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' } } },
+    ]);
+    expect(s.chats[0].items).toMatchObject([{ kind: 'agent', text: 'Spawning. Done.' }]);
+  });
+
   it('tracks commands, output and exit', () => {
     const s = run([
       { t: 'created', chat: chat({ busy: true }) },

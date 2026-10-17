@@ -4,32 +4,37 @@
 import type { ComponentChildren } from 'preact';
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
-import { MAP, ago, cardLine, linkBadges, mapKey, mapLayout, statusOf, tipPlace, type MapEdge, type MapLayout, type MapNode } from '../shared/view';
+import type { ClaudeSession } from '../shared/messages';
+import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
 
 const TIP_W = 288;
 
-export function AgentMap({ state, now, focusId, onFocus }: { state: AppState; now: number; focusId?: string; onFocus(id: string): void }) {
+export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state: AppState; outside?: ClaudeSession[]; now: number; focusId?: string; onFocus(id: string): void }) {
   // Laid out again only when something the map shows changed, not for every streamed chunk.
-  const key = mapKey(state);
-  const map = useMemo(() => mapLayout(state), [key]);
+  const key = mapKey(state, outside, now);
+  const map = useMemo(() => mapLayout(state, outside, now), [key]);
   const [tip, setTip] = useState<string | null>(null);
+  // A subagent you clicked: highlighted with its chat, its details beside the map. Never a jump to some chat.
+  const [sel, setSel] = useState<string | null>(null);
   const waiting = decisions({ chats: state.chats.filter((c) => !c.archived) }).length;
-  if (!map.nodes.length) return null;
+  if (!map.nodes.length && !map.outside.length) return null;
+  const selSub = map.subs.find((n) => n.id === sel);
   const tipNode = map.nodes.find((n) => n.chat.id === tip);
   // The layout may be older than this update: the tooltip reads the chat as it is now.
   const tipChat = tipNode && state.chats.find((c) => c.id === tipNode.chat.id);
-  const roving = map.nodes.some((n) => n.chat.id === focusId) ? focusId! : map.nodes[0].chat.id;
+  const roving = map.nodes.some((n) => n.chat.id === focusId) ? focusId! : (map.nodes[0]?.chat.id ?? '');
 
   return (
     <div class="map-wrap">
       <Legend still={!map.edges.some((e) => e.flowing)} working={map.nodes.some((n) => n.status === 'working')} />
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
-          <MapCanvas map={map} tip={tip} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} onFocus={onFocus} />
+          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={setSel} onFocus={onFocus} />
           {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} />}
         </div>
       </div>
+      {selSub && <SubDetail sub={selSub} state={state} outside={outside} now={now} onClose={() => setSel(null)} />}
     </div>
   );
 }
@@ -41,27 +46,30 @@ interface CanvasProps {
   waiting: number;
   /** For the shared files' names of the chats; compared by layout, which changes with them. */
   chats: ChatView[];
+  /** The subagent selected for the detail panel. */
+  sel: string | null;
   setTip(id: string | null): void;
+  setSel(id: string | null): void;
   onFocus(id: string): void;
 }
 
 /** The drawing itself: drawn again when the layout, the highlighted chat or the decision count changes. */
 const MapCanvas = memo(
   MapCanvasView,
-  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus,
+  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.sel === b.sel && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus,
 );
 
-function MapCanvasView({ map, tip, roving, waiting, chats, setTip, onFocus }: CanvasProps) {
+function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, onFocus }: CanvasProps) {
   const lit = tip ? new Set([tip, ...map.edges.flatMap((e) => (e.from === tip || e.to === tip ? [e.id, e.from, e.to] : []))]) : null;
   return (
           <svg class="map" width={map.width} height={map.height} viewBox={`0 0 ${map.width} ${map.height}`} role="group" aria-label="Agent map" data-lit={lit ? '' : undefined}>
             <MapDefs />
             {map.lanes.map((lane) => (
-              <g key={lane.agent} class="map-lane" data-agent={lane.agent}>
+              <g key={lane.outside ? 'outside' : lane.agent} class="map-lane" data-agent={lane.agent}>
                 <rect x={MAP.laneX} y={lane.y} width={map.width - MAP.pad - MAP.laneX} height={lane.h} rx="12" />
                 <SvgGlyph agent={lane.agent} x={MAP.col0} y={lane.y + 8} size={16} />
                 <text class="lane-head" x={MAP.col0 + 23} y={lane.y + 20}>
-                  <tspan class="lane-name">{AGENT_FACES[lane.agent].name}</tspan>
+                  <tspan class="lane-name">{lane.outside ? 'Claude Code · outside FriedLiver' : AGENT_FACES[lane.agent].name}</tspan>
                   <tspan class="lane-meta" dx="8">
                     {lane.chats}
                     {lane.working > 0 ? ` · ${lane.working} working` : ''}
@@ -134,34 +142,54 @@ function MapCanvasView({ map, tip, roving, waiting, chats, setTip, onFocus }: Ca
                 }}
               />
             ))}
-            {map.subs.map((n) => (
-              <g
-                key={n.id}
-                class={`map-node map-sub ${lit && !lit.has(n.id) ? 'dim' : ''}`}
-                data-status={n.state === 'failed' ? 'error' : n.state}
-                data-agent={n.agent}
-                transform={`translate(${n.x} ${n.y})`}
-                tabIndex={-1}
-                role="button"
-                aria-label={`Subagent: ${n.title}`}
-                onClick={() => send({ type: 'openChat', chatId: n.chatId, item: n.item })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    send({ type: 'openChat', chatId: n.chatId, item: n.item });
-                  }
-                }}
-              >
+            {map.outside.map((o) => (
+              <g key={o.id} class={`map-node map-outside ${lit && !lit.has(`cc:${o.id}`) ? 'dim' : ''}`} data-status={o.state} data-agent="claude" transform={`translate(${o.x} ${o.y})`} aria-label={`Claude Code session outside FriedLiver: ${o.title}`}>
+                <title>Started outside FriedLiver (the claude CLI or the Claude Code extension)</title>
                 <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
-                <text class="node-label" x="14" y="17">
-                  subagent
+                <SvgGlyph agent="claude" x={10} y={10} size={20} />
+                <text class="node-label" x="40" y="17">
+                  {o.title}
                 </text>
-                <text class="node-title" x="14" y="31">
-                  {n.title}
+                <text class="node-title" x="40" y="31">
+                  Claude Code · outside
                 </text>
-                <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                <circle class="node-dot" data-state={o.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
               </g>
             ))}
+            {map.subs.map((n) => {
+              const pick = () => setSel(sel === n.id ? null : n.id);
+              return (
+                <g
+                  key={n.id}
+                  class={`map-node map-sub ${lit && !lit.has(n.id) ? 'dim' : ''}`}
+                  data-status={n.state === 'failed' ? 'error' : n.state}
+                  data-agent={n.agent}
+                  data-selected={sel === n.id ? '' : undefined}
+                  transform={`translate(${n.x} ${n.y})`}
+                  tabIndex={0}
+                  role="button"
+                  aria-pressed={sel === n.id}
+                  aria-label={`Subagent: ${n.title}`}
+                  onClick={pick}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      pick();
+                    }
+                  }}
+                >
+                  {n.state === 'working' && <rect class="ring" x="-3.5" y="-3.5" width={MAP.nodeW + 7} height={MAP.nodeH + 7} rx="11" />}
+                  <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
+                  <text class="node-label" x="14" y="17">
+                    subagent
+                  </text>
+                  <text class="node-title" x="14" y="31">
+                    {n.title}
+                  </text>
+                  <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                </g>
+              );
+            })}
             {map.conflicts.map((f) => (
               <g
                 key={f.file}
@@ -343,6 +371,51 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
         </div>
       )}
     </div>
+  );
+}
+
+const SUB_LABEL = { working: 'Working', done: 'Done', failed: 'Problem' } as const;
+
+/** The selected subagent: what it is doing or did, beside the map. Opening its chat is a choice here, not what a click does. */
+function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: AppState; outside: ClaudeSession[]; now: number; onClose(): void }) {
+  const chat = sub.outside ? undefined : state.chats.find((c) => c.id === sub.chatId);
+  const session = sub.outside ? outside.find((s) => `cc:${s.id}` === sub.chatId) : undefined;
+  const info = chat ? subagents(chat).find((s) => s.id === sub.item) : session && claudeSubagents(session, now).find((s) => s.id === sub.item);
+  const call = chat?.items.find((i): i is ToolItem => i.kind === 'tool' && i.id === sub.item);
+  const steps = chat ? chat.items.filter((i): i is ToolItem => i.kind === 'tool' && i.parent === sub.item) : [];
+  const answer = call && subagentAnswer(call);
+  const state_ = info?.state ?? sub.state;
+  const ms = info?.ms ?? (info?.startedAt !== undefined ? Math.max(0, now - info.startedAt) : undefined);
+  return (
+    <aside class="map-detail" aria-label={`Subagent: ${info?.title ?? sub.title}`}>
+      <div class="tip-head">
+        <Dot state={state_ === 'failed' ? 'error' : state_} />
+        <b>Subagent</b>
+        <span class="hint">{SUB_LABEL[state_]}{ms !== undefined ? ` · ${shortDuration(ms)}` : ''}</span>
+        <span class="spacer" />
+        <button class="ghost icon-btn sm" aria-label="Close" title="Close" onClick={onClose}>
+          <Icon name="close" />
+        </button>
+      </div>
+      <div class="tip-title">{info?.title ?? sub.title}</div>
+      <div class="tip-meta">of {chat ? `${chat.label}: ${chat.title}` : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
+      {steps.length > 0 && (
+        <ol class="map-detail-steps" aria-label="Steps">
+          {steps.slice(-8).map((t) => (
+            <li key={t.id} data-state={t.status}>
+              {t.title}
+            </li>
+          ))}
+        </ol>
+      )}
+      {answer && <div class="map-detail-answer">{answer.length > 600 ? `${answer.slice(0, 599)}…` : answer}</div>}
+      {!steps.length && !answer && <div class="tip-line">{session ? 'Its steps are in that session\'s transcript; FriedLiver lists only its title and state.' : 'No steps reported yet.'}</div>}
+      {chat && (
+        <button class="link" onClick={() => send({ type: 'openChat', chatId: chat.id, item: sub.item })}>
+          Show in {chat.label}
+        </button>
+      )}
+    </aside>
   );
 }
 
