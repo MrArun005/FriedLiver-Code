@@ -42,9 +42,9 @@ What changes from stock VS Code:
   accent color ([screenshots](docs/screenshots/workbench/)). A first-run
   walkthrough (Help → Welcome) shows the Demo agent, sign-in, the Agent
   Manager and `@gemini`.
-- **No telemetry, no experiments, no update service.** Once a week the Agents
-  extension asks GitHub whether a newer FriedLiver release is out and tells
-  you (`friedliver.updates.check` turns that off). It has its own
+- **No telemetry, no experiments, no update service.** Every 4 hours the Agents
+  extension asks GitHub whether a newer FriedLiver release is out and offers to
+  install it (checksum-verified; `friedliver.update.mode: off` turns that off). It has its own
   `.friedliver` settings folder, so it doesn't touch an installed VS Code.
 - **Agents ask first.** In Ask, each edit and command waits for you, shown as a
   diff or a command line; Full auto is a per-chat choice you confirm. Files

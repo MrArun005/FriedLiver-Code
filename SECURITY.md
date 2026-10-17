@@ -194,15 +194,15 @@ arguments are checked, and its images and output are bounded.
   workspace's "Always allow" rules.
 - **The output channel** (FriedLiver Agents) logs agent commands, agent stderr
   and errors. It never logs keys.
-- **globalState** also holds the update check's last-check time and the last
-  version it announced.
 
 ### Network
 
-FriedLiver itself contacts Open VSX (extensions, over HTTPS) and, once a week,
+FriedLiver itself contacts Open VSX (extensions, over HTTPS) and, every 4 hours,
 `api.github.com` for the latest FriedLiver release. That check is an anonymous
-GET and can be turned off with `friedliver.updates.check` or `update.mode:
-none`. It runs only in the FriedLiver app. There is no telemetry. Agents talk
+GET and can be turned off with `friedliver.update.mode: off` or `update.mode:
+none`. Installing an update downloads only over https from this repo's release
+downloads (and GitHub's asset hosts, every redirect checked), and refuses a DMG
+whose size or SHA-256 doesn't match the release's `SHA256SUMS.txt`. It runs only in the FriedLiver app. There is no telemetry. Agents talk
 to their own vendors. The Agents extension listens on one port, on 127.0.0.1
 only, for agents that reach the FriedLiver tools over HTTP ("The HTTP
 endpoint" below).
@@ -322,7 +322,7 @@ for a typical single-user desktop.
 | FL-06 | Medium | Install action | The webview supplied the command that was typed into a terminal, and a line break in it would have run it. | Fixed. The action carries only the agent's key; the host uses its own constant command, plain characters only, sent without a newline. |
 | FL-07 | Medium (Windows) | Process launch | Arguments for npm `.cmd` wrappers were quoted with `\"`, which cmd.exe ignores. An argument containing `" & … & "` or `%VAR%` could run other commands or expand variables. | Fixed. cmd.exe metacharacters are escaped with `^`, twice for batch files, and line breaks are refused. Tested against a model of cmd.exe parsing. |
 | FL-08 | Medium (Windows) | Process launch | Binary planting. An agent missing from PATH was started by bare name with the workspace as its folder, and Windows looks in that folder first. npm wrappers start `node` by bare name, and git and taskkill were started by bare name too. | Fixed. Unresolved names are never started. Relative PATH entries are skipped. `NoDefaultCurrentDirectoryInExePath=1` is set for agents and terminal sign-in. Git is resolved on PATH, and taskkill and cmd are started from System32. |
-| FL-09 | Medium | Updates | There was no update path, so people stayed on old builds. | Fixed. A weekly release check in the app, a weekly pull request when VS Code has a new stable release (`upstream.yml`), and GitHub releases with checksums for `v*` tags. |
+| FL-09 | Medium | Updates | There was no update path, so people stayed on old builds. | Fixed. A release check in the app every 4 hours with a checksum-verified macOS install, a weekly pull request when VS Code has a new stable release (`upstream.yml`), and GitHub releases with checksums for `v*` tags. |
 | FL-10 | Medium | CI | Workflows used the default token permissions, left credentials in `.git/config`, ran actions from floating tags and pasted values into scripts. Dependencies had no update automation. | Fixed. Read-only by default, with write only for the release and upstream jobs. `persist-credentials: false` where nothing is pushed. Actions are pinned to commits, scripts read values from variables, Dependabot is on, and release builds use no cache. Tests guard all of this. |
 | FL-11 | Medium | Build supply chain | The Node toolchain, the `@vscode/ripgrep` package and the ripgrep binary were downloaded without integrity checks, and a file already in the shared temp folder was trusted. | Fixed. Node is checked against `SHASUMS256.txt`, the package against lockfile integrity, and the binaries against SHA-256 pins (required for release builds). A cached file must match its pin. |
 | FL-12 | Low | Images | An agent-supplied MIME type went into `data:` URIs unchecked, with no size limit. Image files were read before their size was checked. | Fixed. Allowlisted image types, base64 only, a size cap, and `stat` before reading. SVG is only shown through `<img>`, which a test enforces. |
