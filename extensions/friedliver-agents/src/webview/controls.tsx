@@ -35,6 +35,18 @@ type Permission = Extract<Item, { kind: 'permission' }>;
 
 const LEVEL_TONE: Record<ApprovalLevel, string> = { ask: 'quiet', edits: 'edits', full: 'full' };
 
+/** The approval tone the mode chip's dot shows: Plan, the agent's own loud mode, or the level. */
+export function approvalTone(chat: Pick<ChatView, 'approval' | 'session'>): string {
+  if (planning(chat.session)) return 'plan';
+  const reported = reportedMode(chat.session);
+  return reported?.tone === 'full' || reported?.tone === 'auto' ? reported.tone : LEVEL_TONE[chat.approval ?? 'ask'];
+}
+
+/** The composer border colour for a tone: Ask/Plan grey, edits amber, Full auto red. */
+export function composerMode(tone: string): 'ask' | 'edits' | 'full' {
+  return tone === 'full' ? 'full' : tone === 'edits' || tone === 'auto' ? 'edits' : 'ask';
+}
+
 type ControlsProps = { chat: ChatView; compact?: boolean };
 
 /** Approval level, model and effort, as chips under the message box. Drawn again only when they change, not per streamed chunk. */
@@ -77,7 +89,7 @@ export function ApprovalMenu({ chat, compact }: { chat: ChatView; compact?: bool
   const name = inPlan ? 'Plan' : APPROVAL_NAMES[level];
   const agent = AGENT_FACES[chat.agent].name;
   const title = `${name}: ${inPlan ? 'plans first, changes nothing' : APPROVAL_HINTS[level]}.${reported ? ` ${agent}'s mode: ${reported.name}.` : ''} Shift+Tab switches.`;
-  const tone = inPlan ? 'plan' : reported?.tone === 'full' || reported?.tone === 'auto' ? reported.tone : LEVEL_TONE[level];
+  const tone = approvalTone(chat);
   return (
     <Popover
       label="How much the agent may do without asking"
@@ -257,14 +269,11 @@ export const UsageMeter = memo(function UsageMeter({ usage, compact }: { usage?:
   const pct = usagePercent(usage);
   const level = pct >= 90 ? 'high' : pct >= 75 ? 'warn' : undefined;
   const cost = usage.cost ? formatCost(usage.cost) : '';
-  const title = `Context: ${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens (${pct}%)${cost ? ` · ${cost} so far` : ''}${level ? '. Nearly full: /compact or a new chat clears it.' : ''}`;
+  const title = `${pct}% of the model's context window used (${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens)${cost ? `. ${cost} spent in this chat so far` : ''}${level ? '. Nearly full: /compact or a new chat clears it.' : ''}`;
   return (
     <span class="usage" data-level={level} title={title} role="img" aria-label={title}>
-      <span class="usage-bar" aria-hidden="true">
-        <i style={{ width: `${pct}%` }} />
-      </span>
-      {!compact && <span>{pct}%</span>}
-      {!compact && cost && <span class="usage-cost">{cost}</span>}
+      <span>{compact ? `${pct}%` : `Context ${pct}%`}</span>
+      {!compact && cost && <span class="usage-cost">{cost} this chat</span>}
     </span>
   );
 });

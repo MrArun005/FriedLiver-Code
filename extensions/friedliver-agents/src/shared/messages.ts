@@ -29,8 +29,8 @@ export type WebviewMessage =
   | { type: 'notice'; chatId: string; action: NoticeAction }
   /** `chatId` (optional): the composer the images go to. */
   | { type: 'attach'; chatId?: string }
-  /** macOS dictation into the focused composer (the webview focuses it first). */
-  | { type: 'dictate' }
+  /** Opens System Settings › Keyboard › Dictation (the mic's hint links there). */
+  | { type: 'dictationSettings' }
   /** A step's image: the host answers with imageSrc when the webview may show it. */
   | { type: 'imageSrc'; path: string }
   /** Opens an image in the editor's image preview, beside the chat. */
@@ -226,7 +226,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'moveToCenter':
     case 'openTasks':
     case 'otherAgents':
-    case 'dictate':
+    case 'dictationSettings':
       return { type: m.type };
     case 'attach':
       if (m.chatId === undefined) return { type: 'attach' };

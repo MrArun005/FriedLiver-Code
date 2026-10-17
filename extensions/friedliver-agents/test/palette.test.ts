@@ -55,11 +55,16 @@ const contrast = (a: RGB, b: RGB) => {
 };
 
 const THEMES = {
-  'Dark Modern': { light: false, v: { 'editor-background': '#1f1f1f', foreground: '#cccccc', descriptionForeground: '#9d9d9d', 'button-background': '#0078d4', 'charts-green': '#89d185', 'charts-yellow': '#cca700', errorForeground: '#f85149', 'textLink-foreground': '#4daafc' } },
-  'Light Modern': { light: true, v: { 'editor-background': '#ffffff', foreground: '#3b3b3b', descriptionForeground: '#717171', 'button-background': '#005fb8', 'charts-green': '#388a34', 'charts-yellow': '#bf8803', errorForeground: '#f85149', 'textLink-foreground': '#005fb8' } },
+  'Dark Modern': { light: false, v: { 'editor-background': '#1f1f1f', foreground: '#cccccc', descriptionForeground: '#9d9d9d', 'button-background': '#0078d4', 'charts-green': '#89d185', 'charts-yellow': '#cca700', errorForeground: '#f85149', 'textLink-foreground': '#4daafc', focusBorder: '#0078d4', 'charts-purple': '#b180d7' } },
+  'Light Modern': { light: true, v: { 'editor-background': '#ffffff', foreground: '#3b3b3b', descriptionForeground: '#717171', 'button-background': '#005fb8', 'charts-green': '#388a34', 'charts-yellow': '#bf8803', errorForeground: '#f85149', 'textLink-foreground': '#005fb8', focusBorder: '#005fb8', 'charts-purple': '#652d90' } },
 };
 
 describe('the chat palette keeps WCAG contrast', () => {
+  it('Full auto stays purple, never the error red, with the #b180d7 fallback', () => {
+    const p = block('palette');
+    expect(p['--c-mode-full']).toBe('var(--vscode-charts-purple, #b180d7)');
+    expect(p['--c-focus']).toBe('var(--vscode-focusBorder, #3794ff)');
+  });
   for (const [name, theme] of Object.entries(THEMES)) {
     it(name, () => {
       const vars: Record<string, string> = { '--fl-accent': '#D97757', ...block('palette'), ...(theme.light ? block('palette-light') : {}) };
@@ -76,6 +81,10 @@ describe('the chat palette keeps WCAG contrast', () => {
         // Non-text (WCAG 1.4.11): the accent is only a border, 3:1 against what it edges.
         expect(on('--c-acc', back), `accent border on ${back}`).toBeGreaterThanOrEqual(3);
       }
+      // The composer's mode border (Ask grey, edits amber, Full auto purple) and its blue focus ring
+      // edge the page and the composer's own surface.
+      for (const back of ['--c-bg', '--c-surface'])
+        for (const t of ['--c-mode-ask', '--c-mode-edits', '--c-mode-full', '--c-focus']) expect(on(t, back), `${t} on ${back}`).toBeGreaterThanOrEqual(3);
     });
   }
 });
