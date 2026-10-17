@@ -342,7 +342,8 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
   const status = statusOf(chat);
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
-  const chips = linkBadges(state, chat).filter((b) => !(b.kind === 'origin' && b.chatId === parent?.id));
+  // The banner covers where this chat came from, and a handoff has its card in the transcript; chips cover the rest.
+  const chips = linkBadges(state, chat).filter((b) => !(b.kind === 'origin' && b.chatId === parent?.id) && b.kind !== 'handoff');
   const images = useMemo(() => chatImages(chat.items), [chat.items]);
   return (
     <>
@@ -1229,10 +1230,10 @@ function Composer({
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
           placeholder={
             chat.busy
-              ? `Message ${AGENT_FACES[chat.agent].name}: it goes when the turn ends · Esc stops`
+              ? 'Message… sends when this turn ends · Esc stops'
               : chat.session?.starting
-                ? `Starting ${AGENT_FACES[chat.agent].name}…`
-                : 'Message…   / commands  # files  @ another agent'
+                ? 'Starting…'
+                : 'Message…'
           }
           onInput={(e) => {
             setText(e.currentTarget.value);
