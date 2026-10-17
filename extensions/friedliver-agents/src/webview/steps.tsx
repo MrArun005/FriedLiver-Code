@@ -162,7 +162,7 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
         {/* A heredoc write: the file it writes first, then the command around it. */}
         {doc?.file && <HeredocFile doc={doc} cwd={cwd} />}
         {cmd && (
-          <ToolRow label="IN" class="step-command" aria-label="Command" text={cmd.line} lang="sh" pre tools={
+          <ToolRow label="IN" class="step-command" aria-label="Command" text={cmd.line} lang="sh" tools={
             <>
               {meta.length > 0 && <span class={`tool-meta${exit ? ' bad' : ''}`}>{meta.join(' · ')}</span>}
               {runnable && <RunButton chatId={chatId} command={cmd.line} cwd={cmd.cwd} />}
@@ -202,7 +202,8 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
 const CLAMP_LINES = 3;
 
 /** One IN/OUT row: its label, its text (clipped past three lines), and copy/run on hover. */
-function ToolRow({ label, class: className, text, lang, pre, out, tools, children, ...rest }: { label: string; class: string; text: string; lang: string; pre?: boolean; out?: boolean; tools?: ComponentChildren; children?: ComponentChildren; 'aria-label': string }) {
+/** One IN/OUT/FILE row: its text wraps (QA: long lines don't run off), opens in an editor tab, and has its own tools. */
+function ToolRow({ label, class: className, text, lang, out, tools, children, ...rest }: { label: string; class: string; text: string; lang: string; out?: boolean; tools?: ComponentChildren; children?: ComponentChildren; 'aria-label': string }) {
   const [all, setAll] = useState(false);
   const lines = useMemo(() => text.replace(/\n$/, '').split('\n').length, [text]);
   const long = lines > CLAMP_LINES;
@@ -210,14 +211,19 @@ function ToolRow({ label, class: className, text, lang, pre, out, tools, childre
     <section class={`tool-row ${className}${out ? ' out' : ''}`} aria-label={rest['aria-label']}>
       <span class="tool-label">{label}</span>
       <div class="tool-cell">
-        <Code code={text} lang={lang} class={`${pre ? 'keep ' : ''}${long && !all ? 'capped' : ''}`} />
+        <Code code={text} lang={lang} class={long && !all ? 'capped' : ''} />
         {long && (
           <button class="link sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
             {all ? 'Show less' : `Show all ${lines} lines`}
           </button>
         )}
         {children}
-        {tools && <span class="tool-tools">{tools}</span>}
+        <span class="tool-tools">
+          {tools}
+          <button type="button" class="ghost icon-btn sm" aria-label="Open in editor" title="Open in an editor tab (long lines wrap)" onClick={() => send({ type: 'openText', text })}>
+            <Icon name="open" />
+          </button>
+        </span>
       </div>
     </section>
   );

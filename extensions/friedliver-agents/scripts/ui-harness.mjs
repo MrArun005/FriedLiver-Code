@@ -1222,7 +1222,8 @@ async function shoot() {
     await row('cat << EOF | python3 minidb.py').locator('.step-main').click();
     const opened = p.locator('.tl-step[data-open]:has(.step-text:text("cat << EOF | python3 minidb.py"))');
     check((await opened.locator('.step-command pre.code').innerText()) === COMMANDS.users, 'the command shows in full with every line');
-    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre', 'the command never wraps');
+    // Owner, 2026-10-17: long lines wrap in IN/OUT (its own lines stay lines); the whole command opens wrapped in an editor tab.
+    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre-wrap', 'a long command line wraps, keeping its own lines');
     check(await opened.locator('.step-output pre.code.capped').count() === 1, 'long output starts capped');
     await opened.locator('.step-output button:has-text("Show all")').click();
     check(await opened.locator('.step-output pre.code.capped').count() === 0, 'Show all opens the whole output');

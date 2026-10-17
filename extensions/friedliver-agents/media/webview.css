@@ -3628,6 +3628,14 @@ pre.code {
     linear-gradient(to left, color-mix(in srgb, var(--fg) 14%, transparent), transparent) right / var(--sp-4) 100% no-repeat scroll,
     var(--code-bg);
 }
+/* A code block in a reply wraps unless its Wrap is off. */
+.code-block[data-wrap] pre.code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+button.wrap-btn[aria-pressed='true'] {
+  color: var(--fg);
+}
 pre.code:focus-visible {
   outline: 1px solid var(--focus);
   outline-offset: -1px;
@@ -3880,10 +3888,6 @@ button.step-main:active {
   font-size: var(--t-100);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.tool-cell pre.code.keep {
-  white-space: pre;
-  overflow-wrap: normal;
 }
 .tool-cell pre.code.capped {
   max-height: 60px;

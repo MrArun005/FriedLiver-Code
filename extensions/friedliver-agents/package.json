@@ -36,6 +36,20 @@
     "test:integration": "node esbuild.mjs && node dist/test/run.js"
   },
   "contributes": {
+    "languages": [
+      {
+        "id": "friedliver-output",
+        "aliases": [
+          "Agent output"
+        ]
+      }
+    ],
+    "configurationDefaults": {
+      "[friedliver-output]": {
+        "editor.wordWrap": "on",
+        "editor.wrappingIndent": "same"
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
