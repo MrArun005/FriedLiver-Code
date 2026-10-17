@@ -251,3 +251,23 @@ export function nodeEnv() {
 		version: required,
 	};
 }
+
+/**
+ * codesign's arguments for one macOS target. With an identity (MACOS_SIGN_IDENTITY: the
+ * self-signed certificate CI imports, or later a Developer ID) the signature's designated
+ * requirement names that certificate, so macOS keeps Desktop, Documents, mic and speech grants
+ * across updates; without one it is ad-hoc ('-'), whose requirement is the build's cdhash and
+ * changes every build. No hardened runtime: Electron needs entitlements for that.
+ */
+export function codesignArgs(target, { identity = '', keychain = '', identifier = '', deep = false } = {}) {
+	const signed = identity.trim() !== '';
+	return [
+		'--force',
+		...(deep ? ['--deep'] : []),
+		'--sign', signed ? identity : '-',
+		...(signed ? ['--timestamp=none'] : []),
+		...(signed && keychain ? ['--keychain', keychain] : []),
+		...(identifier ? ['--identifier', identifier] : []),
+		target,
+	];
+}

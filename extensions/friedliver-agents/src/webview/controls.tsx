@@ -4,7 +4,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { DiffLine } from '../shared/diff';
 import { AGENT_FACES, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
-import { describeRule, ruleCandidates } from '../shared/rules';
+import { ruleCandidates } from '../shared/rules';
+import { describeGrant, grantId, type Grant } from '../shared/permissions';
 import {
   optionKey,
   reportedMode,
@@ -169,30 +170,46 @@ export function PermissionOptions({ item, compact }: { item: Permission; compact
   );
 }
 
-/** "Always allow" for a command: the exact line, or the program and its subcommand. Never for chained lines. */
-export function AlwaysAllow({ line, target }: { line: string; target: { requestId: string } | { commandId: string } }) {
-  const rules = ruleCandidates(line);
-  if (!rules.length) return null;
+/**
+ * "Always allow", remembered for every chat and later session: for a command, the exact line or the
+ * program and its subcommand (never chained lines); for files, the folders the host offered (most
+ * specific first); for a fetch, its website. Manage Permissions lists and revokes them.
+ */
+export function AlwaysAllow({ line, grants = [], target }: { line?: string; grants?: Grant[]; target: { requestId: string } | { commandId: string } }) {
+  const choices: Grant[] = [...(line ? ruleCandidates(line) : []), ...grants];
+  if (!choices.length) return null;
   return (
-    <Popover label="Always allow" title="Run this without asking from now on, in this workspace" buttonClass="link always-allow" trigger={<>Always allow…</>}>
+    <Popover label="Always allow" title="Don't ask again: in every chat, for every agent, after restarts" buttonClass="link always-allow" trigger={<>Always allow…</>}>
       {(close) => (
         <>
           <div class="pop-title" aria-hidden="true">
-            Run without asking in this workspace
+            Always allow, in every chat
           </div>
-          {rules.map((rule) => (
-            <button
-              key={rule.kind}
-              role="menuitem"
-              onClick={() => {
-                close();
-                send({ type: 'allowAlways', ...target, rule });
-              }}
-            >
-              <span class="menu-label mono">{describeRule(rule)}</span>
-              <span class="menu-sub">{rule.kind === 'exact' ? 'this exact command' : 'and anything after it'}</span>
-            </button>
-          ))}
+          {choices.map((grant) => {
+            const d = describeGrant(grant);
+            return (
+              <button
+                key={grantId(grant)}
+                role="menuitem"
+                onClick={() => {
+                  close();
+                  send({ type: 'allowAlways', ...target, grant });
+                }}
+              >
+                <span class="menu-label mono">{d.scope}</span>
+                <span class="menu-sub">{grant.kind === 'folder' ? `${grant.access === 'read' ? 'read files here' : 'change files here'} and below` : d.what.toLowerCase()}</span>
+              </button>
+            );
+          })}
+          <button
+            role="menuitem"
+            onClick={() => {
+              close();
+              send({ type: 'managePermissions' });
+            }}
+          >
+            <span class="menu-label">Manage permissions…</span>
+          </button>
         </>
       )}
     </Popover>
@@ -236,7 +253,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
       <PermissionDetailView detail={item.detail} requestId={item.requestId} open />
       <div class="actions">
         <PermissionOptions item={item} />
-        {command && item.toolKind === 'execute' && <AlwaysAllow line={command} target={{ requestId: item.requestId }} />}
+        <AlwaysAllow line={command && item.toolKind === 'execute' ? command : undefined} grants={item.detail?.always} target={{ requestId: item.requestId }} />
       </div>
       {deny && <KeyHint chat={chat} id={item.requestId} n={item.options.length} yes={!!primaryOption(item.options)} />}
     </section>

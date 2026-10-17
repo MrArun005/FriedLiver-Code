@@ -2,7 +2,7 @@
 // treated as untrusted: every message is checked here before it is acted on.
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import type { DictationUpdate } from './dictation';
-import { isRule, type CommandRule } from './rules';
+import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
 import { typeable } from './steps';
 
@@ -63,7 +63,7 @@ export type WebviewMessage =
   /** The same task on several agents at once, each in its own worktree when asked, to compare. */
   | { type: 'fanout'; agents: AgentKey[]; prompt: string; worktree: boolean; choices?: TaskChoices; approval?: ApprovalLevel }
   /** Answer an agent's request to reach another chat or agent. */
-  | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'deny' }
+  | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'allowAlways' | 'deny' }
   | { type: 'archive'; chatId: string; archived: boolean }
   | { type: 'star'; chatId: string; starred: boolean }
   /** Open the shared rules files (sharedRules.ts). */
@@ -83,7 +83,11 @@ export type WebviewMessage =
   /** A read-only diff of what a permission request would write to `path`. */
   | { type: 'permissionDiff'; requestId: string; path: string }
   /** Always allow a command from now on (after a confirmation), and allow this one. */
-  | { type: 'allowAlways'; requestId?: string; commandId?: string; rule: CommandRule }
+  | { type: 'allowAlways'; requestId?: string; commandId?: string; grant: Grant }
+  /** Manage Permissions: open it, revoke one remembered "Always allow", or all of them. */
+  | { type: 'managePermissions' }
+  | { type: 'revokePermission'; id: string }
+  | { type: 'revokeAllPermissions' }
   | { type: 'reviewAll'; chatId: string; action: 'accept' | 'reject' }
   /** A queued message: drop it, or send it now into the running turn. */
   | { type: 'unqueue'; chatId: string; id: string }
@@ -110,6 +114,8 @@ export type HostMessage =
   /** `defaults` (optional): each agent's last known options and the user's last choices. */
   | { type: 'snapshot'; state: AppState; selected?: string; now: number; defaults?: Partial<Record<AgentKey, AgentDefaults>> }
   | { type: 'defaults'; defaults: Partial<Record<AgentKey, AgentDefaults>> }
+  /** Manage Permissions: every remembered "Always allow". */
+  | { type: 'permissions'; rules: Remembered[] }
   | { type: 'action'; action: Action }
   /** Several actions in order; the host batches them when agents stream fast. */
   | { type: 'actions'; actions: Action[] }
@@ -276,11 +282,16 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'permissionDiff':
       return id(m.requestId) && str(m.path, LIMITS.path) && m.path ? { type: 'permissionDiff', requestId: m.requestId, path: m.path } : null;
     case 'allowAlways': {
-      if (!isRule(m.rule) || (m.requestId !== undefined && !id(m.requestId)) || (m.commandId !== undefined && !id(m.commandId))) return null;
+      if (!isGrant(m.grant) || (m.requestId !== undefined && !id(m.requestId)) || (m.commandId !== undefined && !id(m.commandId))) return null;
       if ((m.requestId === undefined) === (m.commandId === undefined)) return null;
-      const rule = { kind: m.rule.kind, command: m.rule.command };
-      return m.requestId !== undefined ? { type: 'allowAlways', requestId: m.requestId as string, rule } : { type: 'allowAlways', commandId: m.commandId as string, rule };
+      const grant = cleanGrant(m.grant);
+      return m.requestId !== undefined ? { type: 'allowAlways', requestId: m.requestId as string, grant } : { type: 'allowAlways', commandId: m.commandId as string, grant };
     }
+    case 'managePermissions':
+    case 'revokeAllPermissions':
+      return { type: m.type };
+    case 'revokePermission':
+      return str(m.id, 5000) && m.id ? { type: 'revokePermission', id: m.id } : null;
     case 'reviewAll':
       return id(m.chatId) && (m.action === 'accept' || m.action === 'reject') ? { type: 'reviewAll', chatId: m.chatId, action: m.action } : null;
     case 'unqueue':
@@ -340,7 +351,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
         : null;
     }
     case 'bridge':
-      return id(m.requestId) && (m.answer === 'allow' || m.answer === 'allowChat' || m.answer === 'deny')
+      return id(m.requestId) && (m.answer === 'allow' || m.answer === 'allowChat' || m.answer === 'allowAlways' || m.answer === 'deny')
         ? { type: 'bridge', requestId: m.requestId, answer: m.answer }
         : null;
     case 'openRules':

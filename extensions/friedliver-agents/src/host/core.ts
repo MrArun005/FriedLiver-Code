@@ -14,7 +14,8 @@ import { TurnLog } from '@friedliver/main/agents/turnLog';
 import * as git from '@friedliver/main/workspace/git';
 import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
 import type { Attachment } from '../shared/messages';
-import { describeRule, matchesRule, type CommandRule } from '../shared/rules';
+import { describeRule, matchesRule } from '../shared/rules';
+import { describeGrant, sameGrant, siteOrigin, type Access, type Grant } from '../shared/permissions';
 import {
   APPROVAL_NAMES,
   EMPTY_SESSION,
@@ -59,10 +60,11 @@ import {
 } from '../shared/model';
 import { BridgeServer } from './bridge';
 import { Checkpoints, type RewindPlan } from './checkpoints';
-import { BridgeRequests, type AgentToAgent, type ToolHost } from './bridgeRequests';
+import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
-import { inGitFolder, insideRoots } from './paths';
+import { inGitFolder, insideRoots, realPath } from './paths';
+import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
 import { loginExtras } from './signin';
@@ -84,6 +86,8 @@ const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_PROPOSAL_BYTES = 4 * 1024 * 1024;
 /** Tool calls remembered per chat until they finish, to fill in permission requests that name only an id. */
 const MAX_OPEN_TOOLS = 200;
+/** Where agents' tool inputs name the files they act on (Claude, Codex, Gemini, and the obvious others). */
+const TARGET_KEYS = ['file_path', 'filePath', 'path', 'abs_path', 'notebook_path', 'old_path', 'new_path', 'source', 'destination', 'target'];
 /** Messages that can wait for a busy chat. */
 const MAX_QUEUE = 10;
 
@@ -124,10 +128,10 @@ export interface CoreUi {
   turnEnded?(t: { chatId: string; label: string; title: string; stopReason: acp.StopReason | null; failure?: Item; files: number; byUser: boolean }): void;
   /** Asks once per chat before Full auto. */
   confirmFullAuto?(ask: { label: string; agent: string; mode?: string }): Promise<boolean>;
-  /** Asks before adding an "Always allow" rule. */
-  confirmRule?(rule: CommandRule): Promise<boolean>;
+  /** Asks before adding an "Always allow" command rule. */
+  confirmRule?(rule: Extract<Grant, { kind: 'exact' | 'prefix' }>): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
-  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string }): void;
+  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void;
   /** An agent asks a question as a small form, answered in the chat. */
   askQuestion?(ask: { chatId: string; requestId: string; agentLabel: string; message: string }): void;
   signInUrl?(agent: AgentKey, url: string): void;
@@ -159,8 +163,10 @@ export interface CoreOptions {
   approvalDefault?(): Exclude<ApprovalLevel, 'full'>;
   /** Each agent's last known options and the user's last choices, kept in the user's own storage. */
   defaults?: { get(agent: AgentKey): AgentDefaults | undefined; set(agent: AgentKey, value: AgentDefaults): void };
-  /** "Always allow" command rules, from the user's own workspace storage. */
-  rules?: { get(): CommandRule[]; add(rule: CommandRule): void };
+  /** Remembered "Always allow" answers (permissions.ts), from the user's own storage. */
+  permissions?: Permissions;
+  /** Where agents start when no folder is open: an empty folder of FriedLiver's, so they don't scan home (and macOS doesn't ask for Desktop, Documents, Downloads). */
+  noFolderCwd?: string;
   /** Starts a new chat's agent and session at once, before its first message. On unless false. */
   warmStart?: boolean;
   /** The shared rules for a new session (sharedRules.ts loadRules); none when absent. */
@@ -264,7 +270,7 @@ export class AgentCore {
     });
     this.checkpointsLoaded = this.checkpoints.load().catch((err: unknown) => options.log?.(`Couldn't load checkpoints: ${messageOf(err)}`));
     this.hub = new AgentHub({
-      cwd: options.folders()[0] ?? os.homedir(),
+      cwd: options.folders()[0] ?? options.noFolderCwd ?? os.homedir(),
       clientVersion: options.clientVersion,
       resolveSpec: (id) => this.spec(id),
       idleStopMs: limits.idleStopMinutes * 60_000,
@@ -330,6 +336,7 @@ export class AgentCore {
       get remember() {
         return options.remember;
       },
+      permissions: options.permissions,
     });
   }
 
@@ -874,7 +881,7 @@ export class AgentCore {
   }
 
   /** The user's answer to an agent's request to reach another agent or chat. */
-  answerBridge(requestId: string, answer: 'allow' | 'allowChat' | 'deny'): void {
+  answerBridge(requestId: string, answer: BridgeAnswer): void {
     this.requests.answer(requestId, answer);
   }
 
@@ -1480,6 +1487,8 @@ export class AgentCore {
     if (command) detail.command = { line: visibleText(command.line), cwd: command.cwd ?? chat?.cwd };
     const plan = planOf(tool.rawInput);
     if (plan) detail.plan = plan;
+    const url = (tool.rawInput as { url?: unknown } | undefined)?.url;
+    if (tool.kind === 'fetch' && typeof url === 'string' && siteOrigin(url)) detail.url = url.slice(0, 2000);
     if (proposals.length) {
       detail.files = proposals.map((p) => proposedFile(p.path, p.before, p.entries, p.after));
     }
@@ -1498,7 +1507,13 @@ export class AgentCore {
    * rule covers it. Only ever with a one-time allow that doesn't change the
    * agent's mode, and never for a plan or a mode switch.
    */
-  private autoAnswer(chat: ChatView | undefined, kind: string | undefined, detail: PermissionDetail, options: acp.PermissionOption[]): { option: acp.PermissionOption; reason: string } | undefined {
+  private autoAnswer(
+    chat: ChatView | undefined,
+    kind: string | undefined,
+    detail: PermissionDetail,
+    options: acp.PermissionOption[],
+    files: { paths: string[]; access?: Access; complete: boolean },
+  ): { option: acp.PermissionOption; reason: string } | undefined {
     if (!chat || kind === 'switch_mode' || detail.plan) return undefined;
     const once = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
     const no = options.find((o) => o.kind === 'reject_once');
@@ -1512,10 +1527,53 @@ export class AgentCore {
     const outside = detail.command?.cwd !== undefined && insideRoots(detail.command.cwd, this.roots()) === null;
     if (level === 'full' && !outside) return { option: once, reason: APPROVAL_NAMES.full };
     if (kind === 'execute' && detail.command && !outside) {
-      const rule = matchesRule(detail.command.line, this.options.rules?.get() ?? []);
+      const rule = matchesRule(detail.command.line, this.options.permissions?.commands() ?? []);
       if (rule) return { option: once, reason: `Always allowed: ${describeRule(rule)}` };
     }
+    // Remembered folders and websites answer with the agent's one-time allow, so it doesn't ask again either.
+    const remembered = this.options.permissions;
+    if (remembered && files.access && files.complete && files.paths.length) {
+      const rules = files.paths.map((f) => remembered.folder(f, files.access!));
+      if (rules.every(Boolean)) return { option: once, reason: `Always allowed: ${describeGrant(rules[0]!.grant).scope}` };
+    }
+    const origin = kind === 'fetch' && detail.url ? siteOrigin(detail.url) : undefined;
+    if (remembered && origin && remembered.site(origin)) return { option: once, reason: `Always allowed: ${origin}` };
     return undefined;
+  }
+
+  /**
+   * The files a request is about, and whether it reads or changes them: what a folder rule is matched
+   * against. Every target it names counts: its diffs, its locations, and the paths in its input
+   * (file_path, new_path, paths[], Codex's changes…), relative ones resolved against the chat's
+   * folder. Fails closed: `complete` is false when any target isn't a usable path, and then no rule
+   * answers it or is offered.
+   */
+  private requestFiles(tool: OpenTool, kind: string | undefined, proposals: Proposal[], cwd: string | undefined): { paths: string[]; access?: Access; complete: boolean } {
+    // A request that runs a command or approves a plan is never a file request, whatever kind it claims.
+    if (commandOf(tool.rawInput) || planOf(tool.rawInput)) return { paths: [], complete: false };
+    const raw = tool.rawInput && typeof tool.rawInput === 'object' && !Array.isArray(tool.rawInput) ? (tool.rawInput as Record<string, unknown>) : {};
+    const named: unknown[] = TARGET_KEYS.flatMap((k) => (raw[k] === undefined ? [] : [raw[k]]));
+    if (raw.paths !== undefined) named.push(...(Array.isArray(raw.paths) ? raw.paths : [raw.paths]));
+    if (raw.changes && typeof raw.changes === 'object' && !Array.isArray(raw.changes)) named.push(...Object.keys(raw.changes));
+    let complete = true;
+    const paths = new Set<string>();
+    for (const target of [...proposals.map((p) => p.path), ...(tool.locations ?? []).map((l) => l.path), ...named]) {
+      const abs = typeof target !== 'string' || !target || target.includes('\0') ? undefined : path.isAbsolute(target) ? target : cwd ? path.resolve(cwd, target) : undefined;
+      if (!abs || realPath(abs) === null) complete = false;
+      else paths.add(abs);
+    }
+    const access: Access | undefined =
+      kind === 'edit' || kind === 'delete' || kind === 'move' || proposals.length ? 'write' : kind === 'read' || kind === 'search' ? 'read' : undefined;
+    return { paths: [...paths], access, complete };
+  }
+
+  /** What "Always allow" may offer for a request beyond commands: its folders, or the website it fetches. */
+  private alwaysFor(files: { paths: string[]; access?: Access; complete: boolean }, detail: PermissionDetail): Grant[] {
+    const remembered = this.options.permissions;
+    if (!remembered || detail.plan) return [];
+    if (files.paths.length || !files.complete) return files.access && files.complete ? remembered.folderCandidates(files.paths, files.access, this.roots()) : [];
+    const origin = detail.url ? siteOrigin(detail.url) : undefined;
+    return origin ? [{ kind: 'site', origin }] : [];
   }
 
   /** The user (or the level) allowed exactly these files: the writes that follow aren't asked again. */
@@ -1606,6 +1664,9 @@ export class AgentCore {
     const chat = this.chat(chatId);
     const kind = tool.kind ?? undefined;
     const detail = this.permissionDetail(tool, proposals, chat);
+    const files = this.requestFiles(tool, kind, proposals, chat?.cwd);
+    const always = kind === 'switch_mode' ? [] : this.alwaysFor(files, detail);
+    if (always.length) detail.always = always;
     for (const p of proposals) this.noteFile(chatId, p.path, p.before);
     const title = tool.title?.trim() || fallbackTitle(kind, detail);
     const options = req.options;
@@ -1618,7 +1679,7 @@ export class AgentCore {
       ...(kind ? { toolKind: kind } : {}),
       ...(Object.keys(detail).length ? { detail } : {}),
     };
-    const auto = this.autoAnswer(chat, kind, detail, options);
+    const auto = this.autoAnswer(chat, kind, detail, options, files);
     if (auto) {
       this.items(chatId, [{ ...item, answer: auto.option.name, auto: auto.reason }]);
       if (auto.option.kind.startsWith('allow')) this.approveWrites(chatId, proposals);
@@ -1701,19 +1762,28 @@ export class AgentCore {
     return true;
   }
 
-  /** "Always allow": adds the rule after the user confirms, then allows the command that asked. */
-  async allowAlways(target: { requestId: string } | { commandId: string }, rule: CommandRule): Promise<void> {
-    let line: string | undefined;
+  /**
+   * "Always allow": remembers the grant for every chat and later session (a command rule after the
+   * user confirms it), then allows the request that asked. The grant must be one this very request
+   * offered: the command on screen, or a folder or website its card listed. Never in a read-only chat.
+   */
+  async allowAlways(target: { requestId: string } | { commandId: string }, grant: Grant): Promise<void> {
+    let found: { chat: ChatView; line?: string; offered: Grant[] } | undefined;
     for (const chat of this.state.chats) {
       for (const i of chat.items) {
-        if ('requestId' in target && i.kind === 'permission' && i.requestId === target.requestId && !i.answer) line = i.detail?.command?.line;
-        if ('commandId' in target && i.kind === 'command' && i.commandId === target.commandId && i.state === 'awaiting' && !i.outside) line = i.commandLine;
+        if ('requestId' in target && i.kind === 'permission' && i.requestId === target.requestId && !i.answer) found = { chat, line: i.detail?.command?.line, offered: i.detail?.always ?? [] };
+        if ('commandId' in target && i.kind === 'command' && i.commandId === target.commandId && i.state === 'awaiting' && !i.outside) found = { chat, line: i.commandLine, offered: [] };
       }
     }
-    // The rule must cover the very command on screen.
-    if (!line || !matchesRule(line, [rule]) || !this.options.rules) return;
-    if (!(await this.options.ui.confirmRule?.(rule))) return;
-    this.options.rules.add(rule);
+    const remembered = this.options.permissions;
+    if (!found || found.chat.readOnly || !remembered) return;
+    if (grant.kind === 'exact' || grant.kind === 'prefix') {
+      // The rule must cover the very command on screen.
+      if (!found.line || !matchesRule(found.line, [grant]) || !(await this.options.ui.confirmRule?.(grant))) return;
+    } else if (!found.offered.some((g) => sameGrant(g, grant))) {
+      return;
+    }
+    if (!remembered.add(grant, AGENT_FACES[found.chat.agent].name)) return;
     if ('commandId' in target) {
       this.decideCommand(target.commandId, true);
       return;
@@ -1758,7 +1828,16 @@ export class AgentCore {
         this.items(chatId, [{ kind: 'review', reviewId, path: file, ...stats, isNew: before === null, state: 'rejected', auto: 'Reject all' }]);
         throw new Error(`The user rejected the change to ${file}.`);
       }
-      const reason = approved ? 'Approved above' : all === 'accept' ? 'Accept all' : level !== 'ask' ? APPROVAL_NAMES[level] : undefined;
+      const folder = this.options.permissions?.folder(file, 'write');
+      const reason = approved
+        ? 'Approved above'
+        : all === 'accept'
+          ? 'Accept all'
+          : level !== 'ask'
+            ? APPROVAL_NAMES[level]
+            : folder
+              ? `Always allowed: ${describeGrant(folder.grant).scope}`
+              : undefined;
       if (reason) {
         if (approved) this.approvedWrites.get(chatId)?.delete(file);
         this.items(chatId, [{ kind: 'review', reviewId, path: file, ...stats, isNew: before === null, state: 'accepted', auto: reason }]);
@@ -1808,7 +1887,7 @@ export class AgentCore {
         const outside = insideRoots(info.cwd, this.roots()) === null;
         // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.
         const chat = chatId ? this.chat(chatId) : undefined;
-        const rule = outside ? undefined : matchesRule(info.commandLine, this.options.rules?.get() ?? []);
+        const rule = outside ? undefined : matchesRule(info.commandLine, this.options.permissions?.commands() ?? []);
         const auto = outside || !chat ? undefined : chat.approval === 'full' ? APPROVAL_NAMES.full : rule ? `Always allowed: ${describeRule(rule)}` : undefined;
         if (chatId && auto) {
           this.items(chatId, [{ kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'running', output: '', auto }]);
