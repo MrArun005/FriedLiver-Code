@@ -28,13 +28,15 @@ export interface ToolHost {
   cancel(chatId: string): Promise<void>;
   /** Does a browser tool call for the chat (browser.ts); absent when the editor has no built-in browser. */
   browser?(chatId: string, call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string>;
+  /** Appends a fact to the project's memory (sharedRules.ts remember); absent when there is no trusted folder. */
+  remember?(fact: string): Promise<string>;
   /** Whether browser actions by the external client (EXTERNAL_CLIENT) skip the user's OK. Default no. */
   externalAutoApprove?(): boolean;
   /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
   browserPage?(selector?: string): Promise<{ origin?: string; password: boolean }>;
 }
 
-type ChatCall = Exclude<BridgeCall, BrowserCall | { tool: 'list_agents' | 'list_chats' }>;
+type ChatCall = Exclude<BridgeCall, BrowserCall | { tool: 'list_agents' | 'list_chats' | 'remember' }>;
 
 type Answer = 'allowed' | 'denied' | 'timeout';
 
@@ -68,6 +70,7 @@ export class BridgeRequests {
     if (call.tool === 'list_agents') return agentList();
     if (call.tool === 'list_chats') return chatList(this.host.state, chatId);
     if (isBrowserCall(call)) return this.browser(caller, call, signal);
+    if (call.tool === 'remember') return this.memory(caller, call.fact, signal);
 
     this.check(caller, call);
     this.room(chatId);
@@ -108,6 +111,18 @@ export class BridgeRequests {
       case 'read_chat':
         return renderChat(this.chat(call.chatId)!, call.last ?? DEFAULT_READ);
     }
+  }
+
+  /** remember: waits for the user like the other chat tools, then appends to .friedliver/memory.md. */
+  private async memory(caller: ChatView, fact: string, signal: AbortSignal): Promise<string> {
+    if (!this.host.remember) throw new Error('There is no trusted project folder open, so FriedLiver keeps no memory for it.');
+    const key = `${caller.id} memory`;
+    const auto = this.host.policy() === 'allow' || this.allowedChats.has(key);
+    if (!auto) this.room(caller.id);
+    const item: BridgeItem = { kind: 'bridge', requestId: this.host.id('bridge'), tool: 'remember', target: { memory: true }, text: fact, state: 'awaiting' };
+    settled(await this.approve(caller, item, auto, signal));
+    if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
+    return `Remembered: ${await this.host.remember(fact)}`;
   }
 
   /**
@@ -219,6 +234,7 @@ export class BridgeRequests {
     this.settle(chatId, true);
     this.allowedChats.delete(chatId);
     this.allowedChats.delete(`${chatId} browser`);
+    this.allowedChats.delete(`${chatId} memory`);
     this.waits.delete(chatId);
   }
 
@@ -297,7 +313,7 @@ export class BridgeRequests {
       const onAbort = () => done('denied');
       const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
       timer.unref?.();
-      this.pending.set(requestId, { chatId: caller.id, allowKey: 'browser' in item.target ? `${caller.id} browser` : caller.id, resolve: done });
+      this.pending.set(requestId, { chatId: caller.id, allowKey: 'browser' in item.target ? `${caller.id} browser` : 'memory' in item.target ? `${caller.id} memory` : caller.id, resolve: done });
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [item], at: Date.now() });
       if (signal.aborted) return done('denied');
       signal.addEventListener('abort', onAbort, { once: true });

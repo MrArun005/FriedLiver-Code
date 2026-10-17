@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -20,6 +20,7 @@ import { EditorAgent } from './host/editor';
 import { imagePreview } from './host/imageAccess';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
+import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
 import { ReviewUi } from './host/review';
 import { userSetting } from './host/settings';
@@ -150,6 +151,12 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
       approvalDefault: () => this.approvalDefault(),
+      sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
+      remember: (fact) => {
+        const folder = this.folders()[0];
+        if (!folder || !vscode.workspace.isTrusted) return Promise.reject(new Error('This workspace is not trusted (or no folder is open), so FriedLiver keeps no project memory here.'));
+        return remember(folder, fact);
+      },
       defaults: {
         get: (agent) => this.context.globalState.get<Partial<Record<AgentKey, AgentDefaults>>>(DEFAULTS_KEY)?.[agent],
         set: (agent, value) => {
@@ -272,6 +279,9 @@ export class Controller {
     command('friedliver.stopAgents', () => this.core.stopAll());
     command('friedliver.otherAgents', () => this.otherAgents());
     command('friedliver.approvals.rules', () => this.manageRules());
+    command('friedliver.rules.open', () => this.openRules());
+    command('friedliver.rules.openMemory', () => this.openRuleFile(PROJECT_MEMORY));
+    command('friedliver.rules.import', () => this.importRules());
     command('friedliver.review.acceptAll', (chatId?: unknown) => this.decideAll(typeof chatId === 'string' ? chatId : undefined, 'accept'));
     command('friedliver.review.rejectAll', (chatId?: unknown) => this.decideAll(typeof chatId === 'string' ? chatId : undefined, 'reject'));
     // Targets of the links in decision notifications.
@@ -297,6 +307,45 @@ export class Controller {
     });
     context.subscriptions.push(this.editor);
     this.updateDecisions();
+  }
+
+  /** Opens a shared rules file (sharedRules.ts), creating it empty first. `rel` is in the folder; none means the personal one. */
+  private async openRuleFile(rel?: string): Promise<void> {
+    const folder = this.folders()[0];
+    if (rel && !folder) return void vscode.window.showInformationMessage('Open a folder to keep project rules and memory.');
+    const storage = this.context.globalStorageUri.fsPath;
+    if (!rel) await mkdir(storage, { recursive: true });
+    const file = await ensureFile(rel ? folder! : storage, rel ?? 'rules.md').catch((err: unknown) => void this.error(err));
+    if (!file) return;
+    await vscode.window.showTextDocument(vscode.Uri.file(file));
+  }
+
+  /** Rules every agent follows: the project's, the user's own, and the project memory. */
+  private async openRules(): Promise<void> {
+    const pick = await vscode.window.showQuickPick(
+      [
+        { label: 'Project rules', description: PROJECT_RULES, rel: PROJECT_RULES as string | undefined },
+        { label: 'Personal rules', description: 'yours, in every project', rel: undefined },
+        { label: 'Project memory', description: PROJECT_MEMORY, rel: PROJECT_MEMORY },
+        { label: 'Import from CLAUDE.md / AGENTS.md / GEMINI.md', description: 'into ' + PROJECT_RULES, rel: 'import' },
+      ],
+      { title: 'Shared rules for Claude, Codex and Gemini' },
+    );
+    if (!pick) return;
+    if (pick.rel === 'import') return this.importRules();
+    await this.openRuleFile(pick.rel);
+  }
+
+  private async importRules(): Promise<void> {
+    const folder = this.folders()[0];
+    if (!folder) return void vscode.window.showInformationMessage('Open a folder to import its rules.');
+    if (!vscode.workspace.isTrusted) return void vscode.window.showWarningMessage('Trust this workspace first: its rules files are only used in trusted workspaces.');
+    const { added, sources } = await importRules(folder);
+    if (!sources.length) return void vscode.window.showInformationMessage('No CLAUDE.md, AGENTS.md or GEMINI.md at the folder root.');
+    void vscode.window.showInformationMessage(
+      added ? `Imported ${added} new paragraph${added === 1 ? '' : 's'} from ${sources.join(', ')} into ${PROJECT_RULES}. The originals are unchanged.` : `${PROJECT_RULES} already has everything in ${sources.join(', ')}.`,
+    );
+    if (added) await this.openRuleFile(PROJECT_RULES);
   }
 
   async dispose(): Promise<void> {
@@ -581,6 +630,9 @@ export class Controller {
           return;
         case 'star':
           this.core.star(m.chatId, m.starred);
+          return;
+        case 'openRules':
+          void this.openRules();
           return;
         case 'renameChat': {
           const chat = this.core.chat(m.chatId);
