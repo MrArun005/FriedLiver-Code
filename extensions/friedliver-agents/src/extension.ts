@@ -222,7 +222,7 @@ export class Controller {
       this.statusItem,
       this.workingItem,
       this.autoItem,
-      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'))),
+      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m))),
       this.reviews,
       this.accounts,
       vscode.window.registerTreeDataProvider('friedliver.accounts', this.accounts),

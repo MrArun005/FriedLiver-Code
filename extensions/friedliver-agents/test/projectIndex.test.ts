@@ -134,6 +134,32 @@ describe('what is never indexed', () => {
     for (const s of ['.netrc', '.pypirc', '.git-credentials', 'x.jks']) expect(isSecret(s), s).toBe(true);
   });
 
+  it('fails closed when git check-ignore errors inside a repo', async () => {
+    const root = await project({ 'ok.ts': 'fine' }, true);
+    const fake = path.join(root, '..', `fake-git-${path.basename(root)}`);
+    await writeFile(fake, '#!/bin/sh\nif [ "$1" = rev-parse ]; then echo true; exit 0; fi\nexit 128\n', { mode: 0o755 });
+    dirs.push(fake);
+    const logged: string[] = [];
+    const ix = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1e8, git: fake, log: (m) => logged.push(m) });
+    await writeFile(path.join(root, 'new.ts'), 'leakword');
+    await ix.updateMany(['new.ts']);
+    expect(ix.has('new.ts')).toBe(false);
+    expect(logged.join()).toContain('128');
+  });
+
+  it('uses name rules only in a folder outside git, and skips submodules and symlinked dirs in one', async () => {
+    const plain = await project({ 'a.ts': 'word', '.env': 'word' });
+    const ix = new ProjectIndex(plain, { maxFiles: 100, maxBytes: 1e8 });
+    await ix.updateMany(['a.ts', '.env']);
+    expect([ix.has('a.ts'), ix.has('.env')]).toEqual([true, false]);
+
+    const repo = await project({ 'ok.ts': 'word', 'sub/.git': 'gitdir: elsewhere', 'sub/x.ts': 'word' }, true);
+    await symlink(path.join(repo, 'sub'), path.join(repo, 'linked'));
+    const rx = new ProjectIndex(repo, { maxFiles: 100, maxBytes: 1e8 });
+    await rx.updateMany(['ok.ts', 'sub/x.ts', 'linked/x.ts']);
+    expect([rx.has('ok.ts'), rx.has('sub/x.ts'), rx.has('linked/x.ts')]).toEqual([true, false, false]);
+  });
+
   it('returns no content from a file swapped for a symlink after indexing', async () => {
     const outside = await project({ 'leak.ts': 'needle outsidesecret' });
     const root = await project({ 'a.ts': 'needle inside' });

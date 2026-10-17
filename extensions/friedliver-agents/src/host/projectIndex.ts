@@ -150,6 +150,10 @@ export interface IndexOptions {
   maxBytes: number;
   /** files.exclude patterns, relative to the folder. */
   exclude?: string[];
+  /** The git command; tests swap in a fake. */
+  git?: string;
+  /** Where to report a problem the user may want to know about. */
+  log?: (message: string) => void;
 }
 
 /** The index of one workspace folder. */
@@ -186,32 +190,75 @@ export class ProjectIndex {
    */
   async updateMany(rels: string[]): Promise<void> {
     const norm = rels.map((r) => r.split(path.sep).join('/'));
-    const ignored = await this.ignored(norm.filter((r) => this.allowed(r)));
+    // A new .git may turn the folder into a repo: decide again.
+    if (norm.some((r) => r === '.git' || r.startsWith('.git/'))) this.isGit = undefined;
+    const ok: string[] = [];
+    const dirs = new Map<string, Promise<boolean>>();
+    for (const r of norm) if (this.allowed(r) && (await this.plainDirs(r, dirs))) ok.push(r);
+    const ignored = await this.ignored(ok);
+    const keep = new Set(ok.filter((r) => !ignored.has(r)));
     for (const rel of norm) {
-      if (ignored.has(rel)) this.remove(rel);
-      else await this.update(rel);
+      if (keep.has(rel)) await this.update(rel);
+      else this.remove(rel);
     }
   }
 
-  /** Which of `rels` git ignores; none outside a git folder. Fails closed: if git errors in a repo, all are ignored. */
-  private ignored(rels: string[]): Promise<Set<string>> {
-    if (!rels.length) return Promise.resolve(new Set());
+  /** Whether every directory above `rel` is a real directory of this repo: no symlink, no submodule or nested repo (a `.git` in it). */
+  private async plainDirs(rel: string, seen: Map<string, Promise<boolean>>): Promise<boolean> {
+    const parts = rel.split('/').slice(0, -1);
+    for (let i = 1; i <= parts.length; i++) {
+      const dir = parts.slice(0, i).join('/');
+      if (!seen.has(dir)) {
+        const abs = path.join(this.root, dir);
+        seen.set(
+          dir,
+          lstat(abs).then(
+            async (st) => !st.isSymbolicLink() && !(await lstat(path.join(abs, '.git')).then(() => true, () => false)),
+            () => true, // Gone: update() drops it.
+          ),
+        );
+      }
+      if (!(await seen.get(dir))) return false;
+    }
+    return true;
+  }
+
+  /** Whether the folder is in a git work tree; asked once, again when a .git appears. */
+  private isGit?: Promise<boolean>;
+
+  /**
+   * Which of `rels` git ignores. Outside git none are (name rules only). In a repo, any exit
+   * from check-ignore other than 0 (some ignored) or 1 (none) ignores the whole batch: fail closed.
+   */
+  private async ignored(rels: string[]): Promise<Set<string>> {
+    if (!rels.length) return new Set();
+    this.isGit ??= new Promise((resolve) =>
+      execFile(this.git, ['rev-parse', '--is-inside-work-tree'], { cwd: this.root }, (err, out) => resolve(!err && out.trim() === 'true')),
+    );
+    if (!(await this.isGit)) return new Set();
     return new Promise((resolve) => {
-      const child = spawn('git', ['check-ignore', '-z', '--stdin'], { cwd: this.root, stdio: ['pipe', 'pipe', 'ignore'] });
+      const child = spawn(this.git, ['check-ignore', '-z', '--stdin'], { cwd: this.root, stdio: ['pipe', 'pipe', 'ignore'] });
       let out = '';
+      const closed = (why: string) => {
+        this.options.log?.(`Project index: git check-ignore failed (${why}) in ${this.root}; skipped ${rels.length} changed file(s).`);
+        resolve(new Set(rels));
+      };
       child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d));
-      child.on('error', () => resolve(new Set()));
-      // 0: some ignored, 1: none, 128: not a git folder (no .gitignore to respect).
-      child.on('close', (code) => resolve(code === 0 || code === 1 ? new Set(out.split('\0').filter(Boolean)) : code === 128 ? new Set() : new Set(rels)));
+      child.on('error', (e) => closed(e.message));
+      child.on('close', (code) => (code === 0 || code === 1 ? resolve(new Set(out.split('\0').filter(Boolean))) : closed(`exit ${code}`)));
       child.stdin.on('error', () => {});
       child.stdin.end(rels.join('\0') + '\0');
     });
   }
 
+  private get git(): string {
+    return this.options.git ?? 'git';
+  }
+
   /** Every file to index: git's list (tracked + untracked, .gitignore respected) or, outside git, a walk. */
   async list(): Promise<string[]> {
     const fromGit = await new Promise<string[] | null>((resolve) =>
-      execFile('git', ['ls-files', '-z', '-co', '--exclude-standard'], { cwd: this.root, maxBuffer: 256 * 1024 * 1024 }, (err, out) =>
+      execFile(this.git, ['ls-files', '-z', '-co', '--exclude-standard'], { cwd: this.root, maxBuffer: 256 * 1024 * 1024 }, (err, out) =>
         resolve(err ? null : out.split('\0').filter(Boolean)),
       ),
     );
