@@ -78,6 +78,16 @@
     },
     "commands": [
       {
+        "command": "friedliver.showVersion",
+        "title": "Show Version",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.checkForUpdates",
+        "title": "Check for Updates",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.newChat",
         "title": "New Chat",
         "category": "FriedLiver",

@@ -52,7 +52,7 @@ const CLAUDE_CONFIG = () => path.join(os.homedir(), '.claude.json');
 export async function activate(context: vscode.ExtensionContext) {
   controller = new Controller(context);
   await controller.start();
-  context.subscriptions.push(startUpdateChecks(context, controller.log));
+  context.subscriptions.push(startUpdateChecks(context));
   void revealOnFirstStart(context);
   // Integration tests drive the same controller the views use.
   return context.extensionMode === vscode.ExtensionMode.Test ? controller : undefined;

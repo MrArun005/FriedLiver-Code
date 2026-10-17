@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,6 +15,9 @@ import {
   downloadVerified,
   installScript,
   isAllowedDownload,
+  manualCheckMessage,
+  readInstallResult,
+  resolveRealApp,
   parseRelease,
   pickInstaller,
   sumFor,
@@ -202,9 +207,103 @@ describe('the check', () => {
 });
 
 describe('install script', () => {
-  it('waits for the app, swaps the bundle from the DMG, and reopens it', () => {
-    const script = installScript({ pid: 4242, app: '/Applications/FriedLiver.app', dmg: "/tmp/fl-x/it's.dmg", dir: '/tmp/fl-x' });
+  const args = { pid: 4242, app: '/Applications/FriedLiver.app', dmg: "/tmp/fl-x/it's.dmg", dir: '/tmp/fl-x', log: '/tmp/friedliver-update.log', version: '1.142.0-3' };
+  it('waits for the app, swaps the bundle from the DMG, clears quarantine and reopens the real path', () => {
+    const script = installScript(args);
     expect(script).toMatchSnapshot();
     expect(script).toContain(`DMG='/tmp/fl-x/it'\\''s.dmg'`);
+    expect(script).toContain('xattr -dr com.apple.quarantine "$APP"');
+    expect(script).toContain('open -a "$APP"');
+    expect(script).toContain('echo "RESULT ok $VERSION" >> "$LOG"');
   });
+  it('never targets a translocated bundle', () => {
+    expect(() => installScript({ ...args, app: '/private/var/folders/x/T/AppTranslocation/U/d/FriedLiver.app' })).toThrow(/translocated/);
+  });
+});
+
+describe('the real app behind a translocated one', () => {
+  const T = '/private/var/folders/ab/xyz/T/AppTranslocation/6F1C-UUID/d/FriedLiver.app';
+  const probe = (ids: Record<string, string>, found: string[] | (() => string[])) => ({
+    home: '/Users/me',
+    bundleId: (app: string) => ids[app] ?? null,
+    mdfind: typeof found === 'function' ? found : () => found,
+  });
+  it('keeps a normal running path', () => {
+    expect(resolveRealApp('/Applications/FriedLiver.app', probe({}, []))).toBe('/Applications/FriedLiver.app');
+  });
+  it('finds it by bundle id in ~/Applications or /Applications only', () => {
+    const ids = { [T]: 'dev.friedliver', '/Users/me/Applications/FriedLiver.app': 'dev.friedliver', '/Volumes/X/FriedLiver.app': 'dev.friedliver' };
+    expect(resolveRealApp(T, probe(ids, ['/Volumes/X/FriedLiver.app', T, '/Users/me/Applications/FriedLiver.app']))).toBe('/Users/me/Applications/FriedLiver.app');
+  });
+  it('falls back to /Applications/FriedLiver.app when Spotlight has nothing or fails', () => {
+    const ids = { [T]: 'dev.friedliver', '/Applications/FriedLiver.app': 'dev.friedliver' };
+    expect(resolveRealApp(T, probe(ids, []))).toBe('/Applications/FriedLiver.app');
+    expect(resolveRealApp(T, probe(ids, () => { throw new Error('mds off'); }))).toBe('/Applications/FriedLiver.app');
+  });
+  it('refuses a bundle with another id, or an unreadable running bundle', () => {
+    expect(resolveRealApp(T, probe({ [T]: 'dev.friedliver', '/Applications/FriedLiver.app': 'com.other' }, ['/Applications/FriedLiver.app']))).toBeNull();
+    expect(resolveRealApp(T, probe({ '/Applications/FriedLiver.app': 'dev.friedliver' }, []))).toBeNull();
+  });
+});
+
+describe('surfacing results', () => {
+  it('reads the last RESULT line of the install log', () => {
+    expect(readInstallResult('x\nRESULT failed could not mount the DMG\n')).toEqual({ ok: false, detail: 'could not mount the DMG' });
+    expect(readInstallResult('RESULT failed a\nRESULT ok 1.142.0-3\n')).toEqual({ ok: true, detail: '1.142.0-3' });
+    expect(readInstallResult('started\n')).toBeNull();
+  });
+  it('a manual check always says something unless the offer toast does', () => {
+    expect(manualCheckMessage('up-to-date', '1.142.0-2')).toBe("You're up to date: FriedLiver 1.142.0-2.");
+    expect(manualCheckMessage('already-told', '1.142.0-2')).toMatch(/up to date/);
+    expect(manualCheckMessage('failed', '1.142.0-2')).toMatch(/Couldn't check/);
+    expect(manualCheckMessage('newer', '1.142.0-2')).toBeNull();
+  });
+});
+
+describe.runIf(process.platform === 'darwin')('install script end to end (throwaway DMG, translocated running copy)', () => {
+  it('installs into the real app, clears quarantine, relaunches it and logs success', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'fl-e2e-'));
+    try {
+      const mkApp = (at: string, version: string) => {
+        mkdirSync(path.join(at, 'Contents'), { recursive: true });
+        writeFileSync(path.join(at, 'Contents/Info.plist'), `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>test.friedliver.e2e</string></dict></plist>`);
+        writeFileSync(path.join(at, 'Contents/VERSION'), version);
+      };
+      const translocated = path.join(root, 'AppTranslocation/UUID/d/FriedLiver.app');
+      const real = path.join(root, 'Applications/FriedLiver.app');
+      mkApp(translocated, 'old');
+      mkApp(real, 'old');
+      const plist = (app: string) => { try { return execFileSync('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(app, 'Contents/Info.plist')], { encoding: 'utf8' }).trim(); } catch { return null; } };
+      const app = resolveRealApp(translocated, { home: root, bundleId: (a) => (existsSync(a) ? plist(a) : null), mdfind: () => [real] });
+      expect(app).toBe(real);
+
+      const src = path.join(root, 'src');
+      mkApp(path.join(src, 'FriedLiver.app'), 'new');
+      execFileSync('/usr/bin/xattr', ['-w', 'com.apple.quarantine', '0081;00000000;Test;', path.join(src, 'FriedLiver.app')]);
+      const dir = path.join(root, 'update');
+      mkdirSync(dir);
+      const dmg = path.join(dir, 'FriedLiver.dmg');
+      execFileSync('hdiutil', ['create', '-quiet', '-fs', 'HFS+', '-srcfolder', src, '-format', 'UDZO', dmg]);
+      const bin = path.join(root, 'bin');
+      mkdirSync(bin);
+      writeFileSync(path.join(bin, 'open'), `#!/bin/sh\necho "$@" >> '${root}/opened'\n`);
+      chmodSync(path.join(bin, 'open'), 0o755);
+
+      const sleeper = spawn('sleep', ['1']);
+      const log = path.join(root, 'friedliver-update.log');
+      const script = path.join(dir, 'install.sh');
+      writeFileSync(script, installScript({ pid: sleeper.pid!, app: app!, dmg, dir, log, version: '9.9.9' }));
+      // Async so Node reaps the sleep process; a zombie would still answer kill -0.
+      await promisify(execFile)('/bin/sh', [script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 60_000 });
+
+      expect(readFileSync(path.join(real, 'Contents/VERSION'), 'utf8')).toBe('new');
+      expect(readFileSync(path.join(translocated, 'Contents/VERSION'), 'utf8')).toBe('old');
+      expect(execFileSync('/usr/bin/xattr', [real], { encoding: 'utf8' })).not.toContain('com.apple.quarantine');
+      expect(readFileSync(path.join(root, 'opened'), 'utf8').trim()).toBe(`-a ${real}`);
+      expect(readInstallResult(readFileSync(log, 'utf8'))).toEqual({ ok: true, detail: '9.9.9' });
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 90_000);
 });
