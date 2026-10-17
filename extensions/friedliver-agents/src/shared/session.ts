@@ -379,7 +379,7 @@ export function turnsLeft(samples: number[], size: number): number | '>50' | und
 
 export function formatTokens(n: number): string {
   if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  if (n < 1_000_000) return `${Number((n / 1000).toFixed(1))}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 

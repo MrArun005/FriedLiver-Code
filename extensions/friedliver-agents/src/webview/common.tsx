@@ -37,21 +37,19 @@ export function usePersisted<T>(key: string, initial: T): [T, (value: T) => void
   return [value, set];
 }
 
-/** The webview's width, for laying out by the room there is (side bar or editor). */
-// friedliver.chat.fontFamily: Inter (bundled) is the stylesheet's default; empty means the editor's UI font.
+// friedliver.chat.fontFamily: empty keeps the editor's chat font (the stylesheet's --font).
 {
-  const font = document.body?.dataset.font?.trim();
-  if (font !== undefined && font !== 'Inter') {
-    document.documentElement.style.setProperty('--ui', font ? `"${font.replace(/["\\]/g, '')}", var(--vscode-font-family), sans-serif` : 'var(--vscode-font-family), sans-serif');
-  }
+  const font = document.body?.dataset.font?.trim().replace(/["\\]/g, '');
+  if (font) document.documentElement.style.setProperty('--font', `"${font}", var(--vscode-chat-font-family, system-ui), sans-serif`);
 }
 
-// friedliver.chat.accentColor: any CSS colour; empty keeps the theme's button colour.
+// friedliver.chat.accentColor: any CSS colour; the stylesheet's default (Claude orange) otherwise.
 {
   const accent = document.body?.dataset.accent?.trim();
-  if (accent && CSS.supports('color', accent)) document.documentElement.style.setProperty('--fl-accent', accent);
+  if (accent && accent.toLowerCase() !== '#d97757' && CSS.supports('color', accent)) document.documentElement.style.setProperty('--fl-accent', accent);
 }
 
+/** The webview's width, for laying out by the room there is (side bar or editor). */
 export function useWidth(): number {
   const [width, setWidth] = useState(window.innerWidth);
   useEffect(() => {
@@ -497,10 +495,14 @@ const ICONS = {
 };
 export type IconName = keyof typeof ICONS;
 
-export function Icon({ name }: { name: IconName }) {
+/**
+ * One icon set on a 16 grid. `size` is the box in CSS px; the stroke stays 1.2 CSS px
+ * at every size (non-scaling), so a 20px menu icon is no heavier than a 14px one.
+ */
+export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   return (
-    <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-      <path d={ICONS[name]} fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+    <svg class="icon" viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
+      <path d={ICONS[name]} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }

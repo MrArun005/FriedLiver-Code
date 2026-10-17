@@ -556,8 +556,8 @@
       "properties": {
         "friedliver.chat.fontFamily": {
           "type": "string",
-          "default": "Inter",
-          "markdownDescription": "Font for the chat, the Agent Manager and the other FriedLiver views. `Inter` is bundled; leave it empty to use the editor's UI font. Takes effect when a view next opens."
+          "default": "",
+          "markdownDescription": "Font for the chat, the Agent Manager and the other FriedLiver views. Empty uses the editor's chat font (the system font). Takes effect when a view next opens."
         },
         "friedliver.chat.fontSize": {
           "type": "number",

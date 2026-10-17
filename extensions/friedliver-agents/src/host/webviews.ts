@@ -31,7 +31,6 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,
     `style-src ${webview.cspSource}`,
-    `font-src ${webview.cspSource}`,
     `script-src 'nonce-${nonce}'`,
   ].join('; ');
   return `<!doctype html>
@@ -43,7 +42,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <link rel="stylesheet" href="${media('webview.css')}">
 <title>${escapeHtml(title)}</title>
 </head>
-<body data-surface="${script}"${list ? ' data-view="list"' : ''} data-platform="${process.platform}" data-font="${escapeHtml(chat.get<string>('fontFamily', 'Inter'))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}" data-font-size="${escapeHtml(String(chat.get<number>('fontSize', 13)))}">
+<body data-surface="${script}"${list ? ' data-view="list"' : ''} data-platform="${process.platform}" data-font="${escapeHtml(chat.get<string>('fontFamily', ''))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}" data-font-size="${escapeHtml(String(chat.get<number>('fontSize', 13)))}">
 <div id="root"></div>
 <script nonce="${nonce}" src="${media(`dist/${script}.js`)}"></script>
 </body>
