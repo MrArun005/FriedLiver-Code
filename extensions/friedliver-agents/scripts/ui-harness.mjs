@@ -449,9 +449,8 @@ async function shoot() {
     const look = () =>
       p.evaluate(() => {
         const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b), ring = window.getComputedStyle(b, '::after');
-        const blue = window.getComputedStyle(document.body).getPropertyValue('--vscode-button-background').trim() || '#0078d4';
         const probe = document.createElement('i');
-        probe.style.color = blue;
+        probe.style.color = '#0078d4'; // the mic's brand blue, the same in every theme
         document.body.append(probe);
         const want = window.getComputedStyle(probe).color;
         probe.remove();
@@ -519,6 +518,9 @@ async function shoot() {
     await light.mouse.move(0, 0);
     await save(light, 'composer-mic-listening-light', { element: '.composer' });
     await light.close();
+    const blackBlue = await open('surface=chat&side=1&select=chat-c5&theme=black-blue', 900, 700);
+    await save(blackBlue, 'composer-mic-idle-black-blue', { element: '.composer' });
+    await blackBlue.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
     check((await linux.locator('.cc-mic').count()) === 0, 'no mic off macOS');
     await linux.close();
