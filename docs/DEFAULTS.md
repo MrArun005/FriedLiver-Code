@@ -88,7 +88,8 @@ warns "Only defaults for machine-overridable, window, resource and language
 overridable scoped settings are supported." Object-valued defaults merge with
 the registered default rather than replacing it
 (`src/vs/platform/configuration/common/configurationRegistry.ts:714-736`).
-Every key below was checked against its registration.
+Every key below was checked against its registration. User and workspace
+settings override all of them.
 
 | Setting | Value | Scope (source) | Why |
 |---|---|---|---|
@@ -107,7 +108,6 @@ Every key below was checked against its registration.
 | `editor.overviewRulerBorder` | `false` | language-overridable (`editorOptions.ts:6584`) | quieter |
 | `editor.guides.bracketPairs` | `active` | language-overridable (`editorOptions.ts:4915`) | a guide only for the bracket pair the cursor is in: shows structure where you work, nothing elsewhere |
 | `editor.renderLineHighlight` | `line` | language-overridable | pinned |
-| `editor.cursorBlinking` | `smooth` | language-overridable (`editorOptions.ts:6251`) | the caret fades instead of flashing; a CSS animation on one element |
 | `editor.cursorSmoothCaretAnimation` | `on` | language-overridable (`editorOptions.ts:6258`) | the caret glides to its new position; a CSS transition, no extra rendering |
 | `editor.smoothScrolling` | `true` | language-overridable (`editorOptions.ts:6780`) | animated scrolling; only runs while scrolling |
 | `editor.stickyScroll.enabled` | `true` | language-overridable (`editorOptions.ts:3204`) | keeps the enclosing scopes in view; already the upstream default, pinned |
@@ -121,10 +121,20 @@ Every key below was checked against its registration.
 | `workbench.tips.enabled` | `false` | window (`workbench.contribution.ts:823`) | quieter empty editor |
 | `extensions.ignoreRecommendations` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:197`) | no recommendation toasts |
 | `typescript.disableAutomaticTypeAcquisition` | `true` | window (`extensions/typescript-language-features/package.json`) | memory, see memory-plan.md item 5 |
-| `files.watcherExclude` | adds `**/node_modules/*/**` (merged with the upstream defaults) | resource (`contrib/files/browser/files.contribution.ts:294`) | memory, see memory-plan.md item 4 |
+| `files.watcherExclude` | adds `**/node_modules/*/**` and the tool caches `**/{.venv,venv,__pycache__,.mypy_cache,.pytest_cache,.next,.nuxt,.turbo,.parcel-cache,.gradle}/**` (each its own key) (merged with the upstream defaults) | resource (`contrib/files/browser/files.contribution.ts:294`) | memory, see memory-plan.md item 4; the caches: watcher and extension-host CPU during `pip install`, `next build` and the like (CORE-PERF C10). Build outputs (`dist`, `build`, `target`, `out`) and `node_modules` as a whole stay watched on purpose: extensions' recursive `createFileSystemWatcher` calls inherit `files.watcherExclude` (`api/common/extHostFileSystemEventService.ts:178-190`), and TypeScript watches through them (`tsServer/fileWatchingManager.ts:57`), so `tsc -b` project references, cargo and gradle outputs, and newly installed packages would go stale |
+| `typescript.tsserver.useSyntaxServer` | `never` | window (`extensions/typescript-language-features/package.json:2523`) | one tsserver per window instead of two, est. −40–80 MB and one Node process with TS/JS open (CORE-PERF C5). **Trade-off:** on large projects, syntax features (outline, folding, breadcrumbs, document highlights) wait for the semantic server's project load instead of answering at once. The key must be the `typescript.*` one: the extension reads `js/ts.tsserver.useSyntaxServer` first but only when a user or workspace set it (`src/utils/configuration.ts:23-37` ignores defaults there), then falls back to `typescript.*`, which sees this default. Either key in user settings wins |
+| `workbench.startupEditor` | `none` | resource (`contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts:317`) | no Welcome editor in a window with nothing to restore: est. −5–15 MB renderer and the time to restore it (CORE-PERF C8). Walkthroughs stay under Help |
+| `extensions.experimental.deferredStartupFinishedActivation` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:312`) | `onStartupFinished` extensions activate in 50 ms slices (`api/common/extHostExtensionService.ts:622-645`) instead of all in one extension-host task: fewer long tasks and less input lag in the first seconds. Each such extension may activate a few hundred ms later (CORE-PERF C7) |
+
+`editor.cursorBlinking` is **not** set, so it is upstream's `blink`: a 500 ms
+JS interval toggles the caret (`editor/browser/viewParts/viewCursors/viewCursors.ts:262-270`).
+FriedLiver used to default it to `smooth`, which runs a CSS opacity animation
+for 10 s after every caret change (`viewCursors.css:42-52`), so the renderer and
+GPU process drew frames at display rate for 10 s each time you stopped typing
+(CORE-PERF C6). `phase` and `expand` are CSS animations too.
 
 The editor and list defaults above cost no memory: smooth scrolling and the
-caret animations only run while something moves, and sticky scroll and the
+caret glide only run while something moves, and sticky scroll and the
 command center were already on upstream. The memory-related defaults
 (minimap off, no automatic type acquisition, `node_modules` out of the file
 watcher) are unchanged. A comfortable row height is not among them: list and
