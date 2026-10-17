@@ -291,6 +291,12 @@ pre {
 .grow {
   flex: 1;
 }
+.ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sep {
   color: var(--fg-2);
 }
@@ -2785,6 +2791,21 @@ button.cc-item[aria-checked='true'] .cc-item-desc {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The / menu keeps one line per command: name, then its description, cut to fit. */
+.cc-slash-menu .cc-item-text {
+  flex: 1;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.cc-slash-menu .cc-item-name {
+  flex: none;
+  max-width: 60%;
+}
+.cc-slash-menu .cc-item-hint {
+  margin-top: 0;
+  flex: 1;
+}
 .cc-item-value {
   flex: none;
   margin-left: auto;
@@ -4417,6 +4438,25 @@ button.chat-head-title:hover {
 }
 button[aria-pressed='true'] .icon path {
   fill: currentColor;
+}
+button.rules-chip {
+  font: inherit;
+  font-size: var(--t-85);
+  border: 0;
+  cursor: pointer;
+}
+button.rules-chip:hover,
+button.rules-chip[aria-expanded='true'] {
+  background: var(--pill-hover);
+}
+.chat-head-row > .pop {
+  display: inline-flex;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .chat-head .branch-chip {
+    display: none;
+  }
 }
 button.images-pill {
   height: 18px;
