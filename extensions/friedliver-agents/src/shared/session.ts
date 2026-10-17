@@ -65,6 +65,8 @@ export interface ChatSession {
   steering?: boolean;
   /** False for a session from an earlier window: its agent starts again with the next message. */
   live: boolean;
+  /** The agent is starting this session now, before the chat's first message. */
+  starting?: boolean;
   /** The adapter's name and version, from `initialize`. */
   agent?: { name: string; version: string };
 }
@@ -322,6 +324,8 @@ export function reportedMode(session: ChatSession | undefined): { name: string; 
 export interface AgentDefaults {
   /** The options the agent's last session offered, so pickers show before a session starts. */
   options: SessionOption[];
+  /** The commands the agent's last session offered, so "/" works before a session starts. */
+  commands?: SlashCommand[];
   /** The user's last choice per optionKey. */
   chosen: Record<string, string | boolean>;
   /** Last level chosen for this agent; never Full auto. */

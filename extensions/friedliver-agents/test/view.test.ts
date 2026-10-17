@@ -26,6 +26,8 @@ import {
   relativePath,
   rosterKey,
   settleOrder,
+  slashAction,
+  slashMenu,
   sortChats,
   statusOf,
   subagents,
@@ -414,5 +416,45 @@ describe('text', () => {
     expect(clip('  a   b  ', 10)).toBe('a b');
     expect(clip('abcdefghij', 5)).toBe('abcd…');
     expect(excerpt('**Done.** See [the docs](http://x) and `x`.\n```\ncode\n```', 80)).toBe('Done. See the docs and x.');
+  });
+});
+
+describe('"/" commands', () => {
+  const agentCmds = [{ name: 'review', description: 'Agent review' }, { name: 'help', description: 'Help' }];
+
+  it('adds FriedLiver’s own commands after the agent’s, and the agent’s win a shared name', () => {
+    expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'review', 'new']);
+    const menu = slashMenu(agentCmds);
+    expect(menu.map((c) => c.name)).toEqual(['review', 'help', 'handoff', 'ask', 'pipe', 'new']);
+    expect(menu[0].description).toBe('Agent review');
+  });
+
+  it('turns a FriedLiver command into its action, and leaves the agent’s own alone', () => {
+    const me = chat('a', { agent: 'claude' });
+    const codex = chat('b', { agent: 'codex', lastActivity: 5 });
+    const all = [me, chat('c', { agent: 'codex', lastActivity: 1 }), codex];
+    expect(slashAction('/handoff codex', me, all, [])).toEqual({ type: 'handoff', chatId: 'a', agent: 'codex' });
+    expect(slashAction('/ask gemini why?', me, all, [])).toEqual({ type: 'consult', chatId: 'a', agent: 'gemini', text: 'why?' });
+    expect(slashAction('/pipe codex', me, all, [])).toEqual({ type: 'pipe', from: 'a', to: 'b' });
+    expect(slashAction('/review', me, all, [])).toEqual({ type: 'viewChanges', chatId: 'a' });
+    expect(slashAction('/new', me, all, [])).toEqual({ type: 'newChat', agent: 'claude' });
+    expect(slashAction('/new gemini', me, all, [])).toEqual({ type: 'newChat', agent: 'gemini' });
+    // Not finished: no agent, no question, no chat to pipe to.
+    expect(slashAction('/handoff', me, all, [])).toBe('incomplete');
+    expect(slashAction('/ask codex', me, all, [])).toBe('incomplete');
+    expect(slashAction('/pipe gemini', me, all, [])).toBe('incomplete');
+    // The agent's /review, and anything else, go to the agent as typed.
+    expect(slashAction('/review', me, all, agentCmds)).toBeNull();
+    expect(slashAction('/help', me, all, agentCmds)).toBeNull();
+    expect(slashAction('hello', me, all, [])).toBeNull();
+  });
+});
+
+describe('a starting agent', () => {
+  it('says so on the card until the session is live', () => {
+    const starting = chat('a', { agent: 'codex', session: { options: [], commands: [], live: false, starting: true } });
+    expect(cardLine(state([starting]), starting).text).toBe('Starting Codex…');
+    const started = { ...starting, session: { ...starting.session!, live: true, starting: false } };
+    expect(cardLine(state([started]), started).text).not.toContain('Starting');
   });
 });

@@ -656,6 +656,7 @@ export function stateLine(chat: ChatView): StateLine {
     if (waiting.kind === 'bridge') return { text: waiting.title, decision: waiting };
     if (waiting.kind === 'question') return { text: `Asks you: ${waiting.title.slice(8)}`, decision: waiting };
   }
+  if (!chat.busy && chat.session?.starting) return { text: `Starting ${AGENT_FACES[chat.agent].name}…` };
   const status = chatStatus(chat);
   if (status === 'working') {
     const plan = chat.items.findLast((i) => i.kind === 'plan');

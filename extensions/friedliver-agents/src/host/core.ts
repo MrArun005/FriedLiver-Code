@@ -241,6 +241,7 @@ export class AgentCore {
         update: (chatId, update) => {
           this.noteTool(chatId, update);
           this.dispatch({ t: 'update', chatId, update: compactUpdate(update), at: Date.now() });
+          if (update.sessionUpdate === 'available_commands_update') this.updateKnown(chatId);
           void this.collectImages(update);
         },
         session: (chatId, start) => this.sessionStarted(chatId, start),
@@ -380,9 +381,10 @@ export class AgentCore {
     if (level !== 'ask') view.approval = level;
     if (level === 'full') this.confirmedFull.add(chat.id);
     if (options.choices) this.chosen.set(chat.id, { ...options.choices });
-    // Pickers show the agent's last known options until its session answers.
+    // Pickers and "/" show the agent's last known options and commands until its session answers.
     const known = this.options.defaults?.get(agent);
-    if (known?.options.length) view.session = { ...EMPTY_SESSION, options: known.options, live: false };
+    if (known?.options.length || known?.commands?.length) view.session = { ...EMPTY_SESSION, options: known.options, commands: known.commands ?? [], live: false };
+    if (this.options.warmStart !== false) view.session = { ...(view.session ?? { ...EMPTY_SESSION, live: false }), starting: true };
     this.dispatch({ t: 'created', chat: view });
     if (this.options.warmStart !== false) void this.warmStart(chat.id);
     return view;
@@ -399,9 +401,10 @@ export class AgentCore {
     } catch (err) {
       const chat = this.chat(chatId);
       // A turn that started meanwhile reports the same failure itself.
-      if (chat && !chat.busy && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link' || i.kind === 'notice')) {
-        this.items(chatId, [this.failureNotice(chat.agent, err)]);
-      }
+      if (chat && !chat.busy) this.items(chatId, [this.failureNotice(chat.agent, err)]);
+    } finally {
+      const session = this.chat(chatId)?.session;
+      if (session?.starting) this.dispatch({ t: 'session', chatId, session: { ...session, starting: false } });
     }
   }
 
@@ -642,10 +645,10 @@ export class AgentCore {
     if (want !== undefined && want !== mode.current) await this.applyOption(chatId, mode, want);
   }
 
-  /** The agent's options, kept as its defaults for the next chat's pickers. */
+  /** The agent's options and commands, kept as its defaults for the next chat's pickers and "/" menu. */
   private updateKnown(chatId: string): void {
     const chat = this.chat(chatId);
-    if (chat?.session?.live) this.saveDefaults(chat.agent, { options: chat.session.options.filter((o) => o.category !== 'mode') });
+    if (chat?.session?.live) this.saveDefaults(chat.agent, { options: chat.session.options.filter((o) => o.category !== 'mode'), commands: chat.session.commands });
   }
 
   /**
@@ -680,9 +683,18 @@ export class AgentCore {
     this.updateKnown(chatId);
   }
 
+  /** Runs the last message again, or, when the chat has none yet, starts its agent again. */
   async retry(chatId: string): Promise<void> {
     const blocks = this.lastPrompt.get(chatId);
-    if (blocks && !this.requireChat(chatId).busy) await this.runPrompt(chatId, blocks);
+    const chat = this.requireChat(chatId);
+    if (chat.busy) return;
+    if (blocks) {
+      await this.runPrompt(chatId, blocks);
+      return;
+    }
+    if (chat.session?.live) return;
+    this.dispatch({ t: 'session', chatId, session: { ...(chat.session ?? { ...EMPTY_SESSION, live: false }), starting: true } });
+    await this.warmStart(chatId);
   }
 
   /** Stops the chat's turn, and the consultations its agent is waiting on through the FriedLiver tools. */

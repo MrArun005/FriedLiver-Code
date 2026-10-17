@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import {
   AGENT_FACES,
@@ -32,6 +32,8 @@ import {
   recentChats,
   relativePath,
   rosterKey,
+  slashAction,
+  slashMenu,
   switcherGroups,
   statusOf,
 } from '../shared/view';
@@ -284,6 +286,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             <span class="sep">·</span>
             <Dot state={status} />
             <span>{DOT_LABEL[status]}</span>
+            {chat.session?.starting && <span class="tag">Starting {AGENT_FACES[chat.agent].name}…</span>}
             <ModeBadge session={chat.session} agent={chat.agent} />
             <AutoBadge chat={chat} />
             {chat.branch && (
@@ -939,9 +942,11 @@ function Composer({
   // "@" at the very start picks an agent to ask; the answer comes back into this chat.
   const query = shut ? null : mentionQuery(text, caret);
   const mentions = query === null ? [] : mentionOptions(query);
-  // "/" at the very start picks one of the agent's own commands.
-  const commands = chat.session?.commands ?? [];
-  const slash = shut || !commands.length ? null : slashQuery(text, caret);
+  // "/" at the very start picks one of the agent's own commands, or one of FriedLiver's.
+  const state = useContext(LiveState);
+  const agentCommands = chat.session?.commands ?? [];
+  const commands = slashMenu(agentCommands);
+  const slash = shut ? null : slashQuery(text, caret);
   const slashes = slash === null ? [] : slashOptions(commands, slash);
   const menu: { key: string; title: string; label: string; agent?: (typeof mentions)[number]['agent']; choose(): void }[] = mentions.length
     ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
@@ -984,6 +989,13 @@ function Composer({
       return;
     }
     if (empty) return;
+    const action = slashAction(text, chat, state.chats, agentCommands);
+    if (action === 'incomplete') return;
+    if (action) {
+      send(action);
+      reset();
+      return;
+    }
     // While the agent works, the message waits in the queue and goes when the turn ends.
     send({ type: 'send', chatId: chat.id, text: text.trim(), images: attachments, ...withRefs });
     reset();
@@ -1065,6 +1077,11 @@ function Composer({
                 <span class="pick-label">{o.label}</span>
               </div>
             ))}
+            {slashes.length > 0 && !agentCommands.length && !chat.session?.live && (
+              <div class="pick-row" aria-disabled="true">
+                <span class="pick-label">Agent is starting…</span>
+              </div>
+            )}
           </div>
         )}
         <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
@@ -1085,7 +1102,7 @@ function Composer({
           aria-autocomplete="list"
           aria-controls={picking ? listId : undefined}
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
-          placeholder={chat.busy ? `Message ${chat.label}: it goes when the turn ends · Esc stops` : `Message ${chat.label} · ${commands.length ? '/ commands · ' : ''}# files · @ another agent`}
+          placeholder={chat.busy ? `Message ${chat.label}: it goes when the turn ends · Esc stops` : chat.session?.starting ? `Starting ${chat.label}… · / commands · # files · @ another agent` : `Message ${chat.label} · / commands · # files · @ another agent`}
           onInput={(e) => {
             setText(e.currentTarget.value);
             track(e.currentTarget);
