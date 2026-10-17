@@ -596,6 +596,26 @@ BLOCKS.F20 = async () => {
   await p.close();
 };
 
+// ---- F21: in Light themes an off switch and the effort thumb read as off; Needs you passes contrast ----
+BLOCKS.F21 = async () => {
+  const p = await open('surface=chat&theme=light-2026&select=chat-c2', 1200, 800);
+  const pill = await axe(p, '.chat-head');
+  if (pill) check(!pill.some((x) => /color-contrast/.test(x)), `the header pills pass contrast [${pill.join(', ')}]`);
+  await p.click('.cc-model');
+  const lum = (c) => {
+    const [r, g, b] = c.match(/[\d.]+/g).map(Number);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  };
+  const thumb = await p.locator('.cc-thumb').evaluate((t) => window.getComputedStyle(t).backgroundColor);
+  check(lum(thumb) > 0.9, `the effort thumb is light on a light theme [${thumb}]`);
+  const off = p.locator('button.cc-switch[aria-checked="false"]').first();
+  if (await off.count()) {
+    const knob = await off.evaluate((b) => window.getComputedStyle(b, '::after').backgroundColor);
+    check(lum(knob) > 0.9, `an off switch's knob is light too [${knob}]`);
+  }
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();

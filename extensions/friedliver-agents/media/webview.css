@@ -11,6 +11,7 @@
   --bg: var(--vscode-editor-background, #121314);
   --input-bg: var(--vscode-input-background, #191a1b);
   --field-border: transparent;
+  --thumb: var(--fg);
   --menu-bg: var(--vscode-menu-background, #202122);
   --dialog-bg: var(--vscode-sideBar-background, #191a1b);
   --code-bg: var(--vscode-textCodeBlock-background, #242526);
@@ -137,6 +138,9 @@ body.vscode-high-contrast-light {
   --decision-soft: color-mix(in srgb, var(--decision) 9%, transparent);
   --decision-line: color-mix(in srgb, var(--decision) 50%, transparent);
   --field-border: color-mix(in srgb, var(--fg-2) 40%, transparent);
+  /* A dark knob on a light track reads as on: knobs are white, with a ring. */
+  --thumb: #ffffff;
+  --shadow-thumb: 0 0 0 1px #00000033, 0 1px 2px #00000029;
 }
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
@@ -2894,7 +2898,7 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   width: 14px;
   height: 14px;
   border-radius: var(--r-round);
-  background: var(--fg);
+  background: var(--thumb);
   box-shadow: var(--shadow-thumb);
   transition: left var(--ease-toggle);
 }
@@ -2917,7 +2921,7 @@ button.cc-switch::after {
   width: 14px;
   height: 14px;
   border-radius: var(--r-round);
-  background: var(--fg);
+  background: var(--thumb);
   box-shadow: var(--shadow-thumb);
   transition: left var(--ease-toggle);
 }
