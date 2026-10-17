@@ -49,8 +49,9 @@ import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
-import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, type ComposerMenu } from './composerMenus';
-import { RefList, refsOf, sameRef } from './refs';
+import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
+import { RefChip, RefList, refsOf, sameRef } from './refs';
+import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -121,7 +122,6 @@ function App() {
               reveal={reveal}
               onSelect={select}
             />
-            <RunningAgents chat={chat} />
             <Composer
               key={chat.id}
               chat={chat}
@@ -1223,199 +1223,203 @@ function Composer({
   }, [openMenu]);
   const samples = usageSamples(chat);
   const queueing = chat.busy && !asking;
+  // Busy with nothing typed: the send button stops the turn, as in Claude Code.
+  const stopping = chat.busy && !asking && empty;
+  const override = agentOverride(chat.approval ?? 'ask', chat.session);
   return (
-    <>
-      <EditsBar chat={chat} />
-      <div
-        class="composer"
-        data-menu={openMenu ?? undefined}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          const files = Array.from(e.dataTransfer?.files ?? []);
-          if (files.length) {
-            e.preventDefault();
-            addFiles(files);
-          }
-        }}
-      >
-        {picking && (
-          <div class="mention-menu" id={listId} role="listbox" aria-label={mentions.length ? 'Ask an agent' : slashes.length ? 'Commands' : 'Files'}>
-            {menu.map((o) => (
-              <div
-                key={o.key}
-                id={`${listId}-${o.key}`}
-                role="option"
-                class="pick-row"
-                aria-selected={o === picked}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  o.choose();
-                }}
-                onMouseMove={() => setPick(menu.indexOf(o))}
-              >
-                {o.agent && <Glyph agent={o.agent} size="sm" />}
-                <span class="pick-title">{o.title}</span>
-                <span class="pick-label">{o.label}</span>
-              </div>
-            ))}
-            {slashes.length > 0 && !agentCommands.length && !chat.session?.live && (
-              <div class="pick-row" aria-disabled="true">
-                <span class="pick-label">Agent is starting…</span>
-              </div>
-            )}
-          </div>
-        )}
-        <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
-        {attachments.length > 0 && (
-          <div class="thumbs cc-chips">
-            {attachments.map((a, i) => (
-              <AttachmentChip key={i} a={a} onRemove={() => setAttachments((list) => list.filter((_, n) => n !== i))} />
-            ))}
-          </div>
-        )}
-        <div class="cc-input">
-        <textarea
-          ref={area}
-          value={text}
-          rows={2}
-          aria-label={`Message ${chat.label}`}
-          aria-autocomplete="list"
-          aria-controls={picking ? listId : undefined}
-          aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
-          placeholder={chat.session?.starting && !chat.busy ? 'Starting…' : 'Message…'}
-          onInput={(e) => {
-            setText(e.currentTarget.value);
-            track(e.currentTarget);
-            setShut(false);
-            setPick(0);
-          }}
-          onKeyUp={(e) => !['ArrowUp', 'ArrowDown'].includes(e.key) && track(e.currentTarget)}
-          onClick={(e) => track(e.currentTarget)}
-          onBlur={() => setShut(true)}
-          onFocus={() => setShut(false)}
-          onPaste={(e) => {
-            const files = Array.from(e.clipboardData?.items ?? [])
-              .filter((i) => i.kind === 'file')
-              .map((i) => i.getAsFile())
-              .filter((f): f is File => f !== null && f.type.startsWith('image/'));
+    <div class="composer-dock">
+      <div class="composer-col">
+        <div class="banners">
+          <EditsBar chat={chat} />
+          <RunningAgents chat={chat} />
+          {micHint && (
+            <div class="banner mic-hint" role="status">
+              <span class="banner-text">Press Fn twice to dictate</span>
+              <a href="#" onClick={(e) => (e.preventDefault(), send({ type: 'dictationSettings' }))}>
+                Dictation settings
+              </a>
+            </div>
+          )}
+        </div>
+        <div
+          class="composer"
+          data-mode={override ? 'full' : currentMode(chat)}
+          data-menu={openMenu ?? undefined}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            const files = Array.from(e.dataTransfer?.files ?? []);
             if (files.length) {
               e.preventDefault();
               addFiles(files);
             }
           }}
-          onKeyDown={(e) => {
-            if (picking && picked) {
-              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                setPick((p) => (Math.min(p, menu.length - 1) + (e.key === 'ArrowDown' ? 1 : menu.length - 1)) % menu.length);
-                return;
-              }
-              if ((e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || e.key === 'Tab') {
-                e.preventDefault();
-                picked.choose();
-                return;
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setShut(true);
-                return;
-              }
-            }
-            if (decisionKey(e, chat, !text.trim())) return;
-            if (e.key === 'Tab' && e.shiftKey) {
-              // Shift+Tab, as in Claude Code: Ask → Auto-accept edits → Plan.
-              e.preventDefault();
-              cycle();
-              return;
-            }
-            if (e.key === 'Escape' && !text && chat.busy) {
-              e.preventDefault();
-              send({ type: 'stop', chatId: chat.id });
-              return;
-            }
-            if (e.key === 'ArrowUp' && !text) {
-              const last = lastSent();
-              if (last) {
-                e.preventDefault();
-                insert({ text: last, caret: last.length });
-              }
-              return;
-            }
-            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        {MAC && (
-          <button
-            type="button"
-            class="cc-mic mic-btn"
-            aria-label="Dictate"
-            title="Dictate: press Fn twice in the message box"
-            onClick={() => {
-              // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
-              area.current?.focus();
-              setMicHint(true);
-            }}
-          >
-            <Icon name="mic" />
-          </button>
-        )}
-        </div>
-        {micHint && (
-          <span class="composer-queued mic-hint" role="status">
-            Press Fn twice to dictate ·{' '}
-            <a href="#" onClick={(e) => (e.preventDefault(), send({ type: 'dictationSettings' }))}>
-              Dictation settings
-            </a>
-          </span>
-        )}
-        {openMenu === 'model' && <ModelMenu chat={chat} close={closeMenu} />}
-        {openMenu === 'modes' && <ModesMenu chat={chat} close={closeMenu} />}
-        {openMenu === 'slash' && (
-          <SlashMenu
-            chat={chat}
-            close={closeMenu}
-            openModel={() => setMenu('model')}
-            mention={() => insert({ text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}#`, caret: text.length + (text && !/\s$/.test(text) ? 2 : 1) })}
-            command={(name, run) => (run ? send({ type: 'send', chatId: chat.id, text: `/${name}`, images: [] }) : insert({ text: `/${name} `, caret: name.length + 2 }))}
-          />
-        )}
-        <div class="composer-bar">
-          <span class="bar-left">
+        >
+          {picking && (
+            <div class="cc-menu cc-typeahead mention-menu" id={listId} role="listbox" aria-label={mentions.length ? 'Ask an agent' : slashes.length ? 'Commands' : 'Files'}>
+              {menu.map((o) => (
+                <div
+                  key={o.key}
+                  id={`${listId}-${o.key}`}
+                  role="option"
+                  class="cc-item pick-row"
+                  aria-selected={o === picked}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    o.choose();
+                  }}
+                  onMouseMove={() => setPick(menu.indexOf(o))}
+                >
+                  {o.agent && <Glyph agent={o.agent} size="sm" />}
+                  <span class="cc-item-name">{o.title}</span>
+                  <span class="cc-item-value">{o.label}</span>
+                </div>
+              ))}
+              {slashes.length > 0 && !agentCommands.length && !chat.session?.live && (
+                <div class="cc-item pick-row" aria-disabled="true">
+                  <span class="cc-item-value">Agent is starting…</span>
+                </div>
+              )}
+            </div>
+          )}
+          {(attachments.length > 0 || refs.length > 0) && (
+            <div class="cc-chips">
+              {attachments.map((a, i) => (
+                <AttachmentChip key={i} a={a} onRemove={() => setAttachments((list) => list.filter((_, n) => n !== i))} />
+              ))}
+              {refs.map((r) => (
+                <RefChip key={`${r.path}:${r.startLine}-${r.endLine}`} codeRef={r} cwd={chat.cwd} onRemove={() => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
+              ))}
+            </div>
+          )}
+          <div class="cc-input">
+            <textarea
+              ref={area}
+              value={text}
+              rows={1}
+              aria-label={`Message ${chat.label}`}
+              aria-autocomplete="list"
+              aria-controls={picking ? listId : undefined}
+              aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
+              placeholder={chat.session?.starting && !chat.busy ? 'Starting…' : 'Message…'}
+              onInput={(e) => {
+                setText(e.currentTarget.value);
+                track(e.currentTarget);
+                setShut(false);
+                setPick(0);
+              }}
+              onKeyUp={(e) => !['ArrowUp', 'ArrowDown'].includes(e.key) && track(e.currentTarget)}
+              onClick={(e) => track(e.currentTarget)}
+              onBlur={() => setShut(true)}
+              onFocus={() => setShut(false)}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData?.items ?? [])
+                  .filter((i) => i.kind === 'file')
+                  .map((i) => i.getAsFile())
+                  .filter((f): f is File => f !== null && f.type.startsWith('image/'));
+                if (files.length) {
+                  e.preventDefault();
+                  addFiles(files);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (picking && picked) {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setPick((p) => (Math.min(p, menu.length - 1) + (e.key === 'ArrowDown' ? 1 : menu.length - 1)) % menu.length);
+                    return;
+                  }
+                  if ((e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || e.key === 'Tab') {
+                    e.preventDefault();
+                    picked.choose();
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setShut(true);
+                    return;
+                  }
+                }
+                if (decisionKey(e, chat, !text.trim())) return;
+                if (e.key === 'Tab' && e.shiftKey) {
+                  // Shift+Tab, as in Claude Code: Ask → Auto-accept edits → Plan.
+                  e.preventDefault();
+                  cycle();
+                  return;
+                }
+                if (e.key === 'Escape' && !text && chat.busy) {
+                  e.preventDefault();
+                  send({ type: 'stop', chatId: chat.id });
+                  return;
+                }
+                if (e.key === 'ArrowUp' && !text) {
+                  const last = lastSent();
+                  if (last) {
+                    e.preventDefault();
+                    insert({ text: last, caret: last.length });
+                  }
+                  return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            {MAC && (
+              <button
+                type="button"
+                class="cc-mic mic-btn"
+                aria-label="Dictate"
+                title="Dictate: press Fn twice in the message box"
+                onClick={() => {
+                  // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
+                  area.current?.focus();
+                  setMicHint(true);
+                }}
+              >
+                <Icon name="mic" />
+              </button>
+            )}
+          </div>
+          {openMenu === 'model' && <ModelMenu chat={chat} close={closeMenu} />}
+          {openMenu === 'modes' && <ModesMenu chat={chat} close={closeMenu} />}
+          {openMenu === 'slash' && (
+            <SlashMenu
+              chat={chat}
+              close={closeMenu}
+              openModel={() => setMenu('model')}
+              mention={() => insert({ text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}#`, caret: text.length + (text && !/\s$/.test(text) ? 2 : 1) })}
+              command={(name, run) => (run ? send({ type: 'send', chatId: chat.id, text: `/${name}`, images: [] }) : insert({ text: `/${name} `, caret: name.length + 2 }))}
+            />
+          )}
+          <div class="composer-bar">
             <button type="button" class="cc-icon-btn attach-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
-              <Icon name="plus" />
+              <Icon name="plus" size={20} />
             </button>
             <ComposerPills chat={chat} linked={linked} samples={samples} open={setMenu} />
             {asking && (
-              <span class="composer-agent">
-                <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
+              <span class="composer-hint composer-agent">
+                <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
               </span>
             )}
-            {hint && <span class="hint composer-hint">{hint}</span>}
-          </span>
-          <span class="bar-right">
-            {chat.busy && (
-              <button class="cc-icon-btn stop-btn" aria-label="Stop" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-                <Icon name="stop" />
-              </button>
-            )}
+            {hint && <span class="composer-hint">{hint}</span>}
+            <span class="spacer" />
             <ModeButton chat={chat} open={setMenu} />
             <button
               class="primary send-btn"
-              onClick={submit}
-              disabled={!canSend}
-              aria-label={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-              title={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
+              onClick={stopping ? () => send({ type: 'stop', chatId: chat.id }) : submit}
+              disabled={!stopping && !canSend}
+              data-stop={stopping ? '' : undefined}
+              aria-label={stopping ? 'Stop' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
+              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
             >
-              <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
+              <Icon name={stopping ? 'stop' : asking ? 'ask' : queueing ? 'queue' : 'up'} size={stopping ? 16 : 20} />
             </button>
-          </span>
+          </div>
         </div>
       </div>
       {openMenu === 'agents' && <AgentMap chat={chat} linked={linked} close={closeMenu} />}
-    </>
+    </div>
   );
 }
 
