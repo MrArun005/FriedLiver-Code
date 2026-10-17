@@ -1309,6 +1309,7 @@ function Composer({
           </span>
         )}
         <div class="composer-bar">
+          <span class="bar-left">
           <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
             <Icon name="plus" />
           </button>
@@ -1320,7 +1321,8 @@ function Composer({
             <SessionControls chat={chat} compact={compact} />
           )}
           {hint && <span class="hint composer-hint">{hint}</span>}
-          <span class="spacer" />
+          </span>
+          <span class="bar-right">
           <UsageMeter usage={chat.session?.usage} compact={compact} />
           {chat.busy && (
             <button class="ghost danger sm" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
@@ -1350,6 +1352,7 @@ function Composer({
           >
             <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
           </button>
+          </span>
         </div>
       </div>
     </>

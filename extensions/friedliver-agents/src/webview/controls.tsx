@@ -191,7 +191,7 @@ function OptionMenu({ chat, option, extra, icon, later }: { chat: ChatView; opti
     <Popover
       label={option.name}
       title={`${option.name}: ${current}${on.length ? ` · ${on.map((o) => o.name).join(', ')}` : ''}.${later}`}
-      buttonClass="chip-btn"
+      buttonClass={`chip-btn opt-${icon}`}
       class="chip-pop"
       trigger={
         <>
@@ -272,7 +272,10 @@ export const UsageMeter = memo(function UsageMeter({ usage, compact }: { usage?:
   const title = `${pct}% of the model's context window used (${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens)${cost ? `. ${cost} spent in this chat so far` : ''}${level ? '. Nearly full: /compact or a new chat clears it.' : ''}`;
   return (
     <span class="usage" data-level={level} title={title} role="img" aria-label={title}>
-      <span>{compact ? `${pct}%` : `Context ${pct}%`}</span>
+      <span>
+        {!compact && <span class="usage-word">Context </span>}
+        {pct}%
+      </span>
       {!compact && cost && <span class="usage-cost">{cost} this chat</span>}
     </span>
   );

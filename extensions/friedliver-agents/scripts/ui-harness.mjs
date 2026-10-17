@@ -411,6 +411,17 @@ async function shoot() {
       check(r.w <= 640.5 && Math.abs(r.left - r.right) <= 1 && (width > 672 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 640)`);
       await p.close();
     }
+    for (const [width, id] of [[480, 'chat-c6'], [640, 'chat-c6'], [672, 'chat-c6'], [900, 'chat-c6'], [480, 'chat-c5'], [900, 'chat-c5']]) {
+      // The send/queue button stays on the first row, level with the mode pill, at the right end.
+      const q = await open(`surface=chat&select=${id}`, width, 700);
+      const r = await q.evaluate(() => {
+        const box = (s) => document.querySelector(s).getBoundingClientRect();
+        const send = box('.composer-bar .send-btn'), mode = box('.composer-bar .approval-chip'), bar = box('.composer-bar');
+        return { top: Math.abs(send.top + send.height / 2 - (mode.top + mode.height / 2)), right: bar.right - send.right };
+      });
+      check(r.top <= 6 && r.right <= 2, `at ${width}px (${id}) [${JSON.stringify(r)}] send sits on the mode pill's row at the right end`);
+      await q.close();
+    }
     const p = await open('surface=chat&select=chat-c5', 1200, 700);
     const usage = p.locator('.composer-bar .usage');
     check(/^Context \d+%/.test(await usage.innerText()), 'context usage reads "Context N%"');
