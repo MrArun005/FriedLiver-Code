@@ -3603,18 +3603,21 @@ body[data-surface='chat'] .prose {
 /* A run of steps: one card, numbered, a check per step joined by a thread. */
 .step-card {
   position: relative;
+  margin-top: 30px;
   padding: 10px var(--sp-4);
   border: 1px solid var(--vscode-widget-border, var(--line));
   border-radius: 10px;
   background: var(--vscode-editorWidget-background, var(--panel));
 }
 .step-card[data-folded] {
+  margin-top: 0;
   padding: 6px var(--sp-4);
 }
+/* Above the card, right-aligned: never over a step. */
 button.step-fold {
   position: absolute;
-  top: 6px;
-  right: 10px;
+  top: -30px;
+  right: 0;
   z-index: 1;
   color: var(--vscode-descriptionForeground);
 }
@@ -3635,9 +3638,6 @@ button.step-fold {
   width: 2px;
   height: 18px;
   background: color-mix(in srgb, var(--vscode-charts-green) 45%, transparent);
-}
-.step-card .steps li:first-child .step-row {
-  padding-right: 96px;
 }
 .step-mark {
   flex: none;
