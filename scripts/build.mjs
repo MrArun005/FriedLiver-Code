@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { VSCODE_DIR, checkSha256, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File } from './lib.mjs';
+import { CACHE_DIR, VSCODE_DIR, checkSha256, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
 
 const args = new Set(process.argv.slice(2));
 const wantPackage = args.has('--package');
@@ -191,6 +191,44 @@ function trimPackagedApp(appDir) {
 }
 
 /**
+ * Upstream's .deb step looks the VS Code sysroot (the toolchain it reads library
+ * dependencies with) up through api.github.com too, which answers anonymous calls from
+ * shared CI runners and some proxies with 403 (see seedRipgrepCache). It skips the lookup
+ * when the sysroot folder already has a .stamp naming the asset, so we fetch the asset from
+ * the plain release-download URL, check it against upstream's
+ * build/checksums/vscode-sysroot.txt (the hash upstream itself checks) before unpacking it,
+ * and point VSCODE_SYSROOT_DIR at a folder of ours instead of the shared temp folder.
+ * Returns the env for the .deb steps.
+ */
+function seedVSCodeSysroot(arch) {
+	const debArch = { x64: 'amd64', arm64: 'arm64', armhf: 'armhf' }[arch];
+	const sysroot = vscodeSysrootAsset(
+		fs.readFileSync(path.join(VSCODE_DIR, 'build', 'linux', 'debian', 'install-sysroot.ts'), 'utf8'),
+		fs.readFileSync(path.join(VSCODE_DIR, 'build', 'checksums', 'vscode-sysroot.txt'), 'utf8'),
+		debArch, process.env.VSCODE_SYSROOT_PREFIX);
+	if (!sysroot) {
+		log(`sysroot: no ${debArch ?? arch} asset found from upstream's install-sysroot.ts and checksums; leaving the download to upstream`);
+		return env;
+	}
+	const dir = process.env.VSCODE_SYSROOT_DIR || path.join(CACHE_DIR, `vscode-${debArch}-sysroot`);
+	const stamp = path.join(dir, '.stamp');
+	if (fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === sysroot.asset) {
+		log(`sysroot ${sysroot.asset} present: ${dir}`);
+		return { ...env, VSCODE_SYSROOT_DIR: dir };
+	}
+	fs.rmSync(dir, { recursive: true, force: true });
+	fs.mkdirSync(dir, { recursive: true });
+	const tgz = path.join(dir, sysroot.asset);
+	run('curl', ['-fsSL', '--retry', '3', '-o', tgz, sysroot.url], { cwd: dir });
+	checkSha256(tgz, sysroot.sha256, `sysroot ${sysroot.asset}`);
+	run('tar', ['-xzf', tgz, '-C', dir], { cwd: dir });
+	fs.rmSync(tgz, { force: true });
+	fs.writeFileSync(stamp, sysroot.asset);
+	log(`sysroot seeded: ${dir}`);
+	return { ...env, VSCODE_SYSROOT_DIR: dir };
+}
+
+/**
  * The installer for this OS, into installers/: a per-user setup .exe on Windows (no admin
  * rights needed), a .dmg on macOS, a .deb on Linux. Unsigned: signing needs certificates.
  */
@@ -214,8 +252,9 @@ function buildInstaller(arch, appDir) {
 		file = path.join(dest, `FriedLiver-darwin-${arch}-${version}.dmg`);
 		run('hdiutil', ['create', '-volname', 'FriedLiver', '-srcfolder', path.join(appDir, app), '-ov', '-format', 'UDZO', file], { cwd: appDir });
 	} else if (process.platform === 'linux') {
-		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-prepare-deb`], { env });
-		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-build-deb`], { env });
+		const debEnv = seedVSCodeSysroot(arch);
+		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-prepare-deb`], { env: debEnv });
+		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-build-deb`], { env: debEnv });
 		const debDir = fs.readdirSync(path.join(VSCODE_DIR, '.build', 'linux', 'deb'))
 			.map(d => path.join(VSCODE_DIR, '.build', 'linux', 'deb', d, 'deb'))
 			.find(d => fs.existsSync(d));
