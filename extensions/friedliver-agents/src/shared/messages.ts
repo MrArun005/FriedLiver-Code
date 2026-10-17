@@ -32,7 +32,8 @@ export type WebviewMessage =
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
   /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
   | { type: 'createTask'; agent: AgentKey; prompt: string; worktree: boolean; choices?: TaskChoices; approval?: ApprovalLevel }
-  | { type: 'openChat'; chatId: string }
+  /** `item` (optional): a transcript item to scroll to, e.g. a subagent's tool call. */
+  | { type: 'openChat'; chatId: string; item?: string }
   | { type: 'merge'; chatId: string }
   | { type: 'removeWorktree'; chatId: string }
   | { type: 'moveToCenter' }
@@ -229,9 +230,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     }
     case 'newChat':
       return isAgentKey(m.agent) ? { type: 'newChat', agent: m.agent } : null;
+    case 'openChat':
+      return id(m.chatId) ? { type: 'openChat', chatId: m.chatId, ...(id(m.item) ? { item: m.item } : {}) } : null;
     case 'select':
     case 'stop':
-    case 'openChat':
     case 'merge':
     case 'removeWorktree':
     case 'removeChat':

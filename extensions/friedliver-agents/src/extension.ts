@@ -433,7 +433,7 @@ export class Controller {
           return;
         }
         case 'openChat':
-          await this.showChat(m.chatId);
+          await this.showChat(m.chatId, m.item);
           return;
         case 'merge':
           await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Merging the task into the main checkout…' }, () =>
