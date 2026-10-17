@@ -220,11 +220,11 @@ async function shoot() {
       await side.fill('.composer textarea', '@g');
       await save(side, `chat-mention-${theme}`);
       await side.fill('.composer textarea', '');
-      await side.click('.mode-btn');
+      await side.click('.cc-mode');
       await save(side, `chat-approval-menu-${theme}`);
       await side.keyboard.press('Escape');
-      await side.click('.usage-btn');
-      await side.click('.usage-row[data-row="model"] .chip-btn');
+      await side.keyboard.press('Escape');
+      await side.click('.cc-model');
       await save(side, `chat-model-menu-${theme}`);
       await side.keyboard.press('Escape');
       await side.keyboard.press('Escape');
@@ -337,42 +337,61 @@ async function shoot() {
     // The session controls: approval level, model, effort, Plan, and Shift+Tab.
     const p = await open('surface=chat&side=1&select=chat-c5', 400, 900);
     const last = async () => (await posted(p)).at(-1);
-    await p.click('.mode-btn');
-    check(await p.locator('.popover [role="menuitemradio"]:has-text("Auto-accept edits")').isVisible(), 'the approval chip lists the levels');
-    check(await p.locator('.popover .menu-sub:has-text("Claude: Accept edits")').isVisible(), 'each level says which of the agent’s modes it uses');
-    await p.click('.popover [role="menuitemradio"]:has-text("Auto-accept edits")');
-    check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'picking a level posts it');
-    await p.click('.mode-btn');
-    await p.click('.popover [role="menuitemcheckbox"]:has-text("Plan first")');
-    check(JSON.stringify(await last()) === JSON.stringify({ type: 'plan', chatId: 'chat-c5', on: true }), 'Plan first turns Plan mode on');
-    await p.click('.mode-btn');
-    await p.click('.popover [role="menuitemradio"]:has(.menu-label:text-is("Bypass permissions"))');
+    await p.click('.cc-mode');
+    const modes = await p.locator('.cc-modes-menu .cc-item-name').allInnerTexts();
+    check(['Manual', 'Edit automatically', 'Plan', 'Auto'].every((m) => modes.includes(m)), `Modes lists Manual, Edit automatically, Plan, Auto [${modes}]`);
+    check(await p.locator('.cc-modes-menu .cc-keys:has-text("tab to switch")').isVisible(), 'Modes says ⇧ + tab switches');
+    check((await p.locator('.cc-modes-menu .cc-dots[role="slider"]').count()) === 1, 'Modes has the effort slider');
+    await p.click('.cc-modes-menu [role="menuitemradio"]:has(.cc-item-name:text-is("Edit automatically"))');
+    check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'picking a mode posts its level');
+    await p.click('.cc-mode');
+    await p.click('.cc-modes-menu [role="menuitemradio"]:has(.cc-item-name:text-is("Plan"))');
+    check(JSON.stringify(await last()) === JSON.stringify({ type: 'plan', chatId: 'chat-c5', on: true }), 'Plan turns Plan mode on');
+    await p.click('.cc-mode');
+    await p.click('.cc-modes-menu [role="menuitemradio"]:has(.cc-item-name:text-is("Bypass permissions"))');
     const mode = await last();
     check(mode?.type === 'setOption' && mode.optionId === 'mode' && mode.value === 'bypassPermissions', 'an agent mode is set as its own option');
-    const model = async () => {
-      if (!(await p.locator('.usage-pop .popover').count())) await p.click('.usage-btn');
-      await p.click('.usage-row[data-row="model"] .chip-btn');
-    };
-    await model();
-    await p.click('.popover [role="menuitemradio"]:has-text("Small")');
+    await p.click('.cc-model');
+    check((await p.locator('.cc-model-menu .cc-menu-title').innerText()) === 'Select a model', 'the model menu is titled Select a model');
+    check((await p.locator('.cc-model-menu .cc-item-desc').count()) >= 1, 'models show their descriptions');
+    await p.click('.cc-model-menu [role="menuitemradio"]:has-text("Small")');
     const picked = await last();
     check(picked?.type === 'setOption' && picked.optionId === 'model' && picked.value === 'small', 'picking a model posts setOption');
-    if (!(await p.locator('.usage-pop .popover').count())) await p.click('.usage-btn');
-    await p.click('.segmented [role="radio"]:has-text("Max")');
+    check(!(await p.locator('.cc-model-menu').count()), 'picking a model closes the menu');
+    await p.click('.cc-model');
+    await p.focus('.cc-model-menu .cc-dots');
+    await p.keyboard.press('End');
     const effort = await last();
-    check(effort?.optionId === 'effort' && effort.value === 'max', 'picking an effort level posts setOption');
-    await model();
-    await p.click('.popover [role="menuitemcheckbox"]:has-text("Fast mode")');
+    check(effort?.optionId === 'effort' && effort.value === 'max', 'the effort slider posts setOption (End = Max)');
+    await p.click('.cc-model-menu [role="switch"][aria-label="Fast mode"]');
     const fast = await last();
-    check(fast?.optionId === 'fast' && fast.value === true, 'Fast mode toggles as a boolean');
+    check(fast?.optionId === 'fast' && fast.value === true, 'Fast mode is a toggle in the model menu');
     await p.keyboard.press('Escape');
+    check(!(await p.locator('.cc-menu').count()), 'Esc closes the menu');
     await p.click('.composer textarea');
     await p.keyboard.press('Shift+Tab');
     check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'Shift+Tab moves to the next level');
-    await p.hover('.usage-btn');
-    check((await p.locator('.usage-row[data-row="usage"]').innerText()).includes('of 200k tokens left'), 'the usage popover shows the context left');
-    await p.mouse.move(0, 0);
-
+    const tip = (await p.getAttribute('.cc-model', 'title')) ?? '';
+    check(/of 200k tokens left/.test(tip) && /Context lasts/.test(tip), 'the model pill’s tooltip has the context left and the turns estimate');
+    // The / button: search, Context, Model, the agent's commands.
+    await p.click('.cc-slash-btn');
+    check((await p.inputValue('.cc-slash-menu .cc-search')) === '/', 'the / menu opens with its search at /');
+    const subs = await p.locator('.cc-slash-menu .cc-menu-sub').allInnerTexts();
+    check(subs[0] === 'Context' && subs[1] === 'Model' && subs.length === 3, `the / menu has Context, Model and the agent’s commands [${subs}]`);
+    await p.fill('.cc-slash-menu .cc-search', '/comp');
+    check((await p.locator('.cc-slash-menu [role="menuitem"]').allInnerTexts()).every((t) => /comp/i.test(t)), 'typing filters the / menu');
+    await p.keyboard.press('Enter');
+    check((await p.inputValue('.composer textarea')) === '/compact ', 'Enter picks the first match into the box');
+    await p.fill('.composer textarea', '');
+    await p.click('.cc-slash-btn');
+    await p.click('.cc-slash-menu [role="menuitem"]:has-text("Mention file from this project")');
+    check((await p.inputValue('.composer textarea')) === '#', 'Mention file starts a # file search');
+    await p.fill('.composer textarea', '');
+    await p.click('.cc-slash-btn');
+    await p.click('.cc-slash-menu [role="menuitem"]:has-text("Switch model")');
+    check(await p.locator('.cc-model-menu').isVisible(), 'Switch model… opens the model menu');
+    await p.keyboard.press('Escape');
+    await p.click('.composer textarea');
     await p.keyboard.type('/co');
     check(await p.locator('.mention-menu [role="option"]:has-text("/compact")').isVisible(), '/ opens the agent’s commands');
     await p.keyboard.press('Enter');
@@ -396,26 +415,28 @@ async function shoot() {
     await p.close();
   }
   {
-    // Dictate lives in the + menu: no programmatic start (it beeped); it focuses the box and says Fn Fn, with a settings link.
+    // The mic, top right in the box: no programmatic start (it beeped); it focuses the box and says Fn Fn.
     const p = await open('surface=chat&side=1&select=chat-c5', 900, 700);
-    await p.click('.attach-btn');
-    await p.click('.popover .mic-item');
-    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'Dictate no longer asks the app to start dictation (it beeped)');
-    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'Dictate focuses the message box');
-    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'Dictate shows the Fn Fn hint');
+    await p.click('.cc-mic');
+    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'the mic no longer asks the app to start dictation (it beeped)');
+    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
+    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'the mic shows the Fn Fn hint');
     await p.click('.mic-hint a');
     check((await posted(p)).some((m) => m.type === 'dictationSettings'), 'the hint opens Dictation settings');
+    const r = await p.evaluate(() => {
+      const m = document.querySelector('.cc-mic').getBoundingClientRect(), t = document.querySelector('.cc-input').getBoundingClientRect();
+      return t.right - m.right < 16 && m.top - t.top < 16;
+    });
+    check(r, 'the mic sits at the top right inside the box');
     await p.click('.attach-btn');
-    await p.click('.popover [role="menuitem"]:has-text("Attach images")');
-    check((await posted(p)).some((m) => m.type === 'attach'), 'the + menu attaches images');
+    check((await posted(p)).some((m) => m.type === 'attach'), '+ attaches images');
     await p.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
-    await linux.click('.attach-btn');
-    check((await linux.locator('.popover .mic-item').count()) === 0, 'no Dictate off macOS');
+    check((await linux.locator('.cc-mic').count()) === 0, 'no mic off macOS');
     await linux.close();
   }
   {
-    // The composer: centred, 640px at most; a minimal row; mode border; blue focus ring.
+    // The composer: centred, 640px at most; one row; orange border on focus.
     for (const width of [480, 900, 1600]) {
       const p = await open('surface=chat&select=chat-c5', width, 700);
       const r = await p.evaluate(() => {
@@ -425,93 +446,85 @@ async function shoot() {
       check(r.w <= 640.5 && Math.abs(r.left - r.right) <= 1 && (width > 672 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 640)`);
       await p.close();
     }
-    for (const [width, id] of [[320, 'chat-c6'], [480, 'chat-c6'], [640, 'chat-c6'], [320, 'chat-c5'], [900, 'chat-c5']]) {
-      // One row: everything on the attach button's line; the mode icon right before send, send at the right end.
+    for (const [width, id] of [[320, 'chat-c6'], [480, 'chat-c6'], [640, 'chat-c6'], [320, 'chat-c5'], [900, 'chat-pay&fixture=subagents']]) {
+      // One row: +, /, agents, model on the left; mode then send at the right end.
       const q = await open(`surface=chat&side=1&select=${id}`, width, 700);
       const r = await q.evaluate(() => {
         const box = (s) => document.querySelector(s).getBoundingClientRect();
-        const bar = box('.composer-bar'), send = box('.composer-bar .send-btn'), mode = box('.composer-bar .mode-btn');
+        const bar = box('.composer-bar'), send = box('.composer-bar .send-btn'), mode = box('.composer-bar .cc-mode');
         const mid = (b) => b.top + b.height / 2;
         const rows = [...document.querySelectorAll('.composer-bar button')].filter((b) => b.offsetWidth).map((b) => Math.round(mid(b.getBoundingClientRect())));
-        return { oneRow: Math.max(...rows) - Math.min(...rows) <= 6, modeLeftOfSend: mode.right <= send.left + 0.5 && send.left - mode.right < 12, right: bar.right - send.right, words: document.querySelector('.composer-bar').innerText.trim() };
+        return { oneRow: Math.max(...rows) - Math.min(...rows) <= 6, modeLeftOfSend: mode.right <= send.left + 0.5 && send.left - mode.right < 12, right: bar.right - send.right };
       });
-      check(r.oneRow && r.modeLeftOfSend && r.right <= 2, `at ${width}px (${id}) the row fits on one line, mode icon just left of send [${JSON.stringify(r)}]`);
-      check(!/Context|this chat|Default|Medium/.test(r.words), `at ${width}px (${id}) no cost/context/model/effort text in the row`);
+      check(r.oneRow && r.modeLeftOfSend && r.right <= 8, `at ${width}px (${id}) one row, mode just left of send at the right end [${JSON.stringify(r)}]`);
       await q.close();
     }
-    const p = await open('surface=chat&select=chat-c5', 1200, 700);
-    check(((await p.getAttribute('.mode-btn', 'title')) ?? '').startsWith('Ask'), 'the mode icon’s tooltip names the mode');
-    const untitled = await p.evaluate(() => [...document.querySelectorAll('.composer-bar button')].filter((b) => !b.title && !b.getAttribute('aria-label')).length);
+    const p = await open('surface=chat&select=chat-c6', 1200, 700);
+    check((await p.locator('.cc-mode').innerText()).trim() === 'Auto', 'the mode button reads Auto in Full auto');
+    const untitled = await p.evaluate(() => [...document.querySelectorAll('.composer button')].filter((b) => !b.title && !b.getAttribute('aria-label')).length);
     check(untitled === 0, 'every composer control has a tooltip or label');
-    // Usage popover: hover opens without focus, leaving closes, click opens a trapped dialog, Esc closes.
-    await p.hover('.usage-btn');
-    const pop = p.locator('.usage-pop .popover[role="dialog"]');
-    check(await pop.isVisible(), 'hovering the usage button opens the popover');
-    const rows = await pop.locator('.usage-row').evaluateAll((r) => r.map((e) => e.dataset.row + ':' + e.innerText.replace(/\s+/g, ' ')));
-    check(/usage:Context \d+% · [\d.]+k of 200k tokens left/.test(rows[0] ?? '') && /this chat/.test(rows[0]) && /Context lasts (— \(needs a couple of turns to estimate\)|~(\d+|>50) more turns \(estimate\))/.test(rows[0]), `row 1: context left, cost, turns estimate [${rows[0]}]`);
-    check(rows[1]?.startsWith('model:') && rows[2]?.startsWith('effort:') && (await pop.locator('.segmented [role="radio"]').count()) >= 2, 'rows 2 and 3: model picker, effort segmented control');
-    await p.mouse.move(5, 5);
-    await p.waitForTimeout(400);
-    check(!(await pop.count()), 'leaving closes it');
-    await p.click('.usage-btn');
-    check(await p.evaluate(() => !!document.activeElement?.closest('.usage-pop .popover')), 'a click opens it with focus inside');
-    for (let i = 0; i < 8; i++) await p.keyboard.press('Tab');
-    check(await p.evaluate(() => !!document.activeElement?.closest('.usage-pop .popover')), 'Tab stays inside');
-    await p.keyboard.press('Escape');
-    check(!(await pop.count()) && (await p.evaluate(() => document.activeElement?.matches('.usage-btn'))), 'Esc closes it and returns focus');
+    await p.evaluate(() => document.activeElement?.blur());
+    const border = () => p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).borderTopColor);
+    const idle = await border();
+    await p.click('.composer textarea');
+    const focused = await border();
+    const acc = await p.evaluate(() => {
+      const d = document.createElement('div');
+      d.style.color = 'var(--c-acc)';
+      document.querySelector('.composer').appendChild(d);
+      const c = window.getComputedStyle(d).color;
+      d.remove();
+      return c;
+    });
+    check(idle !== focused && focused === acc, `focus turns the border the accent orange (${idle} → ${focused})`);
+    check((await p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow)) === 'none', 'no blue ring');
     await p.close();
-    // Agents popup: subagents and hand-offs, each one goes to its card or chat; footer opens the Agent Manager.
+    // Agent map: modal with this chat and its agents; each opens its card or chat; Open Agent Manager.
     const ag = await open('surface=chat&select=chat-pay&fixture=subagents', 1200, 800);
-    const has = await ag.locator('.agents-btn').count();
-    check(has === 1, 'a chat with subagents shows the agents button');
-    if (has) {
-      check(/^\d+$/.test((await ag.locator('.agents-count').innerText()).trim()), 'it shows the running count');
-      await ag.click('.agents-btn');
-      check((await ag.locator('.agents-pop .agent-row').count()) >= 1, 'the popup lists the agents');
-      await ag.click('.agents-pop [role="menuitem"]:has-text("Open Agent Manager")');
-      check((await posted(ag)).some((m) => m.type === 'openTasks'), 'Open Agent Manager opens it');
-    }
+    check(/^\d+ agents?$/.test((await ag.locator('.cc-agents').innerText()).trim()), 'the agents pill reads N agents');
+    await ag.click('.cc-agents');
+    check(await ag.locator('.cc-map[role="dialog"] .cc-map-title:text-is("Agent map")').isVisible(), 'the pill opens the Agent map');
+    check(/\d+ agents? · click an agent for details/.test(await ag.locator('.cc-map-sub').innerText()), 'it says how many agents');
+    check((await ag.locator('.cc-map-children .cc-map-node').count()) >= 1 && /tool call|tokens/.test(await ag.locator('.cc-map-children .cc-map-meta').first().innerText()), 'children show time and tool calls or tokens');
+    await ag.keyboard.press('Escape');
+    await ag.waitForTimeout(300);
+    await ag.locator('.cc-map').waitFor({ state: 'detached', timeout: 2000 }).catch(() => {});
+    check(!(await ag.locator('.cc-map').count()), 'Esc closes the map');
+    await ag.click('.cc-agents');
+    await ag.click('.cc-map-manager');
+    check((await posted(ag)).some((m) => m.type === 'openTasks'), 'Open Agent Manager opens it');
     await ag.close();
     const none = await open('surface=chat&select=chat-c4', 1200, 700);
-    check((await none.locator('.agents-btn').count()) === 0, 'no agents button without agents');
+    check((await none.locator('.cc-agents').count()) === 0, 'no agents pill without agents');
     await none.close();
-    const ring = async (q) => q.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
-    const r1 = await open('surface=chat&select=chat-c5', 1200, 700);
-    await r1.evaluate(() => document.activeElement?.blur());
-    check((await ring(r1)) === 'none', 'no ring unfocused');
-    await r1.click('.composer textarea');
-    check(/^rgba?\(.*\) 0px 0px 0px 2px$/.test(await ring(r1)), 'focus draws a 2px ring');
-    await r1.close();
-    const colour = async (id) => {
-      const q = await open(`surface=chat&select=${id}`, 1200, 700);
-      const out = await q.evaluate(() => [document.querySelector('.composer').dataset.mode, window.getComputedStyle(document.querySelector('.composer')).borderTopColor, window.getComputedStyle(document.querySelector('.mode-icon')).color]);
-      await q.close();
-      return out;
+    // Screenshots, comparable with the Claude Code references.
+    const shot = async (q, name, sel) => {
+      const c = await q.locator('.composer').boundingBox();
+      const m = sel && (await q.locator(sel).count()) ? await q.locator(sel).boundingBox() : null;
+      const top = Math.max(0, Math.min(c.y, m ? m.y : c.y) - 16);
+      const left = Math.max(0, Math.min(c.x, m ? m.x : c.x) - 16);
+      const right = Math.max(c.x + c.width, m ? m.x + m.width : 0) + 16;
+      const bottom = Math.max(c.y + c.height, m ? m.y + m.height : 0) + 16;
+      await q.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), clip: { x: left, y: top, width: right - left, height: bottom - top }, animations: 'disabled', caret: 'hide' });
     };
-    const [ask, edits, full] = [await colour('chat-c5'), await colour('chat-c2'), await colour('chat-c6')];
-    check(ask[0] === 'ask' && edits[0] === 'edits' && full[0] === 'full', 'the composer names its mode: ask, edits, full');
-    check(new Set([ask[1], edits[1], full[1]]).size === 3, `each mode has its own border colour (${ask[1]} / ${edits[1]} / ${full[1]})`);
-    check([ask, edits, full].every((m) => m[1] === m[2]), 'the mode icon has the border’s colour');
-    // Screenshots.
-    const shot = async (q, name) => {
-      const b = await q.locator('.composer').boundingBox();
-      const top = Math.max(0, b.y - 340);
-      await q.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), clip: { x: b.x - 24, y: top, width: b.width + 48, height: b.y + b.height + 24 - top }, animations: 'disabled', caret: 'hide' });
-    };
-    for (const [name, theme, id, act] of [
-      ['composer-min-dark', 'black-blue', 'chat-c5', null],
-      ['composer-popover-dark', 'black-blue', 'chat-c5', 'usage'],
-      ['composer-popover-light', 'light-blue', 'chat-c2', 'usage'],
-      ['composer-agents-dark', 'black-blue', 'chat-pay&fixture=subagents', 'agents'],
-      ['composer-clarity-fullauto', 'black-blue', 'chat-c6', null],
+    for (const [name, theme, id, act, sel] of [
+      ['cc-composer', 'black-blue', 'chat-pay&fixture=subagents', 'focus', null],
+      ['cc-model-menu', 'black-blue', 'chat-c5', '.cc-model', '.cc-menu'],
+      ['cc-modes-menu', 'black-blue', 'chat-c6', '.cc-mode', '.cc-menu'],
+      ['cc-slash-menu', 'black-blue', 'chat-c5', '.cc-slash-btn', '.cc-menu'],
+      ['cc-model-menu-light', 'light-blue', 'chat-c2', '.cc-model', '.cc-menu'],
     ]) {
-      const q = await open(`surface=chat&theme=${theme}&select=${id}`, 1200, 800);
-      await q.evaluate(() => document.activeElement?.blur());
-      if (act === 'usage') await q.click('.usage-btn');
-      if (act === 'agents' && (await q.locator('.agents-btn').count())) await q.click('.agents-btn');
-      await shot(q, name);
+      const q = await open(`surface=chat&theme=${theme}&select=${id}`, 1200, 860);
+      await q.click('.composer textarea');
+      await q.keyboard.type('I want this composer to look like Claude Code’s.');
+      if (act !== 'focus') await q.click(act);
+      await shot(q, name, sel);
       await q.close();
     }
+    const map = await open('surface=chat&theme=black-blue&select=chat-pay&fixture=subagents', 1200, 860);
+    await map.click('.cc-agents');
+    await map.screenshot({ path: path.join(os.homedir(), 'code/cc-agent-map.png'), animations: 'disabled', caret: 'hide' });
+    await map.close();
   }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.

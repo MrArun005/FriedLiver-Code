@@ -44,11 +44,12 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, ApprovalMenu, AutoBadge, UsageSettings, approvalTone, usageSamples, composerMode, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
+import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
-import { AgentsButton, RunningAgents, SubagentCard } from './subagents';
+import { RunningAgents, SubagentCard } from './subagents';
+import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, type ComposerMenu } from './composerMenus';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -1175,6 +1176,21 @@ function Composer({
 
   const canSend = asking ? !!question : !empty;
   const [micHint, setMicHint] = useState(false);
+  const [openMenu, setMenu] = useState<ComposerMenu>(null);
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    area.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!openMenu || openMenu === 'agents') return;
+    // A click outside the menu and its buttons closes it.
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Element;
+      if (!t.closest?.('.cc-menu, .cc-pill, .cc-mode, .cc-slash-btn')) setMenu(null);
+    };
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, [openMenu]);
   const samples = usageSamples(chat);
   const queueing = chat.busy && !asking;
   return (
@@ -1182,7 +1198,7 @@ function Composer({
       <EditsBar chat={chat} />
       <div
         class="composer"
-        data-mode={composerMode(approvalTone(chat))}
+        data-menu={openMenu ?? undefined}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           const files = Array.from(e.dataTransfer?.files ?? []);
@@ -1221,14 +1237,13 @@ function Composer({
         )}
         <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
         {attachments.length > 0 && (
-          <div class="thumbs">
+          <div class="thumbs cc-chips">
             {attachments.map((a, i) => (
-              <button key={i} class="thumb" title={`Remove ${a.name}`} onClick={() => setAttachments((list) => list.filter((_, n) => n !== i))}>
-                <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
-              </button>
+              <AttachmentChip key={i} a={a} onRemove={() => setAttachments((list) => list.filter((_, n) => n !== i))} />
             ))}
           </div>
         )}
+        <div class="cc-input">
         <textarea
           ref={area}
           value={text}
@@ -1302,7 +1317,22 @@ function Composer({
             }
           }}
         />
-        {chat.busy && text.trim() && <div class="composer-queued">Queued for after this turn · Esc stops</div>}
+        {MAC && (
+          <button
+            type="button"
+            class="cc-mic mic-btn"
+            aria-label="Dictate"
+            title="Dictate: press Fn twice in the message box"
+            onClick={() => {
+              // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
+              area.current?.focus();
+              setMicHint(true);
+            }}
+          >
+            <Icon name="mic" />
+          </button>
+        )}
+        </div>
         {micHint && (
           <span class="composer-queued mic-hint" role="status">
             Press Fn twice to dictate ·{' '}
@@ -1311,31 +1341,23 @@ function Composer({
             </a>
           </span>
         )}
+        {openMenu === 'model' && <ModelMenu chat={chat} close={closeMenu} />}
+        {openMenu === 'modes' && <ModesMenu chat={chat} close={closeMenu} />}
+        {openMenu === 'slash' && (
+          <SlashMenu
+            chat={chat}
+            close={closeMenu}
+            openModel={() => setMenu('model')}
+            mention={() => insert({ text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}#`, caret: text.length + (text && !/\s$/.test(text) ? 2 : 1) })}
+            command={(name, run) => (run ? send({ type: 'send', chatId: chat.id, text: `/${name}`, images: [] }) : insert({ text: `/${name} `, caret: name.length + 2 }))}
+          />
+        )}
         <div class="composer-bar">
           <span class="bar-left">
-            <Popover label="Add" title="Attach images or dictate" buttonClass="chip-btn icon-btn attach-btn" trigger={<Icon name="plus" />}>
-              {(close) => (
-                <>
-                  <button role="menuitem" onClick={() => (close(false), send({ type: 'attach', chatId: chat.id }))}>
-                    <span class="menu-label">Attach images</span>
-                  </button>
-                  {MAC && (
-                    <button
-                      role="menuitem"
-                      class="mic-item"
-                      onClick={() => {
-                        // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
-                        close(false);
-                        area.current?.focus();
-                        setMicHint(true);
-                      }}
-                    >
-                      <span class="menu-label">Dictate (Fn Fn)</span>
-                    </button>
-                  )}
-                </>
-              )}
-            </Popover>
+            <button type="button" class="cc-icon-btn attach-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
+              <Icon name="plus" />
+            </button>
+            <ComposerPills chat={chat} linked={linked} samples={samples} open={setMenu} />
             {asking && (
               <span class="composer-agent">
                 <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
@@ -1345,13 +1367,11 @@ function Composer({
           </span>
           <span class="bar-right">
             {chat.busy && (
-              <button class="chip-btn icon-btn stop-btn" aria-label="Stop" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+              <button class="cc-icon-btn stop-btn" aria-label="Stop" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
                 <Icon name="stop" />
               </button>
             )}
-            <AgentsButton chat={chat} linked={linked} />
-            <UsageSettings chat={chat} samples={samples} />
-            <ApprovalMenu chat={chat} bare />
+            <ModeButton chat={chat} open={setMenu} />
             <button
               class="primary send-btn"
               onClick={submit}
@@ -1364,6 +1384,7 @@ function Composer({
           </span>
         </div>
       </div>
+      {openMenu === 'agents' && <AgentMap chat={chat} linked={linked} close={closeMenu} />}
     </>
   );
 }
