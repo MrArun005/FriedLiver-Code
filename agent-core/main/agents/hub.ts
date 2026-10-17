@@ -129,9 +129,11 @@ export class AgentHub {
     for (const agent of this.agents.values()) this.scheduleIdleStop(agent);
   }
 
-  createChat(agentId: AgentId, cwd = this.options.cwd): Chat {
-    const chat: ChatState = { id: `chat-${this.nextChat++}`, agentId, cwd, busy: false, loading: false };
+  /** `sessionId`: an existing session of that agent to continue, reloaded on the first prompt when the agent can. */
+  createChat(agentId: AgentId, cwd = this.options.cwd, sessionId?: string): Chat {
+    const chat: ChatState = { id: `chat-${this.nextChat++}`, agentId, cwd, busy: false, loading: false, sessionId };
     this.chats.set(chat.id, chat);
+    if (sessionId) this.sessionToChat.set(sessionKey(agentId, sessionId), chat.id);
     return chat;
   }
 

@@ -145,6 +145,27 @@ describe('restoring chats', () => {
     expect(c.label).toBe('Demo 2');
   });
 
+  it('continues a session started outside FriedLiver', async () => {
+    const before = process.env.FAKE_AGENT_LOAD_SESSION;
+    process.env.FAKE_AGENT_LOAD_SESSION = '1';
+    try {
+      const dir = await gitRepo();
+      const core = makeCore(dir);
+      const a = await core.createChat('demo', { resume: { sessionId: 'outside-1', cwd: dir }, title: 'From the CLI' });
+      expect(a.cwd).toBe(dir);
+      await core.send(a.id, 'again');
+      expect(lastReply(core.chat(a.id)!)).toBe('You said: again');
+      expect(core.exportState().chats[a.id].sessionId).toBe('outside-1');
+      // Only the "continues" notice: no "continues in a new session" one.
+      expect(core.chat(a.id)!.items.filter((i) => i.kind === 'notice').map((i) => (i.kind === 'notice' ? i.text : ''))).toEqual([
+        expect.stringContaining('Continues Claude Code session outside-1'),
+      ]);
+    } finally {
+      if (before === undefined) delete process.env.FAKE_AGENT_LOAD_SESSION;
+      else process.env.FAKE_AGENT_LOAD_SESSION = before;
+    }
+  });
+
   it('reloads the old session when the agent can', async () => {
     const before = process.env.FAKE_AGENT_LOAD_SESSION;
     process.env.FAKE_AGENT_LOAD_SESSION = '1';

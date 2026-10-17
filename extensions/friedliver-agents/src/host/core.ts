@@ -346,7 +346,8 @@ export class AgentCore {
     const folder = this.options.folders()[0];
     if (!folder) throw new Error('Open a folder first. Agents work inside the folder you open.');
     const shared = options.shareWorktreeOf ? this.chat(options.shareWorktreeOf) : undefined;
-    let cwd = shared?.cwd ?? folder;
+    const resumeCwd = options.resume && this.options.folders().includes(options.resume.cwd) ? options.resume.cwd : undefined;
+    let cwd = shared?.cwd ?? resumeCwd ?? folder;
     let wt = shared && this.worktrees.get(shared.id);
     if (options.worktree && !wt) {
       const repo = await git.repoRoot(folder);
@@ -355,7 +356,7 @@ export class AgentCore {
       wt = { ...(await git.createWorktree(repo, options.worktreeName ?? title)), repo, title };
       cwd = wt.path;
     }
-    const chat = this.hub.createChat(agent, cwd);
+    const chat = this.hub.createChat(agent, cwd, options.resume?.sessionId);
     if (wt) this.worktrees.set(chat.id, wt);
     const n = (this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1);
     const name = AGENT_FACES[agent].name;
@@ -369,7 +370,9 @@ export class AgentCore {
       createdAt: Date.now(),
       busy: false,
       changedFiles: 0,
-      items: [],
+      items: options.resume
+        ? [{ kind: 'notice', tone: 'info', text: `Continues Claude Code session ${options.resume.sessionId}. Its earlier messages aren't shown here, but ${name} remembers them.` }]
+        : [],
       origin: options.origin,
       group: options.group,
       depth: options.depth ?? 0,
