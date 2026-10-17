@@ -14,6 +14,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -75,18 +76,36 @@ function page(params) {
   const data =
     params.get('empty') === '1' ? { state: { chats: [], images: [], links: [] } } : params.get('fixture') === 'steps' ? stepsFixture(Date.now()) : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
-  const saved = params.get('view') ? { view: params.get('view') } : undefined;
+  // textSize: a tab's saved text size, as vscode.setState would have kept it.
+  const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
+  const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
   const stub = `
     window.__posted = [];
+    window.__vscodeState = () => saved;
     let saved = ${JSON.stringify(saved ?? null)};
     const snapshot = ${JSON.stringify(snapshot).replace(/</g, '\\u003c')};
     window.acquireVsCodeApi = () => ({
       postMessage(m) {
         window.__posted.push(m);
         if (m && m.type === 'ready') setTimeout(() => window.postMessage(snapshot, '*'), 0);
+        // Step images: a drawn stand-in for files the host would allow; paths with "outside" are refused.
+        if (m && m.type === 'imageSrc') {
+          const label = m.path.split('/').pop();
+          const c = document.createElement('canvas');
+          c.width = 480;
+          c.height = 300;
+          const g = c.getContext('2d');
+          g.fillStyle = '#e8ecf2'; g.fillRect(0, 0, 480, 300);
+          g.fillStyle = '#fff'; g.fillRect(140, 70, 200, 160);
+          g.fillStyle = '#dfe3ea'; g.fillRect(165, 110, 150, 18); g.fillRect(165, 140, 150, 18);
+          g.fillStyle = '#5b7cfa'; g.fillRect(165, 180, 150, 26);
+          g.fillStyle = '#7a8394'; g.font = '14px sans-serif'; g.fillText(label, 20, 285);
+          setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: c.toDataURL('image/png') }) }, '*'), 0);
+        }
       },
       getState: () => saved ?? undefined,
       setState: (s) => { saved = s; },
+      __saved: () => saved,
     });`;
   return `<!doctype html>
 <html lang="en">
@@ -98,7 +117,7 @@ function page(params) {
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
-<body class="vscode-${theme.kind}" data-surface="${surface}">
+<body class="vscode-${theme.kind}" data-accent="#D97757" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
 <div id="root"></div>
 <script src="/media/dist/${surface}.js"></script>
 </body>
@@ -141,7 +160,7 @@ if (opts.serve) {
 
 async function shoot() {
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}), args: ['--use-mock-keychain', '--password-store=basic'] });
   const ids = fixture().ids;
   fs.mkdirSync(opts.out, { recursive: true });
   const problems = [];
@@ -264,7 +283,7 @@ async function shoot() {
     check(await p.locator('.mention-menu [role="option"]:has-text("Gemini")').isVisible(), '@ opens the agent picker');
     await p.keyboard.press('Enter');
     await p.keyboard.type('is this safe for de-CH?');
-    check((await p.locator('.composer-bar button.primary').innerText()).includes('Ask Gemini'), 'the send button reads Ask Gemini');
+    check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Ask Gemini'), 'the send button reads Ask Gemini');
     await p.keyboard.press('Enter');
     const consult = (await posted(p)).find((m) => m.type === 'consult');
     check(consult?.agent === 'gemini' && consult.text === 'is this safe for de-CH?' && consult.chatId === ids.side, 'a mention sends a consultation');
@@ -354,7 +373,136 @@ async function shoot() {
     check((await p.inputValue('.composer textarea')) === 'draft for Claude 5', 'the draft comes back with its chat');
     await p.fill('.composer textarea', '');
     await p.keyboard.press('ArrowUp');
-    check((await p.inputValue('.composer textarea')) === 'How does the auth middleware decide a session is valid?', 'Up in an empty box recalls the last message');
+    check((await p.inputValue('.composer textarea')) === 'Does the login page still look right?', 'Up in an empty box recalls the last message');
+    await p.close();
+  }
+  {
+    // The mic: macOS only; it focuses the message box and asks the host for dictation.
+    const p = await open('surface=chat&side=1&select=chat-c5', 400, 700);
+    await p.click('.mic-btn');
+    check((await posted(p)).some((m) => m.type === 'dictate'), 'the mic asks for dictation');
+    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box first');
+    await p.close();
+    const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
+    check((await linux.locator('.mic-btn').count()) === 0, 'no mic off macOS');
+    await linux.close();
+  }
+  {
+    // Text size: Cmd/Ctrl + = - 0 in a tab, that tab only, kept in its own webview state, and never reaching the window's zoom.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    await p.evaluate(() => {
+      window.__forwarded = 0;
+      window.addEventListener('keydown', (e) => e.key !== 'Meta' && e.key !== 'Control' && window.__forwarded++); // what the webview host forwards to the workbench
+    });
+    const size = async () => (await p.waitForTimeout(50), p.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize));
+    check((await size()) === '13px', 'the chat starts at 13px');
+    await p.click('.composer textarea');
+    await p.keyboard.press('ControlOrMeta+Equal');
+    await p.keyboard.press('ControlOrMeta+Equal');
+    check((await size()) === '15px', 'Cmd/Ctrl + = grows this tab by 1px a press');
+    check(await p.locator('.text-size-toast:has-text("Text 15px")').isVisible(), 'the new size shows briefly');
+    check((await p.evaluate(() => window.__forwarded)) === 0, 'the zoom keys don’t reach the window');
+    check((await p.evaluate(() => window.__vscodeState()?.textSize)) === 15, 'the size is kept in this webview’s state');
+    await p.keyboard.press('ControlOrMeta+Minus');
+    check((await size()) === '14px', 'Cmd/Ctrl + - shrinks it');
+    await p.keyboard.press('ControlOrMeta+Digit0');
+    check((await size()) === '13px', 'Cmd/Ctrl + 0 resets it');
+    await p.close();
+    const restored = await open('surface=chat&theme=black-blue&select=chat-c5&textSize=17', 1200, 800);
+    check((await restored.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '17px', 'a tab comes back at its own size');
+    await restored.close();
+    const other = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    check((await other.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '13px', 'another tab keeps the default');
+    await other.screenshot({ path: path.join(os.homedir(), 'code/chat-sizes-dark.png'), animations: 'disabled', caret: 'hide' });
+    await other.close();
+  }
+  {
+    // Step images: a thumbnail with a title, opening the editor's preview; the header's Images pill lists them.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 900);
+    await p.waitForSelector('.step-image img');
+    const titles = await p.locator('.step-image .image-title').allInnerTexts();
+    check(titles.join('|') === 'Screenshot of localhost:3000/login|Login page mockup', 'image steps show thumbnails titled from the step or the file name');
+    const box = await p.locator('.step-image img').first().boundingBox();
+    check(!!box && box.width <= 240 && box.height <= 160, 'thumbnails fit 240×160');
+    await p.locator('.step-image .image-thumb').nth(1).click();
+    check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
+    check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
+    await p.screenshot({ path: path.join(os.homedir(), 'code/chat-images.png'), animations: 'disabled', caret: 'hide' });
+    await p.click('.images-pill');
+    check((await p.locator('.image-strip .image-thumb').count()) === 2, 'the Images pill opens the gallery');
+    await p.close();
+  }
+  {
+    // The chat list lives in its own side bar view; the chat tab has none, at any width.
+    const tab = await open('surface=chat&theme=black-blue&select=chat-c5', 1400, 800);
+    check((await tab.locator('.chat-side').count()) === 0, 'the chat tab has no chat list beside it');
+    await tab.close();
+    const list = await open('surface=chat&theme=black-blue&list=1&select=chat-c5', 300, 800);
+    check((await list.locator('.chat-list-view .new-chat').count()) === 1 && (await list.locator('.transcript').count()) === 0, 'the side bar view is the list only');
+    await list.locator('.chat-list-view [role="option"]').first().click();
+    check((await posted(list)).some((m) => m.type === 'openChat'), 'picking a chat in the list opens it in the chat tab');
+    await list.screenshot({ path: path.join(os.homedir(), 'code/chat-list-sidebar.png'), animations: 'disabled' });
+    await list.close();
+  }
+  {
+    // The document look: the editor's own background, a plain placeholder, one handoff note, numbered decisions.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    check(await p.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--vscode-editor-background)';
+      document.body.append(probe);
+      const want = window.getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return window.getComputedStyle(document.body).backgroundColor === want;
+    }), 'the chat background is the editor background exactly');
+    check((await p.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'the placeholder is just Message…');
+    check((await p.locator('.link-strip .badge[data-kind="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
+    await p.close();
+    const d = await open('surface=chat&theme=black-blue&select=chat-c2', 1200, 800);
+    check((await d.locator('.ask .opt-num').first().innerText()) === '1.', 'decision options are numbered');
+    check(await d.evaluate(() => {
+      const yes = window.getComputedStyle(document.querySelector('.ask button.decide'));
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--c-surface)';
+      probe.style.borderColor = 'var(--c-acc)';
+      document.body.append(probe);
+      const want = window.getComputedStyle(probe);
+      const ok = yes.backgroundColor === want.backgroundColor && yes.borderTopColor === want.borderTopColor;
+      probe.remove();
+      return ok;
+    }), 'the recommended option is a neutral surface with the accent border, not a fill');
+    check((await d.locator('.step-files').count()) === 0 && (await d.locator('.step-target').first().innerText()).includes('src/store.ts'), 'a tool line names its file once, as the link');
+    await d.locator('.step-target').first().click();
+    check((await posted(d)).some((m) => m.type === 'openFile' && m.path === 'src/store.ts'), 'the path opens the file');
+    check((await d.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'a busy chat’s placeholder is just Message…');
+    await d.fill('.composer textarea', 'and then');
+    check(await d.locator('.composer-hint:has-text("Sends after this turn · Esc stops")').isVisible(), 'with text in a busy chat, the faint hint says when it sends');
+    await d.fill('.composer textarea', '');
+    await d.click('.composer textarea');
+    await d.keyboard.press('2');
+    const picked = (await posted(d)).find((m) => m.type === 'permission');
+    check(picked?.requestId === 'perm-c2' && (await d.inputValue('.composer textarea')) === '', '2 in an empty box picks the second option');
+    await d.close();
+  }
+  for (const [name, theme, width] of [['chat-final-dark', 'black-blue', 1200], ['chat-final-light', 'light-blue', 1200], ['chat-final-narrow', 'black-blue', 480]]) {
+    const p = await open(`surface=chat&theme=${theme}&select=chat-c2`, width, 900);
+    await p.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), animations: 'disabled', caret: 'hide' });
+    await p.close();
+  }
+  for (const width of [320, 480, 700, 1200]) {
+    // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.
+    const p = await open('surface=chat&side=1&select=chat-c5', width, 700);
+    await p.fill('.composer textarea', 'ok ticket');
+    const r = await p.evaluate(() => {
+      const box = (s) => document.querySelector(s).getBoundingClientRect();
+      const c = box('.composer'), t = box('.composer textarea'), b = box('.composer-bar');
+      const kids = [...document.querySelectorAll('.composer-bar button')].map((e) => e.getBoundingClientRect()).filter((k) => k.width > 0).sort((x, y) => x.left - y.left);
+      const apart = kids.every((k, i) => i === 0 || k.left >= kids[i - 1].right - 0.5);
+      return { apart, ratio: t.width / c.width, barInside: b.right <= c.right + 1 && b.left >= c.left - 1, page: document.documentElement.scrollWidth <= window.innerWidth };
+    });
+    check(r.ratio >= 0.7, `at ${width}px the message box is ${Math.round(r.ratio * 100)}% of the composer (>= 70%)`);
+    check(r.barInside && r.page && r.apart, `at ${width}px the controls don't overlap, stay inside the composer and nothing scrolls sideways`);
+    if (width < 1200) await p.screenshot({ path: path.join(os.homedir(), `code/composer-${width}.png`), animations: 'disabled', caret: 'hide' });
     await p.close();
   }
   {
@@ -362,14 +510,14 @@ async function shoot() {
     const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
     const card = p.locator('#item-perm-c1');
     check(await card.locator('.diff .dl[data-op="add"]').first().isVisible(), 'the permission card shows the diff');
-    check((await card.locator('button.decide').innerText()).trim() === 'Yes', "the loud button is the one-time yes, not \"don't ask again\"");
+    check((await card.locator('button.decide').innerText()).replace(/^\d\.\s*/, '').trim() === 'Yes', "the loud button is the one-time yes, not \"don't ask again\"");
     await card.locator('button:has-text("Open diff")').click();
     check((await posted(p)).some((m) => m.type === 'permissionDiff' && m.requestId === 'perm-c1'), 'Open diff asks for the whole file');
     await p.click('.composer textarea');
     await p.keyboard.press('Control+Enter');
     const answer = (await posted(p)).filter((m) => m.type === 'bridge' || m.type === 'permission').at(-1);
     check(answer?.type === 'bridge' && answer.answer === 'allow', 'Ctrl+Enter answers the first waiting decision');
-    check((await p.locator('.composer-bar button.primary').innerText()).includes('Queue'), 'a busy chat queues the message');
+    check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Queue'), 'a busy chat queues the message');
     await p.click('.bubble.queued button[aria-label="Remove from the queue"]');
     check((await posted(p)).some((m) => m.type === 'unqueue' && m.id === 'queued-c1'), 'a queued message can be removed');
     check(await p.locator('.edits-bar').isVisible(), 'edits waiting get Accept all');

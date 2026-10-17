@@ -51,6 +51,8 @@
   --t-md: 13px;
   --t-lg: 15px;
   --t-xl: 22px;
+  /* The chat's one text size (Cmd/Ctrl + = - 0 per tab); the chat's sizes are relative to it. */
+  --fl-font-size: var(--vscode-chat-font-size, 13px);
 
   /* Spacing and shape */
   --sp-1: 4px;
@@ -3390,8 +3392,12 @@ body[data-surface='chat'] {
   --c-warn: var(--vscode-charts-yellow);
   --c-bad: var(--vscode-errorForeground);
   /* palette:end */
-  font-size: 15px;
-  line-height: 1.7;
+  --t-xs: calc(var(--fl-font-size) - 2px);
+  --t-sm: calc(var(--fl-font-size) - 1px);
+  --t-md: var(--fl-font-size);
+  --t-lg: calc(var(--fl-font-size) + 2px);
+  font-size: var(--fl-font-size);
+  line-height: 1.55;
   color: var(--c-soft);
   background: var(--c-bg);
 }
@@ -3408,10 +3414,6 @@ body.vscode-high-contrast-light[data-surface='chat'] {
 }
 body[data-surface='chat'] .chat-app {
   background: var(--c-bg);
-}
-.chat-app[data-wide] {
-  display: grid;
-  grid-template-columns: minmax(240px, 290px) minmax(0, 1fr);
 }
 .chat-main {
   display: flex;
@@ -3477,7 +3479,7 @@ button.new-chat kbd {
 .all-chats .pop-group {
   gap: var(--sp-2);
   margin: 20px 10px 6px;
-  font-size: 12px;
+  font-size: calc(var(--fl-font-size) - 2px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3500,7 +3502,7 @@ button.new-chat kbd {
   min-width: 0;
 }
 .chat-item .pick-title {
-  font-size: 14px;
+  font-size: var(--fl-font-size);
   color: var(--c-soft);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3534,13 +3536,15 @@ body[data-surface='chat'] .chat-head {
   min-width: 0;
 }
 button.chat-head-title {
+  display: block;
+  text-align: left;
   height: auto;
   min-width: 0;
   padding: 2px 6px;
   margin-left: -6px;
   border: 0;
   background: none;
-  font-size: 15px;
+  font-size: calc(var(--fl-font-size) + 1px);
   font-weight: 600;
   color: var(--c-text);
   overflow: hidden;
@@ -3552,7 +3556,7 @@ button.chat-head-title:hover:not(:disabled) {
 }
 .status-pill {
   flex: none;
-  font-size: 12.5px;
+  font-size: calc(var(--fl-font-size) - 1px);
   font-weight: 500;
   line-height: 22px;
   padding: 0 11px;
@@ -3614,13 +3618,13 @@ body[data-surface='chat'] .transcript > * {
 }
 body[data-surface='chat'] .prose {
   color: var(--c-text);
-  line-height: 1.7;
+  line-height: 1.55;
 }
 body[data-surface='chat'] .md a {
   color: var(--c-link);
 }
 body[data-surface='chat'] .md code {
-  font-size: 13.5px;
+  font-size: calc(var(--fl-font-size) - 1px);
 }
 .jump-list {
   position: absolute;
@@ -3629,13 +3633,13 @@ body[data-surface='chat'] .md code {
   width: 210px;
   max-height: calc(100% - 32px);
   overflow-y: auto;
-  font-size: 12.5px;
+  font-size: calc(var(--fl-font-size) - 1px);
   color: var(--c-mute);
 }
 .jump-list b {
   display: block;
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: calc(var(--fl-font-size) - 2px);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3677,7 +3681,7 @@ button.step-fold {
   padding: 0;
   border: 0;
   background: none;
-  font-size: 13px;
+  font-size: calc(var(--fl-font-size) - 0.5px);
   font-weight: 400;
   color: var(--c-mute);
 }
@@ -3693,7 +3697,7 @@ button.step-fold:hover:not(:disabled) {
 .step-card .steps li {
   padding: 2px 0;
   min-height: 0;
-  font-size: 14px;
+  font-size: calc(var(--fl-font-size) - 0.5px);
   color: var(--c-soft);
 }
 .step-card .steps li + li::before {
@@ -3755,12 +3759,12 @@ button.step-fold:hover:not(:disabled) {
   color: var(--c-text);
 }
 .step-denied {
-  font-size: 12.5px;
+  font-size: calc(var(--fl-font-size) - 1px);
   color: var(--c-bad);
 }
 .step-time {
   padding-left: 24px;
-  font-size: 12.5px;
+  font-size: calc(var(--fl-font-size) - 1px);
   color: var(--c-mute);
 }
 .step-card .tag {
@@ -3780,7 +3784,7 @@ body[data-surface='chat'] .ask.question .actions button.sm:not(.danger) {
   height: 36px;
   padding: 0 16px;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: var(--fl-font-size);
   font-weight: 400;
   color: var(--c-text);
   border: 1px solid var(--c-line);
@@ -3791,10 +3795,12 @@ body[data-surface='chat'] .ask.question .actions button.sm:not(.danger):first-ch
 }
 
 /* The composer: one rounded bar. */
+/* Always stacked: the message box gets its own full-width row, the controls a
+   row below, so pills can never squeeze the text (they shrink instead). */
 body[data-surface='chat'] .composer {
+  container-type: inline-size;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
   margin: 0 64px 26px;
   padding: 8px 10px 8px 20px;
   border-radius: 18px;
@@ -3808,24 +3814,66 @@ body[data-surface='chat'] .composer:focus-within {
   border-color: var(--vscode-focusBorder);
 }
 body[data-surface='chat'] .composer textarea {
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  max-height: calc(8lh + 14px);
+  field-sizing: content;
+  overflow-y: auto;
   padding: 7px 0;
   color: var(--c-text);
-  font-size: 15px;
+  font-size: var(--fl-font-size);
 }
 body[data-surface='chat'] .composer textarea::placeholder {
   color: var(--c-mute);
 }
 body[data-surface='chat'] .composer-bar {
+  flex-wrap: nowrap;
+  min-width: 0;
   padding: 0;
   gap: var(--sp-2);
+}
+body[data-surface='chat'] .composer-bar > *,
+body[data-surface='chat'] .composer-bar .session-controls,
+body[data-surface='chat'] .composer-bar .pop {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+body[data-surface='chat'] .composer-bar .session-controls {
+  flex: 0 1 auto;
+}
+body[data-surface='chat'] .composer-bar button.chip-btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+body[data-surface='chat'] .composer-bar .send-btn,
+body[data-surface='chat'] .composer-bar .icon-btn {
+  flex: none;
+}
+/* Narrow: usage goes first, then pill labels (icons keep their tooltips). */
+@container (max-width: 480px) {
+  body[data-surface='chat'] .composer-bar .usage {
+    display: none;
+  }
+}
+@container (max-width: 520px) {
+  body[data-surface='chat'] .composer-bar .chip-text {
+    display: none;
+  }
+  body[data-surface='chat'] .composer-bar button.chip-btn {
+    padding: 0 8px;
+  }
+  body[data-surface='chat'] .composer-bar button.chip-btn:not(.icon-btn) .icon:last-child {
+    display: none;
+  }
 }
 body[data-surface='chat'] .composer-bar button.chip-btn {
   height: 28px;
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: calc(var(--fl-font-size) - 1px);
   color: var(--c-soft);
   background: var(--c-surface2);
 }
@@ -3862,9 +3910,323 @@ button.send-btn .icon {
   }
   body[data-surface='chat'] .composer {
     margin: 0 var(--sp-3) var(--sp-3);
-    grid-template-columns: minmax(0, 1fr);
   }
   .user-msg .bubble {
     max-width: 90%;
   }
+}
+
+/* Reply headings stay close to the body: a reply is not a document. */
+body[data-surface='chat'] .md h3,
+body[data-surface='chat'] .md h4 {
+  margin: 0.9em 0 0.3em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--c-text);
+}
+body[data-surface='chat'] .md h3 {
+  font-size: calc(var(--fl-font-size) + 2px);
+}
+body[data-surface='chat'] .md h4 {
+  font-size: calc(var(--fl-font-size) + 1px);
+}
+body[data-surface='chat'] .md > :first-child {
+  margin-top: 0;
+}
+.text-size-toast {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 50;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--c-text);
+  background: var(--c-surface2);
+  box-shadow: 0 0 0 1px var(--c-line);
+  pointer-events: none;
+}
+/* Step images: a thumbnail under the step, its title below; click opens the editor's image preview. */
+.step-image {
+  padding: 4px 0 6px 26px;
+}
+button.image-thumb,
+.image-thumb {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  height: auto;
+  max-width: 240px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-soft, var(--fg-2));
+  font-size: calc(var(--fl-font-size, 13px) - 1px);
+  text-align: left;
+  cursor: pointer;
+}
+.image-thumb img,
+.image-thumb .image-wait {
+  display: block;
+  max-width: 240px;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--c-line, var(--line));
+  background: var(--c-surface, var(--sunken));
+}
+.image-thumb .image-wait {
+  width: 240px;
+  height: 120px;
+}
+.image-thumb .image-title {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-thumb.missing {
+  flex-direction: row;
+  align-items: center;
+  cursor: default;
+}
+.image-strip {
+  display: flex;
+  gap: 12px;
+  max-width: min(80vw, 760px);
+  overflow-x: auto;
+  padding: 4px;
+}
+.image-strip .image-thumb img,
+.image-strip .image-thumb .image-wait {
+  max-width: 160px;
+  max-height: 110px;
+}
+.image-strip .image-thumb .image-wait {
+  width: 160px;
+  height: 90px;
+}
+/* The side bar's chat list: the side bar's own background, the full height. */
+.chat-side.chat-list-view {
+  height: 100vh;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2);
+  background: transparent;
+  border-right: 0;
+}
+
+/* ---- The transcript reads like a document (owner direction 2026-10-17) ----
+   8px grid: 24px between turns, 12px between a reply's blocks; 32px page padding wide, 16px narrow.
+   No avatars or big headers; tool calls are one line each; the composer is a plain bordered box. */
+body[data-surface='chat'] .transcript {
+  padding: 16px 32px 24px;
+  gap: 12px;
+}
+body[data-surface='chat'] .transcript > * {
+  max-width: 900px;
+}
+.user-msg {
+  margin: 12px 0 0;
+}
+.user-msg .bubble {
+  width: 100%;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+}
+.user-msg .bubble:hover {
+  background: var(--c-surface2);
+}
+body[data-surface='chat'] .md p,
+body[data-surface='chat'] .md ul,
+body[data-surface='chat'] .md ol,
+body[data-surface='chat'] .md pre {
+  margin: 0 0 12px;
+}
+body[data-surface='chat'] .md > :last-child {
+  margin-bottom: 0;
+}
+/* Tool calls: a status bullet, the verb in bold, the target in muted code. */
+.step-card {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+.step-card .step-verb {
+  font-weight: 600;
+  color: var(--c-text);
+}
+.step-card .step-text {
+  font-family: var(--mono);
+  font-size: calc(var(--fl-font-size) - 1px);
+  color: var(--c-mute);
+}
+.step-mark .icon {
+  display: none;
+}
+.step-mark::before,
+.step-mark[data-state='working']::before,
+.step-mark[data-state='next']::before,
+.step-mark[data-state='needs-you']::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: none;
+}
+.step-mark[data-state='working'] {
+  color: var(--c-mute);
+}
+.step-mark[data-state='working']::before {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-mark[data-state='working']::before {
+    animation: none;
+  }
+}
+.step-card .step-details {
+  margin: 6px 0 4px 22px;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: calc(var(--fl-font-size) - 1px);
+}
+details.thought > summary {
+  font-style: italic;
+  color: var(--c-mute);
+  cursor: pointer;
+}
+/* Decisions: a bordered card, numbered options one per line. */
+body[data-surface='chat'] .ask:not(.question) {
+  padding: 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: none;
+}
+.ask-head .glyph {
+  display: none;
+}
+body[data-surface='chat'] .ask:not(.question) .actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+body[data-surface='chat'] .ask .actions button.sm {
+  justify-content: flex-start;
+  text-align: left;
+}
+.opt-num {
+  min-width: 1.4em;
+  color: var(--c-mute);
+  font-variant-numeric: tabular-nums;
+}
+/* The composer: a plain box that brightens its border on focus (the accent stays for the recommended answer). */
+body[data-surface='chat'] .composer {
+  margin: 0 32px 24px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 8px;
+}
+body[data-surface='chat'] .composer:focus-within {
+  border-color: color-mix(in srgb, var(--c-text) 40%, var(--c-bg));
+}
+body[data-surface='chat'] .composer textarea {
+  padding: 4px 0 8px;
+}
+body[data-surface='chat'] .composer-bar button.chip-btn {
+  height: 24px;
+  padding: 0 8px;
+  background: none;
+  color: var(--c-mute);
+  font-size: calc(var(--fl-font-size) - 1px);
+}
+body[data-surface='chat'] .composer-bar button.chip-btn:hover:not(:disabled) {
+  color: var(--c-text);
+  background: var(--c-surface2);
+}
+button.send-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+}
+button.send-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+/* Header: the title and its status; one icon size, muted, 8px apart. */
+body[data-surface='chat'] .chat-head {
+  min-height: 0;
+  padding: 12px 32px 8px;
+}
+.chat-head-actions {
+  gap: 8px;
+}
+.chat-head-actions button.icon-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--c-mute);
+}
+.chat-head-actions button.icon-btn:hover:not(:disabled) {
+  color: var(--c-text);
+}
+.chat-head-actions .icon {
+  width: 16px;
+  height: 16px;
+}
+@media (max-width: 1200px) {
+  .transcript-wrap[data-jump] .transcript {
+    padding-right: 32px;
+  }
+}
+@media (max-width: 640px) {
+  body[data-surface='chat'] .transcript,
+  .transcript-wrap[data-jump] .transcript {
+    padding: 12px 16px 16px;
+  }
+  body[data-surface='chat'] .chat-head {
+    padding: 8px 16px;
+  }
+  body[data-surface='chat'] .composer {
+    margin: 0 16px 16px;
+  }
+}
+/* Decision options: plain rows; the recommended one a neutral surface with the accent border only. */
+body[data-surface='chat'] .ask .actions button.sm {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  font-weight: 400;
+}
+body[data-surface='chat'] .ask .actions button.sm.decide {
+  border-color: var(--c-acc);
+  background: var(--c-surface);
+}
+body[data-surface='chat'] .ask .actions button.sm:hover:not(:disabled),
+body[data-surface='chat'] .ask .actions button.sm:focus-visible {
+  background: var(--c-surface2);
+  outline: none;
+}
+body[data-surface='chat'] .ask .actions button.sm.danger {
+  color: color-mix(in srgb, var(--c-bad) 75%, var(--c-mute));
+}
+.step-target {
+  cursor: pointer;
+}
+.step-target:hover {
+  color: var(--c-text);
+  text-decoration: underline;
 }

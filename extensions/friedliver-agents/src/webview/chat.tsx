@@ -42,16 +42,20 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
+import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
 import { Steps } from './steps';
+import { TextSize } from './textSize';
+import { chatImages } from '../shared/stepImages';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-/** From this width the chat list sits beside the chat. */
-const WIDE = 900;
+/** The mic button: macOS dictation, which only the FriedLiver app on a Mac can start. */
+const MAC = document.body.dataset.platform === 'darwin';
+/** This webview is the side bar's chat list, not a chat tab. */
+const LIST = document.body.dataset.view === 'list';
 
 type Select = (chatId: string) => void;
 
@@ -85,18 +89,23 @@ function App() {
   }, []);
   const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
   // Wide (the chat in the editor area): the chat list stays open beside it. Narrow: tabs and a dropdown.
-  const wide = useWidth() >= WIDE;
+
+  if (LIST) {
+    // The side bar's chat list (its own activity-bar view): picking a chat opens it in the chat tab.
+    return (
+      <LiveState.Provider value={state}>
+        <aside class="chat-side chat-list-view" aria-label="Chats">
+          <AllChats state={state} active={chat?.id} onPick={(chatId) => send({ type: 'openChat', chatId })} />
+        </aside>
+      </LiveState.Provider>
+    );
+  }
 
   return (
     <LiveState.Provider value={state}>
-      <div class="chat-app" data-wide={wide ? '' : undefined}>
-        {wide ? (
-          <aside class="chat-side" aria-label="Chats">
-            <AllChats state={state} active={chat?.id} onPick={select} newAgent={chat?.agent} />
-          </aside>
-        ) : (
-          <Switcher state={state} active={chat?.id} onSelect={select} />
-        )}
+      <div class="chat-app">
+        <TextSize />
+        <Switcher state={state} active={chat?.id} onSelect={select} />
         <div class="chat-main">
         {chat ? (
           <>
@@ -333,7 +342,9 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
   const status = statusOf(chat);
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
-  const chips = linkBadges(state, chat).filter((b) => !(b.kind === 'origin' && b.chatId === parent?.id));
+  // The banner covers where this chat came from, and a handoff has its card in the transcript; chips cover the rest.
+  const chips = linkBadges(state, chat).filter((b) => !(b.kind === 'origin' && b.chatId === parent?.id) && b.kind !== 'handoff');
+  const images = useMemo(() => chatImages(chat.items), [chat.items]);
   return (
     <>
       <header class="chat-head">
@@ -352,6 +363,17 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             {chat.merged && <span class="tag">merged</span>}
           </div>
         </div>
+        {images.length > 0 && (
+          <Popover label="Images in this chat" title="Images in this chat" kind="dialog" align="end" buttonClass="chip-btn images-pill" trigger={<span class="chip-text">Images · {images.length}</span>}>
+            {() => (
+              <div class="image-strip">
+                {images.map((img) => (
+                  <ImageThumb key={img.path} path={img.path} title={img.title} />
+                ))}
+              </div>
+            )}
+          </Popover>
+        )}
         <span class="status-pill" data-state={status}>
           {DOT_LABEL[status]}
         </span>
@@ -1073,7 +1095,7 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint;
+  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
 
   const reset = () => {
     setText('');
@@ -1206,13 +1228,7 @@ function Composer({
           aria-autocomplete="list"
           aria-controls={picking ? listId : undefined}
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
-          placeholder={
-            chat.busy
-              ? `Message ${AGENT_FACES[chat.agent].name}: it goes when the turn ends · Esc stops`
-              : chat.session?.starting
-                ? `Starting ${AGENT_FACES[chat.agent].name}…`
-                : 'Message…   / commands  # files  @ another agent'
-          }
+          placeholder={chat.session?.starting && !chat.busy ? 'Starting…' : 'Message…'}
           onInput={(e) => {
             setText(e.currentTarget.value);
             track(e.currentTarget);
@@ -1294,6 +1310,19 @@ function Composer({
           {chat.busy && (
             <button class="ghost danger sm" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
               <Icon name="stop" /> {!compact && 'Stop'}
+            </button>
+          )}
+          {MAC && (
+            <button
+              class="chip-btn icon-btn mic-btn"
+              aria-label="Dictate"
+              title="Dictate (Fn Fn)"
+              onClick={() => {
+                area.current?.focus();
+                send({ type: 'dictate' });
+              }}
+            >
+              <Icon name="mic" />
             </button>
           )}
           <button

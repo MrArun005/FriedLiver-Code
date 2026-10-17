@@ -38,6 +38,11 @@
     "viewsContainers": {
       "activitybar": [
         {
+          "id": "friedliver-chats",
+          "title": "Chats",
+          "icon": "$(comment-discussion)"
+        },
+        {
           "id": "friedliver",
           "title": "FriedLiver Agents",
           "icon": "media/agents.svg"
@@ -45,6 +50,13 @@
       ]
     },
     "views": {
+      "friedliver-chats": [
+        {
+          "type": "webview",
+          "id": "friedliver.chats",
+          "name": "Chats"
+        }
+      ],
       "friedliver": [
         {
           "type": "webview",
@@ -445,6 +457,13 @@
           "default": "Inter",
           "markdownDescription": "Font for the chat, the Agent Manager and the other FriedLiver views. `Inter` is bundled; leave it empty to use the editor's UI font. Takes effect when a view next opens."
         },
+        "friedliver.chat.fontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 10,
+          "maximum": 20,
+          "markdownDescription": "Text size (px) a new chat tab starts at. In a tab, Cmd/Ctrl + `=` / `-` / `0` changes that tab only. Takes effect when a view next opens."
+        },
         "friedliver.chat.accentColor": {
           "type": "string",
           "default": "#D97757",
@@ -506,7 +525,10 @@
         },
         "friedliver.update.mode": {
           "type": "string",
-          "enum": ["notify", "off"],
+          "enum": [
+            "notify",
+            "off"
+          ],
           "enumDescriptions": [
             "30 seconds after start and every 4 hours, ask GitHub whether a newer FriedLiver release is out, and offer to install it.",
             "Never check."
