@@ -500,7 +500,7 @@ export const ComposerPills = memo(function ComposerPills({
         </button>
       )}
       <button type="button" class="cc-pill cc-model" title={usageTitle(chat, samples)} aria-label={`Model: ${usageTitle(chat, samples)}`} onClick={() => open('model')}>
-        <span class="cc-pill-text">{modelLabel(model) ?? (chat.session?.live ? AGENT_FACES[chat.agent].name : 'Starting…')}</span>
+        <span class="cc-pill-text">{modelLabel(model) ?? (chat.session?.starting ? 'Starting…' : AGENT_FACES[chat.agent].name)}</span>
         {effort && <span class="cc-pill-sub">{choiceName(effort)}</span>}
       </button>
     </>

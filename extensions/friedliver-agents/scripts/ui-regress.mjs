@@ -338,6 +338,22 @@ BLOCKS.F08 = async () => {
   await p.close();
 };
 
+// ---- F10: "Starting…" only while a session really starts ----
+BLOCKS.F10 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&fixture=steps', 1200, 800);
+  const pill = (q) => q.locator('.cc-model').innerText();
+  check(!/Starting/.test(await pill(p)), `a finished chat's model pill names the agent, not Starting… [${await pill(p)}]`);
+  await p.close();
+  const q = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  const state = fixture(Date.now()).state;
+  state.chats.push(freshChat('claude'));
+  await snapshot(q, state, 'chat-new-claude');
+  await q.waitForSelector('.chat-head-title:has-text("New chat")');
+  const head = await q.locator('.status-pill').innerText();
+  check(/Starting/.test(await pill(q)) && head === 'Starting', `a starting chat says Starting in its pill and its status [${await pill(q)} / ${head}]`);
+  await q.close();
+};
+
 await run();
 await browser.close();
 server.kill();
