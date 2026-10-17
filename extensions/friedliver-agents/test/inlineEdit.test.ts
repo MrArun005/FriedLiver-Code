@@ -2,7 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyReplacement, INLINE_AROUND, INLINE_LIMITS, INLINE_MARK, inlinePrompt, parseReplacement, runInline } from '../src/host/inlineEdit';
-import { disposeCores, gitRepo, makeCore } from './helpers';
+import { lastReply } from '../src/shared/model';
+import { buildBridge, disposeCores, gitRepo, makeCore } from './helpers';
 
 afterEach(disposeCores);
 
@@ -104,5 +105,56 @@ describe('inline edit run (Demo agent)', () => {
     setTimeout(() => run.cancel(), 300);
     expect(await run.done).toBeUndefined();
     expect(core.snapshot.chats.length).toBe(0);
+  });
+});
+
+describe('read-only chats (enforced in the core)', () => {
+  const spies = () => {
+    const shown: string[] = [];
+    return {
+      shown,
+      ui: {
+        showReview: () => shown.push('review'),
+        closeReview: () => {},
+        askCommand: () => shown.push('command'),
+        askPermission: () => shown.push('permission'),
+        askBridge: () => shown.push('bridge'),
+        askQuestion: () => shown.push('question'),
+      },
+    };
+  };
+
+  it('refuses a command an Always-allow rule and Full auto would run, without showing anything', async () => {
+    const dir = await gitRepo();
+    const { shown, ui } = spies();
+    const core = makeCore(dir, { ui, rules: { get: () => [{ kind: 'prefix', command: process.execPath }], add: () => {} } });
+    const chat = await core.createChat('claude', { readOnly: true, approval: 'full' });
+    await core.send(chat.id, 'run');
+    expect(lastReply(core.chat(chat.id)!)).toContain('denied the command');
+    expect(shown).toEqual([]);
+  });
+
+  it('refuses writes at any level, with no card or diff', async () => {
+    const dir = await gitRepo();
+    const file = path.join(dir, 'x.txt');
+    await writeFile(file, 'keep\n');
+    const { shown, ui } = spies();
+    const core = makeCore(dir, { ui });
+    const chat = await core.createChat('claude', { readOnly: true, approval: 'full' });
+    await core.send(chat.id, `edit ${file}`);
+    await core.send(chat.id, 'question');
+    expect(await readFile(file, 'utf8')).toBe('keep\n');
+    expect(shown).toEqual([]);
+  });
+
+  it('offers no FriedLiver tools even when the bridge policy is allow', async () => {
+    const dir = await gitRepo();
+    const { shown, ui } = spies();
+    const core = makeCore(dir, { ui, bridgeScript: await buildBridge(), policy: () => 'allow' });
+    const chat = await core.createChat('claude', { readOnly: true });
+    await core.send(chat.id, 'ask demo hello');
+    expect(lastReply(core.chat(chat.id)!)).not.toContain('Demo says');
+    expect(core.snapshot.chats).toHaveLength(1);
+    expect(shown).toEqual([]);
   });
 });

@@ -65,6 +65,7 @@ export class BridgeRequests {
     }
     const caller = this.chat(chatId);
     if (!caller) throw new Error('This chat was closed in FriedLiver.');
+    if (caller.readOnly) throw new Error('This chat only proposes text: FriedLiver tools are off in it.');
     if (call.tool === 'list_agents') return agentList();
     if (call.tool === 'list_chats') return chatList(this.host.state, chatId);
     if (isBrowserCall(call)) return this.browser(caller, call, signal);
