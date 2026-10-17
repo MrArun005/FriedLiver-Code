@@ -24,6 +24,8 @@ import {
 } from '../shared/model';
 import {
   tabAfterClose,
+  openTab,
+  closeTab,
   applyMention,
   clip,
   linkBadges,
@@ -43,7 +45,7 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
+import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -83,29 +85,32 @@ function App() {
       setFocusTick((n) => n + 1);
     }
   });
-  // Tabs closed in this window: out of the strip only; the chats go on, in the Chats list and the Agent Manager.
-  const [closed, setClosed] = usePersisted<string[]>('closedTabs', []);
-  // Opening a chat (from the list, a notification, a card) brings its tab back.
+  // The tabs, as a browser keeps them: the chats opened in this window, in the order they were opened.
+  // Closing one takes only the tab away; the chat goes on, in the Chats list and the Agent Manager.
+  // A window from before this kept no tabs: the recent chats it showed become its tabs.
+  const [saved, setTabs] = usePersisted<string[] | null>('openTabs', null);
+  const tabs = (saved ?? (state.chats.length ? recentChats(state.chats, selected, 6).map((c) => c.id) : [])).filter((id) => state.chats.some((c) => c.id === id));
+  // Opening a chat (a new one, or from the list, a notification, a card, the Agent Manager) adds its tab at the end.
   useEffect(() => {
-    if (selected && closed.includes(selected)) setClosed(closed.filter((id) => id !== selected));
-  }, [selected]);
-  // The selected chat even when archived (opened from History); otherwise the newest open one with a tab.
-  const chat = state.chats.find((c) => c.id === selected && !closed.includes(c.id)) ?? openChats(state.chats).filter((c) => !closed.includes(c.id)).at(-1);
+    if (selected && state.chats.some((c) => c.id === selected) && !tabs.includes(selected)) setTabs(openTab(tabs, selected));
+    else if (saved === null && tabs.length) setTabs(tabs);
+  }, [selected, state.chats.length]);
+  // The selected chat when it has a tab (archived ones too, opened from History); otherwise the last tab.
+  const chat = state.chats.find((c) => c.id === selected) ?? state.chats.find((c) => c.id === tabs.at(-1));
   shown.current = chat?.id;
 
   const select = useCallback((chatId: string) => {
     setSelected(chatId);
     send({ type: 'select', chatId });
   }, []);
-  const strip = useRef<string[]>([]);
-  const closeTab = (chatId: string) => {
-    const next = tabAfterClose(strip.current, chatId, chat?.id);
-    setClosed([...closed.filter((id) => id !== chatId), chatId]);
+  const close = (chatId: string) => {
+    const next = tabAfterClose(tabs, chatId, chat?.id);
+    setTabs(closeTab(tabs, chatId));
     if (next && next !== chat?.id) select(next);
     else if (!next) setSelected(undefined);
   };
   const closeActive = useRef(() => {});
-  closeActive.current = () => chat && closeTab(chat.id);
+  closeActive.current = () => chat && close(chat.id);
   useEffect(() => {
     // Cmd/Ctrl+W closes the open chat's tab; caught before the webview forwards it, so the editor's own tab stays.
     const onKey = (e: KeyboardEvent) => {
@@ -135,7 +140,7 @@ function App() {
     <LiveState.Provider value={state}>
       <div class="chat-app">
         <TextSize />
-        <Switcher state={state} active={chat?.id} onSelect={select} closed={closed} onClose={closeTab} stripRef={strip} />
+        <Switcher state={state} active={chat?.id} onSelect={select} tabs={tabs} onClose={close} />
         <div class="chat-main">
         {chat ? (
           <>
@@ -171,16 +176,29 @@ function App() {
 }
 
 /** Recent chats as tabs, and every open chat one click away in "All chats", for fifteen agents and more. */
-function Switcher({ state, active, onSelect, closed, onClose, stripRef }: { state: AppState; active?: string; onSelect: Select; closed: string[]; onClose(chatId: string): void; stripRef: { current: string[] } }) {
-  const width = useWidth();
-  const strip = recentChats(state.chats, active, Math.max(1, Math.min(6, Math.floor((width - 140) / 128))), closed);
-  stripRef.current = strip.map((c) => c.id);
+function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState; active?: string; onSelect: Select; tabs: string[]; onClose(chatId: string): void }) {
+  const strip = tabs.flatMap((id) => state.chats.find((c) => c.id === id) ?? []);
   const shortcut = IS_MAC ? '⌘W' : 'Ctrl+W';
+  // More tabs than fit: the strip scrolls sideways, its edges fade, and the open tab stays in view.
+  const box = useRef<HTMLDivElement>(null);
+  const [over, setOver] = useState(false);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tabs.length]);
+  useEffect(() => {
+    box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
   const open = openChats(state.chats);
   const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
   return (
     <div class="switcher">
-      <div class="tabs" role="tablist" aria-label="Recent chats">
+      <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-overflow={over ? '' : undefined}>
         {strip.map((c) => (
           <span key={c.id} class="tab-wrap" data-active={c.id === active ? '' : undefined}>
             <button
