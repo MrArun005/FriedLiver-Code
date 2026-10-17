@@ -213,6 +213,7 @@ Patches:
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 | `0110-modern-workbench` | The FriedLiver workbench stylesheet: regions separate by tone, soft rounded overlays, an activity pill, thin scrollbars, a pill command center. Theme variables only; high contrast untouched |
 | `0120-macos-dictation-command` | `friedliver.startDictation` (macOS): starts system dictation in the focused text box, for the agents' composer mic button |
+| `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |
 
 ### Writing a patch
 

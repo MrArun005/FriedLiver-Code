@@ -38,6 +38,11 @@
     "viewsContainers": {
       "activitybar": [
         {
+          "id": "friedliver-chats",
+          "title": "Chats",
+          "icon": "$(comment-discussion)"
+        },
+        {
           "id": "friedliver",
           "title": "FriedLiver Agents",
           "icon": "media/agents.svg"
@@ -45,6 +50,13 @@
       ]
     },
     "views": {
+      "friedliver-chats": [
+        {
+          "type": "webview",
+          "id": "friedliver.chats",
+          "name": "Chats"
+        }
+      ],
       "friedliver": [
         {
           "type": "webview",
@@ -508,7 +520,10 @@
         },
         "friedliver.update.mode": {
           "type": "string",
-          "enum": ["notify", "off"],
+          "enum": [
+            "notify",
+            "off"
+          ],
           "enumDescriptions": [
             "30 seconds after start and every 4 hours, ask GitHub whether a newer FriedLiver release is out, and offer to install it.",
             "Never check."

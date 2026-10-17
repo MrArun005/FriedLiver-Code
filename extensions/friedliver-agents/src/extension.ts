@@ -220,6 +220,7 @@ export class Controller {
         { resolveWebviewView: (view) => this.resolveView(view, 'chat', 'Agents') },
         { webviewOptions: { retainContextWhenHidden: false } },
       ),
+      vscode.window.registerWebviewViewProvider('friedliver.chats', { resolveWebviewView: (view) => this.resolveView(view, 'chat', 'Chats', true) }),
       vscode.window.registerWebviewViewProvider('friedliver.images', { resolveWebviewView: (view) => this.resolveView(view, 'images', 'Images') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.tasks', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'tasks') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'chat') }),
@@ -337,16 +338,17 @@ export class Controller {
 
   // ---- Surfaces ----
 
-  private resolveView(view: vscode.WebviewView, kind: Script, title: string): void {
+  private resolveView(view: vscode.WebviewView, kind: Script, title: string, list = false): void {
     const surface: Surface = {
       kind,
+      ...(list ? { list } : {}),
       webview: view.webview,
       selected: kind === 'chat' ? this.lastSelected : undefined,
       ready: false,
       visible: () => view.visible,
       reveal: () => view.show(true),
     };
-    if (kind === 'chat') this.agentsView = view;
+    if (kind === 'chat' && !list) this.agentsView = view;
     this.addSurface(surface, title, view);
     this.updateDecisions();
   }
@@ -420,7 +422,7 @@ export class Controller {
           }
           return;
         case 'newChat':
-          await this.newChat(m.agent, surface);
+          await this.newChat(m.agent, surface.list ? undefined : surface);
           return;
         case 'select':
           surface.selected = m.chatId;
@@ -502,6 +504,8 @@ export class Controller {
           return;
         }
         case 'openChat':
+          // From the side bar's list: into the chat tab, opening one when there is none.
+          if (surface.list && !this.chatPanel) await this.moveToCenter();
           await this.showChat(m.chatId, m.item);
           return;
         case 'openClaudeSession': {

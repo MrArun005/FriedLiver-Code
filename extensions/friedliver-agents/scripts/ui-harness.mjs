@@ -109,7 +109,7 @@ function page(params) {
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
-<body class="vscode-${theme.kind}" data-surface="${surface}" data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
+<body class="vscode-${theme.kind}" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
 <div id="root"></div>
 <script src="/media/dist/${surface}.js"></script>
 </body>
@@ -423,6 +423,18 @@ async function shoot() {
     await p.click('.images-pill');
     check((await p.locator('.image-strip .image-thumb').count()) === 2, 'the Images pill opens the gallery');
     await p.close();
+  }
+  {
+    // The chat list lives in its own side bar view; the chat tab has none, at any width.
+    const tab = await open('surface=chat&theme=black-blue&select=chat-c5', 1400, 800);
+    check((await tab.locator('.chat-side').count()) === 0, 'the chat tab has no chat list beside it');
+    await tab.close();
+    const list = await open('surface=chat&theme=black-blue&list=1&select=chat-c5', 300, 800);
+    check((await list.locator('.chat-list-view .new-chat').count()) === 1 && (await list.locator('.transcript').count()) === 0, 'the side bar view is the list only');
+    await list.locator('.chat-list-view [role="option"]').first().click();
+    check((await posted(list)).some((m) => m.type === 'openChat'), 'picking a chat in the list opens it in the chat tab');
+    await list.screenshot({ path: path.join(os.homedir(), 'code/chat-list-sidebar.png'), animations: 'disabled' });
+    await list.close();
   }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.
