@@ -215,6 +215,50 @@ describe('a window with no folder', () => {
     expect(list).toHaveLength(5);
   });
 
+  /** A headless run, as the security-review hook writes them: every record says entrypoint sdk-py. */
+  const headless = (home: string, cwd: string, id: string, age: number) => {
+    const dir = path.join(home, '.claude', 'projects', encodeCwd(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.jsonl`);
+    const rec = { cwd, entrypoint: 'sdk-py', userType: 'external', isSidechain: false };
+    fs.writeFileSync(
+      file,
+      [
+        { type: 'user', message: { role: 'user', content: 'Review this change for security vulnerabilities.' }, promptSource: 'sdk', timestamp: iso(NOW - age) },
+        { type: 'assistant', message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'Read', input: { file_path: 'a.ts' } }] }, timestamp: iso(NOW - age) },
+      ]
+        .map((o) => JSON.stringify({ ...o, ...rec }))
+        .join('\n') + '\n',
+    );
+    fs.utimesSync(file, new Date(NOW - age), new Date(NOW - age));
+  };
+  const hex = (n: number) => `80000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+
+  it('hides headless runs (SDK entrypoints other than FriedLiver’s own) unless showAll', async () => {
+    const home = projects();
+    headless(home, '/Users/a/code/wt-v5', hex(1), 10_000);
+    const ids = async (showAll: boolean) => (await listClaudeSessions({ home, folders: [], now: NOW, showAll })).map((s) => s.id);
+    expect(await ids(false)).not.toContain(hex(1));
+    expect(await ids(true)).toContain(hex(1));
+    // In a folder window too.
+    expect((await listClaudeSessions({ home, folders: ['/Users/a/code/wt-v5'], now: NOW })).map((s) => s.id)).toEqual([]);
+  });
+
+  it('lists up to 100 sessions, counting only the ones it shows', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-cccap-'));
+    for (let i = 0; i < 60; i++) headless(home, '/Users/a/code/wt-v5', hex(1000 + i), i * 1000);
+    const dir = path.join(home, '.claude', 'projects', encodeCwd('/Users/a/HRMS'));
+    fs.mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 110; i++) {
+      const file = path.join(dir, `${hex(i)}.jsonl`);
+      fs.writeFileSync(file, [user(NOW, 'Fix the payslip rounding for arrears'), assistant(NOW, 'm', [{ type: 'tool_use', id: 't', name: 'Bash', input: { command: 'ls' } }])].map((l) => JSON.stringify({ ...JSON.parse(l), cwd: '/Users/a/HRMS', entrypoint: 'claude-vscode' })).join('\n') + '\n');
+      fs.utimesSync(file, new Date(NOW - 60_000 - i * 1000), new Date(NOW - 60_000 - i * 1000));
+    }
+    const list = await listClaudeSessions({ home, folders: [], now: NOW });
+    expect(list).toHaveLength(100);
+    expect(list.every((s) => s.project === 'HRMS')).toBe(true);
+  });
+
   it('names no project for a window that has folders', async () => {
     const { home } = build();
     const [s] = await listClaudeSessions({ home, folders: [WS], now: NOW });
