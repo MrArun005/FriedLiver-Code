@@ -3,7 +3,7 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { applySessionUpdate, isSessionUpdate, type ApprovalLevel, type ChatSession } from './session';
 import type { QuestionField } from './questions';
-import { appendOutput, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
+import { appendOutput, claudeMeta, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
 
 export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'demo'] as const;
 export type AgentKey = (typeof AGENT_KEYS)[number];
@@ -148,8 +148,11 @@ export type Item =
   | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[] }
   | { kind: 'agent'; text: string }
   | { kind: 'thought'; text: string }
-  /** `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short. */
-  | { kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[]; out?: ToolOut[]; input?: string }
+  /**
+   * `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short.
+   * `tool` and `parent` (optional): Claude's tool name, and the subagent (Task/Agent) call this one ran inside.
+   */
+  | { kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[]; out?: ToolOut[]; input?: string; tool?: string; parent?: string }
   | { kind: 'plan'; entries: { content: string; status: string }[] }
   /**
    * `toolKind` and `detail` (optional) say what is being approved: the diff, the command, the plan.
@@ -439,6 +442,7 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
         locations: (update.locations ?? []).map((l) => l.path),
         ...(out || streamed ? { out: streamed ? appendOutput(out, streamed) : out } : {}),
         ...(input ? { input } : {}),
+        ...claudeMeta(update._meta),
       };
       const at = items.findIndex((i) => i.kind === 'tool' && i.id === update.toolCallId);
       return at < 0 ? [...items, tool] : items.map((i, n) => (n === at ? tool : i));
@@ -460,6 +464,7 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
           locations: update.locations ? update.locations.map((l) => l.path) : i.locations,
           out: next,
           input: input ?? i.input,
+          ...claudeMeta(update._meta),
         };
       });
     }

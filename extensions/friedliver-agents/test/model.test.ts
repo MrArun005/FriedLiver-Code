@@ -61,6 +61,20 @@ describe('transcript reducer', () => {
     expect(s.chats[0].items).toEqual([{ kind: 'tool', id: 't1', title: 'Read', toolKind: undefined, status: 'completed', locations: [] }]);
   });
 
+  it("keeps Claude's tool name and a subagent's parent tool call", () => {
+    const meta = (claudeCode: object) => ({ _meta: { claudeCode } });
+    const s = run([
+      { t: 'created', chat: chat() },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call', toolCallId: 'task', title: 'Find it', kind: 'think', status: 'pending', rawInput: { description: 'Find it', prompt: 'p', subagent_type: 'Explore' }, ...meta({ toolName: 'Task' }) } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call', toolCallId: 'inner', title: 'Read', status: 'pending', ...meta({ toolName: 'Read', parentToolUseId: 'task' }) } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'task', status: 'completed', ...meta({ toolName: 'Task' }) } },
+    ]);
+    expect(s.chats[0].items).toMatchObject([
+      { kind: 'tool', id: 'task', tool: 'Task', status: 'completed' },
+      { kind: 'tool', id: 'inner', tool: 'Read', parent: 'task' },
+    ]);
+  });
+
   it('tracks commands, output and exit', () => {
     const s = run([
       { t: 'created', chat: chat({ busy: true }) },

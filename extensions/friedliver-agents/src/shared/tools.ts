@@ -48,6 +48,17 @@ export function streamedOutput(meta: unknown): string | undefined {
   return typeof data === 'string' && data ? data : undefined;
 }
 
+/** What claude-agent-acp says in `_meta.claudeCode`: the tool's name, and the subagent call it ran in. */
+export function claudeMeta(meta: unknown): { tool?: string; parent?: string } {
+  const c = meta && typeof meta === 'object' ? (meta as { claudeCode?: unknown }).claudeCode : undefined;
+  if (!c || typeof c !== 'object') return {};
+  const { toolName, parentToolUseId } = c as Record<string, unknown>;
+  return {
+    ...(typeof toolName === 'string' && toolName ? { tool: toolName.slice(0, 128) } : {}),
+    ...(typeof parentToolUseId === 'string' && parentToolUseId ? { parent: parentToolUseId.slice(0, 128) } : {}),
+  };
+}
+
 /** Appends streamed output to a tool's text, keeping only the end. */
 export function appendOutput(out: ToolOut[] | undefined, data: string): ToolOut[] {
   const list = out ? [...out] : [];
