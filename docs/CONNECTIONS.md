@@ -110,3 +110,54 @@ when the agent can reload it, and otherwise starts a new session and says so;
 either way its model, effort and approval level are applied again (Full auto
 comes back as Ask). Messages that were queued aren't saved.
 Turning the setting off deletes the saved chats.
+
+## The browser
+
+**FriedLiver: Open Browser** (the globe in the Agents view's title bar, or the
+command palette) opens the editor's integrated browser on the right. It never
+opens by itself: only that command, or an agent's `browser_open` you allow.
+
+- It is VS Code 1.142's own integrated browser: an Electron `WebContentsView`
+  shown as an editor tab, reached through the `browser` API proposal (enabled
+  for this extension in `product.json`). Pages load as top-level pages, so
+  X-Frame-Options and CSP `frame-ancestors` don't block them, and web
+  security stays on. No core patch is needed.
+- Cookies and storage live in the integrated browser's own persistent
+  session (`workbench.browser.dataStorage`, `global` by default), separate
+  from your system browser.
+- It opens in the second editor group at the width you last left it,
+  between 40% and 70% of the window. Drag the sash to change it; FriedLiver
+  remembers it and pulls it back inside those bounds when the groups change.
+- **FriedLiver: Switch Between Code and Agent Chat** (Ctrl/Cmd+Alt+A) swaps
+  the left group between your last code editor and the agent chat. Cmd/Ctrl+B
+  still toggles the file side bar.
+- `friedliver.browser.relaxLocalhostCors` (default off, user settings only)
+  adds permissive CORS headers, and answers preflights with 204, for
+  responses from `localhost`, `127.0.0.1` and `[::1]` in this browser only,
+  through CDP's Fetch domain on pages FriedLiver is attached to.
+
+### Browser tools
+
+| Tool | What it does | Needs your OK |
+|---|---|---|
+| `browser_open {url}` | Opens an http/https URL (bare `localhost:3000` works) and waits for the load | Yes, unless the chat is on Full auto |
+| `browser_snapshot` | Title, URL, the links/buttons/fields with a selector each, and the visible text (password values never) | No |
+| `browser_click {selector \| text}` | Clicks with real mouse events | Yes, unless Full auto |
+| `browser_type {selector, text}` | Replaces a field's text | Yes, unless Full auto |
+| `browser_screenshot` | Saves a PNG under the temp folder and returns its path | No |
+| `browser_console` | The last 100 console messages and uncaught errors | No |
+| `browser_back`, `browser_reload` | History back, reload | Yes, unless Full auto |
+
+`file:`, `chrome:`, `devtools:`, `javascript:`, `data:` and every other
+scheme are refused before anyone is asked. The `friedliver.connections.agentToAgent`
+setting still applies: `off` removes these tools with the others. "Allow for
+this chat" on a browser request allows later browser actions in that chat,
+not agent-to-agent requests (and the other way round).
+
+Claude, Codex and Gemini get these tools with the rest of the `friedliver`
+server. The separate Claude Code extension can't use it yet: the server only
+answers requests carrying a FriedLiver chat's in-memory token, and there is
+no way to issue one to an outside client. Adding that (a per-window token
+shown by a command, configured as an HTTP MCP server named `friedliver` in
+Claude Code's `.mcp.json` with `Authorization: Bearer <token>`) is follow-up
+work.
