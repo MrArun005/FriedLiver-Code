@@ -182,6 +182,7 @@ export function parseSaved(raw: unknown): SavedState | null {
       agent: c.agent,
       label: str(c.label) ? c.label : c.agent,
       title: str(c.title) ? c.title : 'Untitled task',
+      titlePinned: c.titlePinned === true || undefined,
       cwd: c.cwd,
       branch: str(c.branch) ? c.branch : undefined,
       merged: c.merged === true || undefined,

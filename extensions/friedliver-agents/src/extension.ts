@@ -532,6 +532,13 @@ export class Controller {
         case 'archive':
           this.core.archive(m.chatId, m.archived);
           return;
+        case 'renameChat': {
+          const chat = this.core.chat(m.chatId);
+          if (!chat) return;
+          const title = await vscode.window.showInputBox({ title: 'Rename chat', value: chat.title, prompt: 'A name you give stays; the chat stops renaming itself.' });
+          if (title !== undefined) this.core.renameChat(m.chatId, title);
+          return;
+        }
         case 'removeChat': {
           const chat = this.core.chat(m.chatId);
           if (!chat) return;

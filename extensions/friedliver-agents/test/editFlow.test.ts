@@ -145,7 +145,7 @@ describe('Ask About Selection and Review My Changes through the core', () => {
     // The demo agent echoes all it got: the reference first, then the question.
     const reply = view.items.find((i) => i.kind === 'agent');
     expect(reply?.kind === 'agent' && reply.text).toMatch(/src\/format\.ts:2-3\n```typescript\n {2}const greeting[\s\S]*Why a template string\?/);
-    expect(view.title).toBe('Why a template string?');
+    expect(view.title).toBe('Why template string');
   });
 
   it('gets a review of the working tree in a chat named after the branch', async () => {
