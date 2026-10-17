@@ -960,6 +960,7 @@ export class Controller {
   private askBridge(ask: { chatId: string; requestId: string; title: string }): void {
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
       { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
+      { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
     ]);
