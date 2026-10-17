@@ -30,6 +30,8 @@ import {
   type ApprovalLevel,
   type ChatSession,
   type SessionOption,
+  readOnlyChoice,
+  CLAUDE_READ_ONLY_META,
 } from '../shared/session';
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
 import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
@@ -272,6 +274,7 @@ export class AgentCore {
       },
       terminalListener: (agentId) => this.commandHooks(agentId),
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
+      sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
     // The connections read the live state, not the one at construction.
     const live = () => this.state;
@@ -713,8 +716,19 @@ export class AgentCore {
       const value = wanted[key];
       if (option && option.category !== 'mode' && offers(option, value) && option.current !== value) await this.applyOption(chatId, option, value);
     }
-    await this.applyLevel(chatId, false);
+    if (chat.readOnly) await this.restrictMode(chatId);
+    else await this.applyLevel(chatId, false);
     this.updateKnown(chatId);
+  }
+
+  /** A read-only chat: the agent's own most restrictive mode too, so its built-in tools can't act either. */
+  private async restrictMode(chatId: string): Promise<void> {
+    const pick = readOnlyChoice(this.chat(chatId)?.session?.options ?? []);
+    if (!pick) {
+      this.options.log?.(`Read-only chat ${chatId}: the agent offers no plan or read-only mode; FriedLiver's refusals still apply.`);
+      return;
+    }
+    if (pick.option.current !== pick.value) await this.applyOption(chatId, pick.option, pick.value);
   }
 
   /** Runs the last message again, or, when the chat has none yet, starts its agent again. */

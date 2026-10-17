@@ -3,6 +3,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyReplacement, INLINE_AROUND, INLINE_LIMITS, INLINE_MARK, inlinePrompt, parseReplacement, runInline } from '../src/host/inlineEdit';
 import { lastReply } from '../src/shared/model';
+import { readOnlyChoice, type SessionOption } from '../src/shared/session';
+import { waitFor } from './helpers';
 import { buildBridge, disposeCores, gitRepo, makeCore } from './helpers';
 
 afterEach(disposeCores);
@@ -156,5 +158,30 @@ describe('read-only chats (enforced in the core)', () => {
     expect(lastReply(core.chat(chat.id)!)).not.toContain('Demo says');
     expect(core.snapshot.chats).toHaveLength(1);
     expect(shown).toEqual([]);
+  });
+});
+
+describe("read-only chats: the agent's own mode", () => {
+  const sel = (id: string, name: string, choices: [string, string][], category?: string): SessionOption => ({ id, name, category, type: 'select', current: choices[0][0], choices: choices.map(([value, n]) => ({ value, name: n })), via: 'option' });
+
+  it('picks read-only before plan, by id or name, and nothing when neither is offered', () => {
+    const codex = [sel('approval_preset', 'Approval', [['auto', 'Auto'], ['read-only', 'Read Only']])];
+    const claude = [sel('mode', 'Mode', [['default', 'Ask'], ['plan', 'Plan'], ['bypassPermissions', 'Full']], 'mode')];
+    expect(readOnlyChoice(codex)).toMatchObject({ value: 'read-only' });
+    expect(readOnlyChoice(claude)).toMatchObject({ value: 'plan' });
+    expect(readOnlyChoice([...claude, ...codex])).toMatchObject({ value: 'read-only' });
+    expect(readOnlyChoice([sel('model', 'Model', [['plan-x', 'Plan X']], 'model')])).toBeUndefined();
+    expect(readOnlyChoice([sel('mode', 'Mode', [['default', 'Ask']], 'mode')])).toBeUndefined();
+  });
+
+  it("puts the Demo agent in its Plan mode, whatever the chat's level", async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir);
+    const chat = await core.createChat('claude', { readOnly: true, approval: 'full' });
+    await core.send(chat.id, 'hi');
+    await waitFor(() => readOnlyChoice(core.chat(chat.id)?.session?.options ?? [])?.option.current === 'plan');
+    const normal = await core.createChat('claude');
+    await core.send(normal.id, 'hi');
+    expect(core.chat(normal.id)?.session?.options.find((o) => o.category === 'mode')?.current).not.toBe('plan');
   });
 });

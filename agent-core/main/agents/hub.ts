@@ -66,6 +66,8 @@ export interface HubOptions {
    * `agent.http` says whether its agent takes HTTP servers.
    */
   mcpServersFor?(chatId: string, agent: { http: boolean }): acp.McpServer[] | Promise<acp.McpServer[]>;
+  /** Extra `_meta` for a chat's session/new (e.g. a read-only chat's tool limits). */
+  sessionMetaFor?(chatId: string, agentId: AgentId): Record<string, unknown> | undefined;
   log?(line: string): void;
 }
 
@@ -434,7 +436,7 @@ export class AgentHub {
       }
     }
 
-    const session = await agent.conn.newSession(cwd, mcpServers);
+    const session = await agent.conn.newSession(cwd, mcpServers, this.options.sessionMetaFor?.(chat.id, chat.agentId));
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(
