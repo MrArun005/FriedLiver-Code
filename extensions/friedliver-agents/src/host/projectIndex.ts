@@ -3,7 +3,7 @@
 // token index ranked with BM25. Plain Node, no vscode, so it is testable; the
 // editor side (projectIndexHost.ts) feeds it files and watches for changes.
 // ponytail: keywords only. Semantic embeddings would go beside the token index if keyword search falls short.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,13 +22,14 @@ export const INDEX_LIMITS = {
 };
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.hg', '.svn', 'out', '.next', '__pycache__', '.venv', 'venv', 'target', 'build', 'coverage']);
-const SECRET = /^(\.env(\..*)?|.*\.pem|.*\.key|id_(rsa|dsa|ecdsa|ed25519).*|.*\.p12|.*\.pfx)$/i;
+const SECRET =
+  /^(\.env(\..*)?|.*\.pem|.*\.key|id_(rsa|dsa|ecdsa|ed25519).*|.*\.p12|.*\.pfx|\.npmrc|\.netrc|\.pypirc|\.git-credentials|credentials.*|.*\.tfstate.*|.*\.tfvars|secrets\..*|.*\.keystore|.*\.jks|service-account.*\.json)$/i;
 
 /** Whether a file must never be indexed because it likely holds secrets. */
 export const isSecret = (file: string): boolean => SECRET.test(path.basename(file));
 
-/** A file a skipped directory holds. */
-export const inSkippedDir = (rel: string): boolean => rel.split('/').slice(0, -1).some((d) => SKIP_DIRS.has(d));
+/** A file in a skipped or hidden (dot) directory, which the full build's walk never enters. */
+export const inSkippedDir = (rel: string): boolean => rel.split('/').slice(0, -1).some((d) => SKIP_DIRS.has(d) || d.startsWith('.'));
 
 /** A minimal glob (`**`, `*`, `?`, `{a,b}`) as a regex over a /-separated relative path, for files.exclude. */
 export function globToRegex(glob: string): RegExp {
@@ -177,6 +178,34 @@ export class ProjectIndex {
   allowed(rel: string): boolean {
     if (!rel || rel.startsWith('../') || path.isAbsolute(rel) || rel.split('/').includes('..')) return false;
     return !isSecret(rel) && !inSkippedDir(rel) && !this.exclude.some((re) => re.test(rel));
+  }
+
+  /**
+   * Changed files from the watcher, through the same filters as the full build: name rules here,
+   * .gitignore by `git check-ignore` (in a git folder), then update(). Ignored files are dropped.
+   */
+  async updateMany(rels: string[]): Promise<void> {
+    const norm = rels.map((r) => r.split(path.sep).join('/'));
+    const ignored = await this.ignored(norm.filter((r) => this.allowed(r)));
+    for (const rel of norm) {
+      if (ignored.has(rel)) this.remove(rel);
+      else await this.update(rel);
+    }
+  }
+
+  /** Which of `rels` git ignores; none outside a git folder. Fails closed: if git errors in a repo, all are ignored. */
+  private ignored(rels: string[]): Promise<Set<string>> {
+    if (!rels.length) return Promise.resolve(new Set());
+    return new Promise((resolve) => {
+      const child = spawn('git', ['check-ignore', '-z', '--stdin'], { cwd: this.root, stdio: ['pipe', 'pipe', 'ignore'] });
+      let out = '';
+      child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d));
+      child.on('error', () => resolve(new Set()));
+      // 0: some ignored, 1: none, 128: not a git folder (no .gitignore to respect).
+      child.on('close', (code) => resolve(code === 0 || code === 1 ? new Set(out.split('\0').filter(Boolean)) : code === 128 ? new Set() : new Set(rels)));
+      child.stdin.on('error', () => {});
+      child.stdin.end(rels.join('\0') + '\0');
+    });
   }
 
   /** Every file to index: git's list (tracked + untracked, .gitignore respected) or, outside git, a walk. */

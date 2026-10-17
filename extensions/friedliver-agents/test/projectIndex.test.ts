@@ -109,6 +109,31 @@ describe('what is never indexed', () => {
     expect(ix.has('in.ts')).toBe(true);
   });
 
+  it('applies the full build\'s filters to watcher updates too', async () => {
+    const root = await project({ '.gitignore': 'logs/\n*.gen.ts\n', 'ok.ts': 'fine' }, true);
+    const ix = await build(root);
+    const later: Record<string, string> = {
+      'logs/a.ts': 'leakword',
+      'b.gen.ts': 'leakword',
+      '.hidden/c.ts': 'leakword',
+      '.npmrc': 'leakword',
+      'deploy/prod.tfvars': 'leakword',
+      'terraform.tfstate.backup': 'leakword',
+      'credentials.json': 'leakword',
+      'service-account-prod.json': 'leakword',
+      'secrets.yaml': 'leakword',
+      'app.keystore': 'leakword',
+      'new.ts': 'leakword',
+    };
+    for (const [rel, text] of Object.entries(later)) {
+      await mkdir(path.dirname(path.join(root, rel)), { recursive: true });
+      await writeFile(path.join(root, rel), text);
+    }
+    await ix.updateMany(Object.keys(later));
+    expect(ix.search('leakword', 50).map((h) => h.rel)).toEqual(['new.ts']);
+    for (const s of ['.netrc', '.pypirc', '.git-credentials', 'x.jks']) expect(isSecret(s), s).toBe(true);
+  });
+
   it('returns no content from a file swapped for a symlink after indexing', async () => {
     const outside = await project({ 'leak.ts': 'needle outsidesecret' });
     const root = await project({ 'a.ts': 'needle inside' });
