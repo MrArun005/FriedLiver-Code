@@ -387,6 +387,11 @@ button.link {
   background: none;
   color: var(--link);
 }
+/* Beside the numbered choices, a link so it doesn't read as one more. */
+.actions .pop:has(> button.always-allow) {
+  margin-left: var(--sp-2);
+  align-self: center;
+}
 button.link:hover:not(:disabled) {
   text-decoration: underline;
   text-underline-offset: 3px;
