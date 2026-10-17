@@ -2066,70 +2066,326 @@ svg[data-lit] .map-file-line:not(.lit) {
   gap: var(--sp-1);
 }
 
-/* ---- Images ---- */
+/* ---- Images: a tab per chat, source filters, a grid of thumbnails, a large preview ---- */
 
-.images {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  align-content: start;
-  gap: var(--sp-2);
-  height: 100%;
-  padding: var(--sp-2);
-  overflow-y: auto;
-}
-.images figure {
+.gallery {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  margin: 0;
+  min-height: 0;
+  height: 100%;
 }
-.images .thumb {
-  aspect-ratio: 4 / 3;
-  padding: var(--sp-1);
+/* Inside the Agent Manager the page scrolls, not the gallery. */
+.mgr-view .gallery {
+  height: auto;
+}
+/* The chat strip's tabs (.tabs, .tab-wrap, .tab), with a count where the × would be. */
+.gallery-tabs {
+  flex: none;
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.gallery-tabs button.tab {
+  padding: 0 6px 0 var(--sp-1);
+}
+.tab-count {
+  flex: none;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+button.tab[aria-selected='true'] .tab-count {
+  color: var(--sel-fg);
+}
+.gallery-bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+}
+.gallery-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+button.filter-chip {
+  height: 22px;
+  gap: 6px;
+  padding: 0 var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-8);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--t-90);
+}
+button.filter-chip:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--hover-bg);
+}
+button.filter-chip[aria-pressed='true'] {
+  border-color: transparent;
+  color: var(--sel-fg);
+  background: var(--sel-bg);
+}
+.filter-count {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+button.filter-chip[aria-pressed='true'] .filter-count {
+  color: var(--sel-fg);
+}
+.gallery-search {
+  width: min(280px, 100%);
+}
+/* As many columns as fit, never a gutter wider than the gap. */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 168px), 1fr));
+  align-content: start;
+  gap: var(--sp-4) var(--sp-3);
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-4) var(--sp-4);
+  overflow-y: auto;
+  list-style: none;
+}
+.mgr-view .gallery-grid {
+  overflow: visible;
+}
+.mgr-view .gallery-tabs,
+.mgr-view .gallery-bar,
+.mgr-view .gallery-grid {
+  padding-left: 0;
+  padding-right: 0;
+}
+.gallery-item {
+  min-width: 0;
+}
+button.gallery-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-6);
+  background: none;
+  white-space: normal;
+  text-align: left;
+}
+button.gallery-card:hover:not(:disabled) {
+  background: none;
+}
+button.gallery-card:focus-visible {
+  outline: none;
+}
+.gallery-thumb {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
   background: var(--input-bg);
 }
-.images .thumb:hover:not(:disabled) {
-  border-color: var(--border);
+.gallery-card:hover .gallery-thumb {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--fg));
 }
-.images .thumb img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: 4px;
+.gallery-card:focus-visible .gallery-thumb {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
-.images figcaption {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  min-width: 0;
+.gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+.gallery-thumb img[data-fit='whole'] {
+  padding: var(--sp-2);
+  object-fit: scale-down;
+  object-position: center;
+}
+.gallery-thumb[data-state='wait'] {
+  background: linear-gradient(90deg, var(--input-bg), var(--hover-bg), var(--input-bg)) 0 0 / 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.gallery-ext {
+  padding: 2px 6px;
+  border-radius: var(--r-3);
+  background: var(--code-bg);
+  color: var(--fg-2);
+  font-family: var(--mono);
   font-size: var(--t-85);
 }
-.caption {
+.gallery-title,
+.gallery-meta,
+.gallery-chat-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lightbox {
+.gallery-title {
+  color: var(--fg);
+}
+.gallery-meta,
+.preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.gallery-meta > * + *::before,
+.preview-meta > * + *::before {
+  content: '·';
+  margin-right: 6px;
+}
+.gallery-chat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.preview-meta .gallery-chat {
+  display: inline-flex;
+  font-size: inherit;
+}
+.gallery-time {
+  flex: none;
+}
+.gallery-empty {
+  margin: var(--sp-4);
+  padding: 40px var(--sp-4);
+  border-radius: var(--r-8);
+  background: var(--input-bg);
+  color: var(--fg-2);
+  text-align: center;
+}
+.mgr-view .gallery-empty {
+  margin: var(--sp-4) 0;
+}
+.gallery-empty h2 {
+  margin-bottom: var(--sp-1);
+  font-size: var(--t-title);
+  font-weight: 600;
+  color: var(--fg);
+}
+.gallery-empty p {
+  margin: 0;
+}
+
+/* The preview: a dialog over the 75% overlay, the image as large as the view allows. */
+.gallery-overlay {
   position: fixed;
+  z-index: var(--z-overlay);
   inset: 0;
-  z-index: 40;
+  display: flex;
+  padding: var(--sp-4);
+  background: var(--overlay);
+  animation: var(--fade-menu);
+}
+.gallery-preview {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  padding: var(--sp-5);
-  background: color-mix(in srgb, var(--bg) 90%, transparent);
-  cursor: zoom-out;
-}
-.lightbox img {
-  max-width: 100%;
-  max-height: calc(100% - 40px);
-  object-fit: contain;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--dialog-border);
   border-radius: var(--r-8);
-  box-shadow: var(--shadow-ctx);
+  background: var(--dialog-bg);
+  outline: none;
+}
+.preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.preview-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.preview-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-title);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.preview-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-2);
+}
+.preview-img {
+  justify-self: center;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  border-radius: var(--r-4);
+}
+.preview-stage .preview-img {
+  max-height: calc(100vh - 160px);
+}
+.preview-none {
+  justify-self: center;
+  color: var(--fg-2);
+}
+button.preview-nav {
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-round);
+  background: var(--menu-bg);
+  color: var(--fg-2);
+}
+button.preview-nav:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--hover-bg);
+}
+button.preview-nav[data-dir='prev'] .icon {
+  transform: rotate(90deg);
+}
+button.preview-nav[data-dir='next'] .icon {
+  transform: rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gallery-thumb[data-state='wait'] {
+    animation: none;
+  }
 }
 
 .task-options {
