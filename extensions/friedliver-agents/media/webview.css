@@ -3302,9 +3302,10 @@ body[data-surface='chat'] {
 .transcript > * + .user-msg {
   margin-top: var(--turn-gap);
 }
+/* Your message's box spans the transcript, however short, like Claude Code's prompt box. */
 .user-msg .bubble {
   position: relative;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   margin: var(--sp-1) 0;
   padding: var(--sp-1) 6px;
@@ -3375,9 +3376,10 @@ button.msg-more {
   max-width: 120px;
   border-radius: var(--r-4);
 }
+/* In the box's top-right corner: floated so text wraps around it, with negative margins so a one-line box doesn't grow. */
 button.rewind-btn {
-  flex: none;
-  margin-top: 6px;
+  float: right;
+  margin: -2px -4px -6px var(--sp-2);
   color: var(--fg-2);
   opacity: 0;
 }

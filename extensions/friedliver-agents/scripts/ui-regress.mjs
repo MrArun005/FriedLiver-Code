@@ -934,6 +934,51 @@ BLOCKS.ACCOUNTS = async () => {
   }
 };
 
+// ---- FULLWIDTH: your message's box spans the transcript, however short (like Claude Code's prompt box) ----
+BLOCKS.FULLWIDTH = async () => {
+  const content = (p) =>
+    p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      const cs = window.getComputedStyle(t);
+      return t.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    });
+  const width = (p, sel) => p.locator(sel).first().evaluate((e) => e.getBoundingClientRect().width);
+  for (const w of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', w, 800);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    const filler = { kind: 'agent', at: Date.now(), text: Array.from({ length: 40 }, (_, n) => `Line ${n + 1}.`).join('\n\n') };
+    c5.items = [{ kind: 'user', text: 'Fix the login bug.', images: [], checkpoint: 'turn-1' }, filler, ...c5.items];
+    await snapshot(p, state, 'chat-c5');
+    await p.waitForTimeout(200);
+    const want = await content(p);
+    const left = await p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      return t.getBoundingClientRect().left + parseFloat(window.getComputedStyle(t).paddingLeft);
+    });
+    const box = await p.locator('.user-msg .bubble').first().evaluate((e) => e.getBoundingClientRect().toJSON());
+    check(Math.abs(box.width - want) <= 0.5 && Math.abs(box.left - left) <= 0.5, `at ${w}px a 4-word message's box spans the transcript [${Math.round(box.width)} of ${Math.round(want)}]`);
+    const text = await p.locator('.user-msg .bubble-text').first().evaluate((e) => window.getComputedStyle(e).textAlign);
+    check(/start|left/.test(text), 'its text stays left');
+    // The sticky copy, once scrolled past.
+    await p.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
+    await p.waitForTimeout(100);
+    await p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      t.scrollTop = document.querySelector('.user-msg').getBoundingClientRect().bottom - t.getBoundingClientRect().top + 300;
+    });
+    await p.waitForTimeout(200);
+    const sticky = await width(p, '.sticky-prompt .bubble').catch(() => -1);
+    check(Math.abs(sticky - want) <= 0.5, `at ${w}px the sticky copy spans it too [${Math.round(sticky)}]`);
+    await p.close();
+  }
+  const q = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 800);
+  const want = await content(q);
+  const queued = await width(q, '.bubble.queued').catch(() => -1);
+  check(Math.abs(queued - want) <= 0.5, `a queued message spans it too [${Math.round(queued)} of ${Math.round(want)}]`);
+  await q.close();
+};
+
 await run();
 await browser.close();
 server.kill();

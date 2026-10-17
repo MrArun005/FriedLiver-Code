@@ -947,6 +947,17 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
         <div class="user-msg" id={`msg-${msgKey}`}>
           {/* Not a button: it holds Show more and reference buttons (QA F19). */}
           <div class="bubble">
+            {item.checkpoint && !chat.busy && (
+              <button
+                type="button"
+                class="ghost icon-btn sm rewind-btn"
+                title="Rewind to here"
+                aria-label="Rewind to here"
+                onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })}
+              >
+                <Icon name="history" />
+              </button>
+            )}
             {item.text && <ClampedText text={item.text} />}
             <RefList refs={refsOf(item)} cwd={chat.cwd} />
             {item.images.length > 0 && (
@@ -958,17 +969,6 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
               </div>
             )}
           </div>
-          {item.checkpoint && !chat.busy && (
-            <button
-              type="button"
-              class="ghost icon-btn sm rewind-btn"
-              title="Rewind to here"
-              aria-label="Rewind to here"
-              onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })}
-            >
-              <Icon name="history" />
-            </button>
-          )}
         </div>
       );
     case 'agent':
