@@ -15,8 +15,8 @@ describe('agents in the editor: contributions', () => {
     for (const id of EDITOR_COMMANDS) expect((byId.get(id) as { category: string }).category).toBe('FriedLiver');
   });
 
-  it('binds Ctrl/Cmd+I in a text editor only while no other inline chat claims it', () => {
-    const binding = contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.editSelection');
+  it('binds Ctrl/Cmd+I to Inline Edit in a text editor only while no other inline chat claims it', () => {
+    const binding = contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.inlineEdit');
     expect(binding).toMatchObject({ key: 'ctrl+i', mac: 'cmd+i' });
     expect(binding.when).toContain('editorTextFocus');
     expect(binding.when).toContain('!inlineChatHasProvider');
@@ -32,6 +32,7 @@ describe('agents in the editor: contributions', () => {
 
   it('lets only the user, not a repository, choose which agent gets their code', () => {
     expect(contributes.configuration.properties['friedliver.edit.defaultAgent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'demo'] });
+    expect(contributes.configuration.properties['friedliver.inlineEdit.agent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'demo'] });
   });
 
   it('names no AI models', () => {
