@@ -4,7 +4,8 @@
 // editor side (projectIndexHost.ts) feeds it files and watches for changes.
 // ponytail: keywords only. Semantic embeddings would go beside the token index if keyword search falls short.
 import { execFile } from 'node:child_process';
-import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises';
+import { constants, type Stats } from 'node:fs';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 export const INDEX_LIMITS = {
@@ -206,24 +207,41 @@ export class ProjectIndex {
   }
 
   /**
+   * Whether `rel` may be read right now: allowed by name, a regular file (not a symlink) within the
+   * size cap, and its real path inside the folder's real path. Checked before every read, since the
+   * file can change after it was indexed.
+   */
+  private async check(rel: string): Promise<Stats | null> {
+    if (!this.allowed(rel)) return null;
+    const abs = path.join(this.root, rel);
+    const st = await lstat(abs).catch(() => null);
+    if (!st || !st.isFile() || st.size > INDEX_LIMITS.fileBytes) return null;
+    // A symlinked directory on the way out of the folder: lstat sees only the last part.
+    this.rootReal ??= await realpath(this.root).catch(() => this.root);
+    const real = await realpath(abs).catch(() => null);
+    return real && real.startsWith(this.rootReal + path.sep) ? st : null;
+  }
+
+  /** The text of an indexed file, re-checked first; drops the entry when anything is off. */
+  async read(rel: string): Promise<string | null> {
+    const text = (await this.check(rel)) ? await readText(path.join(this.root, rel)) : null;
+    if (text === null) this.remove(rel);
+    return text;
+  }
+
+  /**
    * Indexes (or re-indexes) one file, or drops it when it is gone, a symlink, outside the folder,
    * binary or too big. Returns false when a cap stopped it.
    */
   async update(rel: string): Promise<boolean> {
     rel = rel.split(path.sep).join('/');
-    if (!this.allowed(rel)) return this.remove(rel), true;
-    const abs = path.join(this.root, rel);
-    const st = await lstat(abs).catch(() => null);
-    if (!st || !st.isFile() || st.size > INDEX_LIMITS.fileBytes) return this.remove(rel), true;
+    const st = await this.check(rel);
+    if (!st) return this.remove(rel), true;
     const old = this.docs.get(rel);
     if (old && old.mtime === st.mtimeMs && old.size === st.size) return true;
-    // A symlinked directory on the way out of the folder: lstat sees only the last part.
-    this.rootReal ??= await realpath(this.root).catch(() => this.root);
-    const real = await realpath(abs).catch(() => null);
-    if (!real || (real !== this.rootReal && !real.startsWith(this.rootReal + path.sep))) return this.remove(rel), true;
     if (!old && this.docs.size >= this.options.maxFiles) return (this.capped = true), false;
-    const text = await readText(abs);
-    if (text === null) return this.remove(rel), true;
+    const text = await this.read(rel);
+    if (text === null) return true;
     const tokens = new Map<string, number>();
     let len = 0;
     for (const t of tokenize(text)) {
@@ -366,38 +384,49 @@ export class ProjectIndex {
   }
 
   /** Takes back a saved index; files that changed since are refreshed by the next update(). */
-  load(saved: unknown): void {
+  async load(saved: unknown): Promise<void> {
     const docs = (saved as { v?: number; docs?: unknown[] })?.v === 1 ? (saved as { docs: unknown[] }).docs : [];
     for (const raw of Array.isArray(docs) ? docs : []) {
       const d = raw as Doc & { tokens: [string, number][] };
-      if (typeof d?.rel !== 'string' || !this.allowed(d.rel) || !Array.isArray(d.tokens)) continue;
+      if (typeof d?.rel !== 'string' || !Array.isArray(d.tokens) || !Array.isArray(d.symbols) || !Array.isArray(d.imports)) continue;
       if (this.docs.size >= this.options.maxFiles) break;
+      // The saved file may be stale or tampered with: an entry is used only if its file passes today's checks.
+      if (!(await this.check(d.rel))) continue;
       this.add({ ...d, tokens: new Map(d.tokens) });
     }
   }
+
+  /** Matching lines of an indexed file for a search result: up to `max`, each cut to INDEX_LIMITS.line. */
+  async snippets(rel: string, query: string, max = 3): Promise<{ line: number; text: string }[]> {
+    const text = await this.read(rel);
+    return text === null ? [] : matchingLines(text, query, max);
+  }
 }
 
-/** A file's text, or null when it looks binary or can't be read. */
+/**
+ * A regular file's text, or null when it looks binary, is too big, or can't be read. Opened without
+ * following a symlink and checked on the open handle, so a swap after check() reads nothing.
+ */
 async function readText(abs: string): Promise<string | null> {
   try {
-    const fh = await open(abs, 'r');
+    const fh = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
-      const head = Buffer.alloc(8192);
-      const { bytesRead } = await fh.read(head, 0, head.length, 0);
-      if (head.subarray(0, bytesRead).includes(0)) return null;
+      const st = await fh.stat();
+      if (!st.isFile() || st.size > INDEX_LIMITS.fileBytes) return null;
+      const buf = Buffer.alloc(st.size);
+      const { bytesRead } = await fh.read(buf, 0, st.size, 0);
+      const data = buf.subarray(0, bytesRead);
+      if (data.subarray(0, 8192).includes(0)) return null;
+      return data.toString('utf8');
     } finally {
       await fh.close();
     }
-    return await readFile(abs, 'utf8');
   } catch {
     return null;
   }
 }
 
-/** Matching lines of a file for a search result: up to `max`, each cut to INDEX_LIMITS.line. */
-export async function snippets(abs: string, query: string, max = 3): Promise<{ line: number; text: string }[]> {
-  const text = await readText(abs);
-  if (text === null) return [];
+function matchingLines(text: string, query: string, max: number): { line: number; text: string }[] {
   const terms = [...new Set(query.toLowerCase().match(/[\w$]{2,}/g) ?? [])];
   // The lines holding the most distinct terms, earliest first among equals.
   const hits: { line: number; n: number }[] = [];
@@ -454,10 +483,12 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       for (const h of hits) {
         const lines = [`${shown(h.ix, h.rel)}  (score ${h.score.toFixed(2)})`];
         for (const s of h.symbols) lines.push(lineOf(s));
-        for (const s of await snippets(path.join(h.ix.root, h.rel), call.query)) lines.push(`  ${s.line}: ${s.text}`);
+        for (const s of await h.ix.snippets(h.rel, call.query)) lines.push(`  ${s.line}: ${s.text}`);
+        // The file failed its re-check and was dropped: say nothing about it.
+        if (!h.ix.has(h.rel)) continue;
         parts.push(lines.join('\n'));
       }
-      return cap(note + parts.join('\n\n'));
+      return parts.length ? cap(note + parts.join('\n\n')) : `${note}No indexed file matches "${call.query}".`;
     }
     case 'index_symbols': {
       const hits = indexes.flatMap((ix) => ix.symbols(call.name, INDEX_LIMITS.results).map((h) => ({ ...h, ix }))).slice(0, INDEX_LIMITS.results);

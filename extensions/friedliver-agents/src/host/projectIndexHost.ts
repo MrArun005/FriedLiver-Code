@@ -85,7 +85,7 @@ export class ProjectIndexHost implements vscode.Disposable {
     this.item.show();
     try {
       for (const ix of this.indexes) {
-        if (!fresh) ix.load(await readFile(this.file(ix), 'utf8').then(JSON.parse, () => undefined));
+        if (!fresh) await ix.load(await readFile(this.file(ix), 'utf8').then(JSON.parse, () => undefined));
         const files = await ix.list();
         ix.prune(new Set(files));
         for (let i = 0; i < files.length; i++) {
