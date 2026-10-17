@@ -317,7 +317,8 @@ function List({ list, cwd }: { list: ListBlock; cwd?: string }) {
 export function Code({ code, lang, class: className }: { code: string; lang: string; class?: string }) {
   const tokens = useMemo(() => highlight(code, lang), [code, lang]);
   return (
-    <pre class={`code ${className ?? ''}`}>
+    // Focusable, so a line wider than the box can be scrolled from the keyboard.
+    <pre class={`code ${className ?? ''}`} tabIndex={0} aria-label={lang ? `${lang} code` : 'Code'}>
       <code>{tokens ? tokens.map((t, i) => (t.k ? <span key={i} class={`tk-${t.k}`}>{t.v}</span> : t.v)) : code}</code>
     </pre>
   );

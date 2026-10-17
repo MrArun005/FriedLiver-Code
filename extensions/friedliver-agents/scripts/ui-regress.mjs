@@ -562,6 +562,23 @@ BLOCKS.F18 = async () => {
   }
 };
 
+// ---- F19: the transcript has no nested controls, and code that scrolls is reachable and shows it scrolls ----
+BLOCKS.F19 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 640, 800);
+  const state = fixture(Date.now()).state;
+  const c5 = state.chats.find((c) => c.id === 'chat-c5');
+  c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'Run this:\n\n```ts\nexport const SESSION_STORE_CONNECTION_STRING = process.env.SESSION_STORE_URL ?? \'redis://localhost:6379/0?pool=16&timeout=2500\';\n```' }];
+  await snapshot(p, state, 'chat-c5');
+  await p.waitForTimeout(200);
+  const pre = p.locator('pre.code').last();
+  const info = await pre.evaluate((el) => ({ over: el.scrollWidth > el.clientWidth, tab: el.tabIndex, bg: window.getComputedStyle(el).backgroundImage, attach: window.getComputedStyle(el).backgroundAttachment }));
+  check(info.over && info.tab === 0, `code that scrolls can be focused to scroll by keyboard [${JSON.stringify({ over: info.over, tab: info.tab })}]`);
+  check(/gradient/.test(info.bg) && /local/.test(info.attach), `its right edge shades while there's more [${info.attach}]`);
+  const v = await axe(p, '.transcript');
+  if (v) check(!v.some((x) => /nested-interactive|scrollable-region-focusable/.test(x)), `axe: no nested controls or unreachable scrolling [${v.join(', ')}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
