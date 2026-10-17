@@ -101,15 +101,15 @@ export interface ChatLink {
 export const MAX_LINK_DEPTH = 2;
 
 /** What an agent asked to do with another chat or agent through the FriedLiver tools. */
-export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat';
+export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload';
 
 export interface BridgeItem {
   kind: 'bridge';
   requestId: string;
   tool: BridgeTool;
-  /** Another agent (a new consultation) or an existing chat. */
-  target: { agent: AgentKey } | { chatId: string };
-  /** The question or message; empty for read_chat. */
+  /** Another agent (a new consultation), an existing chat, or FriedLiver's browser. */
+  target: { agent: AgentKey } | { chatId: string } | { browser: true };
+  /** The question or message; empty for read_chat. For the browser: the URL, the element, or what to type. */
   text: string;
   state: 'awaiting' | 'allowed' | 'denied';
 }
@@ -554,7 +554,16 @@ export function decisions(state: Pick<AppState, 'chats'>): Decision[] {
 }
 
 /** "Claude 2 wants to ask Gemini", "Claude 2 wants to read Codex 3". */
+const BROWSER_VERBS: Partial<Record<BridgeTool, string>> = {
+  browser_open: 'open a page',
+  browser_click: 'click',
+  browser_type: 'type',
+  browser_back: 'go back',
+  browser_reload: 'reload the page',
+};
+
 export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item: BridgeItem): string {
+  if ('browser' in item.target) return `${chat.label} wants to ${BROWSER_VERBS[item.tool] ?? 'use'} in the browser`;
   const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : (state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId)?.label ?? 'another chat');
   const verb = item.tool === 'ask_agent' ? 'ask' : item.tool === 'send_to_chat' ? 'message' : 'read';
   return `${chat.label} wants to ${verb} ${target}`;

@@ -689,7 +689,16 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   );
 }
 
-const BRIDGE_TOOL: Record<BridgeItem['tool'], string> = { ask_agent: 'Question', send_to_chat: 'Message', read_chat: 'Read the transcript' };
+const BRIDGE_TOOL: Record<BridgeItem['tool'], string> = {
+  ask_agent: 'Question',
+  send_to_chat: 'Message',
+  read_chat: 'Read the transcript',
+  browser_open: 'Open',
+  browser_click: 'Click',
+  browser_type: 'Type',
+  browser_back: 'Back',
+  browser_reload: 'Reload',
+};
 
 /** An agent asks to reach another agent or chat through the FriedLiver tools: a decision. */
 function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: ChatView; state: AppState; onSelect: Select }) {
