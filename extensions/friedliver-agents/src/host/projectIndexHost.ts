@@ -110,11 +110,11 @@ export class ProjectIndexHost implements vscode.Disposable {
     this.changeTimer = undefined;
     const paths = [...this.changed];
     this.changed.clear();
-    for (const abs of paths) {
+    for (const ix of this.indexes) {
       if (gen !== this.generation) return;
-      const ix = this.indexes.find((x) => abs.startsWith(x.root + path.sep));
-      // Outside every folder (or the folder itself): never indexed.
-      if (ix) await ix.update(path.relative(ix.root, abs));
+      // Outside every folder (or the folder itself): never indexed. The rest go through the full build's filters.
+      const rels = paths.filter((abs) => abs.startsWith(ix.root + path.sep)).map((abs) => path.relative(ix.root, abs));
+      if (rels.length) await ix.updateMany(rels);
     }
     if (!this.building) this.status(`$(database) Index · ${this.count().toLocaleString()} files`);
     this.scheduleSave();
