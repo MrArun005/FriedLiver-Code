@@ -45,7 +45,7 @@ import {
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useSettledOrder } from './common';
-import { AskMenu, HandoffMenu, PipeMenu } from './connect';
+import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
 import { AgentMap } from './map';
 
@@ -74,7 +74,7 @@ const toolCount = (n: number) => (n ? `${n} tool${n === 1 ? '' : 's'}` : '');
 
 /** A chat's subagents, as small cards under its own: not chats, so no composer and nothing to save. */
 function Subagents({ chat }: { chat: ChatView }) {
-  return <SubCards label={`Subagents of ${chat.label}`} subs={subagents(chat)} onOpen={(id) => openSub(chat.id, id)} />;
+  return <SubCards label={`Subagents of ${chat.title}`} subs={subagents(chat)} onOpen={(id) => openSub(chat.id, id)} />;
 }
 
 /** `onOpen` (optional): a FriedLiver chat's subagent opens its card in the chat; an outside session's has nowhere to go but resuming that session, so it is just shown. */
@@ -638,7 +638,7 @@ function BadgeView({ badge }: { badge: Badge }) {
     else if (badge.group) document.getElementById(`group-${badge.group}`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   };
   return (
-    <button class="badge" data-kind={badge.kind} onClick={go} title={`${badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
+    <button class="badge" data-kind={badge.kind} onClick={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
       <Icon name={BADGE_ICON[badge.kind]} />
       <span class="badge-text">{badge.text}</span>
     </button>
@@ -673,22 +673,21 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       }}
     >
       <div class="card-top">
-        <Glyph agent={chat.agent} />
+        <Glyph agent={chat.agent} size="sm" />
         <span class="card-who" title={chat.label}>
           {agentName(chat.agent)}
         </span>
-        <span class="sep">·</span>
-        <span title="Started">{model.age}</span>
         <span class="spacer" />
         <AutoBadge chat={chat} short />
         {(reportedMode(chat.session)?.tone === 'full' || reportedMode(chat.session)?.tone === 'auto') && chat.approval !== 'full' && <ModeBadge session={chat.session} agent={chat.agent} />}
         {chat.merged && <span class="tag">merged</span>}
-        {chat.branch && (
-          <span class="chip" title={`${chat.branch}\n${chat.cwd}`}>
-            <Icon name="branch" />
-            <span class="chip-text">{chat.branch}</span>
-          </span>
-        )}
+        {/* Connections: out of sight until the card is hovered or has focus; ⋯ holds them too. */}
+        <span class="card-connect">
+          <HandoffMenu chat={chat} compact />
+          <AskMenu chat={chat} compact />
+          <PipeMenu chat={chat} compact />
+        </span>
+        <CardMore chat={chat} canMerge={canMerge} changes={files > 0 || !!chat.branch} archive={archive} />
       </div>
       <h3 class="card-title">
         <button class="title-btn" title={chat.title} onClick={() => open(chat.id)}>
@@ -715,16 +714,15 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         ))}
       <Decide chat={chat} line={line} />
       {progress && <Steps progress={progress} />}
-      {(files > 0 || chat.turns > 0 || badges.length > 0 || conflicts.length > 0) && (
-        <div class="card-meta">
-          {files > 0 && (
-            <span class="meta-item">
-              <Icon name="file" /> {files} file{files === 1 ? '' : 's'}
-            </span>
-          )}
-          {chat.turns > 0 && (
-            <span class="meta-item">
-              {chat.turns} turn{chat.turns === 1 ? '' : 's'}
+      <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${chat.turns} turn${chat.turns === 1 ? '' : 's'} · started ${model.age} ago`}>
+        {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, chat.turns > 0 ? `${chat.turns} turn${chat.turns === 1 ? '' : 's'}` : undefined, model.age].filter(Boolean).join(' · ')}
+      </div>
+      {(chat.branch || badges.length > 0 || conflicts.length > 0) && (
+        <div class="card-pills">
+          {chat.branch && (
+            <span class="chip" title={`${chat.branch}\n${chat.cwd}`}>
+              <Icon name="branch" />
+              <span class="chip-text">{chat.branch}</span>
             </span>
           )}
           {conflicts.slice(0, 2).map((c) => (
@@ -739,87 +737,74 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
           ))}
         </div>
       )}
-      <div class="card-actions">
-        {chat.busy && (
-          <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-            <Icon name="stop" /> Stop
-          </button>
-        )}
-        {canMerge && !line.decision && (
-          <button class="sm" onClick={() => send({ type: 'merge', chatId: chat.id })}>
-            <Icon name="merge" /> Merge
-          </button>
-        )}
-        <HandoffMenu chat={chat} />
-        <AskMenu chat={chat} />
-        <PipeMenu chat={chat} />
-        <span class="spacer" />
-        {(files > 0 || chat.branch) && (
-          <button class="ghost icon-btn sm" title="Changes" aria-label="Changes" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
-            <Icon name="diff" />
-          </button>
-        )}
-        <button class="ghost icon-btn sm" title="Open chat" aria-label="Open chat" onClick={() => open(chat.id)}>
-          <Icon name="open" />
-        </button>
-        <Popover label={`More for ${chat.label}`} title="More" align="end" buttonClass="ghost icon-btn sm" trigger={<Icon name="more" />}>
-          {(close) => (
-            <>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  send({ type: 'viewChanges', chatId: chat.id });
-                }}
-              >
-                <Icon name="diff" /> Changes
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  send({ type: 'renameChat', chatId: chat.id });
-                }}
-              >
-                <Icon name="rename" /> Rename chat
-              </button>
-              {canMerge && (
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    close();
-                    send({ type: 'merge', chatId: chat.id });
-                  }}
-                >
-                  <Icon name="merge" /> Merge into main
-                </button>
-              )}
-              {chat.branch && !chat.busy && (
-                <button
-                  role="menuitem"
-                  class="danger"
-                  onClick={() => {
-                    close();
-                    send({ type: 'removeWorktree', chatId: chat.id });
-                  }}
-                >
-                  <Icon name="trash" /> Delete worktree
-                </button>
-              )}
-              <button
-                role="menuitem"
-                onClick={() => {
-                  close(false);
-                  archive();
-                }}
-              >
-                <Icon name="archive" /> Archive
-              </button>
-            </>
+      {/* The one primary action, when there is one: Stop while it runs, Merge when its branch is ready. */}
+      {(chat.busy || (canMerge && !line.decision)) && (
+        <div class="card-actions">
+          {chat.busy ? (
+            <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+              <Icon name="stop" /> Stop
+            </button>
+          ) : (
+            <button class="sm" onClick={() => send({ type: 'merge', chatId: chat.id })}>
+              <Icon name="merge" /> Merge
+            </button>
           )}
-        </Popover>
-      </div>
+        </div>
+      )}
     </article>
+  );
+}
+
+/** ⋯ on a card: open it, its changes, the connections (also on hover), and the rest. */
+function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMerge: boolean; changes: boolean; archive(): void }) {
+  // Ask needs its form: ⋯ opens the card's own Ask.
+  const ask = () => document.querySelector<HTMLButtonElement>(`[data-nav="${CSS.escape(chat.id)}"] .card-connect [aria-haspopup="dialog"]`)?.click();
+  return (
+    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn sm card-more" trigger={<Icon name="more" />}>
+      {(close) => (
+        <>
+          <button role="menuitem" onClick={() => (close(false), open(chat.id))}>
+            <Icon name="open" /> Open chat
+          </button>
+          {changes && (
+            <button role="menuitem" onClick={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))}>
+              <Icon name="diff" /> View changes
+            </button>
+          )}
+          <button role="menuitem" onClick={() => (close(false), ask())}>
+            <Icon name="ask" /> Ask another agent…
+          </button>
+          <div class="pop-sep" role="separator" />
+          <div class="pop-title" aria-hidden="true">Hand off to</div>
+          {AGENT_KEYS.map((agent) => (
+            <button key={agent} role="menuitem" onClick={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}>
+              <Glyph agent={agent} size="sm" />
+              <span class="grow">{agentName(agent)}</span>
+              {agent === chat.agent && <span class="hint">new chat</span>}
+            </button>
+          ))}
+          <div class="pop-sep" role="separator" />
+          <PipeTargets chat={chat} close={close} />
+          <div class="pop-sep" role="separator" />
+          <button role="menuitem" onClick={() => (close(), send({ type: 'renameChat', chatId: chat.id }))}>
+            <Icon name="rename" /> Rename chat
+          </button>
+          {canMerge && (
+            <button role="menuitem" onClick={() => (close(), send({ type: 'merge', chatId: chat.id }))}>
+              <Icon name="merge" /> Merge into main
+            </button>
+          )}
+          {chat.branch && !chat.busy && (
+            <button role="menuitem" class="danger" onClick={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))}>
+              <Icon name="trash" /> Delete worktree
+            </button>
+          )}
+          <button role="menuitem" onClick={() => (close(false), archive())}>
+            <Icon name="archive" /> Archive
+          </button>
+        </>
+      )}
+    </Popover>
   );
 }
 
@@ -853,9 +838,12 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
             return (
               <article key={c.id} class="compare-col" data-status={status}>
                 <div class="compare-top">
-                  <Glyph agent={c.agent} />
-                  <button class="title-btn" onClick={() => open(c.id)}>
-                    {c.label}
+                  <Glyph agent={c.agent} size="sm" />
+                  <span class="compare-agent" title={c.label}>
+                    {agentName(c.agent)}
+                  </span>
+                  <button class="title-btn compare-topic" title={c.title} onClick={() => open(c.id)}>
+                    {c.title}
                   </button>
                   <Dot state={status} />
                   <span class="hint">{DOT_LABEL[status]}</span>
@@ -1112,7 +1100,7 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
           {sorted.map((c) => (
             <li key={c.id} class="history-row">
               <Glyph agent={c.agent} size="sm" />
-              <span class="history-label">{c.label}</span>
+              <span class="history-label" title={c.label}>{agentName(c.agent)}</span>
               <button class="title-btn history-title" title={c.title} onClick={() => open(c.id)}>
                 {c.title}
               </button>

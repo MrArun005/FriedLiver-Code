@@ -136,8 +136,8 @@ export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: b
               }}
             >
               <Glyph agent={c.agent} size="sm" />
-              <span class="menu-label">{c.label}</span>
-              <span class="menu-sub">{clip(c.title, 34)}</span>
+              <span class="menu-label">{clip(c.title, 40)}</span>
+              <span class="menu-sub">{AGENT_FACES[c.agent].name}</span>
               {pipe ? <span class="tag on">{pipe.active ? 'piping' : 'paused'} · stop</span> : null}
             </button>
           );

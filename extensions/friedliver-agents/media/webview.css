@@ -1079,8 +1079,8 @@ button.count-item .icon {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 10px;
-  padding: 14px var(--sp-4) 10px;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--menu-bg);
@@ -1179,10 +1179,14 @@ button.count-item .icon {
   color: var(--fg-2);
   font-weight: 500;
 }
+/* At most two lines, then an ellipsis; the whole title is in the tooltip. */
 .card-title {
-  font-size: var(--t-title);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--t-100);
   font-weight: 600;
-  letter-spacing: -0.01em;
   line-height: 1.35;
 }
 .title-btn {
@@ -1236,14 +1240,25 @@ button.count-item .icon {
   color: var(--fg-2);
   overflow-wrap: anywhere;
 }
+/* Files, turns and age: one muted line. */
 .card-meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  font-size: var(--t-90);
+  overflow: hidden;
+  font-size: var(--t-85);
+  line-height: 1.5;
   color: var(--fg-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Branch, links and shared files: one row of pills that wraps. */
+.card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  min-width: 0;
 }
 .meta-item {
   display: inline-flex;
@@ -1265,12 +1280,34 @@ button.count-item .icon {
   white-space: normal;
   text-align: left;
 }
+.card-top .card-connect + .pop,
+.card-top .card-more {
+  flex: none;
+}
 .card-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 2px;
   min-width: 0;
+  min-height: 26px;
+}
+.card-actions > button.sm {
+  flex: none;
+  white-space: nowrap;
+}
+/* Hand off, Ask and Pipe to: on hover or keyboard focus only (they are in ⋯ as well). */
+.card-connect {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--ease-toggle);
+}
+.task-card:hover .card-connect,
+.task-card:focus-within .card-connect,
+.task-card:focus .card-connect {
+  opacity: 1;
 }
 
 /* Compare: one column per chat of a fan-out. */
@@ -1331,7 +1368,22 @@ button.count-item .icon {
   gap: var(--sp-2);
   font-size: var(--t-90);
 }
+.compare-top {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.compare-agent {
+  flex: none;
+  color: var(--fg-2);
+}
+/* The topic gets a line of its own under the agent, status and numbers. */
 .compare-top .title-btn {
+  flex: 1 0 100%;
+  order: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   font-size: var(--t-100);
 }
