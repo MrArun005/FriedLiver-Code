@@ -55,7 +55,7 @@ async function open(width, height = 900, query = QUERY) {
   await page.waitForSelector('.composer textarea');
   await page.evaluate(() => document.fonts.ready);
   await page.evaluate((sizes) => {
-    const images = sizes.map(([w, h], n) => {
+    const images = sizes.map(([w, h]) => {
       const c = document.createElement('canvas');
       c.width = w;
       c.height = h;
