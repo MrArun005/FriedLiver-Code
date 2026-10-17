@@ -2454,12 +2454,13 @@ button.sa-name:hover {
 
 /* ---- Menus above the composer (§2.3–2.6): model, modes, / and the typeahead ---- */
 
+/* Measured from the composer's outer edge: the menu spans its border, 8px above it. */
 .cc-menu {
   position: absolute;
   z-index: var(--z-menu);
-  left: 0;
-  right: 0;
-  bottom: 100%;
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 1px);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2576,6 +2577,10 @@ button.cc-item[aria-checked='true'] .cc-item-desc {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+/* Two-line rows: each line 1.2em. */
+.cc-model-menu .cc-item-text,
+.cc-modes-menu .cc-item-text {
   line-height: 1.2em;
 }
 .cc-item-name {
@@ -3565,7 +3570,7 @@ button.image-thumb,
   border-radius: var(--r-4);
   background: var(--menu-bg);
   color: var(--fg);
-  line-height: 1.25;
+  line-height: 1.15;
   text-align: left;
 }
 button.cc-map-node:hover {
