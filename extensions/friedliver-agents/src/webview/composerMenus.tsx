@@ -1,9 +1,9 @@
 // The composer's bottom-row menus: Select a model, Modes, the / menu, and the
 // Agent map. Each opens above the composer (the map is a modal); Esc closes.
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
-import { APPROVAL_HINTS, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
+import { APPROVAL_HINTS, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { sameAgents, sameControls, shortDuration, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
 
@@ -95,7 +95,8 @@ function ToggleRow({ chat, option }: { chat: ChatView; option: SessionOption }) 
 /** Up/Down move through a menu's items; Esc closes. */
 function useMenuKeys(close: () => void) {
   const panel = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  // Before paint, so a key pressed right after opening already lands in the menu.
+  useLayoutEffect(() => {
     panel.current?.querySelector<HTMLElement>('input, [aria-checked="true"], [role^="menuitem"]')?.focus();
   }, []);
   const onKeyDown = (e: KeyboardEvent) => {
@@ -159,8 +160,10 @@ export function ModelMenu({ chat, close }: MenuProps) {
 export function ModesMenu({ chat, close }: MenuProps) {
   const { panel, onKeyDown } = useMenuKeys(close);
   const agent = AGENT_FACES[chat.agent].name;
-  const now = currentMode(chat);
-  const inPlan = now === 'plan';
+  // The agent's own, more permissive mode wins the check: the rows must not claim Manual while it bypasses.
+  const override = agentOverride(chat.approval ?? 'ask', chat.session);
+  const now = override ? (override.cls === 'auto' ? 'full' : null) : currentMode(chat);
+  const inPlan = planning(chat.session);
   const plan = planToggle(chat.session);
   const own = modeOption(chat.session);
   // The agent's modes the four rows don't cover (e.g. Bypass permissions), behind More modes….
@@ -440,6 +443,16 @@ function sameControlsAndAgents<T extends { chat: ChatView; linked: ChatView[]; s
 
 export const ModeButton = memo(function ModeButton({ chat, open }: { chat: ChatView; open: (m: ComposerMenu) => void; samples?: number[] }) {
   const m = currentMode(chat);
+  const agent = AGENT_FACES[chat.agent].name;
+  const override = agentOverride(chat.approval ?? 'ask', chat.session);
+  if (override) {
+    return (
+      <button type="button" class="cc-mode" data-warn={override.tone} title={`${agent} is in ${override.name} — it won't ask. Click to change.`} aria-label={`Mode: ${override.name} (${agent}'s own mode, it won't ask)`} onClick={() => open('modes')}>
+        <Icon name="bolt" />
+        {override.name}
+      </button>
+    );
+  }
   return (
     <button type="button" class="cc-mode" data-mode={m} title={`${MODE_NAMES[m]}: ${modeHint(m, AGENT_FACES[chat.agent].name)}. Shift+Tab switches.`} aria-label={`Mode: ${MODE_NAMES[m]}`} onClick={() => open('modes')}>
       <Icon name={MODE_ICONS[m]} />

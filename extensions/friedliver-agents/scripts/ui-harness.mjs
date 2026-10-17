@@ -464,7 +464,18 @@ async function shoot() {
       await q.close();
     }
     const p = await open('surface=chat&select=chat-c6', 1200, 700);
-    check((await p.locator('.cc-mode').innerText()).trim() === 'Auto', 'the mode button reads Auto in Full auto');
+    check((await p.locator('.cc-mode').innerText()).trim() === 'Auto', 'the mode button reads Auto in Full auto (the agent’s Bypass is no more permissive)');
+    // Manual while Claude itself bypasses permissions: the button must say Bypass, loud, and the menu check it.
+    await p.evaluate(() => window.postMessage({ type: 'action', action: { t: 'approval', chatId: 'chat-c6', level: 'ask' } }, '*'));
+    await p.waitForTimeout(50);
+    const warn = p.locator('.cc-mode[data-warn="full"]');
+    check((await warn.count()) === 1 && (await warn.innerText()).trim() === 'Bypass permissions', 'Manual + the agent in Bypass permissions: the button reads Bypass permissions, in the warning style');
+    check(/won't ask/.test((await warn.getAttribute('title')) ?? ''), 'its tooltip says the agent won’t ask');
+    await warn.click();
+    check((await p.locator('.cc-modes-menu [role="menuitemradio"][aria-checked="true"]').allInnerTexts()).join().includes('Bypass permissions') && !(await p.locator('.cc-modes-menu [aria-checked="true"]:has(.cc-item-name:text-is("Manual"))').count()), 'the Modes menu checks Bypass permissions, not Manual');
+    await p.keyboard.press('Escape');
+    await p.evaluate(() => window.postMessage({ type: 'action', action: { t: 'approval', chatId: 'chat-c6', level: 'full' } }, '*'));
+    await p.waitForTimeout(50);
     const untitled = await p.evaluate(() => [...document.querySelectorAll('.composer button')].filter((b) => !b.title && !b.getAttribute('aria-label')).length);
     check(untitled === 0, 'every composer control has a tooltip or label');
     await p.evaluate(() => document.activeElement?.blur());
