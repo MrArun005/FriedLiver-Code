@@ -7,7 +7,7 @@ import { shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem 
 import { Markdown, scrollBehavior, send, useNow } from './common';
 import { Steps } from './steps';
 
-const DOT = { working: 'working', done: 'done', failed: 'error' } as const;
+const DOT = { working: 'working', done: 'done', failed: 'error', quiet: 'idle' } as const;
 const NO_WAIT = new Set<string>();
 
 const elapsed = (s: Subagent, now: number) => (s.ms !== undefined ? s.ms : s.startedAt !== undefined ? Math.max(0, now - s.startedAt) : undefined);

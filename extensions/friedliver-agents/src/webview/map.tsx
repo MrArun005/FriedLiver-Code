@@ -197,7 +197,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 <g
                   key={n.id}
                   class={`map-node map-sub ${lit && !lit.has(n.id) ? 'dim' : ''}`}
-                  data-status={n.state === 'failed' ? 'error' : n.state}
+                  data-status={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state}
                   data-agent={n.agent}
                   data-selected={sel === n.id ? '' : undefined}
                   transform={`translate(${n.x} ${n.y})`}
@@ -223,7 +223,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                   <text class="node-title" x="40" y="31">
                     {AGENT_FACES[n.agent].name}
                   </text>
-                  <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                  <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
                 </g>
               );
             })}
@@ -411,7 +411,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
   );
 }
 
-const SUB_LABEL = { working: 'Working', done: 'Done', failed: 'Problem' } as const;
+const SUB_LABEL = { working: 'Working', done: 'Done', failed: 'Problem', quiet: 'Quiet' } as const;
 
 /** The selected subagent: what it is doing or did, beside the map. Opening its chat is a choice here, not what a click does. */
 function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: AppState; outside: ClaudeSession[]; now: number; onClose(): void }) {
@@ -426,9 +426,9 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
   return (
     <aside class="map-detail" aria-label={`Subagent: ${info?.title ?? sub.title}`}>
       <div class="tip-head">
-        <Dot state={state_ === 'failed' ? 'error' : state_} />
+        <Dot state={state_ === 'failed' ? 'error' : state_ === 'quiet' ? 'idle' : state_} />
         <b>Subagent</b>
-        <span class="hint">{SUB_LABEL[state_]}{ms !== undefined ? ` · ${shortDuration(ms)}` : ''}</span>
+        <span class="hint" title={info?.note}>{SUB_LABEL[state_]}{ms !== undefined ? ` · ${shortDuration(ms)}` : ''}</span>
         <span class="spacer" />
         <button class="ghost icon-btn sm" aria-label="Close" title="Close" onClick={onClose}>
           <Icon name="close" />

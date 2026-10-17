@@ -64,13 +64,16 @@ export interface Subagent {
   /** The tool call's id, to scroll the chat to. */
   id: string;
   title: string;
-  state: 'working' | 'done' | 'failed';
+  /** `quiet`: no completion evidence, but nothing written for a long while (Claude Code sessions from outside FriedLiver). */
+  state: 'working' | 'done' | 'failed' | 'quiet';
   /** Tool calls the subagent made, when the agent says which call they ran in. */
   tools: number;
   /** Its latest step's title. */
   last?: string;
   /** Its agent type and model, when its transcript says (Claude Code sessions from outside FriedLiver). */
   about?: string;
+  /** Why it reads Quiet, e.g. "No activity for 32m", for its tooltip. */
+  note?: string;
   /** When it started running, and how long it took once it ended. */
   startedAt?: number;
   ms?: number;
@@ -123,24 +126,31 @@ export function claudeColumn(s: ClaudeSession, now: number): 'working' | 'done' 
 }
 
 const SUB_FRESH_MS = 60_000;
-// ponytail: a tool call that writes nothing for 30 min reads Done; raise it if long silent builds show up wrong.
+// ponytail: a tool call that writes nothing for 30 min reads Quiet; raise it if long silent builds show up wrong.
 const SUB_STALE_MS = 30 * 60_000;
+
+const idleFor = (ms: number) => {
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+};
 
 /**
  * Its subagents as the Manager draws a chat's. A settled one is Done or Problem. An unsettled one with its own transcript
  * works while that changed in the last minute, or while a tool call is still in flight (for up to 30 minutes). One with no
- * transcript works while the session does.
+ * transcript works while the session does. Otherwise it is Quiet: silent, but nothing says it finished.
  */
 export function claudeSubagents(s: ClaudeSession, now: number): Subagent[] {
   const sessionWorking = claudeColumn(s, now) === 'working';
   return s.subagents.map((a) => {
     const quiet = a.lastActivity === undefined ? undefined : now - a.lastActivity;
     const working = !a.end && (quiet === undefined ? sessionWorking : quiet < SUB_FRESH_MS || (!a.idle && quiet < SUB_STALE_MS));
-    const state = working ? 'working' : a.end === 'failed' ? 'failed' : 'done';
+    // Done and Problem only on evidence: silence alone is Quiet.
+    const state = working ? 'working' : a.end === 'failed' ? 'failed' : a.end === 'done' ? 'done' : 'quiet';
     return {
       id: a.id,
       title: a.title,
       state,
+      ...(state === 'quiet' ? { note: `No activity for ${idleFor(quiet ?? now - s.lastActivity)}` } : {}),
       tools: a.tools ?? 0,
       ...(a.last ? { last: a.last } : {}),
       ...(a.agentType || a.model ? { about: [a.agentType, a.model].filter(Boolean).join(' · ') } : {}),
