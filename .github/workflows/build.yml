@@ -85,10 +85,59 @@ jobs:
         if: runner.os == 'macOS'
         run: extensions/friedliver-agents/native/build.sh
       - run: node scripts/prepare.mjs
+      # A stable macOS signature: the self-signed certificate (MACOS_SIGN_P12) goes into a throwaway
+      # keychain and build.mjs signs with it, so the designated requirement names the certificate rather
+      # than this build's cdhash, and macOS keeps Desktop/Documents, mic and speech grants across updates.
+      # Without the secrets (forks) the app is ad-hoc signed as before. docs/BUILD.md: rotating it.
+      - name: Signing keychain (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          if [ -z "$MACOS_SIGN_P12" ] || [ -z "$MACOS_SIGN_IDENTITY" ]; then
+            echo "No signing secrets: the app gets an ad-hoc signature."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/friedliver-signing.keychain-db"
+          kc_pass=$(openssl rand -hex 24)
+          echo "::add-mask::$kc_pass"
+          p12="$RUNNER_TEMP/friedliver-signing.p12"
+          (umask 077 && printf '%s' "$MACOS_SIGN_P12" | base64 --decode > "$p12")
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          security import "$p12" -k "$keychain" -P "$MACOS_SIGN_P12_PASSWORD" -f pkcs12 -T /usr/bin/codesign
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pass" "$keychain" > /dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          echo "MACOS_SIGN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "MACOS_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+          echo "Signing keychain ready."
       # Downloads the Node version upstream's .nvmrc asks for (checked against nodejs.org's SHASUMS256.txt),
       # installs, runs gulp vscode-<os>-<arch>-min, then makes the installer: per-user setup .exe, .dmg or
       # .deb, in installers/.
       - run: node scripts/build.mjs --package --installer
+      # Signed with the certificate, the requirement must name its root, never a cdhash (which changes every build).
+      - name: Check the signature (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app=$(ls -d "VSCode-$TARGET"/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          requirement=$(codesign -d -r- "$app" 2>&1)
+          echo "$requirement"
+          if [ -n "${MACOS_SIGN_KEYCHAIN:-}" ]; then
+            echo "$requirement" | grep -q 'certificate root = H"' || { echo "::error::the designated requirement doesn't name the signing certificate"; exit 1; }
+            if echo "$requirement" | grep -q 'cdhash'; then echo "::error::the designated requirement is a cdhash"; exit 1; fi
+          fi
+      - name: Remove the signing keychain (macOS)
+        if: always() && runner.os == 'macOS'
+        run: |
+          keychain="$RUNNER_TEMP/friedliver-signing.keychain-db"
+          if [ -f "$keychain" ]; then security delete-keychain "$keychain" || true; fi
+          rm -f "$RUNNER_TEMP/friedliver-signing.p12"
 
       - name: Archive (Linux)
         if: runner.os == 'Linux'
@@ -96,7 +145,7 @@ jobs:
       - name: Archive (macOS)
         if: runner.os == 'macOS'
         run: |
-          # build.mjs already ad-hoc signed the app for the .dmg.
+          # build.mjs already signed the app for the .dmg (the certificate, or ad-hoc without it).
           app=$(ls -d "VSCode-$TARGET"/*.app | head -1)
           ditto -c -k --keepParent "$app" "$ARTIFACT.zip"
       - name: Archive (Windows)
