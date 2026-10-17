@@ -108,7 +108,7 @@ export type HostMessage =
   | { type: 'actions'; actions: Action[] }
   | { type: 'select'; chatId: string }
   | { type: 'attached'; images: Attachment[]; chatId?: string }
-  /** `src` (a webview URI) only when the image may be shown; else the webview shows its name. */
+  /** `src` (a data: URI the host vetted) only when the image may be shown; else the webview shows its name. */
   | { type: 'imageSrc'; path: string; src?: string }
   /** Workspace files for the "#" picker, relative to the chat's folder. */
   | { type: 'foundFiles'; chatId: string; query: string; files: string[] }

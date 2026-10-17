@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
-import { MAX_PREVIEW_BYTES, previewableImage } from '../src/host/imageAccess';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { MAX_PREVIEW_BYTES, imagePreview } from '../src/host/imageAccess';
 import type { Item } from '../src/shared/model';
 import { chatImages, humanTitle, isImagePath, stepImage } from '../src/shared/stepImages';
 
@@ -35,6 +35,8 @@ describe('which steps are images', () => {
   });
 });
 
+vi.mock('vscode', () => ({ Uri: { joinPath: (base: { path: string }, ...parts: string[]) => ({ path: [base.path, ...parts].join('/') }), file: (p: string) => ({ path: p }) } }));
+
 describe('which images the webview may load', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-img-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-out-'));
@@ -42,32 +44,39 @@ describe('which images the webview may load', () => {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });
   });
-  const write = (d: string, name: string, bytes = 10) => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const write = (d: string, name: string, bytes: Buffer = PNG) => {
     const f = path.join(d, name);
-    fs.writeFileSync(f, Buffer.alloc(bytes));
+    fs.writeFileSync(f, bytes);
     return f;
   };
 
-  it('an image inside an allowed root', async () => {
-    const f = write(dir, 'ok.png');
-    expect(await previewableImage(f, [dir])).toBe(f);
+  it('a PNG inside an allowed root comes as a data: URI', async () => {
+    expect(await imagePreview(write(dir, 'ok.png'), [dir])).toBe(`data:image/png;base64,${PNG.toString('base64')}`);
   });
-  it('nothing outside the roots, by name or through a symlink', async () => {
-    const f = write(outside, 'secret.png');
-    expect(await previewableImage(f, [dir])).toBeNull();
-    fs.symlinkSync(f, path.join(dir, 'link.png'));
-    expect(await previewableImage(path.join(dir, 'link.png'), [dir])).toBeNull();
+  it('a path outside the roots is refused', async () => {
+    expect(await imagePreview(write(outside, 'secret.png'), [dir])).toBeNull();
+    expect(await imagePreview(path.join(dir, '../', path.basename(outside), 'secret.png'), [dir])).toBeNull();
   });
-  it('only image files, and not past the size cap', async () => {
-    expect(await previewableImage(write(dir, 'notes.txt'), [dir])).toBeNull();
-    expect(await previewableImage(path.join(dir, 'missing.png'), [dir])).toBeNull();
-    fs.mkdirSync(path.join(dir, 'folder.png'));
-    expect(await previewableImage(path.join(dir, 'folder.png'), [dir])).toBeNull();
-    const big = path.join(dir, 'big.png');
-    fs.writeFileSync(big, '');
+  it('a symlink out of a root is refused', async () => {
+    fs.symlinkSync(path.join(outside, 'secret.png'), path.join(dir, 'link.png'));
+    expect(await imagePreview(path.join(dir, 'link.png'), [dir])).toBeNull();
+  });
+  it('the bytes must be an image of the kind; SVG and other files show as names', async () => {
+    expect(await imagePreview(write(dir, 'fake.png', Buffer.from('<html><script>x</script>')), [dir])).toBeNull();
+    expect(await imagePreview(write(dir, 'pic.svg', Buffer.from('<svg/>')), [dir])).toBeNull();
+    expect(await imagePreview(write(dir, 'notes.txt'), [dir])).toBeNull();
+    expect(await imagePreview(path.join(dir, 'missing.png'), [dir])).toBeNull();
+  });
+  it('not past the preview cap', async () => {
+    const big = write(dir, 'big.png');
     fs.truncateSync(big, MAX_PREVIEW_BYTES + 1);
-    expect(await previewableImage(big, [dir])).toBeNull();
+    expect(await imagePreview(big, [dir])).toBeNull();
     fs.truncateSync(big, MAX_PREVIEW_BYTES);
-    expect(await previewableImage(big, [dir])).toBe(big);
+    expect(await imagePreview(big, [dir])).toMatch(/^data:image\/png;base64,/);
+  });
+  it("the webview's local resources are the media folder only", async () => {
+    const { webviewOptions } = await import('../src/host/webviews');
+    expect(webviewOptions({ path: '/ext' } as never).localResourceRoots).toEqual([{ path: '/ext/media' }]);
   });
 });
