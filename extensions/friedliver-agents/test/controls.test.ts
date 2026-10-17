@@ -136,6 +136,18 @@ describe('what the agent advertises', () => {
     expect(option(c, second.id, 'mode')!.current).toBe('acceptEdits');
   });
 
+  it('remembers the agent’s commands and shows them in a new chat before its session starts', async () => {
+    const dir = await gitRepo();
+    const defaults = memoryDefaults();
+    const { core: c } = core(dir, { defaults });
+    const first = await c.createChat('demo');
+    await waitFor(() => live(c, first.id) && (defaults.all.demo?.commands?.length ?? 0) > 0);
+    expect(defaults.all.demo!.commands!.map((x) => x.name)).toEqual(['help', 'compact', 'review']);
+
+    const second = await c.createChat('demo');
+    expect(c.chat(second.id)!.session?.commands.map((x) => x.name)).toEqual(['help', 'compact', 'review']);
+  });
+
   it('applies a new task’s choices when its session starts', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);

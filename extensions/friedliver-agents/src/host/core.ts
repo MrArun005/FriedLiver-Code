@@ -241,6 +241,7 @@ export class AgentCore {
         update: (chatId, update) => {
           this.noteTool(chatId, update);
           this.dispatch({ t: 'update', chatId, update: compactUpdate(update), at: Date.now() });
+          if (update.sessionUpdate === 'available_commands_update') this.updateKnown(chatId);
           void this.collectImages(update);
         },
         session: (chatId, start) => this.sessionStarted(chatId, start),
@@ -380,9 +381,9 @@ export class AgentCore {
     if (level !== 'ask') view.approval = level;
     if (level === 'full') this.confirmedFull.add(chat.id);
     if (options.choices) this.chosen.set(chat.id, { ...options.choices });
-    // Pickers show the agent's last known options until its session answers.
+    // Pickers and "/" show the agent's last known options and commands until its session answers.
     const known = this.options.defaults?.get(agent);
-    if (known?.options.length) view.session = { ...EMPTY_SESSION, options: known.options, live: false };
+    if (known?.options.length || known?.commands?.length) view.session = { ...EMPTY_SESSION, options: known.options, commands: known.commands ?? [], live: false };
     this.dispatch({ t: 'created', chat: view });
     if (this.options.warmStart !== false) void this.warmStart(chat.id);
     return view;
@@ -642,10 +643,10 @@ export class AgentCore {
     if (want !== undefined && want !== mode.current) await this.applyOption(chatId, mode, want);
   }
 
-  /** The agent's options, kept as its defaults for the next chat's pickers. */
+  /** The agent's options and commands, kept as its defaults for the next chat's pickers and "/" menu. */
   private updateKnown(chatId: string): void {
     const chat = this.chat(chatId);
-    if (chat?.session?.live) this.saveDefaults(chat.agent, { options: chat.session.options.filter((o) => o.category !== 'mode') });
+    if (chat?.session?.live) this.saveDefaults(chat.agent, { options: chat.session.options.filter((o) => o.category !== 'mode'), commands: chat.session.commands });
   }
 
   /**
