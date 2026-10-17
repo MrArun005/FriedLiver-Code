@@ -790,7 +790,9 @@ async function shoot() {
       const sticky = p.locator('.sticky-prompt');
       const sh = await sticky.evaluate((el) => el.getBoundingClientRect().height).catch(() => -1);
       check(sh > 0 && sh <= 0.3 * 900 && (await lines('.sticky-prompt .bubble-text')) <= 3.05, `at ${width}px the sticky copy is 3 lines, ${Math.round(sh)}px (<= 30% of the view)`);
-      await more.click(); // collapse the in-flow one again (it is out of view; the click scrolls it in)
+      // Collapse the in-flow one again without scrolling to it (a pointer click would bring it back into view).
+      await more.evaluate((b) => b.click());
+      await p.waitForTimeout(100);
       await sticky.locator('.msg-more').click();
       await p.waitForTimeout(400);
       const back = await p.evaluate(() => {
