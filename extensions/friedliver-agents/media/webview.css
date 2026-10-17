@@ -2421,16 +2421,94 @@ button.gallery-card:focus-visible {
   min-height: 0;
   padding: var(--sp-4) var(--sp-2);
 }
+/* The image fits the canvas; zoomed, it is its scaled size, centred plus the pan, and drags. */
+.viewer-canvas {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+.viewer-canvas[data-zoomed] {
+  cursor: grab;
+}
+.viewer-canvas[data-zoomed]:active {
+  cursor: grabbing;
+}
 .preview-img {
-  justify-self: center;
   max-width: 100%;
   max-height: 100%;
   min-height: 0;
   object-fit: contain;
   border-radius: var(--r-4);
+  user-select: none;
 }
-.preview-stage .preview-img {
-  max-height: calc(100vh - 160px);
+.viewer-canvas[data-zoomed] .preview-img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+.viewer-count {
+  flex: none;
+  min-width: 48px;
+  color: var(--fg-2);
+  font-size: var(--t-90);
+  font-variant-numeric: tabular-nums;
+}
+.viewer-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: var(--sp-2);
+}
+button.viewer-scale {
+  min-width: 48px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+/* The filmstrip: the set along the bottom, the current one ringed. */
+.viewer-strip {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+button.viewer-thumb {
+  flex: none;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  background: var(--input-bg);
+  overflow: hidden;
+  opacity: 0.7;
+}
+button.viewer-thumb:hover {
+  opacity: 1;
+}
+button.viewer-thumb[aria-selected='true'] {
+  border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
+  opacity: 1;
+}
+.viewer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.viewer-thumb-name {
+  color: var(--fg-2);
+  font-size: var(--t-75);
 }
 .preview-none {
   justify-self: center;
@@ -2445,6 +2523,9 @@ button.preview-nav {
   border-radius: var(--r-round);
   background: var(--menu-bg);
   color: var(--fg-2);
+}
+button.preview-nav:disabled {
+  opacity: 0.3;
 }
 button.preview-nav:hover:not(:disabled) {
   color: var(--fg);

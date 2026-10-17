@@ -49,7 +49,9 @@ import {
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { questionGroups } from '../shared/questions';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
+import { Viewer } from './viewer';
+import { chatGallery } from '../shared/gallery';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -75,6 +77,7 @@ function App() {
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
   const [refs, setRefs] = useState<Record<string, CodeRef[]>>({});
   const [focusTick, setFocusTick] = useState(0);
+  const [viewer, setViewer] = useState<{ path: string; from: HTMLElement } | null>(null);
   const [found, setFound] = useState<{ chatId: string; query: string; files: string[] } | null>(null);
   const shown = useRef<string | undefined>(undefined);
   const { state, selected, setSelected } = useHost((m) => {
@@ -129,6 +132,7 @@ function App() {
   const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
   // Wide (the chat in the editor area): the chat list stays open beside it. Narrow: tabs and a dropdown.
 
+  const openImage = useCallback((path: string, from: HTMLElement) => setViewer({ path, from }), []);
   if (LIST) {
     // The side bar's chat list (its own activity-bar view): picking a chat opens it in the chat tab.
     return (
@@ -140,8 +144,27 @@ function App() {
     );
   }
 
+  // The image viewer: the open chat's images, transcript order, opened on the one clicked; focus goes back to it on close.
+  const gallery = viewer && chat ? chatGallery(chat, state.images) : [];
+  const viewerAt = gallery.findIndex((g) => g.path === viewer?.path);
+
   return (
     <LiveState.Provider value={state}>
+      <OpenImage.Provider value={openImage}>
+      {viewer && chat && viewerAt >= 0 && (
+        <Viewer
+          images={gallery}
+          start={viewerAt}
+          state={state}
+          now={Date.now()}
+          chatOf={(id) => state.chats.find((c) => c.id === id)}
+          onClose={() => {
+            const from = viewer.from;
+            setViewer(null);
+            requestAnimationFrame(() => from.isConnected && from.focus());
+          }}
+        />
+      )}
       <div class="chat-app">
         <TextSize />
         <Switcher state={state} active={chat?.id} onSelect={select} tabs={tabs} onClose={close} />
@@ -175,6 +198,7 @@ function App() {
         )}
         </div>
       </div>
+      </OpenImage.Provider>
     </LiveState.Provider>
   );
 }

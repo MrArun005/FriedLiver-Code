@@ -979,6 +979,70 @@ BLOCKS.FULLWIDTH = async () => {
   await q.close();
 };
 
+// ---- VIEWER: one image viewer from every entry point, with the whole set: arrows, filmstrip, counter, zoom, Esc ----
+BLOCKS.VIEWER = async () => {
+  const review = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  const count = (p) => p.locator('.viewer-count').innerText().then((t) => t.replace(/\s+/g, ' ').trim());
+  const title = (p) => p.locator('.viewer .preview-title').innerText();
+  for (const width of [1200, 640]) {
+    // A step's thumbnail: the chat's images, in transcript order.
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 800);
+    await p.waitForSelector('.step-image img');
+    const thumb = p.locator('.step-image .image-thumb').nth(1);
+    await thumb.click();
+    await p.waitForSelector('.viewer .preview-img');
+    check((await count(p)) === '2 / 2' && (await title(p)) === 'Login page mockup', `${width}: a step thumbnail opens the viewer on it, with the chat's set [${await count(p)}]`);
+    check((await p.locator('.viewer-strip .viewer-thumb').count()) === 2 && (await p.locator('.viewer-thumb[aria-selected="true"]').count()) === 1, `${width}: the filmstrip shows the set, the current one marked`);
+    await p.keyboard.press('ArrowLeft');
+    check((await count(p)) === '1 / 2' && (await title(p)) === 'Screenshot of localhost:3000/login', `${width}: ← goes to the previous image`);
+    await p.keyboard.press('ArrowLeft');
+    check((await count(p)) === '1 / 2', `${width}: and stops at the first`);
+    await p.keyboard.press('End');
+    check((await count(p)) === '2 / 2', `${width}: End goes to the last`);
+    await p.keyboard.press('Home');
+    check((await count(p)) === '1 / 2', `${width}: Home to the first`);
+    await p.locator('.viewer-thumb').nth(1).click();
+    check((await count(p)) === '2 / 2', `${width}: a filmstrip thumbnail jumps to it`);
+    await p.waitForFunction(() => document.querySelector('.viewer .preview-img')?.complete);
+    // Zoom: + in, − out, 0 back to fit; double-click toggles 100%.
+    const scale = () => p.locator('.viewer-scale').innerText().then((t) => t.trim());
+    await p.keyboard.press('+');
+    const zin = await scale();
+    await p.keyboard.press('+');
+    const zin2 = await scale();
+    await p.keyboard.press('-');
+    const zout = await scale();
+    await p.keyboard.press('0');
+    check(zin !== 'Fit' && parseInt(zin2) > parseInt(zin) && zout === zin && (await scale()) === 'Fit', `${width}: + zooms in, − out, 0 fits [${zin} ${zin2} ${zout}]`);
+    await p.locator('.viewer-canvas').dblclick();
+    const hundred = await scale();
+    await p.locator('.viewer-canvas').dblclick();
+    check(/^(100|200)%$/.test(hundred) && (await scale()) === 'Fit', `${width}: double-click toggles 100% (2× for a small image) and fit [${hundred}]`);
+    if (width === 1200 || width === 640) await p.screenshot({ path: path.join(review, `viewer-${width}.png`) });
+    await p.keyboard.press('Escape');
+    check(!(await p.locator('.viewer').count()), `${width}: Esc closes it`);
+    await p.waitForTimeout(50);
+    check(await thumb.evaluate((t) => document.activeElement === t), `${width}: focus goes back to the thumbnail`);
+    // The header's Images strip opens the same viewer.
+    await p.click('.images-pill');
+    await p.locator('.image-strip .image-thumb').first().click();
+    check((await count(p)) === '1 / 2', `${width}: the header's Images strip opens it too`);
+    await p.keyboard.press('Escape');
+    await p.close();
+  }
+  // The Images view: its tab, filter and search order.
+  const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', 1200, 900);
+  await p.waitForSelector('.gallery-card');
+  const n = await p.locator('.gallery-card').count();
+  await p.locator('.gallery-card').nth(2).click();
+  await p.waitForSelector('.viewer');
+  check((await count(p)) === `3 / ${n}` && (await p.locator('.viewer-thumb').count()) === n, `the Images view opens it on the card with its whole result [${await count(p)}]`);
+  await p.keyboard.press('ArrowRight');
+  const shown = (await p.locator('.gallery-card .gallery-title').allInnerTexts())[3];
+  check((await title(p)) === shown, `→ follows the view’s order [${await title(p)} | ${shown}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
