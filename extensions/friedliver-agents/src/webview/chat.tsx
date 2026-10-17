@@ -441,7 +441,6 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             <button class="chat-head-title" title={`${chat.title} (${chat.label}) · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
               {chat.title}
             </button>
-            {chat.session?.starting && <span class="tag">Starting {AGENT_FACES[chat.agent].name}…</span>}
             {chat.branch && (
               <span class="chip" title={chat.cwd}>
                 <Icon name="branch" />
@@ -468,7 +467,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </Popover>
         )}
         <span class="status-pill" data-state={status}>
-          {DOT_LABEL[status]}
+          {chat.session?.starting && status === 'idle' ? 'Starting' : DOT_LABEL[status]}
         </span>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />
