@@ -753,7 +753,10 @@ export function stateLine(chat: ChatView): StateLine {
     if (item?.kind === 'command') return { text: 'Wants to run a command', code: item.commandLine, decision: waiting };
     if (item?.kind === 'permission') {
       const files = item.detail?.files?.map((f) => basename(f.path)).join(', ');
-      return { text: `Asks: ${item.title}`, code: item.detail?.command?.line ?? files, decision: waiting };
+      const line = item.detail?.command?.line;
+      // A permission titled with its own command says it once.
+      if (line && line.trim() === item.title.trim()) return { text: 'Asks to run', code: line, decision: waiting };
+      return { text: `Asks: ${item.title}`, code: line ?? files, decision: waiting };
     }
     if (waiting.kind === 'bridge') {
       const bridge = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === waiting.id);

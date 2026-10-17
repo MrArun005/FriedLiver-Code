@@ -437,6 +437,24 @@ BLOCKS.F13 = async () => {
   await p.close();
 };
 
+// ---- F14: list group headers breathe; at 640 the task column gets the room ----
+BLOCKS.F14 = async () => {
+  for (const w of [1200, 640]) {
+    const p = await open('surface=tasks&theme=dark-2026&view=list', w, 900);
+    const gap = await p.locator('.group-row .col-count').first().evaluate((c) => {
+      const r = document.createRange();
+      r.selectNodeContents(c.previousSibling);
+      return Math.round(c.getBoundingClientRect().left - r.getBoundingClientRect().right);
+    });
+    check(gap >= 6, `at ${w}px the count sits apart from its group name [${gap}px]`);
+    if (w === 640) {
+      const task = await p.locator('thead .c-task').evaluate((t) => Math.round(t.getBoundingClientRect().width));
+      check(task >= 200, `at 640px the task column is wide enough to read [${task}px]`);
+    }
+    await p.close();
+  }
+};
+
 await run();
 await browser.close();
 server.kill();
