@@ -348,6 +348,10 @@ async function shoot() {
     await p.click('.cc-modes-menu [role="menuitemradio"]:has(.cc-item-name:text-is("Plan"))');
     check(JSON.stringify(await last()) === JSON.stringify({ type: 'plan', chatId: 'chat-c5', on: true }), 'Plan turns Plan mode on');
     await p.click('.cc-mode');
+    const names = await p.locator('.cc-modes-menu .cc-item-name').allInnerTexts();
+    check(names.filter((n) => n === 'Manual' || n === 'Plan').length === 2 && !names.includes('Bypass permissions') && !names.includes('Accept edits'), `Modes shows the four rows once, no duplicates [${names}]`);
+    check((await p.locator('.cc-modes-menu .cc-more-btn').getAttribute('aria-expanded')) === 'false', 'other agent modes sit behind More modes…');
+    await p.click('.cc-modes-menu .cc-more-btn');
     await p.click('.cc-modes-menu [role="menuitemradio"]:has(.cc-item-name:text-is("Bypass permissions"))');
     const mode = await last();
     check(mode?.type === 'setOption' && mode.optionId === 'mode' && mode.value === 'bypassPermissions', 'an agent mode is set as its own option');

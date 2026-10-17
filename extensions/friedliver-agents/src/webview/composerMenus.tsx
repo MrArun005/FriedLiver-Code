@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
-import { APPROVAL_HINTS, choiceName, formatCost, formatTokens, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
+import { APPROVAL_HINTS, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { sameAgents, sameControls, shortDuration, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
 
@@ -163,6 +163,9 @@ export function ModesMenu({ chat, close }: MenuProps) {
   const inPlan = now === 'plan';
   const plan = planToggle(chat.session);
   const own = modeOption(chat.session);
+  // The agent's modes the four rows don't cover (e.g. Bypass permissions), behind More modes….
+  const extra = own?.type === 'select' ? own.choices.filter((c) => !['ask', 'edits', 'plan', 'auto'].includes(modeClass(c) ?? '')) : [];
+  const [more, setMore] = useState(() => extra.some((c) => c.value === own?.current));
   const modes: (ApprovalLevel | 'plan')[] = plan ? ['ask', 'edits', 'plan', 'full'] : ['ask', 'edits', 'full'];
   const pick = (m: ApprovalLevel | 'plan') => {
     if (m === 'plan') send({ type: 'plan', chatId: chat.id, on: !inPlan });
@@ -190,30 +193,37 @@ export function ModesMenu({ chat, close }: MenuProps) {
           {now === m && <Icon name="check" />}
         </button>
       ))}
-      {own && own.type === 'select' && (
-        <div class="cc-menu-section">
-          <div class="cc-menu-sub">{agent}'s own modes</div>
-          {own.choices.map((c) => (
-            <button
-              key={c.value}
-              role="menuitemradio"
-              aria-checked={own.current === c.value}
-              class="cc-item cc-item-small"
-              title={c.description}
-              onClick={() => {
-                send({ type: 'setOption', chatId: chat.id, optionId: own.id, value: c.value });
-                close();
-              }}
-            >
-              <span class="cc-item-name">{c.name}</span>
-              {own.current === c.value && <Icon name="check" />}
-            </button>
-          ))}
-        </div>
-      )}
       <div class="cc-menu-foot">
         <EffortRow chat={chat} icon />
       </div>
+      {extra.length > 0 && (
+        <div class="cc-more">
+          <button role="menuitem" class="cc-item cc-item-line cc-more-btn" aria-expanded={more} onClick={() => setMore(!more)}>
+            <span class="cc-item-name">More modes…</span>
+            <Icon name="chevron" />
+          </button>
+          {more &&
+            extra.map((c) => (
+              <button
+                key={c.value}
+                role="menuitemradio"
+                aria-checked={own?.current === c.value}
+                class="cc-item cc-item-small"
+                title={c.description}
+                onClick={() => {
+                  send({ type: 'setOption', chatId: chat.id, optionId: own!.id, value: c.value });
+                  close();
+                }}
+              >
+                <span class="cc-item-text">
+                  <span class="cc-item-name">{c.name}</span>
+                  {c.description && <span class="cc-item-desc">{c.description}</span>}
+                </span>
+                {own?.current === c.value && <Icon name="check" />}
+              </button>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

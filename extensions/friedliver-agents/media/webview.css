@@ -4890,3 +4890,17 @@ body[data-surface='chat'] .composer-bar .composer-hint {
   font-family: inherit;
   color: var(--c-mute);
 }
+/* Modes: the agent's other modes, behind one muted row. */
+.cc-more {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--c-line);
+}
+button.cc-more-btn,
+button.cc-more-btn > .icon:last-child {
+  color: var(--c-mute);
+  font-size: var(--t-sm);
+}
+button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
+  transform: rotate(180deg);
+}
