@@ -777,6 +777,17 @@ async function shoot() {
         return { right: b.right - m.right, bottom: b.bottom - m.bottom };
       });
       check((await more.isVisible()) && (await more.innerText()).trim() === 'Show more' && (await more.getAttribute('aria-expanded')) === 'false' && corner.right >= 0 && corner.right < 16 && corner.bottom >= 0 && corner.bottom < 12, `at ${width}px Show more sits at the bottom right [${JSON.stringify(corner)}]`);
+      // No glyph under it: its box starts below the text's last shown line.
+      const clear = (scope) =>
+        p.evaluate((scope) => {
+          const box = document.querySelector(`${scope} .bubble-text`).getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(document.querySelector(`${scope} .bubble-text`));
+          const lines = [...range.getClientRects()].filter((r) => r.width && r.bottom <= box.bottom + 0.5 && r.top >= box.top - 0.5);
+          const b = document.querySelector(`${scope} .msg-more`).getBoundingClientRect();
+          return lines.length > 0 && lines.every((r) => r.bottom <= b.top + 0.5 || r.top >= b.bottom - 0.5 || r.right <= b.left || r.left >= b.right);
+        }, scope);
+      check(await clear('.user-msg'), `at ${width}px Show more covers no text`);
       if (width === 1200) await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/long-message-collapsed.png') }).catch(() => {});
       await more.click();
       check((await lines('.user-msg .bubble-text')) > 3.5 && (await more.innerText()).trim() === 'Show less' && (await more.getAttribute('aria-expanded')) === 'true', `at ${width}px Show more expands it in place and reads Show less`);
@@ -790,6 +801,7 @@ async function shoot() {
       const sticky = p.locator('.sticky-prompt');
       const sh = await sticky.evaluate((el) => el.getBoundingClientRect().height).catch(() => -1);
       check(sh > 0 && sh <= 0.3 * 900 && (await lines('.sticky-prompt .bubble-text')) <= 3.05, `at ${width}px the sticky copy is 3 lines, ${Math.round(sh)}px (<= 30% of the view)`);
+      check(await clear('.sticky-prompt'), `at ${width}px the sticky copy's Show more covers no text`);
       // Collapse the in-flow one again without scrolling to it (a pointer click would bring it back into view).
       await more.evaluate((b) => b.click());
       await p.waitForTimeout(100);
