@@ -46,7 +46,7 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -609,41 +609,111 @@ const Transcript = memo(
     a.onSelect === b.onSelect,
 );
 
+/** The ids a notification can reveal an item by (its element is item-<id>). */
+function revealIds(i: Item): string[] {
+  const ids: unknown[] = [i.kind === 'tool' ? i.id : undefined, (i as { requestId?: string }).requestId, (i as { reviewId?: string }).reviewId, (i as { commandId?: string }).commandId];
+  return ids.filter((x): x is string => typeof x === 'string');
+}
+
+/** Groups shown at first, and added each time you scroll up to the earliest one shown. */
+const WINDOW = 120;
+
 function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect }: TranscriptProps) {
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  useLayoutEffect(() => {
-    if (stick.current && box.current) box.current.scrollTop = box.current.scrollHeight;
-  });
+  // Only the newest groups are in the page; scrolling up to the first one shown brings earlier ones in.
+  const [limit, setLimit] = useState(WINDOW);
   useEffect(() => {
     stick.current = true;
+    setLimit(WINDOW);
   }, [chat.id]);
-  useEffect(() => {
-    if (!reveal) return;
-    const el = document.getElementById(`item-${reveal.id}`);
-    el?.scrollIntoView({ block: 'center' });
-    el?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, [reveal]);
   const { items, approvals } = useMemo(() => foldApprovals(chat.items), [chat.items]);
   // The marked decision card moves on when it is answered: its hint and outline follow.
   useEffect(() => syncDecisionTarget(chat), [chat.items]);
+  const groups = useMemo(() => {
+    // Keys that stay with their items (common.tsx keyItems), unique in this list.
+    const seen = new Set<string>();
+    return transcriptGroups(items).map((g) => {
+      const first = g.kind === 'steps' ? g.items[0] : g.item;
+      let key = String(itemKey(first));
+      if (seen.has(key)) key = `${key}:${g.at}`;
+      seen.add(key);
+      return { ...g, key };
+    });
+  }, [items]);
+  const shownFrom = Math.max(0, groups.length - limit);
+  const shown = shownFrom ? groups.slice(shownFrom) : groups;
+  // Keep the reading position when earlier groups come in above it.
+  const anchor = useRef<{ height: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    if (anchor.current) {
+      el.scrollTop = anchor.current.top + (el.scrollHeight - anchor.current.height);
+      anchor.current = null;
+    } else if (stick.current) el.scrollTop = el.scrollHeight;
+  });
+  const more = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = more.current;
+    if (!el || !box.current) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (!e.isIntersecting || !box.current) return;
+        anchor.current = { height: box.current.scrollHeight, top: box.current.scrollTop };
+        setLimit((n) => n + WINDOW);
+      },
+      { root: box.current, rootMargin: '400px 0px 0px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [shownFrom > 0, chat.id]);
+  useEffect(() => {
+    if (!reveal) return;
+    const at = groups.findIndex((g) => (g.kind === 'steps' ? g.items : g.kind === 'subagent' ? [g.item, ...g.steps] : [g.item]).some((i) => revealIds(i).includes(reveal.id)));
+    if (at >= 0 && at < shownFrom) {
+      setLimit(groups.length - at + 10);
+      return;
+    }
+    const el = document.getElementById(`item-${reveal.id}`);
+    el?.scrollIntoView({ block: 'center' });
+    el?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [reveal, shownFrom]);
   const lastChanges = items.map((i) => i.kind).lastIndexOf('changes');
   const waiting = new Set(chat.items.flatMap((i) => (i.kind === 'permission' && !i.answer && i.toolCallId ? [i.toolCallId] : [])));
   const waitingKey = [...waiting].join('\n');
   const waitingNow = waitingItems(chat.items).length > 0;
 
-  const asks = items.flatMap((i, at) => (i.kind === 'user' && i.text.trim() ? [{ at, text: i.text }] : []));
+  const asks = groups.flatMap((g) => (g.kind === 'one' && g.item.kind === 'user' && g.item.text.trim() ? [{ key: g.key, text: g.item.text, at: g.at }] : []));
   const jump = asks.length >= 2;
   // The message whose turn you are reading, once it has scrolled out of view: its copy sticks at the top.
-  const [past, setPast] = useState<number | undefined>();
-  const findPast = (el: HTMLElement) => {
-    const top = el.getBoundingClientRect().top;
-    const gone = [...el.querySelectorAll<HTMLElement>('.user-msg')].filter((m) => m.getBoundingClientRect().bottom <= top + 1);
-    const at = gone.length ? Number(gone.at(-1)!.id.slice(4)) : undefined;
-    if (at !== past) setPast(at);
+  // An IntersectionObserver tells which messages have gone above the view; nothing reads boxes on scroll.
+  const [past, setPast] = useState<string | undefined>();
+  useEffect(() => {
+    const root = box.current;
+    if (!root) return;
+    const above = new Map<string, boolean>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) above.set(e.target.id.slice(4), !e.isIntersecting && e.boundingClientRect.bottom <= (e.rootBounds?.top ?? 0) + 1);
+        const ids = [...root.querySelectorAll<HTMLElement>('.user-msg')].map((m) => m.id.slice(4));
+        setPast(ids.filter((id) => above.get(id)).at(-1));
+      },
+      { root },
+    );
+    for (const m of root.querySelectorAll('.user-msg')) io.observe(m);
+    return () => io.disconnect();
+  }, [asks.length, shownFrom, chat.id]);
+  const pastText = past === undefined ? undefined : asks.find((a) => a.key === past)?.text;
+  const seen = useInView(box, jump ? asks.filter((a) => a.at >= (groups[shownFrom]?.at ?? 0)).map((a) => `msg-${a.key}`) : []);
+  const show = (key: string, expand?: boolean) => {
+    const go = () => (expand ? openMessage(key) : scrollToMessage(key));
+    if (document.getElementById(`msg-${key}`)) go();
+    else {
+      setLimit(groups.length);
+      requestAnimationFrame(go);
+    }
   };
-  const pastText = past === undefined ? undefined : asks.find((a) => a.at === past)?.text;
-  const seen = useInView(box, jump ? asks.map((a) => `msg-${a.at}`) : []);
   return (
     <div class="transcript-wrap" data-jump={jump ? '' : undefined}>
     <div
@@ -652,17 +722,17 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       onScroll={(e) => {
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        findPast(el);
       }}
     >
-      {transcriptGroups(items).map((g) =>
+      {shownFrom > 0 && <div ref={more} class="transcript-more" aria-hidden="true" />}
+      {shown.map((g) =>
         g.kind === 'subagent' ? (
-          <SubagentCard key={g.at} chat={chat} item={g.item} steps={g.steps} />
+          <SubagentCard key={g.key} chat={chat} item={g.item} steps={g.steps} />
         ) : g.kind === 'steps' ? (
-          <Steps key={g.at} tools={g.items} approvals={approvals} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
+          <Steps key={g.key} tools={g.items} approvals={approvals} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
         ) : (
           <TranscriptItem
-            key={g.at}
+            key={g.key}
             item={g.item}
             chat={chat}
             state={state}
@@ -672,7 +742,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
             onSelect={onSelect}
             canUndo={g.at === lastChanges && !chat.busy}
             live={chat.busy && g.at === items.length - 1}
-            at={g.at}
+            msgKey={g.key}
           />
         ),
       )}
@@ -690,7 +760,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       {pastText && (
         <div class="sticky-prompt" aria-label="Your message for this turn">
           <div class="bubble">
-            <ClampedText text={pastText} onMore={() => openMessage(past!)} />
+            <ClampedText text={pastText} onMore={() => show(past!, true)} />
           </div>
         </div>
       )}
@@ -698,7 +768,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
         <nav class="jump-list" aria-label="In this chat">
           <b>In this chat</b>
           {asks.map((a) => (
-            <button key={a.at} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].at}`) === `msg-${a.at}` ? 'true' : undefined} onClick={() => scrollToMessage(a.at)}>
+            <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
               {clip(a.text, 60)}
             </button>
           ))}
@@ -709,13 +779,13 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
 }
 
 /** Puts your message at the top of the transcript. */
-function scrollToMessage(at: number) {
-  document.getElementById(`msg-${at}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+function scrollToMessage(key: string) {
+  document.getElementById(`msg-${key}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 /** Scrolls to your message and opens it in full there (the sticky copy never grows). */
-function openMessage(at: number) {
-  const msg = document.getElementById(`msg-${at}`);
+function openMessage(key: string) {
+  const msg = document.getElementById(`msg-${key}`);
   msg?.querySelector('.bubble-text')?.dispatchEvent(new CustomEvent('expand'));
   msg?.scrollIntoView({ block: 'start' });
 }
@@ -762,8 +832,8 @@ interface ItemProps {
   canUndo: boolean;
   /** The reply still streams in: it isn't collapsed. */
   live?: boolean;
-  /** Its index in the transcript, for the "In this chat" list. */
-  at: number;
+  /** Its stable key (keyItems), for the "In this chat" list and the sticky copy. */
+  msgKey: string;
 }
 
 /**
@@ -776,7 +846,7 @@ const TranscriptItem = memo(
   (a: ItemProps, b: ItemProps) =>
     a.item === b.item &&
     a.canUndo === b.canUndo &&
-    a.at === b.at &&
+    a.msgKey === b.msgKey &&
     a.live === b.live &&
     a.chat.id === b.chat.id &&
     a.chat.label === b.chat.label &&
@@ -789,19 +859,13 @@ const TranscriptItem = memo(
     a.onSelect === b.onSelect,
 );
 
-function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, at }: ItemProps) {
+function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKey }: ItemProps) {
   switch (item.kind) {
     case 'user':
       return (
-        <div class="user-msg" id={`msg-${at}`}>
-          <div
-            class="bubble"
-            role="button"
-            tabIndex={0}
-            title="Scroll to the top"
-            onClick={(e) => !(e.target as HTMLElement).closest('button, a') && scrollToMessage(at)}
-            onKeyDown={(e) => e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), scrollToMessage(at))}
-          >
+        <div class="user-msg" id={`msg-${msgKey}`}>
+          {/* Not a button: it holds Show more and reference buttons (QA F19). */}
+          <div class="bubble">
             {item.text && <ClampedText text={item.text} />}
             <RefList refs={refsOf(item)} cwd={chat.cwd} />
             {item.images.length > 0 && (

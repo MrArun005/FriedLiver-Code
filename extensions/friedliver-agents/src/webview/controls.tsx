@@ -344,9 +344,10 @@ const MAC = /Mac/.test(navigator.platform);
 
 /** Where the keys act: the hint shows on that card only. `n` options are numbered 1–n. */
 export function KeyHint({ chat, id, n, yes = true }: { chat: ChatView; id: string; n: number; yes?: boolean }) {
-  if (useDecisionTarget(chat) !== id) return null;
+  // Always laid out, shown only on the marked card: marking another card never moves anything under the pointer.
+  const on = useDecisionTarget(chat) === id;
   return (
-    <div class="hint keys" aria-hidden="true">
+    <div class="hint keys" data-on={on ? '' : undefined} aria-hidden="true">
       Press 1–{Math.min(9, n)} to choose{yes ? ` · ${MAC ? '⌘↩' : 'Ctrl+Enter'} yes` : ''} · {MAC ? '⌘⇧⌫' : 'Ctrl+Shift+Backspace'} no
     </div>
   );
@@ -406,14 +407,16 @@ export function decisionKey(e: KeyboardEvent, chat: ChatView, composerEmpty: boo
   const actions = waitingActions(chat);
   if (!actions) return false;
   const mod = e.ctrlKey || e.metaKey;
-  const kind = mod && !e.shiftKey && e.key === 'Enter' ? 'approve' : mod && e.shiftKey && e.key === 'Backspace' ? 'deny' : !mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code) ? 'pick' : null;
+  // A digit is the character typed (any layout), or Alt+digit by its key position (macOS turns Alt+1 into ¡).
+  const digit = !mod && /^[1-9]$/.test(e.key) ? Number(e.key) : !mod && e.altKey && /^Digit[1-9]$/.test(e.code) ? Number(e.code.slice(5)) : 0;
+  const kind = mod && !e.shiftKey && e.key === 'Enter' ? 'approve' : mod && e.shiftKey && e.key === 'Backspace' ? 'deny' : digit ? 'pick' : null;
   if (!kind) return false;
   // While a decision waits, the key is for it, never typed. Just after the marked card changed, it does nothing.
   e.preventDefault();
   if (!targets.armed(chat.id, waitingIds(chat), Date.now())) return true;
   if (kind === 'approve') actions.approve();
   else if (kind === 'deny') actions.deny();
-  else actions.pick(Number(e.code.slice(5)) - 1);
+  else actions.pick(digit - 1);
   return true;
 }
 
