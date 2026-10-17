@@ -317,3 +317,36 @@ no other metric regressing), otherwise it moves to "Tried and not kept".
 | C7 time-sliced `onStartupFinished` | theme | typing p95 in the first 5 s, with extensions | −10–40 ms | awaiting CI |
 | C2 extension host doesn't wait for the login shell (`friedliver.fastShellEnv`) | patch 0200 | `code/willLoadMainBundle-code/extHost/ready` in a "heavy shell" scenario (`.zshrc` with `sleep 0.8`), second launch on; Quick Open first result at ready + 0.5 s | 0 in the current bench (its throwaway `HOME` has no `.zshrc`); −0.3–2 s on real shells | awaiting CI |
 | C1 Node compile cache for extension host, shared process, pty host (macOS/Linux) | patch 0210 | `code/willLoadMainBundle-code/extHost/ready` and first activations, runs 2–6 (run 1 writes the cache); exthost log says `status: enabled`; `CachedData/<commit>/node/*` fills | −40–120 ms to extension host ready; main process not covered | awaiting CI |
+| C4 Chromium locale packs except English | `build.mjs` (`trimPackagedApp`, `FRIEDLIVER_KEEP_LOCALES`) | editor-bench install size; DMG size | −45 MB installed on macOS (47 MB of `.lproj` measured on the installed app) | awaiting CI |
+
+Checked for C4 and not done:
+
+- **The Agents window (`out/vs/sessions`, 23 MB) and the agent host
+  (`out/vs/platform/agentHost` + the Copilot SDK runtime).** Neither patch 0010
+  nor 0020 disables them; 0020 only defaults `chat.disableAIFeatures` to true,
+  which a user can turn back. Both are still referenced: `windowImpl.ts:1290`
+  loads `vs/sessions/electron-browser/sessions.html` for any sessions window,
+  which the `--agents` command-line flag (`argv.ts:111`) and the agent-sessions
+  workspace open (`windowsMainService.ts:1599`); `app.ts` starts the agent host
+  when AI features are on. Removing the files would turn those into a blank
+  window or a crashed process. They need a patch that removes the entry points
+  first.
+- **Mermaid dedupe (`mermaid-markdown-features`, 46 MB).** Not trivially safe:
+  `chat-webview-out` also backs "open diagram in editor"
+  (`src/editorManager.ts:172-208`), not only chat output; `notebook-out` and
+  `markdown-preview-out` are separate esbuild runs with code splitting, so the
+  identical chunks are imported by relative, hashed names from each entry, and
+  sharing them needs a build change in the extension (or symlinks, which the
+  Windows zip and asar packing don't keep).
+- **C3, gating the built-in chat stack when AI is off.** Measurement first, no
+  build needed: with `--prof-duration-markers` on
+  `code/willCreateWorkbenchContributions/1-code/didCreateWorkbenchContributions/2`
+  and `code/willLoadWorkbenchMain-code/didLoadWorkbenchMain`, plus the renderer
+  log's "Creation of workbench contribution '…' took N ms" lines and the
+  per-contribution marks `code/willCreateWorkbenchContribution/<phase>/<id>`,
+  for FriedLiver and stock VS Code 1.142 in the same editor-bench run (5 cold
+  runs each). The contributions to sum: `chat.shared.contribution`,
+  `agentSessions`, `agentHost.contribution`, `chatSubagentOpenChat`,
+  `welcomeAgentSessions`, `onboardingTryout`. Gate them (step 2) only if they
+  add up to ≥ 30 ms or the renderer heap snapshot shows ≥ 10 MB of chat
+  objects; `browserView` must stay (the Agents extension uses it).

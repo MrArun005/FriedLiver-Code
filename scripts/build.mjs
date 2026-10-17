@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CACHE_DIR, VSCODE_DIR, checkSha256, codesignArgs, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
+import { CACHE_DIR, VSCODE_DIR, checkSha256, codesignArgs, fail, isWindows, keepChromiumLocale, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
 
 const args = new Set(process.argv.slice(2));
 const wantPackage = args.has('--package');
@@ -162,7 +162,8 @@ if (args.has('--no-compile')) {
  * Removes what a FriedLiver user never runs, before installers and signing: source maps
  * (about 300 MB; Microsoft's release pipeline uploads them elsewhere) and the Copilot SDK
  * runtime (about 150 MB; packaged because the agent-host code imports it, but built-in AI
- * features are off and Copilot is gone, see patches 0010 and 0020).
+ * features are off and Copilot is gone, see patches 0010 and 0020), and Chromium's locale
+ * packs except English (about 45 MB on macOS; keepChromiumLocale, FRIEDLIVER_KEEP_LOCALES).
  */
 function trimPackagedApp(appDir) {
 	const app = process.platform === 'darwin'
@@ -187,7 +188,17 @@ function trimPackagedApp(appDir) {
 			remove(path.join(unpackedGithub, name));
 		}
 	}
-	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps and the Copilot SDK runtime from the app`);
+	const locales = process.platform === 'darwin'
+		? path.join(app, '..', '..', 'Frameworks', 'Electron Framework.framework', 'Versions', 'A', 'Resources')
+		: path.join(appDir, 'locales');
+	if (fs.existsSync(locales)) {
+		for (const name of fs.readdirSync(locales).filter(n => !keepChromiumLocale(n))) {
+			remove(path.join(locales, name));
+		}
+	} else {
+		log(`no Chromium locale folder at ${locales}; locale packs not trimmed`);
+	}
+	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps, the Copilot SDK runtime and Chromium locale packs from the app`);
 }
 
 /**
