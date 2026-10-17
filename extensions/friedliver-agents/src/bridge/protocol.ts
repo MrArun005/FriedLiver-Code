@@ -1,6 +1,7 @@
 // Lines between the FriedLiver MCP server an agent session runs (dist/bridge.js)
 // and the extension host, over a local socket: one JSON object per line.
 // The host treats every line as untrusted and checks it here first.
+import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
 
 /** Where the host listens: a Unix socket path or a Windows pipe name. */
@@ -19,6 +20,8 @@ export const BRIDGE_LIMITS = {
   last: 50,
   /** Characters in a URL or CSS selector for the browser tools. */
   url: 2048,
+  /** Characters in an index_* query, name or path. */
+  query: 512,
 };
 
 /** What an agent asks for through the FriedLiver tools. */
@@ -31,7 +34,8 @@ export type BridgeCall =
   | { tool: 'browser_open'; url: string }
   | { tool: 'browser_click'; selector?: string; text?: string }
   | { tool: 'browser_type'; selector: string; text: string }
-  | { tool: 'browser_snapshot' | 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' };
+  | { tool: 'browser_snapshot' | 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' }
+  | IndexCall;
 
 export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
 
@@ -43,6 +47,8 @@ export const EXTERNAL_CLIENT = ':external';
 
 /** An external caller's id: EXTERNAL_CLIENT and its MCP session, `:external:<session>`. */
 export const isExternal = (id: string): boolean => id === EXTERNAL_CLIENT || id.startsWith(`${EXTERNAL_CLIENT}:`);
+
+export const isIndexCall = (call: BridgeCall): call is IndexCall => call.tool.startsWith('index_');
 
 export const isBrowserCall = (call: BridgeCall): call is BrowserCall => call.tool.startsWith('browser_');
 
@@ -62,6 +68,9 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.text;
 const chatId = (v: unknown): v is string => typeof v === 'string' && CHAT_ID.test(v);
 const short = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.url;
+const query = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.query;
+/** A workspace-relative path: no absolute paths, drive letters or `..`. */
+const relPath = (v: unknown): v is string => query(v) && !/^([/\\]|[A-Za-z]:)/.test(v) && !v.split(/[/\\]/).includes('..');
 
 /** The tool call in a request, or null when anything about it is off. */
 export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
@@ -96,6 +105,16 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
     case 'browser_back':
     case 'browser_reload':
       return { tool };
+    case 'index_search': {
+      const limit = a.limit;
+      if (!query(a.query) || (limit !== undefined && !(Number.isInteger(limit) && (limit as number) >= 1 && (limit as number) <= 50))) return null;
+      return { tool, query: a.query, ...(limit !== undefined ? { limit: limit as number } : {}) };
+    }
+    case 'index_symbols':
+      return query(a.name) ? { tool, name: a.name } : null;
+    case 'index_outline':
+    case 'index_related':
+      return relPath(a.path) ? { tool, path: a.path } : null;
     default:
       return null;
   }
