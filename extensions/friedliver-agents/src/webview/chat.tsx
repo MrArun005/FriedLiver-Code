@@ -41,6 +41,7 @@ import {
   slashAction,
   slashMenu,
   switcherGroups,
+  starters,
   switcherMeta,
   transcriptGroups,
   statusOf,
@@ -1513,6 +1514,18 @@ function Composer({
   return (
     <div class="composer-dock">
       <div class="composer-col">
+        {chat.items.length === 0 && !text && (
+          <div class="starters" role="group" aria-label="Ways to start">
+            {starters(chat.agent).map((line) => (
+              <button key={line} type="button" class="starter" onClick={() => insert({ text: line, caret: line.length })}>
+                {line}
+              </button>
+            ))}
+            <p class="starter-keys hint">
+              <kbd>@</kbd> an agent or file · <kbd>/</kbd> commands · <kbd>{IS_MAC ? '⇧Tab' : 'Shift+Tab'}</kbd> switches mode
+            </p>
+          </div>
+        )}
         <div class="banners">
           {removed && (
             <div class="banner" role="status">

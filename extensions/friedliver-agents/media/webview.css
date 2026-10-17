@@ -4620,6 +4620,30 @@ button.pick-agent:hover {
   position: absolute;
   bottom: var(--sp-1);
 }
+/* A fresh chat's first messages to pick from, over the composer. */
+.starters {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-1) var(--sp-3);
+}
+button.starter {
+  height: auto;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--fg);
+  text-align: left;
+}
+button.starter:hover {
+  background: var(--hover-bg);
+}
+.starter-keys {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--t-85);
+}
 .reopen {
   display: flex;
   flex-direction: column;
