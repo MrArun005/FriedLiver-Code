@@ -83,8 +83,18 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
       expect(contrast(resolve('var(--sel-fg)', vars), sel), 'selected text').toBeGreaterThanOrEqual(7);
       expect(contrast(sel, menu), 'the selected row stands off the menu').toBeGreaterThan(1.15);
       expect(sel.slice(0, 3), 'hover differs from selected').not.toEqual(hover.slice(0, 3));
+      // The composer's mic: a white glyph on the theme's button blue, at rest and hovered.
+      for (const t of ['--mic-bg', '--mic-hover']) {
+        const back = over(resolve(`var(${t})`, vars), surface('--input-bg'));
+        expect(contrast(resolve('var(--mic-fg)', vars), back), `mic glyph on ${t}`).toBeGreaterThanOrEqual(4.5);
+      }
     });
   }
+
+  it('the mic\'s fallback blue (no theme) keeps a white glyph at 4.5:1', () => {
+    const vars = declarations(block());
+    for (const t of ['--mic-bg', '--mic-hover']) expect(contrast(resolve('var(--mic-fg)', vars), resolve(`var(${t})`, vars)), t).toBeGreaterThanOrEqual(4.5);
+  });
 
   it('defines each token once, and every var() the stylesheet reads', () => {
     const names = [...block().matchAll(/(--[\w-]+):/g)].map((m) => m[1]);
