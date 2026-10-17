@@ -408,6 +408,35 @@ BLOCKS.F12 = async () => {
   }
 };
 
+// ---- F13: a menu always fits in the window, scrolling inside when it's long ----
+BLOCKS.F13 = async () => {
+  const inside = async (p) =>
+    (await p.waitForTimeout(300)) ||
+    p.evaluate(() => {
+      const m = document.querySelector('.popover');
+      const r = m.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: window.innerHeight, scrolls: m.scrollHeight > m.clientHeight + 1 };
+    });
+  for (const [w, h] of [[1200, 900], [640, 520]]) {
+    const p = await open('surface=tasks&theme=dark-2026&view=board', w, h);
+    const card = p.locator('.task-card').nth(1);
+    await card.hover();
+    await card.locator('button[aria-label*="More"], .card-top button').last().click();
+    const r = await inside(p);
+    check(r.top >= 0 && r.bottom <= r.h, `board card ⋯ menu fits ${w}×${h} [${JSON.stringify(r)}]`);
+    await p.close();
+  }
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 640, 520);
+  const state = fixture(Date.now()).state;
+  const base = state.chats.find((c) => c.id !== 'chat-c5');
+  for (let i = 0; i < 30; i++) state.chats.push({ ...base, id: `extra-${i}`, title: `Extra chat ${i}`, items: [] });
+  await snapshot(p, state, 'chat-c5');
+  await p.click('.chat-head-actions button[aria-label^="More"]');
+  const r = await inside(p);
+  check(r.top >= 0 && r.bottom <= r.h && r.scrolls, `chat ⋯ menu with 30 more chats fits and scrolls [${JSON.stringify(r)}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
