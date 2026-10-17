@@ -1,4 +1,4 @@
-import { Fragment, render } from 'preact';
+import { render } from 'preact';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import {
@@ -38,15 +38,13 @@ import {
   switcherGroups,
   switcherMeta,
   transcriptGroups,
-  type TranscriptGroup,
-  clockTime,
   statusOf,
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
 import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, EditsBar, ModeBadge, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
+import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
 import { Steps } from './steps';
 import { RefList, refsOf, sameRef } from './refs';
 
@@ -272,10 +270,9 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
                 onMouseMove={() => setAt(flat.indexOf(c))}
               >
                 <span class="chat-item-text">
-                  <span class="pick-title" title={`${c.title} (${c.label})`}>
+                  <span class="pick-title" title={`${c.title} (${c.label}) · ${switcherMeta(c, now)}`}>
                     {c.title}
                   </span>
-                  <span class="pick-label">{switcherMeta(c, now)}</span>
                 </span>
                 <span class="chat-item-more" onClick={(e) => e.stopPropagation()}>
                   <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="ghost icon-btn sm" trigger={<Icon name="more" />}>
@@ -342,22 +339,10 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
       <header class="chat-head">
         <div class="chat-head-text">
           <div class="chat-head-row">
-            <h1 class="chat-head-title" title={`${chat.title} (${chat.label})`}>
+            <button class="chat-head-title" title={`${chat.title} (${chat.label}) · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
               {chat.title}
-            </h1>
-            <button class="ghost icon-btn sm" title="Rename chat" aria-label="Rename chat" onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
-              <Icon name="rename" />
             </button>
-            <span class="status-pill" data-state={status}>
-              {DOT_LABEL[status]}
-            </span>
-          </div>
-          <div class="chat-head-sub">
-            <Glyph agent={chat.agent} size="sm" />
-            <span title={chat.label}>{AGENT_FACES[chat.agent].name}</span>
             {chat.session?.starting && <span class="tag">Starting {AGENT_FACES[chat.agent].name}…</span>}
-            <ModeBadge session={chat.session} agent={chat.agent} />
-            <AutoBadge chat={chat} />
             {chat.branch && (
               <span class="chip" title={chat.cwd}>
                 <Icon name="branch" />
@@ -367,6 +352,9 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             {chat.merged && <span class="tag">merged</span>}
           </div>
         </div>
+        <span class="status-pill" data-state={status}>
+          {DOT_LABEL[status]}
+        </span>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />
           <button
@@ -515,7 +503,11 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   const waitingKey = [...waiting].join('\n');
   const waitingNow = waitingItems(chat.items).length > 0;
 
+  const asks = items.flatMap((i, at) => (i.kind === 'user' && i.text.trim() ? [{ at, text: i.text }] : []));
+  const jump = asks.length >= 2;
+  const seen = useInView(box, jump ? asks.map((a) => `msg-${a.at}`) : []);
   return (
+    <div class="transcript-wrap" data-jump={jump ? '' : undefined}>
     <div
       class="transcript"
       ref={box}
@@ -524,13 +516,8 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {transcriptGroups(items).map((g, n, all) => {
-        // Each turn of the agent's opens with its face, name and time.
-        const prev = all[n - 1];
-        const mine = g.kind === 'one' && g.item.kind === 'user';
-        const head = !mine && (!prev || (prev.kind === 'one' && prev.item.kind === 'user'));
-        const at = head ? turnTime(all, n) : undefined;
-        const body = g.kind === 'steps' ? (
+      {transcriptGroups(items).map((g) =>
+        g.kind === 'steps' ? (
           <Steps key={g.at} tools={g.items} approvals={approvals} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
         ) : (
           <TranscriptItem
@@ -544,21 +531,10 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
             onSelect={onSelect}
             canUndo={g.at === lastChanges && !chat.busy}
             live={chat.busy && g.at === items.length - 1}
+            at={g.at}
           />
-        );
-        return head ? (
-          <Fragment key={g.at}>
-            <div class="agent-head">
-              <Glyph agent={chat.agent} />
-              <b>{AGENT_FACES[chat.agent].name}</b>
-              {at !== undefined && <span class="msg-time">{clockTime(at)}</span>}
-            </div>
-            {body}
-          </Fragment>
-        ) : (
-          body
-        );
-      })}
+        ),
+      )}
       <QueueList chat={chat} />
       {chat.busy && !waitingNow && (
         <div class="working">
@@ -570,17 +546,52 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
         {waitingNow ? `${chat.label} needs your decision` : chat.busy ? '' : chat.turns ? `${chat.label} finished` : ''}
       </div>
     </div>
+      {jump && (
+        <nav class="jump-list" aria-label="In this chat">
+          <b>In this chat</b>
+          {asks.map((a) => (
+            <button key={a.at} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].at}`) === `msg-${a.at}` ? 'true' : undefined} onClick={() => scrollToMessage(a.at)}>
+              {clip(a.text, 60)}
+            </button>
+          ))}
+        </nav>
+      )}
+    </div>
   );
 }
 
-/** When the agent's turn starting at group `n` began: its first reply's time. */
-function turnTime(groups: TranscriptGroup[], n: number): number | undefined {
-  for (let i = n; i < groups.length; i++) {
-    const g = groups[i];
-    if (g.kind === 'one' && g.item.kind === 'user') return undefined;
-    if (g.kind === 'one' && g.item.kind === 'agent' && g.item.at !== undefined) return g.item.at;
-  }
-  return undefined;
+/** Puts your message at the top of the transcript. */
+function scrollToMessage(at: number) {
+  document.getElementById(`msg-${at}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+/** The id, of `ids`, of the topmost element showing in `root`: the message you're reading. */
+function useInView(root: { current: HTMLElement | null }, ids: string[]): string | undefined {
+  const [seen, setSeen] = useState<string | undefined>();
+  const key = ids.join(' ');
+  useEffect(() => {
+    if (!root.current || !ids.length) return;
+    const showing = new Set<string>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) showing.add(e.target.id);
+          else showing.delete(e.target.id);
+        }
+        // Showing now, else the last one scrolled past: what you're reading belongs to it.
+        const top = root.current!.getBoundingClientRect().top;
+        const past = ids.filter((id) => (document.getElementById(id)?.getBoundingClientRect().top ?? Infinity) <= top);
+        setSeen(ids.find((id) => showing.has(id)) ?? past.at(-1) ?? ids[0]);
+      },
+      { root: root.current },
+    );
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) io.observe(el);
+    }
+    return () => io.disconnect();
+  }, [key]);
+  return seen;
 }
 
 const PLAN_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', pending: 'next' };
@@ -596,6 +607,8 @@ interface ItemProps {
   canUndo: boolean;
   /** The reply still streams in: it isn't collapsed. */
   live?: boolean;
+  /** Its index in the transcript, for the "In this chat" list. */
+  at: number;
 }
 
 /**
@@ -608,6 +621,7 @@ const TranscriptItem = memo(
   (a: ItemProps, b: ItemProps) =>
     a.item === b.item &&
     a.canUndo === b.canUndo &&
+    a.at === b.at &&
     a.live === b.live &&
     a.chat.id === b.chat.id &&
     a.chat.label === b.chat.label &&
@@ -620,29 +634,30 @@ const TranscriptItem = memo(
     a.onSelect === b.onSelect,
 );
 
-function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live }: ItemProps) {
+function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, at }: ItemProps) {
   switch (item.kind) {
     case 'user':
       return (
-        <div class="user-msg">
-          <div class="user-col">
-            <div class="bubble">
-              {item.text && <div class="bubble-text">{item.text}</div>}
-              <RefList refs={refsOf(item)} cwd={chat.cwd} />
-              {item.images.length > 0 && (
-                <div class="thumbs">
-                  {item.images.map((id) => {
-                    const img = state.images.find((i) => i.id === id);
-                    return img ? <img key={id} src={img.src} alt={img.title} /> : null;
-                  })}
-                </div>
-              )}
-            </div>
-            {item.at !== undefined && <div class="msg-time">{clockTime(item.at)}</div>}
+        <div class="user-msg" id={`msg-${at}`}>
+          <div
+            class="bubble"
+            role="button"
+            tabIndex={0}
+            title="Scroll to the top"
+            onClick={(e) => !(e.target as HTMLElement).closest('button, a') && scrollToMessage(at)}
+            onKeyDown={(e) => e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), scrollToMessage(at))}
+          >
+            {item.text && <div class="bubble-text">{item.text}</div>}
+            <RefList refs={refsOf(item)} cwd={chat.cwd} />
+            {item.images.length > 0 && (
+              <div class="thumbs">
+                {item.images.map((id) => {
+                  const img = state.images.find((i) => i.id === id);
+                  return img ? <img key={id} src={img.src} alt={img.title} /> : null;
+                })}
+              </div>
+            )}
           </div>
-          <span class="avatar" aria-hidden="true">
-            <Icon name="user" />
-          </span>
         </div>
       );
     case 'agent':
@@ -1196,7 +1211,7 @@ function Composer({
               ? `Message ${AGENT_FACES[chat.agent].name}: it goes when the turn ends · Esc stops`
               : chat.session?.starting
                 ? `Starting ${AGENT_FACES[chat.agent].name}…`
-                : `Ask ${AGENT_FACES[chat.agent].name} anything…   / commands   # files   @ another agent`
+                : 'Message…   / commands  # files  @ another agent'
           }
           onInput={(e) => {
             setText(e.currentTarget.value);

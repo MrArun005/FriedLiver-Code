@@ -3367,19 +3367,51 @@ pre.step-input {
   border-style: dashed;
 }
 
-/* ---- The chat, laid out like a chat app: list beside it when wide, bubbles, step cards ---- */
-
+/* ---- The chat: 60/30/10 on the editor's theme ----
+ * 60: --c-bg, the editor background.
+ * 30: --c-surface (sidebar, your messages, steps, composer) and --c-surface2, a step lighter.
+ * 10: --c-acc, the one accent, and only as the border of the recommended (first) answer.
+ * Text tokens are checked for contrast in test/palette.test.ts (body >= 7:1, secondary >= 4.5:1).
+ */
 body[data-surface='chat'] {
-  font-size: 14px;
-  line-height: 1.6;
-  letter-spacing: -0.005em;
+  /* --fl-accent is friedliver.chat.accentColor (Claude orange by default), set by the webview; else the theme's button colour.
+     The accent is only ever a border: never a fill, never text. */
+  /* palette:start */
+  --c-bg: var(--vscode-editor-background);
+  --c-surface: color-mix(in srgb, var(--vscode-foreground) 5%, var(--c-bg));
+  --c-surface2: color-mix(in srgb, var(--vscode-foreground) 10%, var(--c-bg));
+  --c-line: color-mix(in srgb, var(--vscode-foreground) 16%, var(--c-bg));
+  --c-text: var(--vscode-foreground);
+  --c-soft: color-mix(in srgb, var(--vscode-foreground) 85%, var(--vscode-descriptionForeground));
+  --c-mute: color-mix(in srgb, var(--vscode-descriptionForeground) 75%, var(--vscode-foreground));
+  --c-link: var(--vscode-textLink-foreground);
+  --c-acc: var(--fl-accent, var(--vscode-button-background));
+  --c-ok: var(--vscode-charts-green);
+  --c-warn: var(--vscode-charts-yellow);
+  --c-bad: var(--vscode-errorForeground);
+  /* palette:end */
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--c-soft);
+  background: var(--c-bg);
+}
+/* Light themes: the accent border darkens to keep 3:1 against the light surfaces. */
+body.vscode-light[data-surface='chat'],
+body.vscode-high-contrast-light[data-surface='chat'] {
+  /* palette-light:start */
+  --c-acc: color-mix(in srgb, var(--fl-accent, var(--vscode-button-background)) 75%, black);
+  /* palette-light:end */
+}
+body.vscode-high-contrast[data-surface='chat'],
+body.vscode-high-contrast-light[data-surface='chat'] {
+  --c-line: var(--vscode-contrastBorder);
 }
 body[data-surface='chat'] .chat-app {
-  background: var(--vscode-editor-background);
+  background: var(--c-bg);
 }
 .chat-app[data-wide] {
   display: grid;
-  grid-template-columns: minmax(260px, 310px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 290px) minmax(0, 1fr);
 }
 .chat-main {
   display: flex;
@@ -3388,13 +3420,15 @@ body[data-surface='chat'] .chat-app {
   min-width: 0;
   min-height: 0;
 }
+
+/* Sidebar */
 .chat-side {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--sp-4) 14px var(--sp-3);
-  background: var(--vscode-sideBar-background, var(--panel));
-  border-right: 1px solid var(--vscode-widget-border, var(--line));
+  padding: var(--sp-4) var(--sp-3) var(--sp-3);
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-line);
 }
 .chat-side .all-chats {
   width: auto;
@@ -3408,14 +3442,20 @@ body[data-surface='chat'] .chat-app {
 .chat-side .pop-foot {
   margin-top: auto;
   padding-top: var(--sp-3);
-  border-top: 1px solid var(--vscode-widget-border, var(--line));
+  border-top: 1px solid var(--c-line);
 }
 button.new-chat {
-  height: 40px;
+  height: 38px;
   justify-content: space-between;
-  padding: 0 14px;
-  border-radius: var(--r-md);
-  font-weight: 600;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 500;
+  color: var(--c-text);
+  background: var(--c-surface2);
+}
+button.new-chat:hover:not(:disabled) {
+  background: var(--c-line);
 }
 button.new-chat > span {
   display: inline-flex;
@@ -3423,32 +3463,35 @@ button.new-chat > span {
   gap: var(--sp-2);
 }
 button.new-chat kbd {
-  font: 500 12px var(--ui);
-  padding: 1px 7px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--vscode-button-foreground) 18%, transparent);
-  color: var(--vscode-button-foreground);
+  font: 400 12px var(--ui);
+  color: var(--c-mute);
+  background: none;
 }
 .all-chats .search {
-  margin: var(--sp-3) 0 var(--sp-1);
-  border-radius: var(--r-md);
-  background: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, var(--line)));
-  color: var(--vscode-input-placeholderForeground, var(--muted));
+  margin: 10px 0 var(--sp-1);
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid var(--c-line);
+  color: var(--c-mute);
 }
 .all-chats .pop-group {
-  gap: 9px;
-  margin: 18px 6px 6px;
-  font-size: 13px;
+  gap: var(--sp-2);
+  margin: 20px 10px 6px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--vscode-descriptionForeground);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-mute);
+}
+.all-chats .pop-group .dot {
+  width: 7px;
+  height: 7px;
 }
 .pick-row.chat-item {
   height: auto;
   min-height: 0;
-  align-items: flex-start;
-  padding: var(--sp-2) 10px var(--sp-2) 26px;
-  border-radius: 7px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: 9px;
 }
 .chat-item-text {
   display: flex;
@@ -3457,15 +3500,11 @@ button.new-chat kbd {
   min-width: 0;
 }
 .chat-item .pick-title {
-  font-size: 13.5px;
-  color: var(--vscode-foreground);
+  font-size: 14px;
+  color: var(--c-soft);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.chat-item .pick-label {
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground);
 }
 .chat-item-more {
   visibility: hidden;
@@ -3476,20 +3515,17 @@ button.new-chat kbd {
   visibility: visible;
 }
 .pick-row.chat-item[data-open] {
-  background: var(--vscode-list-activeSelectionBackground, var(--raised));
-  color: var(--vscode-list-activeSelectionForeground, var(--fg));
-  box-shadow: inset 3px 0 var(--vscode-focusBorder);
-  padding-left: 23px;
+  background: var(--c-surface2);
 }
 .pick-row.chat-item[data-open] .pick-title {
-  color: inherit;
+  color: var(--c-text);
+  font-weight: 500;
 }
 
-/* Header: the topic, rename, status; star and more on the right. */
+/* Header: the topic (click to rename) left, its status right. */
 body[data-surface='chat'] .chat-head {
   min-height: 56px;
-  padding: var(--sp-2) 28px;
-  border-bottom: 1px solid var(--vscode-widget-border, var(--line));
+  padding: var(--sp-2) 40px;
 }
 .chat-head-row {
   display: flex;
@@ -3497,181 +3533,209 @@ body[data-surface='chat'] .chat-head {
   gap: var(--sp-2);
   min-width: 0;
 }
-body[data-surface='chat'] .chat-head-title {
-  font-size: 16px;
+button.chat-head-title {
+  height: auto;
+  min-width: 0;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  background: none;
+  font-size: 15px;
   font-weight: 600;
-  color: var(--vscode-foreground);
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.chat-head-title:hover:not(:disabled) {
+  background: var(--c-surface);
 }
 .status-pill {
   flex: none;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 500;
-  line-height: 18px;
-  padding: 0 9px;
+  line-height: 22px;
+  padding: 0 11px;
   border-radius: 999px;
-  color: var(--vscode-badge-foreground);
-  background: var(--vscode-badge-background);
+  color: var(--c-soft);
+  background: var(--c-surface2);
 }
 .status-pill[data-state='needs-you'] {
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-button-background);
+  color: var(--c-text);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--c-line);
 }
 button[aria-pressed='true'] .icon path {
   fill: currentColor;
 }
-.chat-head-actions button[aria-pressed='true'] {
-  color: var(--vscode-charts-yellow);
-}
 .pop-sep {
   height: 1px;
   margin: var(--sp-1) 0;
-  background: var(--vscode-widget-border, var(--line));
+  background: var(--c-line);
 }
 
-/* The transcript: your messages right in bubbles, the agent's turns under its face. */
+/* The transcript: replies as plain text, your messages as pills, all on the left. */
+.transcript-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
 body[data-surface='chat'] .transcript {
-  padding: 22px 28px var(--sp-4);
-  gap: 12px;
+  flex: 1;
+  padding: var(--sp-4) 64px var(--sp-6);
+  gap: 10px;
   border-top: 0;
 }
-body[data-surface='chat'] .transcript > :not(.user-msg):not(.agent-head) {
-  margin-left: 46px;
+.transcript-wrap[data-jump] .transcript {
+  padding-right: 270px;
+}
+body[data-surface='chat'] .transcript > * {
+  max-width: 1100px;
 }
 .user-msg {
   display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
-  gap: 10px;
-  margin: var(--sp-2) 0;
-}
-.user-col {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  max-width: 70%;
-  min-width: 0;
+  margin: 6px 0 14px;
 }
 .user-msg .bubble {
-  max-width: 100%;
+  align-self: auto;
+  max-width: 62%;
   margin: 0;
-  padding: 10px 15px;
+  padding: 9px 16px;
   border: 0;
-  border-radius: 16px 16px 4px 16px;
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-button-background);
+  border-radius: 20px;
+  color: var(--c-text);
+  background: var(--c-surface2);
+  cursor: pointer;
+  text-align: left;
 }
-body.vscode-high-contrast .user-msg .bubble,
-body.vscode-high-contrast-light .user-msg .bubble {
-  border: 1px solid var(--vscode-contrastBorder);
-}
-.msg-time {
-  font-size: 11.5px;
-  color: var(--vscode-descriptionForeground);
-  margin-top: var(--sp-1);
-}
-.avatar {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: var(--vscode-badge-foreground);
-  background: var(--vscode-badge-background);
-}
-.agent-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: var(--sp-3);
-  font-size: 13px;
-}
-.agent-head .glyph {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  font-size: 15px;
-}
-.agent-head .msg-time {
-  margin: 0;
-  font-size: 12px;
+.user-msg .bubble:hover {
+  background: var(--c-line);
 }
 body[data-surface='chat'] .prose {
-  line-height: 1.6;
+  color: var(--c-text);
+  line-height: 1.7;
+}
+body[data-surface='chat'] .md a {
+  color: var(--c-link);
+}
+body[data-surface='chat'] .md code {
+  font-size: 13.5px;
+}
+.jump-list {
+  position: absolute;
+  top: var(--sp-4);
+  right: 28px;
+  width: 210px;
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  font-size: 12.5px;
+  color: var(--c-mute);
+}
+.jump-list b {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+button.jump-item {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 4px 10px;
+  border: 0;
+  border-left: 2px solid var(--c-line);
+  border-radius: 0;
+  background: none;
+  color: var(--c-mute);
+  font-weight: 400;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.jump-item:hover:not(:disabled) {
+  color: var(--c-text);
+}
+button.jump-item[aria-current='true'] {
+  border-left-color: var(--c-mute);
+  color: var(--c-text);
 }
 
-/* A run of steps: one card, numbered, a check per step joined by a thread. */
+/* Steps: one compact box sized to its content. */
 .step-card {
-  position: relative;
-  margin-top: 30px;
+  display: inline-block;
+  align-self: flex-start;
+  min-width: min(440px, 100%);
   padding: 10px var(--sp-4);
-  border: 1px solid var(--vscode-widget-border, var(--line));
-  border-radius: 10px;
-  background: var(--vscode-editorWidget-background, var(--panel));
+  border-radius: 12px;
+  background: var(--c-surface);
 }
-.step-card[data-folded] {
-  margin-top: 0;
-  padding: 6px var(--sp-4);
-}
-/* Above the card, right-aligned: never over a step. */
 button.step-fold {
-  position: absolute;
-  top: -30px;
-  right: 0;
-  z-index: 1;
-  color: var(--vscode-descriptionForeground);
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--c-mute);
 }
-.step-card[data-folded] button.step-fold {
-  position: static;
+button.step-fold:hover:not(:disabled) {
+  color: var(--c-text);
 }
-.step-card:not([data-folded]) button.step-fold .icon {
-  transform: rotate(180deg);
+.step-card:not([data-folded]) button.step-fold {
+  margin-bottom: var(--sp-1);
+}
+.step-card[data-folded] button.step-fold .icon {
+  transform: rotate(-90deg);
 }
 .step-card .steps li {
-  padding: 4px 0;
-  font-size: 13.5px;
-  color: var(--vscode-foreground);
+  padding: 2px 0;
+  min-height: 0;
+  font-size: 14px;
+  color: var(--c-soft);
 }
 .step-card .steps li + li::before {
-  left: 9px;
-  top: -10px;
-  width: 2px;
-  height: 18px;
-  background: color-mix(in srgb, var(--vscode-charts-green) 45%, transparent);
+  display: none;
 }
 .step-mark {
   flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  width: 14px;
   display: grid;
   place-items: center;
-  border: 1.5px solid var(--vscode-descriptionForeground);
+  color: var(--c-mute);
 }
 .step-mark .icon {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 .step-mark .icon path {
-  stroke-width: 2.2;
+  stroke-width: 2;
 }
 .step-mark[data-state='done'] {
-  border-color: transparent;
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-charts-green);
+  color: var(--c-ok);
 }
-.step-mark[data-state='error'] {
-  border-color: transparent;
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-charts-red, var(--vscode-errorForeground));
+.step-mark[data-state='error'],
+.step-mark[data-state='denied'] {
+  color: var(--c-bad);
 }
-.step-mark[data-state='working'] {
-  border-color: var(--vscode-charts-yellow);
+.step-mark[data-state='working']::before,
+.step-mark[data-state='next']::before,
+.step-mark[data-state='needs-you']::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+.step-mark[data-state='working']::before {
+  border-color: var(--c-warn);
   border-top-color: transparent;
   animation: spin 0.9s linear infinite;
 }
 .step-mark[data-state='needs-you'] {
-  border-color: var(--vscode-focusBorder);
+  color: var(--c-text);
 }
 @keyframes spin {
   to {
@@ -3679,86 +3743,128 @@ button.step-fold {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .step-mark[data-state='working'] {
+  .step-mark[data-state='working']::before {
     animation: none;
   }
 }
-.step-n {
-  flex: none;
-  color: var(--vscode-descriptionForeground);
-}
 .step-card .step-verb {
-  font-weight: 500;
+  font-weight: 400;
+  color: var(--c-soft);
+}
+.step-card .step-text {
+  color: var(--c-text);
+}
+.step-denied {
+  font-size: 12.5px;
+  color: var(--c-bad);
 }
 .step-time {
-  min-width: 36px;
-  text-align: right;
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground);
+  padding-left: 24px;
+  font-size: 12.5px;
+  color: var(--c-mute);
 }
-.step-card .tag.ok {
-  color: var(--vscode-charts-green);
-  border: 1px solid color-mix(in srgb, var(--vscode-charts-green) 45%, transparent);
-  background: transparent;
+.step-card .tag {
+  display: none;
 }
 
-/* Questions with choices: a card of option buttons. */
+/* Answers: pills, the first one filled with the accent. */
 body[data-surface='chat'] .ask.question {
-  padding: 14px var(--sp-4);
-  border: 1px solid var(--vscode-widget-border, var(--line));
-  border-left: 3px solid var(--vscode-focusBorder);
-  border-radius: 10px;
-  background: var(--vscode-editorWidget-background, var(--panel));
+  padding: 0;
+  border: 0;
+  background: none;
+}
+body[data-surface='chat'] .ask.question .ask-head {
+  display: none;
 }
 body[data-surface='chat'] .ask.question .actions button.sm:not(.danger) {
-  height: 32px;
-  padding: 0 14px;
-  border-radius: var(--r-md);
-  font-size: 13px;
-  border-color: var(--vscode-button-border, var(--vscode-widget-border, var(--line-strong)));
-  background: var(--vscode-button-secondaryBackground, var(--raised));
-  color: var(--vscode-button-secondaryForeground, var(--fg));
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--c-text);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+}
+body[data-surface='chat'] .ask.question .actions button.sm:not(.danger):first-child {
+  border-color: var(--c-acc);
 }
 
-/* The composer: a rounded box, chips along the bottom, a round send button. */
+/* The composer: one rounded bar. */
 body[data-surface='chat'] .composer {
-  margin: 0 28px 20px;
-  padding: 6px var(--sp-2) 4px;
-  border-radius: 14px;
-  background: var(--vscode-input-background);
-  border-color: var(--vscode-input-border, var(--vscode-widget-border, var(--line-strong)));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin: 0 64px 26px;
+  padding: 8px 10px 8px 20px;
+  border-radius: 18px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+}
+body[data-surface='chat'] .composer > :not(textarea):not(.composer-bar) {
+  grid-column: 1 / -1;
 }
 body[data-surface='chat'] .composer:focus-within {
   border-color: var(--vscode-focusBorder);
 }
 body[data-surface='chat'] .composer textarea {
-  color: var(--vscode-input-foreground);
-  font-size: 14px;
+  min-height: 0;
+  padding: 7px 0;
+  color: var(--c-text);
+  font-size: 15px;
 }
 body[data-surface='chat'] .composer textarea::placeholder {
-  color: var(--vscode-input-placeholderForeground);
+  color: var(--c-mute);
+}
+body[data-surface='chat'] .composer-bar {
+  padding: 0;
+  gap: var(--sp-2);
+}
+body[data-surface='chat'] .composer-bar button.chip-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--c-soft);
+  background: var(--c-surface2);
 }
 button.send-btn {
   width: 36px;
   height: 36px;
   padding: 0;
+  border: 1px solid var(--c-line);
   border-radius: 50%;
+  color: var(--c-text);
+  background: var(--c-surface2);
 }
 button.send-btn .icon {
   width: 18px;
   height: 18px;
 }
-@media (max-width: 520px) {
+@media (max-width: 1200px) {
+  .transcript-wrap[data-jump] .transcript {
+    padding-right: 64px;
+  }
+  .jump-list {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
   body[data-surface='chat'] .transcript {
     padding: var(--sp-3) var(--sp-3) var(--sp-4);
   }
-  body[data-surface='chat'] .transcript > :not(.user-msg):not(.agent-head) {
-    margin-left: 0;
+  .transcript-wrap[data-jump] .transcript {
+    padding-right: var(--sp-3);
   }
   body[data-surface='chat'] .chat-head {
     padding: var(--sp-2) var(--sp-3);
   }
   body[data-surface='chat'] .composer {
     margin: 0 var(--sp-3) var(--sp-3);
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .user-msg .bubble {
+    max-width: 90%;
   }
 }

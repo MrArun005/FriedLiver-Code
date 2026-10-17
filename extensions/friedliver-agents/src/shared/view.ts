@@ -474,9 +474,13 @@ export function transcriptGroups(items: Item[]): TranscriptGroup[] {
   return out;
 }
 
-/** "10:24 PM". */
-export function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s/g, ' ');
+/** A step box's heading: "Used the browser · 4 steps · 7s". */
+export function stepsHeading(tools: ToolItem[]): string {
+  const browser = tools.every((t) => /(^|__)browser_/.test(t.tool ?? t.title));
+  const shell = tools.every((t) => !!t.cmd || t.toolKind === 'execute');
+  const what = browser ? 'Used the browser' : shell ? 'Ran commands' : 'Used tools';
+  const ms = tools.reduce((sum, t) => sum + (t.ms ?? 0), 0);
+  return [what, `${tools.length} step${tools.length === 1 ? '' : 's'}`, ...(ms ? [shortDuration(ms)] : [])].join(' · ');
 }
 
 /** "340ms", "1s", "2m 5s": a step's time at a glance. */

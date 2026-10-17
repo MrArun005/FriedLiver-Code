@@ -23,6 +23,7 @@ export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions 
 /** Strict CSP: nonce scripts, no remote content, images only from data: URIs and the extension. */
 export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, script: Script, title: string): string {
   const nonce = randomBytes(16).toString('base64');
+  const chat = vscode.workspace.getConfiguration('friedliver.chat');
   const media = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file)).toString();
   const csp = [
     "default-src 'none'",
@@ -40,7 +41,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <link rel="stylesheet" href="${media('webview.css')}">
 <title>${escapeHtml(title)}</title>
 </head>
-<body data-surface="${script}" data-font="${escapeHtml(vscode.workspace.getConfiguration('friedliver.chat').get<string>('fontFamily', 'Inter'))}">
+<body data-surface="${script}" data-font="${escapeHtml(chat.get<string>('fontFamily', 'Inter'))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}">
 <div id="root"></div>
 <script nonce="${nonce}" src="${media(`dist/${script}.js`)}"></script>
 </body>
