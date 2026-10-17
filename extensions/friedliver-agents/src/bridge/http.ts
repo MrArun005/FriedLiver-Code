@@ -139,6 +139,13 @@ async function serve(req: IncomingMessage, res: ServerResponse, port: number, o:
     const origin = req.headers.origin;
     if (origin !== undefined && !ownHost(origin.replace(/^http:\/\//, ''), port)) return refuse(res, 403, 'wrong origin', o.log);
     if ((req.url ?? '').split('?')[0] !== MCP_PATH) return refuse(res, 404, 'unknown path', o.log);
+    // The external client's handshake (externalStdio.ts): it sends nothing but a nonce until this proves the token.
+    const probe = req.headers['x-friedliver-probe'];
+    if (probe !== undefined) {
+      const key = o.externalKey?.();
+      if (!key || typeof probe !== 'string' || !/^[0-9a-f]{32}$/.test(probe)) return refuse(res, 401, 'bad probe', o.log);
+      return send(res, 204, undefined, { 'X-FriedLiver-Proof': sign(key, 'probe', probe) });
+    }
     const token = bearer(req.headers.authorization);
     let chatId = token ? o.chatFor(token) : undefined;
     // The external token works signed only (externalCaller), never as a bearer.

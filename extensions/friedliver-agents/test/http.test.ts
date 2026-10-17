@@ -311,22 +311,37 @@ describe('the external stdio server Claude Code starts (externalStdio.ts)', () =
     expect(stale.replies).toEqual([{ jsonrpc: '2.0', id: 1, error: { code: -32000, message: expect.stringMatching(/FriedLiver isn't running/) } }]);
   });
 
-  it('drops the answer of an impostor on the port, which learns nothing to replay', async () => {
-    const seen: http.IncomingHttpHeaders[] = [];
-    const fake = { jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'evil' }] } };
+  it('sends an impostor on the port no payload: the handshake fails before any message', async () => {
+    const seen: { headers: http.IncomingHttpHeaders; body: string }[] = [];
+    let connections = 0;
     const impostor = http.createServer((req, res) => {
-      seen.push(req.headers);
-      req.resume();
-      res.writeHead(200, { 'content-type': 'application/json', 'x-friedliver-proof': 'f'.repeat(64) });
-      res.end(JSON.stringify(fake));
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c));
+      req.on('end', () => {
+        seen.push({ headers: req.headers, body });
+        res.writeHead(204, { 'x-friedliver-proof': 'f'.repeat(64) });
+        res.end();
+      });
     });
+    impostor.on('connection', () => connections++);
     await new Promise<void>((r) => impostor.listen(0, '127.0.0.1', r));
     const url = `http://127.0.0.1:${(impostor.address() as { port: number }).port}/mcp`;
     const token = 'c'.repeat(64);
-    const { replies } = await run(await writeTokenFile(await mkdtemp(path.join(os.tmpdir(), 'flx-')), url, token), [rpc(1, 'tools/list')]);
-    impostor.close();
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'flx-'));
+    const { replies } = await run(await writeTokenFile(dir, url, token), [rpc(1, 'tools/call', { name: 'browser_type', arguments: { selector: '#pw', text: 'hunter2' } })]);
     expect(replies).toEqual([{ jsonrpc: '2.0', id: 1, error: { code: -32000, message: expect.stringMatching(/FriedLiver isn't running/) } }]);
-    expect(seen).toHaveLength(1);
+    expect(seen.map((r) => r.body)).toEqual(['']);
+    expect(JSON.stringify(seen)).not.toMatch(/hunter2|tools\/call/);
     expect(JSON.stringify(seen)).not.toContain(token);
+
+    // A dead FriedLiver pid: no connection at all.
+    const dead = spawn(process.execPath, ['-e', '']);
+    await new Promise((r) => dead.on('exit', r));
+    const before = connections;
+    const gone = await run(await writeTokenFile(dir, url, token, dead.pid!), [rpc(2, 'tools/list')]);
+    impostor.close();
+    expect(gone.code).toBe(1);
+    expect(gone.stderr).toMatch(/FriedLiver isn't running/);
+    expect(connections).toBe(before);
   });
 });
