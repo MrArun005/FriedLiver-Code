@@ -110,7 +110,7 @@ export class Controller {
   private tasksPanel?: vscode.WebviewPanel;
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
-  private claudeWatchers: FSWatcher[] = [];
+  private claudeWatchers = new Map<string, FSWatcher>();
   private claudeTimer?: ReturnType<typeof setTimeout>;
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
@@ -1414,16 +1414,26 @@ export class Controller {
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
   }
 
-  /** Watches the folders' Claude Code project folders while the Manager is open; a folder made later is picked up on the next read. */
+  /**
+   * Watches the folders' Claude Code project folders while the Manager is open, subfolders included: subagents write to
+   * <session>/subagents/. A watcher stays while its folder does; a project folder made later is picked up on the next read.
+   */
   private watchClaudeSessions(on: boolean): void {
-    for (const w of this.claudeWatchers) w.close();
-    this.claudeWatchers = [];
-    if (!on) return;
-    for (const folder of this.folders()) {
+    const want = new Set(on ? this.folders() : []);
+    for (const [folder, w] of this.claudeWatchers) {
+      if (want.has(folder)) continue;
+      w.close();
+      this.claudeWatchers.delete(folder);
+    }
+    for (const folder of want) {
+      if (this.claudeWatchers.has(folder)) continue;
       try {
-        const w = watch(path.join(os.homedir(), '.claude', 'projects', encodeCwd(folder)), () => this.refreshClaudeSessions());
-        w.on('error', () => w.close());
-        this.claudeWatchers.push(w);
+        const w = watch(path.join(os.homedir(), '.claude', 'projects', encodeCwd(folder)), { recursive: true }, () => this.refreshClaudeSessions());
+        w.on('error', () => {
+          w.close();
+          if (this.claudeWatchers.get(folder) === w) this.claudeWatchers.delete(folder);
+        });
+        this.claudeWatchers.set(folder, w);
       } catch {
         // No sessions for this folder yet.
       }
