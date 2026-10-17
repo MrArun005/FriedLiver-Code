@@ -676,7 +676,8 @@ async function shoot() {
     const box = await p.locator('.step-image img').first().boundingBox();
     check(!!box && box.width <= 240 && box.height <= 160, 'thumbnails fit 240×160');
     await p.locator('.step-image .image-thumb').nth(1).click();
-    check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
+    check((await p.locator('.viewer .preview-title').innerText()) === 'Login page mockup', 'a thumbnail opens the image viewer on it');
+    await p.keyboard.press('Escape');
     check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
     await p.screenshot({ path: path.join(opts.out, 'chat-images.png'), animations: 'disabled', caret: 'hide' });
     await p.click('.images-pill');
@@ -1386,7 +1387,7 @@ async function imagesChecks({ open, check, posted }) {
     await p.waitForSelector('.gallery-preview .preview-img');
     await p.waitForFunction(() => document.querySelector('.preview-img')?.complete);
     const title = await p.locator('.preview-title').innerText();
-    check(title === mine[1].title && (await p.locator('.preview-meta').innerText()).includes(`2 of ${mine.length}`), `${width}: a card opens the large preview (${title})`);
+    check(title === mine[1].title && (await p.locator('.viewer-count').innerText()).replace(/\s+/g, ' ') === `2 / ${mine.length}`, `${width}: a card opens the large preview (${title})`);
     const fit = await p.evaluate(() => {
       const img = document.querySelector('.preview-img').getBoundingClientRect();
       const stage = document.querySelector('.preview-stage').getBoundingClientRect();

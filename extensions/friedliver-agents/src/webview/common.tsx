@@ -1,5 +1,5 @@
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
@@ -499,6 +499,7 @@ function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
 
 const ICONS = {
   plus: 'M8 3v10M3 8h10',
+  minus: 'M3 8h10',
   hand: 'M5 8.5V3.25a1.1 1.1 0 0 1 2.2 0V7.5M7.2 7V2.25a1.1 1.1 0 0 1 2.2 0V7.5M9.4 7.5V3.25a1.1 1.1 0 0 1 2.2 0v6c0 3-2 5-4.6 5-1.8 0-3-1-3.9-2.5L1.9 9.2a1.1 1.1 0 0 1 1.9-1.1L5 9.75',
   slash: 'M2.5 2.5h11v11h-11zM9.5 4.75l-3 6.5',
   clock: 'M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM8 5v3.25l2 1.25',
@@ -849,9 +850,13 @@ export function useNearScreen(ref: { current: Element | null }): boolean {
 }
 
 /** A step's image with its title; click opens the editor's image preview. Name only when it can't be shown. */
+/** Opens the image viewer on a file, with its chat's images around it; a surface without a viewer opens the editor's preview. */
+export const OpenImage = createContext<((path: string, from: HTMLElement) => void) | null>(null);
+
 export function ImageThumb({ path, title }: { path: string; title: string }) {
   const src = useHostImage('imageThumb', path);
-  const open = () => send({ type: 'openImage', path });
+  const viewer = useContext(OpenImage);
+  const open = (e: Event) => (viewer ? viewer(path, e.currentTarget as HTMLElement) : send({ type: 'openImage', path }));
   if (src === null) {
     return (
       <span class="image-thumb missing" title={path}>
