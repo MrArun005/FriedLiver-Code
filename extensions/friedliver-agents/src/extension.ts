@@ -36,7 +36,7 @@ import { describeRule, isRule, type CommandRule } from './shared/rules';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
-import { clip } from './shared/view';
+import { clip, panelTitle } from './shared/view';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** How long a message for a chat view (a composer's code reference, an item to reveal) waits for one to load. */
@@ -421,6 +421,12 @@ export class Controller {
     }
     this.updateDecisions();
     this.closeAnswered();
+    this.retitle();
+  }
+
+  /** Each chat panel's and the Agents view's title follows the chat it has open: switched, renamed or titled by the agent. */
+  private retitle(): void {
+    for (const s of this.surfaces) s.retitle?.(this.core.chat(s.selected ?? this.lastSelected ?? ''));
   }
 
   folders(): string[] {
@@ -438,8 +444,16 @@ export class Controller {
       ready: false,
       visible: () => view.visible,
     };
-    if (kind === 'chat' && !list) this.agentsView = view;
+    if (kind === 'chat' && !list) {
+      this.agentsView = view;
+      // The view keeps its name; the open chat's topic goes beside it.
+      surface.retitle = (chat) => {
+        const description = chat ? panelTitle(chat).title : undefined;
+        if (view.description !== description) view.description = description;
+      };
+    }
     this.addSurface(surface, title, view);
+    this.retitle();
     this.updateDecisions();
   }
 
@@ -453,8 +467,20 @@ export class Controller {
     };
     if (kind === 'chat') this.chatPanel = panel;
     else this.tasksPanel = panel;
-    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'agents.svg');
+    const icon = (name: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `${name}.svg`);
+    panel.iconPath = icon('agents');
+    // A chat tab is titled like Claude Code's: the topic of the chat it has open, with that agent's face.
+    let shown = '';
+    if (kind === 'chat')
+      surface.retitle = (chat) => {
+        const { title, agent } = panelTitle(chat);
+        if (shown === `${title}\0${agent}`) return;
+        shown = `${title}\0${agent}`;
+        panel.title = title;
+        panel.iconPath = agent ? icon(`agent-${agent}`) : icon('agents');
+      };
     this.addSurface(surface, panel.title, panel);
+    this.retitle();
     panel.onDidDispose(() => {
       if (this.chatPanel === panel) this.chatPanel = undefined;
       if (this.tasksPanel === panel) this.tasksPanel = undefined;
@@ -535,6 +561,7 @@ export class Controller {
         case 'select':
           surface.selected = m.chatId;
           this.lastSelected = m.chatId;
+          this.retitle();
           return;
         case 'send': {
           const extra = m.refs && (await this.editor?.referencesFor(m.chatId, m.refs));
