@@ -1,7 +1,7 @@
 // The chat's session controls (approval level, model, effort, the agent's own
 // modes), the usage meter, and the cards that show what an agent asks to do
 // and what its tools did. Shared by the chat view and the Agent Manager.
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { DiffLine } from '../shared/diff';
 import { AGENT_FACES, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { describeRule, ruleCandidates } from '../shared/rules';
@@ -221,7 +221,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
   const command = item.detail?.command?.line;
   const deny = denyOption(item.options);
   return (
-    <section class="ask" id={`item-${item.requestId}`} aria-label={`${chat.label} asks`}>
+    <section class="ask" id={`item-${item.requestId}`} aria-label={`${chat.label} asks`} {...chooseOn(item.requestId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         Needs your OK
@@ -233,11 +233,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
         <PermissionOptions item={item} />
         {command && item.toolKind === 'execute' && <AlwaysAllow line={command} target={{ requestId: item.requestId }} />}
       </div>
-      {deny && (
-        <div class="hint keys" aria-hidden="true">
-          1–{Math.min(9, item.options.length)} picks · Ctrl+Enter {primaryOption(item.options) ? 'yes' : ''} · Ctrl+Shift+Backspace no
-        </div>
-      )}
+      {deny && <KeyHint chat={chat} id={item.requestId} n={item.options.length} yes={!!primaryOption(item.options)} />}
     </section>
   );
 }
@@ -294,18 +290,77 @@ export function EditsBar({ chat }: { chat: ChatView }) {
   );
 }
 
-/** The first thing the chat waits on, as the actions a shortcut takes. */
+// ---- Which card the decision keys act on ----
+
+/** A waiting item's id, as its card's element id carries it (item-<id>). */
+export function decisionId(i: Item): string | undefined {
+  if (i.kind === 'permission' && !i.answer) return i.requestId;
+  if (i.kind === 'review' && i.state === 'pending') return i.reviewId;
+  if (i.kind === 'command' && i.state === 'awaiting') return i.commandId;
+  if ((i.kind === 'question' || i.kind === 'bridge') && i.state === 'awaiting') return i.requestId;
+  return undefined;
+}
+
+let chosen: string | undefined;
+const chosenWatchers = new Set<() => void>();
+
+/** The card you clicked or focused: the keys act on it while it waits. */
+export function chooseDecision(id: string): void {
+  if (chosen === id) return;
+  chosen = id;
+  for (const w of chosenWatchers) w();
+}
+
+/** The card the keys act on: the one you chose, else the newest waiting one (nearest the composer). */
+export function decisionTarget(chat: ChatView): Item | undefined {
+  const waiting = waitingItems(chat.items).filter((i) => decisionId(i) !== undefined);
+  return waiting.find((i) => decisionId(i) === chosen) ?? waiting.at(-1);
+}
+
+export function useDecisionTarget(chat: ChatView): string | undefined {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const w = () => bump((n) => n + 1);
+    chosenWatchers.add(w);
+    return () => void chosenWatchers.delete(w);
+  }, []);
+  const target = decisionTarget(chat);
+  return target && decisionId(target);
+}
+
+const MAC = /Mac/.test(navigator.platform);
+
+/** Where the keys act: the hint shows on that card only. `n` options are numbered 1–n. */
+export function KeyHint({ chat, id, n, yes = true }: { chat: ChatView; id: string; n: number; yes?: boolean }) {
+  if (useDecisionTarget(chat) !== id) return null;
+  return (
+    <div class="hint keys" aria-hidden="true">
+      Press 1–{Math.min(9, n)} to choose{yes ? ` · ${MAC ? '⌘↩' : 'Ctrl+Enter'} yes` : ''} · {MAC ? '⌘⇧⌫' : 'Ctrl+Shift+Backspace'} no
+    </div>
+  );
+}
+
+/** A decision card's frame: clicking or focusing in it makes it the one the keys act on. */
+export function chooseOn(id: string) {
+  return { onMouseDown: () => chooseDecision(id), onFocusIn: () => chooseDecision(id) };
+}
+
+/** The card the keys act on, as the actions a shortcut takes. */
 export function waitingActions(chat: ChatView): { approve(): void; deny(): void; pick(n: number): boolean } | null {
-  for (const i of waitingItems(chat.items)) {
+  const target = decisionTarget(chat);
+  for (const i of target ? [target] : []) {
     if (i.kind === 'permission' && !i.answer) {
       const answer = (o?: { optionId: string }) => o && send({ type: 'permission', requestId: i.requestId, optionId: o.optionId });
       return { approve: () => answer(primaryOption(i.options)), deny: () => answer(denyOption(i.options)), pick: (n) => (i.options[n] ? (answer(i.options[n]), true) : false) };
     }
     if (i.kind === 'review' && i.state === 'pending') {
-      return { approve: () => send({ type: 'review', reviewId: i.reviewId, action: 'accept' }), deny: () => send({ type: 'review', reviewId: i.reviewId, action: 'reject' }), pick: () => false };
+      const accept = () => send({ type: 'review', reviewId: i.reviewId, action: 'accept' });
+      const reject = () => send({ type: 'review', reviewId: i.reviewId, action: 'reject' });
+      return { approve: accept, deny: reject, pick: (n) => (n === 0 ? (accept(), true) : n === 1 ? (reject(), true) : false) };
     }
     if (i.kind === 'command' && i.state === 'awaiting') {
-      return { approve: () => send({ type: 'command', commandId: i.commandId, approve: true }), deny: () => send({ type: 'command', commandId: i.commandId, approve: false }), pick: () => false };
+      const run = (approve: boolean) => send({ type: 'command', commandId: i.commandId, approve });
+      return { approve: () => run(true), deny: () => run(false), pick: (n) => (n === 0 ? (run(true), true) : n === 1 ? (run(false), true) : false) };
     }
     if (i.kind === 'question' && i.state === 'awaiting') {
       const only = i.fields.length === 1 && i.fields[0].type === 'choice' ? i.fields[0] : undefined;
@@ -321,7 +376,9 @@ export function waitingActions(chat: ChatView): { approve(): void; deny(): void;
       };
     }
     if (i.kind === 'bridge' && i.state === 'awaiting') {
-      return { approve: () => send({ type: 'bridge', requestId: i.requestId, answer: 'allow' }), deny: () => send({ type: 'bridge', requestId: i.requestId, answer: 'deny' }), pick: () => false };
+      const answer = (a: 'allow' | 'allowChat' | 'deny') => send({ type: 'bridge', requestId: i.requestId, answer: a });
+      const order = ['allow', 'allowChat', 'deny'] as const;
+      return { approve: () => answer('allow'), deny: () => answer('deny'), pick: (n) => (order[n] ? (answer(order[n]), true) : false) };
     }
   }
   return null;
@@ -340,8 +397,8 @@ export function decisionKey(e: KeyboardEvent, chat: ChatView, composerEmpty: boo
   if (mod && !e.shiftKey && e.key === 'Enter') actions.approve();
   else if (mod && e.shiftKey && e.key === 'Backspace') actions.deny();
   else if (!mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-    // A digit with nothing to pick types as usual.
-    if (!actions.pick(Number(e.code.slice(5)) - 1)) return false;
+    // While a decision waits, a digit in the empty box is for it: picked when in range, never typed.
+    actions.pick(Number(e.code.slice(5)) - 1);
   }
   else return false;
   e.preventDefault();

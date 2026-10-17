@@ -48,7 +48,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
+import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -995,7 +995,7 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
     );
   }
   return (
-    <section class="ask bridge" id={`item-${item.requestId}`} aria-label={title}>
+    <section class="ask bridge" id={`item-${item.requestId}`} aria-label={title} {...chooseOn(item.requestId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         <Glyph agent={chat.agent} size="sm" />
@@ -1022,15 +1022,16 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
       )}
       <div class="actions">
         <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allow' })}>
-          Allow
+          <span class="opt-num">1.</span>Allow
         </button>
         <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
-          Allow for this chat
+          <span class="opt-num">2.</span>Allow for this chat
         </button>
         <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
-          Deny
+          <span class="opt-num">3.</span>Deny
         </button>
       </div>
+      <KeyHint chat={chat} id={item.requestId} n={3} />
     </section>
   );
 }
@@ -1073,7 +1074,7 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
     );
   }
   return (
-    <section class="ask" id={`item-${item.reviewId}`} aria-label="Edit to review">
+    <section class="ask" id={`item-${item.reviewId}`} aria-label="Edit to review" {...chooseOn(item.reviewId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         <Glyph agent={chat.agent} size="sm" /> {item.isNew ? 'New file to review' : 'Edit to review'}
@@ -1086,15 +1087,16 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
       </div>
       <div class="actions">
         <button class="decide sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'accept' })}>
-          <Icon name="check" /> Accept
+          <span class="opt-num">1.</span>Accept
         </button>
         <button class="ghost danger sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'reject' })}>
-          Reject
+          <span class="opt-num">2.</span>Reject
         </button>
         <button class="ghost sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
           Open diff
         </button>
       </div>
+      <KeyHint chat={chat} id={item.reviewId} n={2} />
     </section>
   );
 }
@@ -1104,7 +1106,7 @@ const COMMAND_STATE: Record<CommandItem['state'], string> = { awaiting: 'needs-y
 function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
   if (item.state === 'awaiting') {
     return (
-      <section class="ask" id={`item-${item.commandId}`} aria-label="Command to approve">
+      <section class="ask" id={`item-${item.commandId}`} aria-label="Command to approve" {...chooseOn(item.commandId)}>
         <div class="ask-head">
           <Dot state="needs-you" />
           <Glyph agent={chat.agent} size="sm" /> {chat.label} wants to run a command
@@ -1118,14 +1120,15 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
         </div>
         {item.outside && <div class="warn">This folder is outside the workspace.</div>}
         <div class="actions">
-          <button class="decide sm" title="Run (Ctrl+Enter)" onClick={() => send({ type: 'command', commandId: item.commandId, approve: true })}>
-            <Icon name="play" /> Run
+          <button class="decide sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: true })}>
+            <span class="opt-num">1.</span>Run
           </button>
-          <button class="ghost danger sm" title="Deny (Ctrl+Shift+Backspace)" onClick={() => send({ type: 'command', commandId: item.commandId, approve: false })}>
-            Deny
+          <button class="ghost danger sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: false })}>
+            <span class="opt-num">2.</span>Deny
           </button>
           {!item.outside && <AlwaysAllow line={item.commandLine} target={{ commandId: item.commandId }} />}
         </div>
+        <KeyHint chat={chat} id={item.commandId} n={2} />
       </section>
     );
   }

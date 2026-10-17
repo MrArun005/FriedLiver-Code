@@ -790,7 +790,8 @@ async function shoot() {
     await p.click('.composer textarea');
     await p.keyboard.press('Control+Enter');
     const answer = (await posted(p)).filter((m) => m.type === 'bridge' || m.type === 'permission').at(-1);
-    check(answer?.type === 'bridge' && answer.answer === 'allow', 'Ctrl+Enter answers the first waiting decision');
+    // The keys act on the card that shows the hint: the newest waiting one, nearest the composer (QA F02).
+    check(answer?.type === 'permission' && answer.requestId === 'perm-c1', 'Ctrl+Enter answers the waiting decision the hint is on');
     check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '') === 'Stop', 'with nothing typed, a busy chat’s send button stops the turn');
     await p.fill('.composer textarea', 'and the tests');
     check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Queue'), 'a busy chat queues the message');
