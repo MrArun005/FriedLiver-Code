@@ -3235,7 +3235,6 @@ pre.code {
   margin: 0;
   padding: var(--sp-2);
   border-radius: var(--r-4);
-  background: var(--code-bg);
   color: var(--fg);
   font-size: var(--fs-mono);
   line-height: 1.5;
@@ -3244,6 +3243,15 @@ pre.code {
   overflow-wrap: normal;
   overflow-x: auto;
   tab-size: 4;
+  /* A shade on the right edge while there's more to scroll to: the cover moves with the code and hides it at the end. */
+  background:
+    linear-gradient(to left, var(--code-bg) 40%, transparent) right / var(--sp-5) 100% no-repeat local,
+    linear-gradient(to left, color-mix(in srgb, var(--fg) 14%, transparent), transparent) right / var(--sp-4) 100% no-repeat scroll,
+    var(--code-bg);
+}
+pre.code:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
 }
 pre.code code {
   padding: 0;
