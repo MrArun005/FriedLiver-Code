@@ -3326,3 +3326,26 @@ pre.step-input {
   white-space: nowrap;
   text-align: right;
 }
+/* Claude Code sessions from outside FriedLiver: read-only, so a dashed edge. */
+.cc-card {
+  border-style: dashed;
+}
+.cc-row {
+  cursor: pointer;
+}
+.cc-lane {
+  margin-top: var(--sp-4);
+}
+.cc-lane-nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+.cc-lane-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cc-node {
+  border-style: dashed;
+}
