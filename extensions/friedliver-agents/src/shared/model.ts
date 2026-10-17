@@ -101,14 +101,14 @@ export interface ChatLink {
 export const MAX_LINK_DEPTH = 2;
 
 /** What an agent asked to do with another chat or agent through the FriedLiver tools. */
-export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload';
+export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'remember' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload';
 
 export interface BridgeItem {
   kind: 'bridge';
   requestId: string;
   tool: BridgeTool;
   /** Another agent (a new consultation), an existing chat, or FriedLiver's browser. */
-  target: { agent: AgentKey } | { chatId: string } | { browser: true };
+  target: { agent: AgentKey } | { chatId: string } | { browser: true } | { memory: true };
   /** The question or message; empty for read_chat. For the browser: the URL, the element, or what to type. */
   text: string;
   state: 'awaiting' | 'allowed' | 'denied';
@@ -609,6 +609,7 @@ export const BROWSER_VERBS: Partial<Record<BridgeTool, string>> = {
 };
 
 export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item: BridgeItem): string {
+  if ('memory' in item.target) return `${chat.label} wants to remember a fact for every agent`;
   if ('browser' in item.target) return `${chat.label} wants to ${BROWSER_VERBS[item.tool] ?? 'use'} in the browser`;
   const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : (state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId)?.label ?? 'another chat');
   const verb = item.tool === 'ask_agent' ? 'ask' : item.tool === 'send_to_chat' ? 'message' : 'read';

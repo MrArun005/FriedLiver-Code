@@ -61,6 +61,8 @@ export type WebviewMessage =
   | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'deny' }
   | { type: 'archive'; chatId: string; archived: boolean }
   | { type: 'star'; chatId: string; starred: boolean }
+  /** Open the shared rules files (sharedRules.ts). */
+  | { type: 'openRules' }
   /** Ask for a new name; a name you give stays put. */
   | { type: 'renameChat'; chatId: string }
   /** Stop and forget a chat. */
@@ -310,6 +312,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.requestId) && (m.answer === 'allow' || m.answer === 'allowChat' || m.answer === 'deny')
         ? { type: 'bridge', requestId: m.requestId, answer: m.answer }
         : null;
+    case 'openRules':
+      return { type: 'openRules' };
     case 'star':
       return id(m.chatId) && typeof m.starred === 'boolean' ? { type: 'star', chatId: m.chatId, starred: m.starred } : null;
     case 'renameChat':

@@ -69,6 +69,8 @@ export interface ChatSession {
   starting?: boolean;
   /** The adapter's name and version, from `initialize`. */
   agent?: { name: string; version: string };
+  /** The shared rules files this session got when it started (sharedRules.ts). */
+  rules?: string[];
 }
 
 const MAX_OPTIONS = 32;

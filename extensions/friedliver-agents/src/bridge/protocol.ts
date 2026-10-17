@@ -28,6 +28,7 @@ export type BridgeCall =
   | { tool: 'ask_agent'; agent: AgentKey; prompt: string; chatId?: string }
   | { tool: 'send_to_chat'; chatId: string; message: string }
   | { tool: 'read_chat'; chatId: string; last?: number }
+  | { tool: 'remember'; fact: string }
   | { tool: 'browser_open'; url: string }
   | { tool: 'browser_click'; selector?: string; text?: string }
   | { tool: 'browser_type'; selector: string; text: string }
@@ -82,6 +83,8 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       if (last !== undefined && !(Number.isInteger(last) && (last as number) >= 1 && (last as number) <= BRIDGE_LIMITS.last)) return null;
       return { tool, chatId: a.chat_id, ...(last !== undefined ? { last: last as number } : {}) };
     }
+    case 'remember':
+      return text(a.fact) ? { tool, fact: a.fact } : null;
     case 'browser_open':
       return short(a.url) ? { tool, url: a.url } : null;
     case 'browser_click':
