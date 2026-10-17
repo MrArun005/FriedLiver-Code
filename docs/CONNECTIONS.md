@@ -144,7 +144,7 @@ opens by itself: only that command, or an agent's `browser_open` you allow.
 | `browser_snapshot` | Title, URL, the links/buttons/fields with a selector each, and the visible text (password values never) | No |
 | `browser_click {selector \| text}` | Clicks with real mouse events | Yes, unless Full auto |
 | `browser_type {selector, text}` | Replaces a field's text | Yes, unless Full auto |
-| `browser_screenshot` | Saves a PNG under the temp folder and returns its path | No |
+| `browser_screenshot` | Saves a PNG in a private per-session folder under the extension's storage and returns its path | No |
 | `browser_console` | The last 100 console messages and uncaught errors | No |
 | `browser_back`, `browser_reload` | History back, reload | Yes, unless Full auto |
 
