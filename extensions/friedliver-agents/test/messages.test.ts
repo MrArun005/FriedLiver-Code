@@ -9,6 +9,8 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'ready' })).toEqual({ type: 'ready' });
     expect(parseWebviewMessage({ type: 'openChat', chatId: 'chat-1', item: 'toolu_01' })).toEqual({ type: 'openChat', chatId: 'chat-1', item: 'toolu_01' });
     expect(parseWebviewMessage({ type: 'openChat', chatId: 'chat-1', item: 'a b' })).toEqual({ type: 'openChat', chatId: 'chat-1' });
+    expect(parseWebviewMessage({ type: 'openClaudeSession', sessionId: '11111111-1111-4111-8111-111111111111' })).toEqual({ type: 'openClaudeSession', sessionId: '11111111-1111-4111-8111-111111111111' });
+    expect(parseWebviewMessage({ type: 'openClaudeSession', sessionId: '../x' })).toBeNull();
     expect(parseWebviewMessage({ type: 'newChat', agent: 'gemini' })).toEqual({ type: 'newChat', agent: 'gemini' });
     expect(parseWebviewMessage({ type: 'send', chatId: 'chat-1', text: 'hi', images: [{ name: 'a.png', mimeType: 'image/png', data: 'aGk=' }] })).toMatchObject({
       type: 'send',
