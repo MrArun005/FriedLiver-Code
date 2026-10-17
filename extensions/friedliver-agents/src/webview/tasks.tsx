@@ -757,8 +757,12 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
 
 /** ⋯ on a card: open it, its changes, the connections (also on hover), and the rest. */
 function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMerge: boolean; changes: boolean; archive(): void }) {
-  // Ask needs its form: ⋯ opens the card's own Ask.
-  const ask = () => document.querySelector<HTMLButtonElement>(`[data-nav="${CSS.escape(chat.id)}"] .card-connect [aria-haspopup="dialog"]`)?.click();
+  // Ask needs its form: ⋯ opens the card's own Ask; where there is none (a list row), the chat, where @ asks.
+  const ask = () => {
+    const form = document.querySelector<HTMLButtonElement>(`[data-nav="${CSS.escape(chat.id)}"] .card-connect [aria-haspopup="dialog"]`);
+    if (form) form.click();
+    else open(chat.id);
+  };
   return (
     <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
@@ -766,11 +770,9 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
           <button role="menuitem" onClick={() => (close(false), open(chat.id))}>
             <Icon name="open" /> Open chat
           </button>
-          {changes && (
-            <button role="menuitem" onClick={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))}>
-              <Icon name="diff" /> View changes
-            </button>
-          )}
+          <button role="menuitem" disabled={!changes} title={changes ? undefined : 'No changes yet'} onClick={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))}>
+            <Icon name="diff" /> View changes
+          </button>
           <button role="menuitem" onClick={() => (close(false), ask())}>
             <Icon name="ask" /> Ask another agent…
           </button>
@@ -1036,9 +1038,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       <td class="c-age num">{model.age}</td>
       <td class="c-act">
         <RowDecision chat={c} line={line} />
-        <button class="ghost icon-btn sm" title="Open chat" aria-label={`Open ${c.label}`} onClick={() => open(c.id)}>
-          <Icon name="open" />
-        </button>
+        <CardMore chat={c} canMerge={!!c.branch && !c.merged && !c.busy} changes={c.files.length > 0 || !!c.branch} archive={() => send({ type: 'archive', chatId: c.id, archived: true })} />
       </td>
     </tr>
   );
