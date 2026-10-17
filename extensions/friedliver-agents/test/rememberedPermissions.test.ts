@@ -134,6 +134,52 @@ describe('config that runs code or steers agents', () => {
   });
 });
 
+describe('every target a request names is checked', () => {
+  const perm = (kind: string, input: Record<string, unknown>) => `native-perm ${kind} ${JSON.stringify(input)}`;
+
+  async function prompts(c: AgentCore, chatId: string, text: string): Promise<Permission> {
+    const { card, turn } = await ask(c, chatId, text);
+    c.answerPermission(card.requestId, null);
+    await turn;
+    return card;
+  }
+
+  it('a move whose new_path is outside the rule asks; inside, it is answered', async () => {
+    const dir = realpathSync(await gitRepo());
+    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
+    const { c, permissions } = setup(dir);
+    permissions.add({ kind: 'folder', folder: dir, access: 'write' });
+    const chat = await c.createChat('demo');
+    const card = await prompts(c, chat.id, perm('move', { locations: [path.join(dir, 'README.md')], file_path: path.join(dir, 'README.md'), new_path: path.join(outside, 'README.md') }));
+    expect(card.detail?.always).toBeUndefined();
+    await c.send(chat.id, perm('move', { locations: [path.join(dir, 'README.md')], file_path: path.join(dir, 'README.md'), new_path: path.join(dir, 'docs/README.md') }));
+    expect(last(c, chat.id)).toMatchObject({ answer: 'Yes', auto: `Always allowed: ${dir}` });
+    // paths[] and Codex's changes map count too.
+    await prompts(c, chat.id, perm('edit', { paths: [path.join(dir, 'a.txt'), path.join(outside, 'b.txt')] }));
+    await prompts(c, chat.id, perm('edit', { changes: { [path.join(dir, 'a.txt')]: {}, [path.join(outside, 'b.txt')]: {} } }));
+  });
+
+  it('a relative path is resolved against the chat’s folder and checked', async () => {
+    const dir = realpathSync(await gitRepo());
+    const { c, permissions } = setup(dir);
+    permissions.add({ kind: 'folder', folder: dir, access: 'write' });
+    const chat = await c.createChat('demo');
+    await c.send(chat.id, perm('edit', { file_path: 'src/rel.txt' }));
+    expect(last(c, chat.id)).toMatchObject({ answer: 'Yes', auto: `Always allowed: ${dir}` });
+    await prompts(c, chat.id, perm('edit', { file_path: '../escape.txt' }));
+  });
+
+  it('fails closed: a target that is not a path, or file arguments on a kind it doesn’t know', async () => {
+    const dir = realpathSync(await gitRepo());
+    const { c, permissions } = setup(dir);
+    permissions.add({ kind: 'folder', folder: dir, access: 'write' });
+    const chat = await c.createChat('demo');
+    await prompts(c, chat.id, perm('edit', { locations: [path.join(dir, 'a.txt')], file_path: path.join(dir, 'a.txt'), new_path: 42 }));
+    await prompts(c, chat.id, perm('edit', { locations: [path.join(dir, 'a.txt')], destination: 'bad\u0000path' }));
+    await prompts(c, chat.id, perm('other', { locations: [path.join(dir, 'a.txt')], file_path: path.join(dir, 'a.txt') }));
+  });
+});
+
 describe('remembered websites', () => {
   it('answer the agent’s next fetch on that exact origin, and no other', async () => {
     const dir = await gitRepo();

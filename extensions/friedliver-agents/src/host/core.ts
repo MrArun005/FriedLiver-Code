@@ -63,7 +63,7 @@ import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
-import { inGitFolder, insideRoots } from './paths';
+import { inGitFolder, insideRoots, realPath } from './paths';
 import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
@@ -86,6 +86,8 @@ const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_PROPOSAL_BYTES = 4 * 1024 * 1024;
 /** Tool calls remembered per chat until they finish, to fill in permission requests that name only an id. */
 const MAX_OPEN_TOOLS = 200;
+/** Where agents' tool inputs name the files they act on (Claude, Codex, Gemini, and the obvious others). */
+const TARGET_KEYS = ['file_path', 'filePath', 'path', 'abs_path', 'notebook_path', 'old_path', 'new_path', 'source', 'destination', 'target'];
 /** Messages that can wait for a busy chat. */
 const MAX_QUEUE = 10;
 
@@ -1510,7 +1512,7 @@ export class AgentCore {
     kind: string | undefined,
     detail: PermissionDetail,
     options: acp.PermissionOption[],
-    files: { paths: string[]; access?: Access },
+    files: { paths: string[]; access?: Access; complete: boolean },
   ): { option: acp.PermissionOption; reason: string } | undefined {
     if (!chat || kind === 'switch_mode' || detail.plan) return undefined;
     const once = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
@@ -1530,7 +1532,7 @@ export class AgentCore {
     }
     // Remembered folders and websites answer with the agent's one-time allow, so it doesn't ask again either.
     const remembered = this.options.permissions;
-    if (remembered && files.access && files.paths.length) {
+    if (remembered && files.access && files.complete && files.paths.length) {
       const rules = files.paths.map((f) => remembered.folder(f, files.access!));
       if (rules.every(Boolean)) return { option: once, reason: `Always allowed: ${describeGrant(rules[0]!.grant).scope}` };
     }
@@ -1539,21 +1541,37 @@ export class AgentCore {
     return undefined;
   }
 
-  /** The files a request is about, and whether it reads or changes them: what a folder rule is matched against. */
-  private requestFiles(tool: OpenTool, kind: string | undefined, proposals: Proposal[]): { paths: string[]; access?: Access } {
+  /**
+   * The files a request is about, and whether it reads or changes them: what a folder rule is matched
+   * against. Every target it names counts: its diffs, its locations, and the paths in its input
+   * (file_path, new_path, paths[], Codex's changes…), relative ones resolved against the chat's
+   * folder. Fails closed: `complete` is false when any target isn't a usable path, and then no rule
+   * answers it or is offered.
+   */
+  private requestFiles(tool: OpenTool, kind: string | undefined, proposals: Proposal[], cwd: string | undefined): { paths: string[]; access?: Access; complete: boolean } {
     // A request that runs a command or approves a plan is never a file request, whatever kind it claims.
-    if (commandOf(tool.rawInput) || planOf(tool.rawInput)) return { paths: [] };
-    const paths = [...new Set([...proposals.map((p) => p.path), ...(tool.locations ?? []).map((l) => l.path)])].filter((f) => typeof f === 'string' && path.isAbsolute(f));
+    if (commandOf(tool.rawInput) || planOf(tool.rawInput)) return { paths: [], complete: false };
+    const raw = tool.rawInput && typeof tool.rawInput === 'object' && !Array.isArray(tool.rawInput) ? (tool.rawInput as Record<string, unknown>) : {};
+    const named: unknown[] = TARGET_KEYS.flatMap((k) => (raw[k] === undefined ? [] : [raw[k]]));
+    if (raw.paths !== undefined) named.push(...(Array.isArray(raw.paths) ? raw.paths : [raw.paths]));
+    if (raw.changes && typeof raw.changes === 'object' && !Array.isArray(raw.changes)) named.push(...Object.keys(raw.changes));
+    let complete = true;
+    const paths = new Set<string>();
+    for (const target of [...proposals.map((p) => p.path), ...(tool.locations ?? []).map((l) => l.path), ...named]) {
+      const abs = typeof target !== 'string' || !target || target.includes('\0') ? undefined : path.isAbsolute(target) ? target : cwd ? path.resolve(cwd, target) : undefined;
+      if (!abs || realPath(abs) === null) complete = false;
+      else paths.add(abs);
+    }
     const access: Access | undefined =
       kind === 'edit' || kind === 'delete' || kind === 'move' || proposals.length ? 'write' : kind === 'read' || kind === 'search' ? 'read' : undefined;
-    return { paths, access };
+    return { paths: [...paths], access, complete };
   }
 
   /** What "Always allow" may offer for a request beyond commands: its folders, or the website it fetches. */
-  private alwaysFor(files: { paths: string[]; access?: Access }, detail: PermissionDetail): Grant[] {
+  private alwaysFor(files: { paths: string[]; access?: Access; complete: boolean }, detail: PermissionDetail): Grant[] {
     const remembered = this.options.permissions;
     if (!remembered || detail.plan) return [];
-    if (files.access && files.paths.length) return remembered.folderCandidates(files.paths, files.access, this.roots());
+    if (files.paths.length || !files.complete) return files.access && files.complete ? remembered.folderCandidates(files.paths, files.access, this.roots()) : [];
     const origin = detail.url ? siteOrigin(detail.url) : undefined;
     return origin ? [{ kind: 'site', origin }] : [];
   }
@@ -1646,7 +1664,7 @@ export class AgentCore {
     const chat = this.chat(chatId);
     const kind = tool.kind ?? undefined;
     const detail = this.permissionDetail(tool, proposals, chat);
-    const files = this.requestFiles(tool, kind, proposals);
+    const files = this.requestFiles(tool, kind, proposals, chat?.cwd);
     const always = kind === 'switch_mode' ? [] : this.alwaysFor(files, detail);
     if (always.length) detail.always = always;
     for (const p of proposals) this.noteFile(chatId, p.path, p.before);
