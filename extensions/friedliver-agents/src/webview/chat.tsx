@@ -916,10 +916,10 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
     case 'agent':
       return (
         <div class="prose">
-          <Markdown key={chat.id} text={item.text} chatId={chat.id} cwd={chat.cwd} full={live} />
           <div class="msg-tools">
             <CopyButton text={item.text} label="Copy reply" />
           </div>
+          <Markdown key={chat.id} text={item.text} chatId={chat.id} cwd={chat.cwd} full={live} />
         </div>
       );
     case 'thought':

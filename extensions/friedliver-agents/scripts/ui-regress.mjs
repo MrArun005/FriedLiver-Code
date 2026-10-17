@@ -379,6 +379,35 @@ BLOCKS.F11 = async () => {
   }
 };
 
+// ---- F12: the Copy reply button never covers the reply's text ----
+BLOCKS.F12 = async () => {
+  for (const width of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 800);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    const words = 'The mode and the effort travel with the chat so a handoff keeps both of them as they were set. '.repeat(4);
+    c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: words }];
+    await snapshot(p, state, 'chat-c5');
+    await p.waitForTimeout(200);
+    const prose = p.locator('.prose').last();
+    await prose.scrollIntoViewIfNeeded();
+    await prose.hover();
+    const hit = await prose.evaluate((el) => {
+      const b = el.querySelector('.msg-tools .copy-btn').getBoundingClientRect();
+      const w = document.createTreeWalker(el.querySelector('.md'), NodeFilter.SHOW_TEXT);
+      const boxes = [];
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const r = document.createRange();
+        r.selectNodeContents(n);
+        boxes.push(...r.getClientRects());
+      }
+      return boxes.filter((t) => t.width && t.left < b.right && t.right > b.left && t.top < b.bottom && t.bottom > b.top).length;
+    });
+    check(hit === 0, `at ${width}px Copy reply covers no text [${hit} line boxes under it]`);
+    await p.close();
+  }
+};
+
 await run();
 await browser.close();
 server.kill();
