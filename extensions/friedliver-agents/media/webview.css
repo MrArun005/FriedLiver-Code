@@ -49,9 +49,10 @@
   --warn: var(--vscode-editorWarning-foreground, #e1c08d);
   --toggle-on: var(--button-bg);
   --effort-fill: var(--vscode-inputOption-activeBorder, #2a2b2c);
-  /* The composer's mic: the theme's button blue, a white glyph. */
-  --mic-bg: var(--vscode-button-background, #0078d4);
-  --mic-hover: var(--vscode-button-hoverBackground, #026ec1);
+  /* The composer's mic: the theme's button blue darkened to 58% so a white glyph keeps 4.5:1
+     even on a light button blue (Black Blue's #7cc4ff); palette.test.ts checks five themes. */
+  --mic-bg: color-mix(in srgb, var(--vscode-button-background, #0078d4) 58%, #000);
+  --mic-hover: color-mix(in srgb, var(--vscode-button-hoverBackground, #026ec1) 58%, #000);
   --mic-fg: #fff;
   /* The one loud colour of the Agent Manager: "you must decide". */
   --decision: var(--vscode-friedliver-decision, var(--focus-border));
