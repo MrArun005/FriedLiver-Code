@@ -203,6 +203,11 @@
         "icon": "$(globe)"
       },
       {
+        "command": "friedliver.connectClaudeBrowser",
+        "title": "Connect Claude Code to the browser",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.toggleCodeAndChat",
         "title": "Switch Between Code and Agent Chat",
         "category": "FriedLiver",
@@ -589,6 +594,18 @@
           "default": "claude",
           "scope": "machine",
           "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
+        },
+        "friedliver.browser.externalClients": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through an MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` with a token that changes every launch. Every action still asks you first. Read from your user settings only."
+        },
+        "friedliver.browser.externalAutoApprove": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Lets Claude Code act in FriedLiver's browser (open, click, type, back, reload) without asking each time. Off by default; Full auto in a FriedLiver chat does not cover it. Read from your user settings only."
         },
         "friedliver.browser.relaxLocalhostCors": {
           "scope": "machine",

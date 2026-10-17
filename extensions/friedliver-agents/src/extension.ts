@@ -8,6 +8,8 @@ import { Accounts } from './host/accounts';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
+import { registerClaude, unregisterClaude, writeTokenFile } from './host/externalBrowser';
+import { EXTERNAL_CLIENT } from './bridge/protocol';
 import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
@@ -40,6 +42,9 @@ const RULES_KEY = 'friedliver.commandRules';
 const MAX_RULES = 100;
 
 let controller: Controller | undefined;
+
+/** Claude Code's user-scope config, where its MCP servers for every project live. */
+const CLAUDE_CONFIG = () => path.join(os.homedir(), '.claude.json');
 
 export async function activate(context: vscode.ExtensionContext) {
   controller = new Controller(context);
@@ -113,6 +118,8 @@ export class Controller {
   private warnedAgentToAgent = false;
   private warnedApprovals = false;
   /** References for a composer, sent again to a chat view that (re)loads soon after; the view drops duplicates. */
+  /** The URL of the `friedliver-browser` entry this window wrote to ~/.claude.json, removed again on close. */
+  private claudeEntryUrl?: string;
   private composerRefs: { message: HostMessage; until: number }[] = [];
   /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
@@ -138,6 +145,7 @@ export class Controller {
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
       agentToAgent: () => this.agentToAgent(),
       browser: (_chatId, call, signal) => this.browser.call(call, signal),
+      externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       approvalDefault: () => this.approvalDefault(),
       defaults: {
         get: (agent) => this.context.globalState.get<Partial<Record<AgentKey, AgentDefaults>>>(DEFAULTS_KEY)?.[agent],
@@ -233,6 +241,9 @@ export class Controller {
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
     command('friedliver.openBrowser', () => this.browser.show());
+    command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
+    // Integration tests must not write the developer's ~/.claude.json.
+    if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
     command('friedliver.nextDecision', () => this.nextDecision());
@@ -290,6 +301,7 @@ export class Controller {
     this.batcher.dispose();
     clearTimeout(this.claudeTimer);
     this.watchClaudeSessions(false);
+    if (this.claudeEntryUrl) await unregisterClaude(CLAUDE_CONFIG(), this.claudeEntryUrl).catch(() => {});
     await this.core.dispose();
   }
 
@@ -968,6 +980,14 @@ export class Controller {
   }
 
   private askBridge(ask: { chatId: string; requestId: string; title: string }): void {
+    if (ask.chatId === EXTERNAL_CLIENT) {
+      // No chat holds this request, so it always gets its own popup, whatever else is waiting.
+      const buttons = { Allow: 'allow', 'Allow for this session': 'allowChat', Deny: 'deny' } as const;
+      void vscode.window.showWarningMessage(plainText(ask.title), ...Object.keys(buttons)).then((picked) => {
+        if (picked) this.core.answerBridge(ask.requestId, buttons[picked as keyof typeof buttons]);
+      });
+      return;
+    }
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
       { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
       { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
@@ -1165,6 +1185,41 @@ export class Controller {
     return value === 'edits' ? 'edits' : 'ask';
   }
 
+  /** friedliver.browser.<key> from the user's own settings only: a repository must not open the browser to outside clients. */
+  private browserSetting(key: 'externalClients' | 'externalAutoApprove', fallback: boolean): boolean {
+    const { value } = userSetting(vscode.workspace.getConfiguration('friedliver.browser').inspect<unknown>(key));
+    return typeof value === 'boolean' ? value : fallback;
+  }
+
+  /**
+   * Lets Claude Code (the extension, or the CLI in a terminal) use the browser tools: writes this
+   * launch's token file and the `friedliver-browser` entry in ~/.claude.json. With the setting off,
+   * revokes the token and removes the entry. `show` reports the result (the Connect command).
+   */
+  private async connectClaude(show: boolean): Promise<void> {
+    const say = (text: string, error = false) => {
+      if (error) this.log.warn(text);
+      else this.log.info(text);
+      if (show) void (error ? vscode.window.showErrorMessage(text) : vscode.window.showInformationMessage(text));
+    };
+    try {
+      if (!this.browserSetting('externalClients', true)) {
+        this.core.revokeExternal();
+        if (this.claudeEntryUrl) await unregisterClaude(CLAUDE_CONFIG(), this.claudeEntryUrl);
+        this.claudeEntryUrl = undefined;
+        return say('Claude Code is not connected to the browser: friedliver.browser.externalClients is off.');
+      }
+      const access = await this.core.externalAccess();
+      if (!access) return say('Claude Code is not connected to the browser: the FriedLiver tools are off or unavailable.', show);
+      await writeTokenFile(this.context.globalStorageUri.fsPath, access.url, access.token);
+      const result = await registerClaude(CLAUDE_CONFIG(), access.url, access.token);
+      this.claudeEntryUrl = access.url;
+      say(`Claude Code can use FriedLiver's browser (MCP server "friedliver-browser", ${result}). Start a new Claude Code session to pick it up.`);
+    } catch (err) {
+      say(`Could not connect Claude Code to the browser: ${messageOf(err)}`, true);
+    }
+  }
+
   /** From the user's own settings only: a repository must not let its agents reach other chats unasked. */
   private agentToAgent(): AgentToAgent {
     const { value, ignored } = userSetting(vscode.workspace.getConfiguration('friedliver.connections').inspect<unknown>('agentToAgent'));
@@ -1217,6 +1272,7 @@ export class Controller {
     if (!e.affectsConfiguration('friedliver')) return;
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
+    if (e.affectsConfiguration('friedliver.browser.externalClients')) void this.connectClaude(false);
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
         if (!this.stateFile) void this.openStateFile(false).then(() => this.stateFile?.schedule());
