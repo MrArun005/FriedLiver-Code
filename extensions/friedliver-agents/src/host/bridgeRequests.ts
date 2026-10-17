@@ -114,6 +114,9 @@ export class BridgeRequests {
       call.tool === 'browser_open' ? call.url : call.tool === 'browser_click' ? (call.selector ?? `"${call.text}"`) : call.tool === 'browser_type' ? `${call.selector} ← ${call.text}` : '';
     const item: BridgeItem = { kind: 'bridge', requestId: this.host.id('bridge'), tool: call.tool as BridgeItem['tool'], target: { browser: true }, text, state: 'awaiting' };
     settled(await this.approve(caller, item, auto, signal));
+    // Either can change while the user decides.
+    if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
+    if (!this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
     return this.host.browser(caller.id, call, signal);
   }
 
@@ -140,6 +143,11 @@ export class BridgeRequests {
     for (const p of [...this.pending.values()]) if (p.chatId === chatId) p.resolve('denied');
     if (!stopped) return;
     for (const target of this.waits.get(chatId) ?? []) void this.host.cancel(target);
+  }
+
+  /** The tools were turned off: nothing still waiting on the user goes ahead. */
+  refuseAll(): void {
+    for (const p of [...this.pending.values()]) p.resolve('denied');
   }
 
   forget(chatId: string): void {
