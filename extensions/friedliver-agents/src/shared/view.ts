@@ -19,6 +19,7 @@ import {
   type ChatView,
   type Decision,
   type FileConflict,
+  type Item,
   type LinkKind,
   type StateLine,
   MENTIONS,
@@ -447,6 +448,40 @@ export function statusGroups(chats: ChatView[], all = false): StatusGroup[] {
 /** Open chats matching the query, grouped by status. */
 export function switcherGroups(chats: ChatView[], query: string): StatusGroup[] {
   return statusGroups(filterChats(openChats(chats), query));
+}
+
+/** "Needs you · 42s ago" under a chat's title in the switcher. */
+export function switcherMeta(chat: ChatView, now: number): string {
+  return `${STATUS_TITLES[statusOf(chat)]} · ${ago(chat.lastActivity, now)}`;
+}
+
+// ---- The transcript ----
+
+export type ToolItem = Extract<Item, { kind: 'tool' }>;
+export type TranscriptGroup = { kind: 'steps'; items: ToolItem[]; at: number } | { kind: 'one'; item: Item; at: number };
+
+/** Consecutive tool calls read as one card of numbered steps; `at` is where each group starts. */
+export function transcriptGroups(items: Item[]): TranscriptGroup[] {
+  const out: TranscriptGroup[] = [];
+  items.forEach((item, at) => {
+    const last = out.at(-1);
+    if (item.kind === 'tool' && last?.kind === 'steps') last.items.push(item);
+    else if (item.kind === 'tool') out.push({ kind: 'steps', items: [item], at });
+    else out.push({ kind: 'one', item, at });
+  });
+  return out;
+}
+
+/** "10:24 PM". */
+export function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s/g, ' ');
+}
+
+/** "340ms", "1s", "2m 5s": a step's time at a glance. */
+export function shortDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 // ---- The map's hover card ----

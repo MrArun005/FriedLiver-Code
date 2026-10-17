@@ -146,8 +146,9 @@ export interface CodeRef {
 
 export type Item =
   /** `refs` (optional, added with the editor commands) is the code the message points at. */
-  | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[] }
-  | { kind: 'agent'; text: string }
+  | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[]; at?: number }
+  /** `at` (optional, on user and agent messages): when it was sent or began, by the host's clock. */
+  | { kind: 'agent'; text: string; at?: number }
   | { kind: 'thought'; text: string }
   /**
    * `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short.
@@ -287,7 +288,11 @@ export function reduce(state: AppState, action: Action): AppState {
         links: state.links.filter((l) => l.from !== action.chatId && l.to !== action.chatId),
       };
     case 'items':
-      return editChat(state, action.chatId, (c) => ({ ...c, items: capItems([...c.items, ...action.items]), lastActivity: action.at ?? c.lastActivity }));
+      return editChat(state, action.chatId, (c) => ({
+        ...c,
+        items: capItems([...c.items, ...action.items.map((i) => (i.kind === 'user' && i.at === undefined && action.at !== undefined ? { ...i, at: action.at } : i))]),
+        lastActivity: action.at ?? c.lastActivity,
+      }));
     case 'update':
       if (action.update.sessionUpdate === 'session_info_update') {
         const title = action.update.title?.trim();
@@ -434,9 +439,9 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate, at?: numbe
       const kind = update.sessionUpdate === 'agent_message_chunk' ? 'agent' : 'thought';
       if (last?.kind === kind) {
         if (last.text.length > MAX_ITEM_TEXT) return items; // Already cut off.
-        return [...items.slice(0, -1), { kind, text: capText(last.text + update.content.text) }];
+        return [...items.slice(0, -1), { ...last, text: capText(last.text + update.content.text) }];
       }
-      return [...items, { kind, text: capText(update.content.text) }];
+      return [...items, { kind, text: capText(update.content.text), ...(kind === 'agent' && at !== undefined ? { at } : {}) }];
     }
     case 'tool_call': {
       const streamed = streamedOutput(update._meta);

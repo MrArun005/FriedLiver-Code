@@ -272,7 +272,30 @@ export function isShell(step: { toolKind?: string; cmd?: StepCommand }): boolean
 }
 
 /** The verb and one-line summary for a tool step. */
-export function stepSummary(step: { title: string; toolKind?: string; cmd?: StepCommand }, max = MAX_SUMMARY): StepSummary {
+const quoted = (v: unknown) => (typeof v === 'string' && v ? `‘${v}’` : '');
+/** FriedLiver's browser tools in plain words: "Opened myntra.com/puma", "Clicked ‘Add to bag’". */
+const BROWSER_SAID: Record<string, { verb: string; text(input: Record<string, unknown>): string }> = {
+  open: { verb: 'Opened', text: (i) => (typeof i.url === 'string' ? i.url.replace(/^https?:\/\/(www\.)?/, '') : '') },
+  click: { verb: 'Clicked', text: (i) => quoted(i.text) || quoted(i.selector) },
+  type: { verb: 'Typed', text: (i) => quoted(i.text) },
+  screenshot: { verb: 'Took a screenshot', text: () => '' },
+  snapshot: { verb: 'Read page', text: () => '' },
+  console: { verb: 'Read console', text: () => '' },
+  back: { verb: 'Went back', text: () => '' },
+  reload: { verb: 'Reloaded page', text: () => '' },
+};
+
+/** A tool's input as an object; input cut short or not JSON reads as empty. */
+function inputOf(input: string | undefined): Record<string, unknown> {
+  try {
+    const v: unknown = input ? JSON.parse(input) : {};
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function stepSummary(step: { title: string; toolKind?: string; cmd?: StepCommand; input?: string }, max = MAX_SUMMARY): StepSummary {
   const kind = step.toolKind ?? '';
   const command = isShell(step) ? (step.cmd?.line ?? plainTitle(step.title).replace(/^Run\s+/, '')) : undefined;
   if (command?.trim()) {
@@ -284,6 +307,8 @@ export function stepSummary(step: { title: string; toolKind?: string; cmd?: Step
   const mcp = title.match(/^(?:Tool\s+)?mcp__(.+?)__(\w+)$/);
   if (mcp) {
     const browser = mcp[1] === 'friedliver' && mcp[2].match(/^browser_(.+)$/);
+    const said = browser && BROWSER_SAID[browser[1]];
+    if (said) return { verb: said.verb, text: cut(said.text(inputOf(step.input)), max), mono: false, full };
     return browser
       ? { verb: 'Browser', text: browser[1].replace(/_/g, ' '), mono: false, full }
       : { verb: mcp[1] === 'friedliver' ? 'FriedLiver' : mcp[1], text: mcp[2].replace(/_/g, ' '), mono: false, full };
