@@ -286,6 +286,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             <span class="sep">·</span>
             <Dot state={status} />
             <span>{DOT_LABEL[status]}</span>
+            {chat.session?.starting && <span class="tag">Starting {AGENT_FACES[chat.agent].name}…</span>}
             <ModeBadge session={chat.session} agent={chat.agent} />
             <AutoBadge chat={chat} />
             {chat.branch && (
@@ -1101,7 +1102,7 @@ function Composer({
           aria-autocomplete="list"
           aria-controls={picking ? listId : undefined}
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
-          placeholder={chat.busy ? `Message ${chat.label}: it goes when the turn ends · Esc stops` : `Message ${chat.label} · / commands · # files · @ another agent`}
+          placeholder={chat.busy ? `Message ${chat.label}: it goes when the turn ends · Esc stops` : chat.session?.starting ? `Starting ${chat.label}… · / commands · # files · @ another agent` : `Message ${chat.label} · / commands · # files · @ another agent`}
           onInput={(e) => {
             setText(e.currentTarget.value);
             track(e.currentTarget);

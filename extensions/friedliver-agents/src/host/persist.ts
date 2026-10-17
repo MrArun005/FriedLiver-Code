@@ -151,7 +151,7 @@ export function settleRestored(state: AppState): AppState {
       ...chat,
       busy: false,
       items,
-      session: chat.session && { ...chat.session, live: false, usage: undefined },
+      session: chat.session && { ...chat.session, live: false, starting: undefined, usage: undefined },
       approval: chat.approval === 'full' ? undefined : chat.approval,
       queue: undefined,
     };
