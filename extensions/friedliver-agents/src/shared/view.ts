@@ -69,6 +69,8 @@ export interface Subagent {
   tools: number;
   /** Its latest step's title. */
   last?: string;
+  /** Its agent type and model, when its transcript says (Claude Code sessions from outside FriedLiver). */
+  about?: string;
   /** When it started running, and how long it took once it ended. */
   startedAt?: number;
   ms?: number;
@@ -112,10 +114,32 @@ export function claudeColumn(s: ClaudeSession, now: number): 'working' | 'done' 
   return now - s.lastActivity < CLAUDE_WORKING_MS ? 'working' : 'done';
 }
 
-/** Its subagents as the Manager draws a chat's: one with no result yet works only while the session does. */
+const SUB_FRESH_MS = 60_000;
+// ponytail: a tool call that writes nothing for 30 min reads Done; raise it if long silent builds show up wrong.
+const SUB_STALE_MS = 30 * 60_000;
+
+/**
+ * Its subagents as the Manager draws a chat's. A settled one is Done or Problem. An unsettled one with its own transcript
+ * works while that changed in the last minute, or while a tool call is still in flight (for up to 30 minutes). One with no
+ * transcript works while the session does.
+ */
 export function claudeSubagents(s: ClaudeSession, now: number): Subagent[] {
-  const working = claudeColumn(s, now) === 'working';
-  return s.subagents.map((a) => ({ id: a.id, title: a.title, state: a.done || !working ? 'done' : 'working', tools: 0 }));
+  const sessionWorking = claudeColumn(s, now) === 'working';
+  return s.subagents.map((a) => {
+    const quiet = a.lastActivity === undefined ? undefined : now - a.lastActivity;
+    const working = !a.end && (quiet === undefined ? sessionWorking : quiet < SUB_FRESH_MS || (!a.idle && quiet < SUB_STALE_MS));
+    const state = working ? 'working' : a.end === 'failed' ? 'failed' : 'done';
+    return {
+      id: a.id,
+      title: a.title,
+      state,
+      tools: a.tools ?? 0,
+      ...(a.last ? { last: a.last } : {}),
+      ...(a.agentType || a.model ? { about: [a.agentType, a.model].filter(Boolean).join(' · ') } : {}),
+      ...(a.startedAt !== undefined ? { startedAt: a.startedAt } : {}),
+      ...(!working && a.startedAt !== undefined && a.lastActivity !== undefined ? { ms: Math.max(0, a.lastActivity - a.startedAt) } : {}),
+    };
+  });
 }
 
 /** Every word of the query must appear in the title or "claude code". */
