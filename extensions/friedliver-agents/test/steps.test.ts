@@ -225,10 +225,13 @@ describe('paths in the chat folder', () => {
 });
 
 describe('friendly tool names and folded approvals', () => {
-  it('names MCP tools without their mcp__server__ prefix, FriedLiver browser tools as Browser', () => {
-    expect(stepSummary({ title: 'mcp__friedliver__browser_click', toolKind: 'other' })).toMatchObject({ verb: 'Browser', text: 'click' });
+  it('names MCP tools without their mcp__server__ prefix, FriedLiver browser tools in plain words', () => {
+    expect(stepSummary({ title: 'mcp__friedliver__browser_click', toolKind: 'other', input: '{"text":"Add to bag"}' })).toMatchObject({ verb: 'Clicked', text: '‘Add to bag’' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_screenshot' })).toMatchObject({ verb: 'Took a screenshot', text: '' });
+    expect(stepSummary({ title: 'Tool mcp__friedliver__browser_open', input: '{"url":"https://www.myntra.com/puma"}' })).toMatchObject({ verb: 'Opened', text: 'myntra.com/puma' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_type', input: '{"selector":"#q","text":"puma"}' })).toMatchObject({ verb: 'Typed', text: '‘puma’' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_snapshot' })).toMatchObject({ verb: 'Read page', text: '' });
     expect(stepSummary({ title: 'mcp__friedliver__browser_take_screenshot' })).toMatchObject({ verb: 'Browser', text: 'take screenshot' });
-    expect(stepSummary({ title: 'Tool mcp__friedliver__browser_open' })).toMatchObject({ verb: 'Browser', text: 'open' });
     expect(stepSummary({ title: 'mcp__github__create_issue' })).toMatchObject({ verb: 'github', text: 'create issue' });
     expect(stepSummary({ title: 'mcp__friedliver__ask_agent' })).toMatchObject({ verb: 'FriedLiver', text: 'ask agent' });
   });

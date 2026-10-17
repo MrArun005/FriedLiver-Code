@@ -34,6 +34,10 @@ import {
   statusGroups,
   switcherGroups,
   tipPlace,
+  clockTime,
+  shortDuration,
+  transcriptGroups,
+  switcherMeta,
 } from '../src/shared/view';
 
 const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
@@ -507,5 +511,25 @@ describe('map hover card placement', () => {
   it('never runs off the bottom or past a tiny viewport', () => {
     expect(tipPlace(at(100, 560), tip, view).top).toBe(600 - 160 - 4);
     expect(tipPlace(at(0, 0), tip, { w: 200, h: 100 })).toMatchObject({ left: 4, width: 192 });
+  });
+});
+
+describe('the chat transcript', () => {
+  const tool = (id: string): Item => ({ kind: 'tool', id, title: id, locations: [] });
+  it('folds each run of consecutive tools into one card, numbered from 1', () => {
+    const items: Item[] = [said, tool('a'), tool('b'), { kind: 'agent', text: 'hi' }, tool('c')];
+    const groups = transcriptGroups(items);
+    expect(groups.map((g) => (g.kind === 'steps' ? g.items.map((t) => t.id) : g.item.kind))).toEqual(['user', ['a', 'b'], 'agent', ['c']]);
+    expect(groups.map((g) => g.at)).toEqual([0, 1, 3, 4]);
+  });
+  it('reads times and durations short', () => {
+    expect(clockTime(new Date(2026, 0, 1, 22, 24).getTime())).toBe('10:24 PM');
+    expect(clockTime(new Date(2026, 0, 1, 9, 5).getTime())).toBe('9:05 AM');
+    expect(shortDuration(340)).toBe('340ms');
+    expect(shortDuration(1400)).toBe('1s');
+    expect(shortDuration(125_000)).toBe('2m 5s');
+  });
+  it('says where a chat stands and when it last moved', () => {
+    expect(switcherMeta(chat('x', { items: [said, waiting], lastActivity: 1000 }), 43_000)).toBe('Needs you · 42s ago');
   });
 });
