@@ -28,6 +28,7 @@ export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state
   return (
     <div class="map-wrap">
       <Legend still={!map.edges.some((e) => e.flowing)} working={map.nodes.some((n) => n.status === 'working')} />
+      <div class="map-body">
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
           <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={setSel} onFocus={onFocus} />
@@ -35,6 +36,7 @@ export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state
         </div>
       </div>
       {selSub && <SubDetail sub={selSub} state={state} outside={outside} now={now} onClose={() => setSel(null)} />}
+      </div>
     </div>
   );
 }
@@ -107,7 +109,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
             {map.edges.map((e) => (
               <Edge key={e.id} edge={e} lit={!!lit?.has(e.id)} />
             ))}
-            {map.edges.map((e) => (
+            {map.edges.filter((e) => e.kind !== 'subagent').map((e) => (
               <EdgeLabel key={`${e.id}:label`} edge={e} lit={!!lit?.has(e.id)} />
             ))}
 
@@ -180,11 +182,13 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 >
                   {n.state === 'working' && <rect class="ring" x="-3.5" y="-3.5" width={MAP.nodeW + 7} height={MAP.nodeH + 7} rx="11" />}
                   <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
-                  <text class="node-label" x="14" y="17">
-                    subagent
-                  </text>
-                  <text class="node-title" x="14" y="31">
+                  <title>{`Subagent: ${n.title}`}</title>
+                  <SvgGlyph agent={n.agent} x={10} y={10} size={20} />
+                  <text class="node-label" x="40" y="17">
                     {n.title}
+                  </text>
+                  <text class="node-title" x="40" y="31">
+                    {AGENT_FACES[n.agent].name}
                   </text>
                   <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
                 </g>
