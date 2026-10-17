@@ -3415,10 +3415,6 @@ body.vscode-high-contrast-light[data-surface='chat'] {
 body[data-surface='chat'] .chat-app {
   background: var(--c-bg);
 }
-.chat-app[data-wide] {
-  display: grid;
-  grid-template-columns: minmax(240px, 290px) minmax(0, 1fr);
-}
 .chat-main {
   display: flex;
   flex-direction: column;
@@ -4011,4 +4007,11 @@ button.image-thumb,
 .image-strip .image-thumb .image-wait {
   width: 160px;
   height: 90px;
+}
+/* The side bar's chat list: the side bar's own background, the full height. */
+.chat-side.chat-list-view {
+  height: 100vh;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2);
+  background: transparent;
+  border-right: 0;
 }

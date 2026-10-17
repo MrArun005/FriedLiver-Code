@@ -54,8 +54,8 @@ const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** The mic button: macOS dictation, which only the FriedLiver app on a Mac can start. */
 const MAC = document.body.dataset.platform === 'darwin';
-/** From this width the chat list sits beside the chat. */
-const WIDE = 900;
+/** This webview is the side bar's chat list, not a chat tab. */
+const LIST = document.body.dataset.view === 'list';
 
 type Select = (chatId: string) => void;
 
@@ -89,19 +89,23 @@ function App() {
   }, []);
   const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
   // Wide (the chat in the editor area): the chat list stays open beside it. Narrow: tabs and a dropdown.
-  const wide = useWidth() >= WIDE;
+
+  if (LIST) {
+    // The side bar's chat list (its own activity-bar view): picking a chat opens it in the chat tab.
+    return (
+      <LiveState.Provider value={state}>
+        <aside class="chat-side chat-list-view" aria-label="Chats">
+          <AllChats state={state} active={chat?.id} onPick={(chatId) => send({ type: 'openChat', chatId })} />
+        </aside>
+      </LiveState.Provider>
+    );
+  }
 
   return (
     <LiveState.Provider value={state}>
-      <div class="chat-app" data-wide={wide ? '' : undefined}>
+      <div class="chat-app">
         <TextSize />
-        {wide ? (
-          <aside class="chat-side" aria-label="Chats">
-            <AllChats state={state} active={chat?.id} onPick={select} newAgent={chat?.agent} />
-          </aside>
-        ) : (
-          <Switcher state={state} active={chat?.id} onSelect={select} />
-        )}
+        <Switcher state={state} active={chat?.id} onSelect={select} />
         <div class="chat-main">
         {chat ? (
           <>
