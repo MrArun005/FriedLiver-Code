@@ -5,6 +5,7 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { Accounts } from './host/accounts';
+import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
 import type { AgentToAgent } from './host/bridgeRequests';
@@ -79,6 +80,10 @@ export class Controller {
   /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
   editor?: EditorAgent;
   readonly log = vscode.window.createOutputChannel('FriedLiver Agents', { log: true });
+  /** The built-in browser on the right (host/browser.ts). */
+  private readonly browser: BrowserPanel;
+  /** The last code editor shown in the left group, for the code/chat toggle. */
+  private lastLeftEditor?: vscode.TextDocument;
   private readonly surfaces = new Set<Surface>();
   private readonly statusItem = vscode.window.createStatusBarItem('friedliver.decisions', vscode.StatusBarAlignment.Right, 100);
   /** "2 agents working", and a warning while any chat runs in Full auto. */
@@ -113,6 +118,13 @@ export class Controller {
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.browser = new BrowserPanel(context, (line) => this.log.info(line));
+    context.subscriptions.push(
+      this.browser,
+      vscode.window.onDidChangeActiveTextEditor((e) => {
+        if (e && e.viewColumn === vscode.ViewColumn.One && e.document.uri.scheme !== 'output') this.lastLeftEditor = e.document;
+      }),
+    );
     this.accounts = new Accounts(
       context.secrets,
       () => this.core,
@@ -125,6 +137,7 @@ export class Controller {
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
       agentToAgent: () => this.agentToAgent(),
+      browser: (_chatId, call, signal) => this.browser.call(call, signal),
       approvalDefault: () => this.approvalDefault(),
       defaults: {
         get: (agent) => this.context.globalState.get<Partial<Record<AgentKey, AgentDefaults>>>(DEFAULTS_KEY)?.[agent],
@@ -219,6 +232,8 @@ export class Controller {
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
+    command('friedliver.openBrowser', () => this.browser.show());
+    command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
     command('friedliver.nextDecision', () => this.nextDecision());
     command('friedliver.review.accept', (reviewId?: unknown) => {
@@ -668,14 +683,28 @@ export class Controller {
     }
   }
 
-  async moveToCenter(): Promise<void> {
+  async moveToCenter(column?: vscode.ViewColumn): Promise<void> {
     if (this.chatPanel) {
-      this.chatPanel.reveal();
+      this.chatPanel.reveal(column);
     } else {
-      const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', vscode.ViewColumn.Active, { retainContextWhenHidden: false });
+      const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', column ?? vscode.ViewColumn.Active, { retainContextWhenHidden: false });
       this.adoptPanel(panel, 'chat');
     }
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+  }
+
+  /**
+   * The left of the window swaps between the code and the agent chat (the browser keeps the right):
+   * the chat moves into the first editor group, or the last code editor there comes back.
+   */
+  async toggleCodeAndChat(): Promise<void> {
+    const chatShown = this.chatPanel?.visible && this.chatPanel.viewColumn === vscode.ViewColumn.One;
+    if (!chatShown) return this.moveToCenter(vscode.ViewColumn.One);
+    if (this.lastLeftEditor && !this.lastLeftEditor.isClosed) {
+      await vscode.window.showTextDocument(this.lastLeftEditor, vscode.ViewColumn.One);
+    } else {
+      await vscode.commands.executeCommand('workbench.action.openPreviousRecentlyUsedEditorInGroup');
+    }
   }
 
   async moveToSide(): Promise<void> {

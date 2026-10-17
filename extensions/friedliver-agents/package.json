@@ -195,6 +195,18 @@
         "title": "Get Another Agent Extension…",
         "category": "FriedLiver",
         "icon": "$(extensions)"
+      },
+      {
+        "command": "friedliver.openBrowser",
+        "title": "Open Browser",
+        "category": "FriedLiver",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "friedliver.toggleCodeAndChat",
+        "title": "Switch Between Code and Agent Chat",
+        "category": "FriedLiver",
+        "icon": "$(arrow-swap)"
       }
     ],
     "menus": {
@@ -213,6 +225,11 @@
           "command": "friedliver.moveToCenter",
           "when": "view == friedliver.agents",
           "group": "navigation@3"
+        },
+        {
+          "command": "friedliver.openBrowser",
+          "when": "view == friedliver.agents",
+          "group": "navigation@4"
         },
         {
           "command": "friedliver.otherAgents",
@@ -247,6 +264,11 @@
           "command": "friedliver.review.acceptAll",
           "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
           "group": "navigation@3"
+        },
+        {
+          "command": "friedliver.toggleCodeAndChat",
+          "when": "browserEditorOpen && activeEditorGroupIndex == 1",
+          "group": "navigation@9"
         }
       ],
       "commandPalette": [
@@ -333,6 +355,12 @@
         "command": "friedliver.nextDecision",
         "key": "ctrl+alt+d",
         "mac": "ctrl+alt+d",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.toggleCodeAndChat",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
         "when": "!terminalFocus"
       }
     ],
@@ -535,6 +563,12 @@
           "default": "claude",
           "scope": "machine",
           "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
+        },
+        "friedliver.browser.relaxLocalhostCors": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
         }
       }
     },
@@ -633,5 +667,8 @@
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",
     "zod": "^4.6.7"
-  }
+  },
+  "enabledApiProposals": [
+    "browser"
+  ]
 }
