@@ -4,5 +4,6 @@
 !dist/extension.js
 !dist/demo-agent.js
 !dist/bridge.js
+!dist/externalStdio.js
 !media/**
 media/dist/*.map
