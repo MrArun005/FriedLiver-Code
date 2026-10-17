@@ -1,0 +1,38 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`install script > waits for the app, swaps the bundle from the DMG, and reopens it 1`] = `
+"#!/bin/sh
+# FriedLiver update: written by the Agents extension, runs once, deletes itself.
+set -u
+PID=4242
+APP='/Applications/FriedLiver.app'
+DMG='/tmp/fl-x/it'\\''s.dmg'
+DIR='/tmp/fl-x'
+MNT="$DIR/mnt"
+i=0
+while kill -0 "$PID" 2>/dev/null; do
+  i=$((i + 1)); [ "$i" -gt 300 ] && exit 1
+  sleep 1
+done
+mkdir -p "$MNT"
+if ! hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG"; then
+  open "$DMG"; exit 1
+fi
+SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -n 1)
+OK=0
+if [ -n "$SRC" ] && rm -rf "$APP.new" && ditto "$SRC" "$APP.new"; then
+  rm -rf "$APP.old"
+  if mv "$APP" "$APP.old"; then
+    if mv "$APP.new" "$APP"; then OK=1; rm -rf "$APP.old"; else mv "$APP.old" "$APP"; fi
+  fi
+fi
+rm -rf "$APP.new"
+hdiutil detach "$MNT" -quiet || hdiutil detach "$MNT" -force -quiet
+if [ "$OK" = 1 ]; then
+  open "$APP"
+  rm -rf "$DIR"
+else
+  open "$DMG"
+fi
+"
+`;
