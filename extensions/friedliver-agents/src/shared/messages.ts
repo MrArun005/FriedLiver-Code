@@ -29,6 +29,8 @@ export type WebviewMessage =
   | { type: 'notice'; chatId: string; action: NoticeAction }
   /** `chatId` (optional): the composer the images go to. */
   | { type: 'attach'; chatId?: string }
+  /** macOS dictation into the focused composer (the webview focuses it first). */
+  | { type: 'dictate' }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
   /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
@@ -218,6 +220,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'moveToCenter':
     case 'openTasks':
     case 'otherAgents':
+    case 'dictate':
       return { type: m.type };
     case 'attach':
       if (m.chatId === undefined) return { type: 'attach' };

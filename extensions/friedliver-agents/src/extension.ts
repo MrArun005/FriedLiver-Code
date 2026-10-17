@@ -12,6 +12,7 @@ import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
+import { startDictation } from './host/dictation';
 import { EditorAgent } from './host/editor';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
@@ -444,6 +445,14 @@ export class Controller {
           return;
         case 'notice':
           await this.noticeAction(m.chatId, m.action);
+          return;
+        case 'dictate':
+          await startDictation({
+            platform: process.platform,
+            run: (command) => vscode.commands.executeCommand(command),
+            toast: (text, button) => vscode.window.showInformationMessage(text, button),
+            openUrl: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
+          });
           return;
         case 'attach':
           post(surface, { type: 'attached', images: await this.pickImages(), ...(m.chatId ? { chatId: m.chatId } : {}) });
