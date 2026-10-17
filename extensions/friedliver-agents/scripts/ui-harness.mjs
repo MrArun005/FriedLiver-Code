@@ -449,9 +449,8 @@ async function shoot() {
     const look = () =>
       p.evaluate(() => {
         const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b), ring = window.getComputedStyle(b, '::after');
-        const blue = window.getComputedStyle(document.body).getPropertyValue('--vscode-button-background').trim() || '#0078d4';
         const probe = document.createElement('i');
-        probe.style.color = `color-mix(in srgb, ${blue} 58%, #000)`; // the theme's button blue, darkened for the white glyph
+        probe.style.color = '#0078d4'; // the mic's brand blue, the same in every theme
         document.body.append(probe);
         const want = window.getComputedStyle(probe).color;
         probe.remove();

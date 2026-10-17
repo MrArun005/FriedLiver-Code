@@ -91,7 +91,7 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
     });
   }
 
-  it('the mic keeps a white glyph at 4.5:1 on its darkened blue in five themes and with none', () => {
+  it('the mic keeps a white glyph at 4.5:1 on its brand blue in five themes and with none', () => {
     const json = (file: string) => JSON.parse(readFileSync(file, 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1')).colors;
     const blackBlue = json(path.join(__dirname, '../../friedliver-theme/themes/friedliver-black-blue-color-theme.json'));
     const fixture = (name: string) => theme(name);
@@ -110,8 +110,7 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
       for (const t of ['--mic-bg', '--mic-hover']) {
         const back = resolve(`var(${t})`, vars);
         expect(contrast(resolve('var(--mic-fg)', vars), back), `${name} ${t}`).toBeGreaterThanOrEqual(4.5);
-        // Still clearly blue: blue the strongest channel.
-        expect(back[2], `${name} ${t} is blue`).toBeGreaterThan(Math.max(back[0], back[1]));
+        expect(back.slice(0, 3), `${name} ${t} is the brand blue`).toEqual(hex(t === '--mic-bg' ? '#0078d4' : '#026ec1').slice(0, 3));
       }
     }
   });
