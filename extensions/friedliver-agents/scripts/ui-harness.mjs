@@ -782,7 +782,6 @@ async function shoot() {
       await board.addStyleTag({ content: `.columns { grid-template-columns: repeat(var(--cols, 3), ${width}px) !important; }` });
       const bad = await spills(board, '.task-card');
       check(bad.length === 0, `board cards ${width}px wide: nothing spills out [${bad.slice(0, 4).join('; ')}]`);
-      if (width === 360) await board.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/board-after.png'), clip: { x: 0, y: 0, width: 1440, height: 900 } }).catch(() => {});
       await board.close();
       // The list and the map at a viewport as narrow as the card.
       for (const view of ['list', 'map']) {
