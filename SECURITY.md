@@ -212,7 +212,8 @@ endpoint" below).
 Release builds come from GitHub Actions on `v*` tags and carry a
 `SHA256SUMS.txt`. The build checks the Node toolchain against nodejs.org's
 `SHA256SUMS.txt`, the `@vscode/ripgrep` package against upstream's lockfile
-integrity, and the ripgrep binaries against pins in `scripts/checksums.json`.
+integrity, the ripgrep binaries against pins in `scripts/checksums.json`, and
+the Linux .deb sysroot against upstream's `build/checksums/vscode-sysroot.txt`.
 Release builds refuse unpinned downloads. Workflows run with a read-only token
 by default and use actions pinned to commits. Only the release job and the
 weekly upstream job can write. Builds aren't code-signed yet (see

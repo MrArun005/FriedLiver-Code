@@ -87,6 +87,28 @@ export function pinnedSha256(fileName, pinsFile = path.join(SCRIPTS_DIR, 'checks
 	return typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash) ? hash : null;
 }
 
+/**
+ * The VS Code sysroot that upstream's .deb step (build/linux/debian/install-sysroot.ts) would
+ * fetch for a Debian arch, read from that file's source and upstream's
+ * build/checksums/vscode-sysroot.txt: `{ asset, sha256, url }`, where `url` is the plain
+ * release-download link rather than the api.github.com lookup upstream makes. Null when
+ * upstream's code no longer has the shape this reads, or the asset has no checksum.
+ */
+export function vscodeSysrootAsset(installSysrootSource, checksums, debArch, prefixOverride) {
+	const src = String(installSysrootSource);
+	const version = /const version = '([\w.-]+)';/.exec(src)?.[1];
+	const repo = /https:\/\/api\.github\.com\/repos\/([\w.-]+\/[\w.-]+)\/releases\/tags\/v\$\{version\}/.exec(src)?.[1];
+	const defaultPrefix = /process\.env\['VSCODE_SYSROOT_PREFIX'\] \?\? '([\w.-]+)'/.exec(src)?.[1];
+	const prefix = prefixOverride ?? defaultPrefix;
+	const triple = { amd64: 'x86_64-linux-gnu', arm64: 'aarch64-linux-gnu', armhf: 'arm-rpi-linux-gnueabihf' }[debArch];
+	if (!version || !repo || prefix === undefined || !/^[\w.-]*$/.test(prefix) || !triple) {
+		return null;
+	}
+	const asset = `${triple}${prefix}.tar.gz`;
+	const sha256 = shasumFor(checksums, asset);
+	return sha256 ? { asset, sha256, url: `https://github.com/${repo}/releases/download/v${version}/${asset}` } : null;
+}
+
 /** Fails, and deletes the file, unless it has the expected SHA-256. */
 export function checkSha256(file, expected, what) {
 	const actual = sha256File(file);

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
-import { friedliverVersion, matchesIntegrity, pinnedSha256, sha256File, shasumFor } from '../scripts/lib.mjs';
+import { friedliverVersion, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
 
@@ -52,6 +52,46 @@ describe('download integrity helpers', () => {
     const lib = fs.readFileSync(path.join(root, 'scripts', 'lib.mjs'), 'utf8');
     expect(lib.indexOf('checkSha256(archive')).toBeGreaterThan(-1);
     expect(lib.indexOf('checkSha256(archive')).toBeLessThan(lib.indexOf("run('tar', ['-xf', archive"));
+    expect(build.indexOf('checkSha256(tgz, sysroot.sha256')).toBeGreaterThan(-1);
+    expect(build.indexOf('checkSha256(tgz, sysroot.sha256')).toBeLessThan(build.indexOf("run('tar', ['-xzf', tgz"));
+  });
+
+  // Lines from VS Code 1.142.0's build/linux/debian/install-sysroot.ts and build/checksums/vscode-sysroot.txt.
+  const installSysroot = [
+    "\tconst version = '20260212-405735';",
+    "\tconst releaseUrl = `https://api.github.com/repos/Microsoft/vscode-linux-build-agent/releases/tags/v${version}`;",
+    "\tconst prefix = process.env['VSCODE_SYSROOT_PREFIX'] ?? '-glibc-2.28-gcc-10.5.0';",
+  ].join('\n');
+  const sysrootSums = [
+    '38fa5acc4e4f17cb7e3f599b5226a511b22cbdceeb38277d224b45f7280f518f  aarch64-linux-gnu-glibc-2.28-gcc-10.5.0.tar.gz',
+    'ac4b6b14b4cec027a22a51bbbb049b3504958a78106c8a8d5cec144206b767d1  x86_64-linux-gnu-glibc-2.28-gcc-10.5.0.tar.gz',
+    '1ebb6ef1fe2983269fd0855a88f9c9a37f9b515d16524a9146198e4cabdf34f7  x86_64-linux-gnu-glibc-2.28-gcc-8.5.0.tar.gz',
+  ].join('\n');
+
+  it('fetches the .deb sysroot from the release-download URL, not api.github.com', () => {
+    expect(vscodeSysrootAsset(installSysroot, sysrootSums, 'amd64')).toEqual({
+      asset: 'x86_64-linux-gnu-glibc-2.28-gcc-10.5.0.tar.gz',
+      sha256: 'ac4b6b14b4cec027a22a51bbbb049b3504958a78106c8a8d5cec144206b767d1',
+      url: 'https://github.com/Microsoft/vscode-linux-build-agent/releases/download/v20260212-405735/x86_64-linux-gnu-glibc-2.28-gcc-10.5.0.tar.gz',
+    });
+    expect(vscodeSysrootAsset(installSysroot, sysrootSums, 'arm64')?.asset).toBe('aarch64-linux-gnu-glibc-2.28-gcc-10.5.0.tar.gz');
+    expect(vscodeSysrootAsset(installSysroot, sysrootSums, 'amd64', '-glibc-2.28-gcc-8.5.0')?.sha256).toBe('1ebb6ef1fe2983269fd0855a88f9c9a37f9b515d16524a9146198e4cabdf34f7');
+  });
+
+  it('leaves the sysroot to upstream when it cannot tell what upstream would fetch', () => {
+    expect(vscodeSysrootAsset(installSysroot, sysrootSums, 'armhf')).toBeNull(); // no checksum
+    expect(vscodeSysrootAsset(installSysroot, sysrootSums, 'ia32')).toBeNull();
+    expect(vscodeSysrootAsset(installSysroot, sysrootSums, 'amd64', '; rm -rf /')).toBeNull();
+    expect(vscodeSysrootAsset(installSysroot.replace("const version = '20260212-405735';", 'const version = getVersion();'), sysrootSums, 'amd64')).toBeNull();
+    expect(vscodeSysrootAsset('', sysrootSums, 'amd64')).toBeNull();
+  });
+
+  it('build.mjs seeds the sysroot for both .deb steps', () => {
+    const build = fs.readFileSync(path.join(root, 'scripts', 'build.mjs'), 'utf8');
+    const seed = build.indexOf('const debEnv = seedVSCodeSysroot(arch);');
+    expect(seed).toBeGreaterThan(-1);
+    expect(seed).toBeLessThan(build.indexOf('-prepare-deb`], { env: debEnv }'));
+    expect(seed).toBeLessThan(build.indexOf('-build-deb`], { env: debEnv }'));
   });
 
   it('stamps a release version only in the release tag form', () => {

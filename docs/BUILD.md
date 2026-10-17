@@ -80,6 +80,13 @@ Environment variables:
   and the package's own download checks nothing). A mismatch stops the build.
   When an upstream bump changes `@vscode/ripgrep`, add the new binaries'
   hashes there; the upstream pull request reminds you.
+- **Linux .deb sysroot.** Upstream's `prepare-deb` step reads the app's library
+  dependencies with a toolchain sysroot that it also looks up through
+  `api.github.com`; a 403 there failed Linux CI builds. `build.mjs`
+  downloads the asset upstream names from the plain release-download URL,
+  checks it against upstream's `build/checksums/vscode-sysroot.txt` before
+  unpacking it into `.cache/vscode-<arch>-sysroot` (or `VSCODE_SYSROOT_DIR`),
+  and writes the stamp that makes upstream skip its own lookup.
 - **Flaky sub-installs.** Upstream's postinstall runs about 100 `npm ci` in
   parallel. If one of them dies (we saw `ECONNRESET`), `build.mjs` retries the
   postinstall instead of the whole `npm ci`.
