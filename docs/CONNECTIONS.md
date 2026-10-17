@@ -155,9 +155,35 @@ this chat" on a browser request allows later browser actions in that chat,
 not agent-to-agent requests (and the other way round).
 
 Claude, Codex and Gemini get these tools with the rest of the `friedliver`
-server. The separate Claude Code extension can't use it yet: the server only
-answers requests carrying a FriedLiver chat's in-memory token, and there is
-no way to issue one to an outside client. Adding that (a per-window token
-shown by a command, configured as an HTTP MCP server named `friedliver` in
-Claude Code's `.mcp.json` with `Authorization: Bearer <token>`) is follow-up
-work.
+server.
+
+### Claude Code (extension or CLI) outside FriedLiver chats
+
+The separate Claude Code VS Code extension, and `claude` run in FriedLiver's
+terminal, reach the browser tools (and only those) through an MCP server named
+`friedliver-browser`:
+
+- On start, with `friedliver.browser.externalClients` on (default), FriedLiver
+  mints a random 256-bit token for this launch, writes `{url, token}` to a 0600
+  file in a fresh 0700 folder in its global storage (the last launch's file is
+  deleted), and adds or updates `mcpServers["friedliver-browser"]` in
+  `~/.claude.json`: `{type: "http", url: "http://127.0.0.1:<port>/mcp",
+  headers: {Authorization: "Bearer <token>"}}`. Nothing else in the file
+  changes; the old file is kept as `~/.claude.json.friedliver-backup` and the
+  new one is written to a temp file and renamed. FriedLiver edits the file
+  itself rather than running `claude mcp add`, which would put the token in a
+  command line other local users can read. Closing the window removes the entry
+  if it still points at that window.
+- The server is the same 127.0.0.1-only HTTP server the chats use, with the
+  same Host/Origin checks. The token reaches `tools/list` and `tools/call` for
+  the `browser_*` tools only; anything else is "not found". A token from an
+  earlier launch is refused (401).
+- Every action (open, click, type, back, reload) asks with a popup such as
+  "Claude Code wants to click in the browser": Allow, Allow for this session,
+  Deny. Full auto in a chat does not cover Claude Code; only
+  `friedliver.browser.externalAutoApprove` (default off) does. The URL rules,
+  the own-tab-only rule and `agentToAgent: off` apply as for chats.
+- **FriedLiver: Connect Claude Code to the browser** does this again and says
+  what happened. Start a new Claude Code session afterwards to pick up the
+  server. Turning `externalClients` off revokes the token and removes the entry.
+- Both settings are read from your user settings only.
