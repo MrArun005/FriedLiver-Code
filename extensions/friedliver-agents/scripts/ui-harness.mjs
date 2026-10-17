@@ -10,6 +10,7 @@
 //
 // Pages: /?surface=tasks|chat|images&theme=black-blue&side=1&select=<chat id>&view=board|list|map&empty=1
 //        &fixture=steps (a Claude chat with long heredoc commands and a plain-text summary, ui-fixture-steps.mjs)
+//        &fixture=subagents (a Claude chat with three subagents, and outside Claude Code sessions, ui-fixture-subagents.mjs)
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -20,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
+import { subagentsFixture } from './ui-fixture-subagents.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -74,7 +76,13 @@ function page(params) {
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
   const data =
-    params.get('empty') === '1' ? { state: { chats: [], images: [], links: [] } } : params.get('fixture') === 'steps' ? stepsFixture(Date.now()) : fixture(Date.now());
+    params.get('empty') === '1'
+      ? { state: { chats: [], images: [], links: [] } }
+      : params.get('fixture') === 'steps'
+        ? stepsFixture(Date.now())
+        : params.get('fixture') === 'subagents'
+          ? subagentsFixture(Date.now())
+          : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
@@ -84,6 +92,7 @@ function page(params) {
     window.__vscodeState = () => saved;
     let saved = ${JSON.stringify(saved ?? null)};
     const snapshot = ${JSON.stringify(snapshot).replace(/</g, '\\u003c')};
+    const claude = ${JSON.stringify(data.claude ?? null).replace(/</g, '\\u003c')};
     window.acquireVsCodeApi = () => ({
       postMessage(m) {
         window.__posted.push(m);
@@ -102,6 +111,7 @@ function page(params) {
           g.fillStyle = '#7a8394'; g.font = '14px sans-serif'; g.fillText(label, 20, 285);
           setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: c.toDataURL('image/png') }) }, '*'), 0);
         }
+        if (m && m.type === 'ready' && claude) setTimeout(() => window.postMessage({ type: 'claudeSessions', sessions: claude }, '*'), 0);
       },
       getState: () => saved ?? undefined,
       setState: (s) => { saved = s; },

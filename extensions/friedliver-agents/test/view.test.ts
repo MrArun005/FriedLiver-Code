@@ -36,6 +36,7 @@ import {
   tipPlace,
   stepsHeading,
   shortDuration,
+  subagentAnswer,
   transcriptGroups,
   switcherMeta,
 } from '../src/shared/view';
@@ -241,9 +242,9 @@ describe('subagents', () => {
 
   it("lists a chat's Task and Agent calls with their state and inner tool count", () => {
     expect(subagents(chat('p', { busy: true, items }))).toEqual([
-      { id: 't1', title: 'Job t1', state: 'working', tools: 2 },
+      { id: 't1', title: 'Job t1', state: 'working', tools: 2, last: 'Read' },
       { id: 't2', title: 'Job t2', state: 'done', tools: 0 },
-      { id: 't3', title: 'Job t3', state: 'failed', tools: 1 },
+      { id: 't3', title: 'Job t3', state: 'failed', tools: 1, last: 'Read' },
     ]);
   });
 
@@ -270,6 +271,54 @@ describe('subagents', () => {
     ]);
     expect(e[0].d.startsWith(`M ${p.x + MAP.nodeW} `)).toBe(true);
     expect(mapKey(state([chat('p', { busy: true, items })]))).not.toBe(mapKey(state([chat('p', { items })])));
+  });
+});
+
+describe('subagents inline', () => {
+  const agent = (id: string, status: string, over: Partial<Extract<Item, { kind: 'tool' }>> = {}): Item => ({ kind: 'tool', id, title: `Job ${id}`, status, locations: [], tool: 'Agent', ...over });
+  const step = (id: string, parent: string, title = 'Read a.ts', status = 'completed'): Item => ({ kind: 'tool', id, title, status, locations: [], tool: 'Read', parent });
+  const read: Item = { kind: 'tool', id: 'r', title: 'Read', status: 'completed', locations: [], tool: 'Read' };
+  const items: Item[] = [said, read, agent('a1', 'in_progress', { startedAt: 1000 }), agent('a2', 'completed', { startedAt: 1000, ms: 4000 }), step('s1', 'a1'), read, step('s2', 'a1', 'Grep foo', 'in_progress'), step('s3', 'a2')];
+
+  it('puts each subagent in the transcript where it was spawned, with its own steps, not in the step boxes', () => {
+    const g = transcriptGroups(items);
+    expect(g.map((x) => x.kind)).toEqual(['one', 'steps', 'subagent', 'subagent', 'steps']);
+    const [, first, a1, a2, last] = g;
+    expect(first.kind === 'steps' && first.items.map((t) => t.id)).toEqual(['r']);
+    expect(a1.kind === 'subagent' && [a1.item.id, a1.steps.map((t) => t.id)]).toEqual(['a1', ['s1', 's2']]);
+    expect(a2.kind === 'subagent' && a2.steps.map((t) => t.id)).toEqual(['s3']);
+    // A step of a subagent between two plain steps doesn't split their box apart either.
+    expect(last.kind === 'steps' && last.items.map((t) => t.id)).toEqual(['r']);
+  });
+
+  it('gives a subagent its last step and its timing', () => {
+    const [a1, a2] = subagents(chat('p', { busy: true, items }));
+    expect(a1).toMatchObject({ id: 'a1', state: 'working', last: 'Grep foo', startedAt: 1000, tools: 2 });
+    expect(a2).toMatchObject({ id: 'a2', state: 'done', last: 'Read a.ts', ms: 4000 });
+  });
+
+  it("reads a subagent's final answer from its result", () => {
+    expect(subagentAnswer({ kind: 'tool', id: 'a', title: 'x', locations: [], out: [{ t: 'text', text: 'Found 3 bugs.' }] })).toBe('Found 3 bugs.');
+    expect(subagentAnswer({ kind: 'tool', id: 'a', title: 'x', locations: [] })).toBeUndefined();
+  });
+
+  it("draws an outside Claude Code session's subagents under it, and leaves sessions without subagents off the map", () => {
+    const outside = [
+      { id: 'cc1', cwd: '/w', title: 'Fan out three reviewers', lastActivity: 10_000, messages: 4, subagents: [{ id: 'x1', title: 'Review A', done: false }, { id: 'x2', title: 'Review B', done: true }] },
+      { id: 'cc2', cwd: '/w', title: 'IDE identification question', lastActivity: 10_000, messages: 2, subagents: [] },
+    ];
+    const map = mapLayout(state([chat('p', { items: [said] })]), outside, 20_000);
+    expect(map.outside.map((n) => [n.id, n.state])).toEqual([['cc1', 'working']]);
+    expect(map.subs.filter((n) => n.outside).map((n) => [n.id, n.chatId, n.state])).toEqual([
+      ['cc:cc1:x1', 'cc:cc1', 'working'],
+      ['cc:cc1:x2', 'cc:cc1', 'done'],
+    ]);
+    expect(map.edges.filter((e) => e.kind === 'subagent').map((e) => [e.from, e.to])).toEqual([
+      ['cc:cc1', 'cc:cc1:x1'],
+      ['cc:cc1', 'cc:cc1:x2'],
+    ]);
+    expect(map.lanes.at(-1)).toMatchObject({ agent: 'claude', outside: true, chats: 1 });
+    expect(mapKey(state([]), outside, 20_000)).not.toBe(mapKey(state([]), [], 20_000));
   });
 });
 

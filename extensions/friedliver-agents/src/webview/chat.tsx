@@ -48,6 +48,7 @@ import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueLi
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
+import { RunningAgents, SubagentCard } from './subagents';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -119,6 +120,7 @@ function App() {
               reveal={reveal}
               onSelect={select}
             />
+            <RunningAgents chat={chat} />
             <Composer
               key={chat.id}
               chat={chat}
@@ -539,7 +541,9 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       }}
     >
       {transcriptGroups(items).map((g) =>
-        g.kind === 'steps' ? (
+        g.kind === 'subagent' ? (
+          <SubagentCard key={g.at} chat={chat} item={g.item} steps={g.steps} />
+        ) : g.kind === 'steps' ? (
           <Steps key={g.at} tools={g.items} approvals={approvals} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
         ) : (
           <TranscriptItem
@@ -560,7 +564,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       <QueueList chat={chat} />
       {chat.busy && !waitingNow && (
         <div class="working">
-          <Dot state="working" /> {chat.label} is working…
+          <Dot state="working" /> Working…
         </div>
       )}
       {/* Read out what matters, not every streamed word. */}
@@ -1293,6 +1297,7 @@ function Composer({
             }
           }}
         />
+        {chat.busy && text.trim() && <div class="composer-queued">Queued for after this turn · Esc stops</div>}
         <div class="composer-bar">
           <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
             <Icon name="plus" />
