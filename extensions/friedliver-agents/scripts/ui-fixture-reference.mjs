@@ -196,8 +196,7 @@ export function referenceFixture(now = Date.now()) {
     approval: 'ask',
     items: [
       { kind: 'user', text: LONG_PROMPT, images: [], checkpoint: 'turn-l1' },
-      ...items.slice(1),
-      ...items.slice(1),
+      ...[1, 2, 3, 4, 5, 6].flatMap((n) => items.slice(1).map((i) => (i.kind === 'tool' ? { ...i, id: `${i.id}-${n}` } : i))),
     ],
   };
   return { state: { chats: [chat, long, ...linked], images: [], links: [] }, ids: { chat: chat.id } };

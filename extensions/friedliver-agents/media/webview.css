@@ -1228,13 +1228,20 @@ button.count-item .icon {
   overflow-wrap: anywhere;
 }
 .card-code {
-  display: block;
   padding: 6px var(--sp-2);
   border-radius: var(--r-4);
   font-size: var(--t-90);
   color: var(--fg);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+/* A quoted request or command on a card: three lines at most; the chat has the rest. */
+.card-code,
+.card-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 .card-quote {
   padding: 6px 10px;

@@ -764,6 +764,9 @@ async function shoot() {
     // A very long message never takes the chat over: 3 lines and Show more, in place and in the sticky copy; the composer caps.
     for (const width of [640, 1200]) {
       const p = await open('surface=chat&theme=dark-2026&fixture=reference&select=chat-long', width, 900);
+      // The chat opens at its end, where the sticky copy shows; start at the message itself.
+      await p.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
+      await p.waitForTimeout(100);
       const msg = p.locator('.user-msg').first();
       const lines = (sel) => p.locator(sel).first().evaluate((el) => el.getBoundingClientRect().height / parseFloat(window.getComputedStyle(el).lineHeight));
       check((await lines('.user-msg .bubble-text')) <= 3.05, `at ${width}px a 3,000-character message shows 3 lines`);
@@ -779,7 +782,10 @@ async function shoot() {
       check((await lines('.user-msg .bubble-text')) > 3.5 && (await more.innerText()).trim() === 'Show less' && (await more.getAttribute('aria-expanded')) === 'true', `at ${width}px Show more expands it in place and reads Show less`);
       if (width === 1200) await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/long-message-expanded.png') }).catch(() => {});
       // Scrolled past, the sticky copy stays at 3 lines and under 30% of the view, even with the message expanded.
-      await p.evaluate(() => (document.querySelector('.transcript').scrollTop = document.querySelector('.user-msg').getBoundingClientRect().bottom + 400));
+      await p.evaluate(() => {
+        const t = document.querySelector('.transcript');
+        t.scrollTop += document.querySelector('.user-msg').getBoundingClientRect().bottom - t.getBoundingClientRect().top + 400;
+      });
       await p.waitForTimeout(150);
       const sticky = p.locator('.sticky-prompt');
       const sh = await sticky.evaluate((el) => el.getBoundingClientRect().height).catch(() => -1);
