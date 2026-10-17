@@ -8,7 +8,7 @@ import { Accounts } from './host/accounts';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { runRewind } from './host/rewindFlow';
-import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
+import { encodeCwd, listClaudeImages, listClaudeSessions } from './host/claudeSessions';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
 import { ProjectIndexHost } from './host/projectIndexHost';
@@ -19,7 +19,7 @@ import { OTHER_AGENTS } from './host/otherAgents';
 import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
 import { InlineEditor } from './host/inlineEditor';
-import { imagePreview } from './host/imageAccess';
+import { imagePreview, imageThumb, workerScaler } from './host/imageAccess';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
@@ -37,6 +37,7 @@ import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
 import { clip } from './shared/view';
+import type { OutsideImages } from './shared/gallery';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** How long a message for a chat view (a composer's code reference, an item to reveal) waits for one to load. */
@@ -110,6 +111,11 @@ export class Controller {
   private tasksPanel?: vscode.WebviewPanel;
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
+  /** The images in those sessions, as the Images view and the Manager last got them. */
+  private claudeImages: OutsideImages[] = [];
+  /** Thumbnails are made one at a time, the scaling in a worker thread. */
+  private thumbQueue: Promise<unknown> = Promise.resolve();
+  private readonly scaler: ReturnType<typeof workerScaler>;
   private claudeWatchers: FSWatcher[] = [];
   private claudeTimer?: ReturnType<typeof setTimeout>;
   /** The chat last shown anywhere, so moving between side and center keeps it. */
@@ -152,6 +158,7 @@ export class Controller {
   });
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.scaler = workerScaler(path.join(context.extensionUri.fsPath, 'dist', 'thumbWorker.js'));
     this.browser = new BrowserPanel(context, (line) => this.log.info(line));
     context.subscriptions.push(
       this.browser,
@@ -264,6 +271,7 @@ export class Controller {
       ),
       vscode.window.registerWebviewViewProvider('friedliver.chats', { resolveWebviewView: (view) => this.resolveView(view, 'chat', 'Chats', true) }),
       vscode.window.registerWebviewViewProvider('friedliver.images', { resolveWebviewView: (view) => this.resolveView(view, 'images', 'Images') }),
+      { dispose: () => this.scaler.dispose() },
       vscode.window.registerWebviewPanelSerializer('friedliver.tasks', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'tasks') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'chat') }),
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
@@ -412,7 +420,7 @@ export class Controller {
   }
 
   private sendActions(actions: Action[]): void {
-    // Each kind of surface gets the actions it shows; the Agent Manager, for one, no images.
+    // Each kind of surface gets the actions it shows; a chat, for one, only the images you attached.
     const byKind = new Map<Script, Action[]>();
     for (const s of this.surfaces) {
       let mine = byKind.get(s.kind);
@@ -474,7 +482,7 @@ export class Controller {
       this.dictation.closed(surface);
       this.surfaces.delete(surface);
       if (surface.webview === this.agentsView?.webview) this.agentsView = undefined;
-      if (surface.kind === 'tasks') this.refreshClaudeSessions();
+      if (surface.kind !== 'chat') this.refreshClaudeSessions();
     });
   }
 
@@ -523,7 +531,10 @@ export class Controller {
           this.batcher.flush();
           surface.ready = true;
           post(surface, { type: 'snapshot', state: stateFor(surface.kind, this.core.snapshot), selected: surface.selected ?? this.lastSelected, now: Date.now(), defaults: this.core.agentDefaults() });
-          if (surface.kind === 'tasks') this.refreshClaudeSessions();
+          if (surface.kind !== 'chat') {
+            if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
+            this.refreshClaudeSessions();
+          }
           if (surface.kind === 'chat') {
             this.replay = this.replay.filter((r) => r.until > Date.now());
             for (const r of this.replay) post(surface, r.message);
@@ -571,9 +582,20 @@ export class Controller {
           post(surface, { type: 'imageSrc', path: m.path, ...(src ? { src } : {}) });
           return;
         }
+        case 'imageThumb': {
+          const job = this.thumbQueue.then(() => imageThumb(m.path, this.imageRoots(), path.join(this.context.globalStorageUri.fsPath, 'thumbs'), this.scaler));
+          this.thumbQueue = job.catch(() => {});
+          const src = await job.catch(() => null);
+          post(surface, { type: 'imageThumb', path: m.path, ...(src ? { src } : {}) });
+          return;
+        }
         case 'openImage':
           // The editor's image preview shows it (no scripts, SVG included); outside the roots too, since the user asked.
           if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(m.path), vscode.ViewColumn.Beside);
+          return;
+        case 'revealImage':
+          // Only shows where the file is; nothing is opened or run.
+          if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(m.path));
           return;
         case 'dictationSettings':
           await vscode.env.openExternal(vscode.Uri.parse(DICTATION_SETTINGS, true));
@@ -1402,16 +1424,25 @@ export class Controller {
   }
 
   private async readClaudeSessions(): Promise<void> {
-    const on = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true) && [...this.surfaces].some((s) => s.kind === 'tasks');
-    this.watchClaudeSessions(on);
+    const shown = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true);
+    const manager = shown && [...this.surfaces].some((s) => s.kind === 'tasks');
+    // The Images view and the Manager's Images tab show what those sessions looked at.
+    const gallery = shown && [...this.surfaces].some((s) => s.kind !== 'chat');
+    this.watchClaudeSessions(gallery);
     const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
-    this.claudeSessions = on ? await listClaudeSessions({
-          home: os.homedir(),
-          folders: this.folders(),
+    const home = os.homedir();
+    const folders = this.folders();
+    this.claudeSessions = manager ? await listClaudeSessions({
+          home,
+          folders,
           skip: owned,
           showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
         }) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
+    const images = gallery ? await listClaudeImages({ home, folders, skip: owned }) : [];
+    if (JSON.stringify(images) === JSON.stringify(this.claudeImages)) return;
+    this.claudeImages = images;
+    for (const s of this.surfaces) if (s.kind !== 'chat' && s.ready) post(s, { type: 'claudeImages', sessions: images });
   }
 
   /** Watches the folders' Claude Code project folders while the Manager is open; a folder made later is picked up on the next read. */
@@ -1421,7 +1452,8 @@ export class Controller {
     if (!on) return;
     for (const folder of this.folders()) {
       try {
-        const w = watch(path.join(os.homedir(), '.claude', 'projects', encodeCwd(folder)), () => this.refreshClaudeSessions());
+        // Recursive: subagents write their transcripts in the session's own folder.
+        const w = watch(path.join(os.homedir(), '.claude', 'projects', encodeCwd(folder)), { recursive: true }, () => this.refreshClaudeSessions());
         w.on('error', () => w.close());
         this.claudeWatchers.push(w);
       } catch {

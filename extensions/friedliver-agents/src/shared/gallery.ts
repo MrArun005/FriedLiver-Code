@@ -83,11 +83,11 @@ export function chatGallery(chat: ChatView, images: readonly ImageItem[]): Galle
       }
     }
   }
-  // Images a tool sent back as data (not a file), or the agent put in a reply.
+  // Images a tool sent back as data (not a file) or the agent put in a reply; and ones you sent with an @-question.
   for (const img of images) {
-    if (img.chatId !== chat.id || img.from !== 'agent' || seen.has(img.id)) continue;
+    if (img.chatId !== chat.id || seen.has(img.id)) continue;
     seen.add(img.id);
-    out.push({ key: `${chat.id}\0${img.id}`, chatId: chat.id, imageId: img.id, ...(img.stepId ? { stepId: img.stepId } : {}), title: img.title, source: 'created', at: img.at ?? chat.lastActivity });
+    out.push({ key: `${chat.id}\0${img.id}`, chatId: chat.id, imageId: img.id, ...(img.stepId ? { stepId: img.stepId } : {}), title: img.title, source: img.from === 'you' ? 'attached' : 'created', at: img.at ?? chat.lastActivity });
   }
   return out;
 }
