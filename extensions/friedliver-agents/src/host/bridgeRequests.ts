@@ -1,6 +1,6 @@
-import { EXTERNAL_CLIENT, isBrowserCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
+import { isBrowserCall, isExternal, type BridgeCall, type BrowserCall } from '../bridge/protocol';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
-import { bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
+import { BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { agentList, chatList, renderChat } from './transcript';
 
 /** Whether agents may reach other agents and chats through the FriedLiver tools. */
@@ -18,7 +18,7 @@ export interface ToolHost {
   dispatch(action: Action): void;
   id(prefix: string): string;
   /** Tells the user an agent waits for their answer, when they may not see the chat. */
-  notify(ask: { chatId: string; requestId: string; title: string }): void;
+  notify(ask: { chatId: string; requestId: string; title: string; detail?: string }): void;
   /** The consultation `chatId` already has with `agent`, if any. */
   consultation(chatId: string, agent: AgentKey): ChatView | undefined;
   /** Asks another agent and resolves with its answer; `started` gets the consulted chat. */
@@ -30,6 +30,8 @@ export interface ToolHost {
   browser?(chatId: string, call: BrowserCall, signal: AbortSignal): Promise<string>;
   /** Whether browser actions by the external client (EXTERNAL_CLIENT) skip the user's OK. Default no. */
   externalAutoApprove?(): boolean;
+  /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
+  browserPage?(selector?: string): Promise<{ origin?: string; password: boolean }>;
 }
 
 type ChatCall = Exclude<BridgeCall, BrowserCall | { tool: 'list_agents' | 'list_chats' }>;
@@ -44,8 +46,11 @@ type Answer = 'allowed' | 'denied' | 'timeout';
  * so they can't loop or deadlock each other.
  */
 export class BridgeRequests {
-  private readonly pending = new Map<string, { chatId: string; browser: boolean; resolve(answer: Answer): void }>();
-  /** Chats whose agent the user allowed for the rest of this window, as `<chatId>` or, for the browser, `<chatId> browser`. */
+  private readonly pending = new Map<string, { chatId: string; allowKey: string; resolve(answer: Answer): void }>();
+  /**
+   * What "Allow for this chat" allowed for the rest of this window: `<chatId>`, `<chatId> browser`, or for an
+   * external MCP session `<callerId> browser <origin>`, so a new session or another site asks again.
+   */
   private readonly allowedChats = new Set<string>();
   /** For each chat, the chats it is waiting on through ask_agent. */
   private readonly waits = new Map<string, Set<string>>();
@@ -54,11 +59,9 @@ export class BridgeRequests {
 
   async call(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {
     if (this.host.policy() === 'off') throw new Error('The user turned off agent-to-agent connections in FriedLiver.');
-    if (chatId === EXTERNAL_CLIENT) {
+    if (isExternal(chatId)) {
       if (!isBrowserCall(call)) throw new Error('Only the browser_* tools are open to clients outside FriedLiver.');
-      // Not a chat: it asks like one on "Ask", and skips asking only when the user opted in.
-      const external = { id: EXTERNAL_CLIENT, label: 'Claude Code', approval: this.host.externalAutoApprove?.() ? 'full' : undefined } as ChatView;
-      return this.browser(external, call, signal);
+      return this.external(chatId, call, signal);
     }
     const caller = this.chat(chatId);
     if (!caller) throw new Error('This chat was closed in FriedLiver.');
@@ -124,8 +127,57 @@ export class BridgeRequests {
     settled(await this.approve(caller, item, auto, signal));
     // Either can change while the user decides.
     if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
-    if (caller.id !== EXTERNAL_CLIENT && !this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
+    if (!this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
     return this.host.browser(caller.id, call, signal);
+  }
+
+  /**
+   * A browser call from outside FriedLiver (Claude Code). Like a chat on Ask, but the popup says
+   * exactly what it will do and where, and "Allow for this session" holds for this MCP session on
+   * this origin only. Skips asking only under friedliver.browser.externalAutoApprove.
+   */
+  private async external(id: string, call: BrowserCall, signal: AbortSignal): Promise<string> {
+    if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
+    if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
+    if (browserNeedsApproval(call.tool, undefined)) {
+      const page = (await this.host.browserPage?.(call.tool === 'browser_type' ? call.selector : undefined).catch(() => undefined)) ?? { password: true };
+      // ponytail: the origin is read at ask time; a page that navigates before the action runs keeps the OK.
+      const origin = call.tool === 'browser_open' ? new URL(call.url).origin : (page.origin ?? 'an unknown page');
+      const allowKey = `${id} browser ${origin}`;
+      if (!this.host.externalAutoApprove?.() && !this.allowedChats.has(allowKey)) {
+        this.room(id);
+        const title = `Claude Code wants to ${BROWSER_VERBS[call.tool as BridgeItem['tool']] ?? 'use'} in the browser`;
+        settled(await this.waitFor(id, allowKey, title, `${clean(origin)}: ${externalDetail(call, page.password)}`, signal));
+        if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
+      }
+    }
+    return this.host.browser(id, call, signal);
+  }
+
+  /** Waits for the user's answer to a request no chat holds. */
+  private waitFor(chatId: string, allowKey: string, title: string, detail: string, signal: AbortSignal): Promise<Answer> {
+    const requestId = this.host.id('bridge');
+    return new Promise((resolve) => {
+      const done = (answer: Answer) => {
+        if (!this.pending.delete(requestId)) return;
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        resolve(answer);
+      };
+      const onAbort = () => done('denied');
+      const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
+      timer.unref?.();
+      this.pending.set(requestId, { chatId, allowKey, resolve: done });
+      if (signal.aborted) return done('denied');
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.host.notify({ chatId, requestId, title, detail });
+    });
+  }
+
+  /** Every external session's token use stops: nothing of theirs waits, nothing stays allowed. */
+  forgetExternal(): void {
+    for (const p of [...this.pending.values()]) if (isExternal(p.chatId)) p.resolve('denied');
+    for (const key of [...this.allowedChats]) if (isExternal(key.split(' ')[0])) this.allowedChats.delete(key);
   }
 
   /** Throws when the chat already has as many requests waiting on the user as it may. */
@@ -139,7 +191,7 @@ export class BridgeRequests {
   answer(requestId: string, answer: 'allow' | 'allowChat' | 'deny'): void {
     const p = this.pending.get(requestId);
     if (!p) return;
-    if (answer === 'allowChat') this.allowedChats.add(p.browser ? `${p.chatId} browser` : p.chatId);
+    if (answer === 'allowChat') this.allowedChats.add(p.allowKey);
     p.resolve(answer === 'deny' ? 'denied' : 'allowed');
   }
 
@@ -240,7 +292,7 @@ export class BridgeRequests {
       const onAbort = () => done('denied');
       const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
       timer.unref?.();
-      this.pending.set(requestId, { chatId: caller.id, browser: 'browser' in item.target, resolve: done });
+      this.pending.set(requestId, { chatId: caller.id, allowKey: 'browser' in item.target ? `${caller.id} browser` : caller.id, resolve: done });
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [item], at: Date.now() });
       if (signal.aborted) return done('denied');
       signal.addEventListener('abort', onAbort, { once: true });
@@ -250,6 +302,31 @@ export class BridgeRequests {
 
   private chat(chatId: string): ChatView | undefined {
     return this.host.state.chats.find((c) => c.id === chatId);
+  }
+}
+
+/** Text from an agent, safe to show in a popup: no control or direction characters, at most ~120 characters. */
+export function clean(text: string, max = 120): string {
+  // eslint-disable-next-line no-control-regex
+  const plain = text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, ' ');
+  return plain.length > max ? `${plain.slice(0, max)}…` : plain;
+}
+
+/** What an external browser action will do, for its popup; typing into a password field shows no text. */
+export function externalDetail(call: BrowserCall, password: boolean): string {
+  switch (call.tool) {
+    case 'browser_open':
+      return `open ${clean(call.url)}`;
+    case 'browser_click':
+      return call.selector ? `click ${clean(call.selector)}` : `click "${clean(call.text ?? '')}"`;
+    case 'browser_type':
+      return `type ${password ? '•••••••• (a password field)' : `"${clean(call.text)}"`} into ${clean(call.selector)}`;
+    case 'browser_back':
+      return 'go back';
+    case 'browser_reload':
+      return 'reload';
+    default:
+      return call.tool;
   }
 }
 

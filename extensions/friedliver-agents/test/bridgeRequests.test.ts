@@ -186,48 +186,84 @@ describe('browser requests whose world changed while the user decided', () => {
 });
 
 describe('the external client (Claude Code outside FriedLiver)', () => {
+  const S1 = `${EXTERNAL_CLIENT}:${'1'.repeat(32)}`;
+  const S2 = `${EXTERNAL_CLIENT}:${'2'.repeat(32)}`;
   const ext = (auto = false) => {
     const h = host();
     const done: string[] = [];
-    const asked: string[] = [];
+    const asks: { requestId: string; title: string; detail?: string }[] = [];
+    const page = { origin: 'http://localhost:3000', password: false };
     h.browser = async (_c, call) => (done.push(call.tool), 'ok');
-    h.notify = (a) => asked.push(a.title);
+    h.notify = (a) => void asks.push(a);
     h.externalAutoApprove = () => auto;
-    return { h, done, asked, requests: new BridgeRequests(h), signal: new AbortController().signal };
+    h.browserPage = async () => ({ ...page });
+    return { h, done, asks, page, requests: new BridgeRequests(h), signal: new AbortController().signal };
   };
+  const tick = () => new Promise((r) => setTimeout(r, 0));
 
   it('reaches only the browser tools', async () => {
     const { requests, signal } = ext(true);
     for (const call of [{ tool: 'list_chats' }, { tool: 'list_agents' }, { tool: 'read_chat', chatId: 'chat-1' }] as const) {
-      await expect(requests.call(EXTERNAL_CLIENT, call, signal)).rejects.toThrow(/Only the browser_\* tools/);
+      await expect(requests.call(S1, call, signal)).rejects.toThrow(/Only the browser_\* tools/);
     }
   });
 
-  it('asks the user before acting, as "Claude Code", and does nothing when denied', async () => {
-    const { done, asked, requests, signal } = ext();
-    await expect(requests.call(EXTERNAL_CLIENT, { tool: 'browser_snapshot' }, signal)).resolves.toBe('ok');
-    let id = '';
-    const notify = new Promise<void>((r) => (requests['host'].notify = (a) => ((id = a.requestId), asked.push(a.title), r())));
-    const click = requests.call(EXTERNAL_CLIENT, { tool: 'browser_click', text: 'Buy' }, signal);
-    await notify;
-    expect(asked).toEqual(['Claude Code wants to click in the browser']);
-    requests.answer(id, 'deny');
+  it('asks before acting, saying what and where, and does nothing when denied', async () => {
+    const { done, asks, requests, signal } = ext();
+    await expect(requests.call(S1, { tool: 'browser_snapshot' }, signal)).resolves.toBe('ok');
+    const click = requests.call(S1, { tool: 'browser_click', text: 'Buy\u202enow\n' + 'x'.repeat(300) }, signal);
+    await tick();
+    expect(asks[0].title).toBe('Claude Code wants to click in the browser');
+    expect(asks[0].detail).toMatch(/^http:\/\/localhost:3000: click "Buy now x+…"$/);
+    expect(asks[0].detail!.length).toBeLessThan(160);
+    requests.answer(asks[0].requestId, 'deny');
     await expect(click).rejects.toThrow(/did not allow/);
     expect(done).toEqual(['browser_snapshot']);
   });
 
-  it('"Allow for this session" covers later actions; auto-approve only by setting; URL rules still apply', async () => {
-    const { done, requests, signal } = ext();
-    let id = '';
-    requests['host'].notify = (a) => (id = a.requestId);
-    const first = requests.call(EXTERNAL_CLIENT, { tool: 'browser_reload' }, signal);
-    requests.answer(id, 'allowChat');
+  it('shows the URL it opens and the text it types, but never a password', async () => {
+    const { asks, page, requests, signal } = ext();
+    void requests.call(S1, { tool: 'browser_open', url: 'https://bank.example/pay' }, signal).catch(() => {});
+    void requests.call(S1, { tool: 'browser_type', selector: '#q', text: 'hello' }, signal).catch(() => {});
+    await tick();
+    page.password = true;
+    void requests.call(S2, { tool: 'browser_type', selector: '#pw', text: 'hunter2' }, signal).catch(() => {});
+    await tick();
+    expect(asks.map((a) => a.detail)).toEqual([
+      'https://bank.example: open https://bank.example/pay',
+      'http://localhost:3000: type "hello" into #q',
+      'http://localhost:3000: type •••••••• (a password field) into #pw',
+    ]);
+    expect(JSON.stringify(asks)).not.toContain('hunter2');
+  });
+
+  it('"Allow for this session" holds for that MCP session on that origin only', async () => {
+    const { done, asks, page, requests, signal } = ext();
+    const first = requests.call(S1, { tool: 'browser_reload' }, signal);
+    await tick();
+    requests.answer(asks[0].requestId, 'allowChat');
     await first;
-    await expect(requests.call(EXTERNAL_CLIENT, { tool: 'browser_back' }, signal)).resolves.toBe('ok');
+    await expect(requests.call(S1, { tool: 'browser_back' }, signal)).resolves.toBe('ok');
+    expect(asks).toHaveLength(1);
+    void requests.call(S2, { tool: 'browser_back' }, signal).catch(() => {});
+    await tick();
+    expect(asks).toHaveLength(2);
+    page.origin = 'https://other.example';
+    void requests.call(S1, { tool: 'browser_back' }, signal).catch(() => {});
+    await tick();
+    expect(asks).toHaveLength(3);
     expect(done).toEqual(['browser_reload', 'browser_back']);
+    requests.forgetExternal();
+    page.origin = 'http://localhost:3000';
+    void requests.call(S1, { tool: 'browser_back' }, signal).catch(() => {});
+    await tick();
+    expect(asks).toHaveLength(4);
+  });
+
+  it('auto-approves only by setting, and URL rules still apply', async () => {
     const auto = ext(true);
-    await expect(auto.requests.call(EXTERNAL_CLIENT, { tool: 'browser_open', url: 'localhost:3000' }, auto.signal)).resolves.toBe('ok');
-    await expect(auto.requests.call(EXTERNAL_CLIENT, { tool: 'browser_open', url: 'file:///etc/passwd' }, auto.signal)).rejects.toThrow(/only http and https/);
-    expect(auto.asked).toEqual([]);
+    await expect(auto.requests.call(S1, { tool: 'browser_open', url: 'localhost:3000' }, auto.signal)).resolves.toBe('ok');
+    await expect(auto.requests.call(S1, { tool: 'browser_open', url: 'file:///etc/passwd' }, auto.signal)).rejects.toThrow(/only http and https/);
+    expect(auto.asks).toEqual([]);
   });
 });

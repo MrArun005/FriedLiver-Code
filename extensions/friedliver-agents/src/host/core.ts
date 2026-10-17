@@ -122,7 +122,7 @@ export interface CoreUi {
   /** Asks before adding an "Always allow" rule. */
   confirmRule?(rule: CommandRule): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
-  askBridge?(ask: { chatId: string; requestId: string; title: string }): void;
+  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string }): void;
   /** An agent asks a question as a small form, answered in the chat. */
   askQuestion?(ask: { chatId: string; requestId: string; agentLabel: string; message: string }): void;
   signInUrl?(agent: AgentKey, url: string): void;
@@ -144,6 +144,8 @@ export interface CoreOptions {
   browser?: ToolHost['browser'];
   /** Whether the external client's browser actions skip the user's OK (friedliver.browser.externalAutoApprove). */
   externalAutoApprove?: () => boolean;
+  /** The browser page's origin and whether a selector there is a password field (browser.ts). */
+  browserPage?: ToolHost['browserPage'];
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -294,6 +296,7 @@ export class AgentCore {
       cancel: (chatId) => this.cancel(chatId),
       browser: options.browser,
       externalAutoApprove: options.externalAutoApprove,
+      browserPage: options.browserPage,
     });
   }
 
@@ -845,7 +848,7 @@ export class AgentCore {
 
   /** The external token stops working and anything it has waiting on the user is denied. */
   revokeExternal(): void {
-    this.requests.forget(EXTERNAL_CLIENT);
+    this.requests.forgetExternal();
     this.bridge?.revoke(EXTERNAL_CLIENT);
   }
 
