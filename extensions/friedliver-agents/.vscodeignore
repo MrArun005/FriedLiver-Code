@@ -5,6 +5,7 @@
 !dist/demo-agent.js
 !dist/bridge.js
 !dist/externalStdio.js
+!dist/thumbWorker.js
 !media/**
 !bin/friedliver-dictate
 media/dist/*.map

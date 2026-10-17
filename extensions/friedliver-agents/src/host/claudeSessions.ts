@@ -8,7 +8,9 @@
 // a file's parse state is kept with the offset it got to.
 import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import type { OutsideImage, OutsideImages } from '../shared/gallery';
 import type { ClaudeSession, ClaudeSubagent } from '../shared/messages';
+import { humanTitle } from '../shared/stepImages';
 
 const SESSION_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const AGENT_META = /^agent-([0-9a-z]+)\.meta\.json$/i;
@@ -363,6 +365,8 @@ export interface ListOptions {
 }
 
 let queue: Promise<unknown> = Promise.resolve();
+/** Where the last listing found each session: its transcript and its (checked) project folder, for the images scan. */
+const listed = new Map<string, { file: string; dir: string }>();
 
 /**
  * The workspace folders' Claude Code sessions, most recent first. Missing folders and unreadable files are left out.
@@ -380,6 +384,7 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
   if (!realBase) return [];
   const all = folders.length === 0;
   const max = limit ?? (all ? 100 : 50);
+  listed.clear();
   // With no folder, each project folder's own sessions say which folder they ran in (see below).
   const projects: { cwd?: string; dir: string }[] = all
     ? (await readdir(realBase).catch(() => [] as string[])).map((name) => ({ dir: path.join(realBase, name) }))
@@ -416,6 +421,7 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
     // A session that launched subagents is never trivial.
     if (trivial && !subs.length && !showAll) continue;
     const lastActivity = Math.max(f.mtime, agentsActive);
+    listed.set(f.id, { file: f.file, dir: f.dir });
     out.push({
       id: f.id,
       cwd,
@@ -438,4 +444,133 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
   }
   // Archived ones last, so the board's newest-first order is unchanged.
   return [...out.filter((s) => !s.archived), ...out.filter((s) => s.archived)];
+}
+
+// ---- Images: what a session's Read and screenshot tools looked at ----
+
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg)$/i;
+const SCREENSHOT_TOOL = /screenshot/i;
+/** Where a screenshot tool says it saved the file: FriedLiver's browser, Playwright's link or its code. */
+const SAVED = [/^Saved to (.+?\.(?:png|jpe?g|gif|webp))\. /m, /\]\(([^)\s]+?\.(?:png|jpe?g|gif|webp))\)/, /save it as (\S+?\.(?:png|jpe?g|gif|webp))\b/];
+/** Bytes of a transcript read for images the first time; later reads take only what was appended. */
+const MAX_SCAN = 64 * 1024 * 1024;
+
+type ImageLine = { timestamp?: string; message?: { content?: string | (Block & { input?: Record<string, unknown>; content?: unknown })[] } };
+
+/**
+ * Reads a transcript's lines for images, a piece at a time as it grows: a Read
+ * of an image file, and the file a screenshot tool saved (from its input's
+ * filename, or the path its result names). Relative paths are the session's
+ * folder's. Each file once, the first time it shows.
+ */
+export class ImageScan {
+  readonly images: OutsideImage[] = [];
+  private readonly seen = new Set<string>();
+  /** Screenshot calls waiting for their result: id → when. */
+  private readonly pending = new Map<string, number>();
+  constructor(private readonly cwd: string) {}
+
+  feed(text: string): void {
+    for (const line of text.split('\n')) {
+      // Most lines are neither; a quick look first spares parsing them (some are megabytes of base64).
+      const use = line.includes('"tool_use"');
+      const result = !use && this.pending.size > 0 && line.includes('"tool_result"') && [...this.pending.keys()].some((id) => line.includes(id));
+      if (!use && !result) continue;
+      let o: ImageLine;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const at = Date.parse(o.timestamp ?? '') || 0;
+      const blocks = Array.isArray(o.message?.content) ? o.message.content : [];
+      for (const b of blocks) {
+        if (b.type === 'tool_use' && b.id && b.name) {
+          const file = b.input?.file_path ?? b.input?.filename;
+          if (b.name === 'Read' && typeof file === 'string') this.add(file, humanTitle(file), 'read', at);
+          else if (SCREENSHOT_TOOL.test(b.name)) {
+            if (typeof file === 'string') this.add(file, humanTitle(file), 'screenshot', at);
+            else this.pending.set(b.id, at);
+          }
+        } else if (b.type === 'tool_result' && b.tool_use_id && this.pending.has(b.tool_use_id)) {
+          const when = this.pending.get(b.tool_use_id)!;
+          this.pending.delete(b.tool_use_id);
+          const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((c: Block) => (c.type === 'text' ? (c.text ?? '') : '')).join('\n') : '';
+          const file = SAVED.map((re) => re.exec(text)?.[1]).find(Boolean);
+          const title = /^(Screenshot of .+)$/m.exec(text)?.[1] ?? /\[(Screenshot[^\]]*)\]/.exec(text)?.[1];
+          if (file) this.add(file, title?.trim() || humanTitle(file), 'screenshot', when);
+        }
+      }
+    }
+  }
+
+  private add(file: string, title: string, source: OutsideImage['source'], at: number): void {
+    if (!IMAGE_FILE.test(file) || file.includes('\0')) return;
+    const full = path.resolve(this.cwd, file);
+    if (this.seen.has(full)) return;
+    this.seen.add(full);
+    this.images.push({ path: full, title: clipTitle(title), source, at });
+  }
+}
+
+const scans = new Map<string, { size: number; mtime: number; offset: number; scan: ImageScan }>();
+
+/** The images in one transcript file, reading only what it gained since last time (a file that shrank is read again). */
+async function scanFile(file: string, cwd: string): Promise<OutsideImage[]> {
+  const st = await lstat(file).catch(() => null);
+  if (!st?.isFile()) return [];
+  let s = scans.get(file);
+  if (s && s.size === st.size && s.mtime === st.mtimeMs) return s.scan.images;
+  if (!s || st.size < s.size) {
+    s = { size: 0, mtime: 0, offset: Math.max(0, st.size - MAX_SCAN), scan: new ImageScan(cwd) };
+    scans.set(file, s);
+  }
+  const fh = await open(file, 'r').catch(() => null);
+  if (!fh) return s.scan.images;
+  try {
+    const len = st.size - s.offset;
+    const buf = Buffer.alloc(len);
+    const { bytesRead } = await fh.read(buf, 0, len, s.offset);
+    // Only whole lines: the last may still be being written.
+    const end = buf.lastIndexOf(0x0a, bytesRead - 1) + 1;
+    s.scan.feed(buf.toString('utf8', 0, end));
+    s.offset += end;
+    s.size = st.size;
+    s.mtime = st.mtimeMs;
+  } finally {
+    await fh.close();
+  }
+  return s.scan.images;
+}
+
+/**
+ * The images the workspace folders' Claude Code sessions read or took, with
+ * their subagents', per session, the most recent sessions first. Sessions
+ * FriedLiver's own chats have (`skip`) are left out: those chats show them.
+ */
+export async function listClaudeImages({ home, folders, skip, limit = 50 }: Pick<ListOptions, 'home' | 'folders' | 'skip' | 'limit'>): Promise<OutsideImages[]> {
+  // The sessions the Manager lists (headless runs hidden), and the files that listing checked.
+  const sessions = await listClaudeSessions({ home, folders, skip, limit });
+  const out: OutsideImages[] = [];
+  for (const s of sessions) {
+    const f = listed.get(s.id);
+    if (!f) continue;
+    // Its subagents' transcripts, unless that folder is a link out of the session's own.
+    const subDir = path.join(f.dir, s.id, 'subagents');
+    const realSub = await realpath(subDir).catch(() => null);
+    const subs = realSub === subDir ? await readdir(subDir).catch(() => [] as string[]) : [];
+    const files = [f.file, ...subs.filter((n) => /^agent-[\w-]+\.jsonl$/.test(n)).map((n) => path.join(subDir, n))];
+    const images: OutsideImage[] = [];
+    const seen = new Set<string>();
+    for (const file of files) {
+      for (const img of await scanFile(file, s.cwd)) {
+        if (seen.has(img.path)) continue;
+        seen.add(img.path);
+        images.push(img);
+      }
+    }
+    if (!images.length) continue;
+    out.push({ id: s.id, cwd: s.cwd, title: s.title, images });
+  }
+  return out;
 }

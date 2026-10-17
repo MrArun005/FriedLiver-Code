@@ -18,6 +18,8 @@ describe('webview message validation', () => {
     });
     expect(parseWebviewMessage({ type: 'permission', requestId: 'perm-1', optionId: null })).toEqual({ type: 'permission', requestId: 'perm-1', optionId: null });
     expect(parseWebviewMessage({ type: 'notice', chatId: 'chat-1', action: { label: 'Log in', do: 'signIn', agent: 'claude', methodId: 'claude-login' } })).toBeTruthy();
+    expect(parseWebviewMessage({ type: 'imageThumb', path: '/w/a.png', extra: 1 })).toEqual({ type: 'imageThumb', path: '/w/a.png' });
+    expect(parseWebviewMessage({ type: 'revealImage', path: '/w/a.png' })).toEqual({ type: 'revealImage', path: '/w/a.png' });
   });
 
   it('drops extra fields', () => {
@@ -43,6 +45,9 @@ describe('webview message validation', () => {
       { type: 'notice', chatId: 'chat-1', action: { label: 'x', do: 'install', command: '' } },
       { type: 'createTask', agent: 'demo', prompt: '   ', worktree: false },
       { type: 'createTask', agent: 'demo', prompt: 'go', worktree: 'yes' },
+      { type: 'imageThumb', path: '' },
+      { type: 'imageThumb', path: 'x'.repeat(5000) },
+      { type: 'revealImage', path: 42 },
     ];
     for (const m of bad) expect(parseWebviewMessage(m), JSON.stringify(m)).toBeNull();
   });

@@ -13,13 +13,14 @@ const actions: Action[] = [
 ];
 
 describe('what each webview is sent', () => {
-  it('sends the Images view everything, a chat only your images, the Agent Manager none', () => {
+  it('sends the Images view and the Agent Manager everything, a chat only your images', () => {
     expect(stateFor('images', start)).toBe(start);
+    expect(stateFor('tasks', start)).toBe(start);
     expect(stateFor('chat', start).images.map((i) => i.id)).toEqual(['y1']);
-    expect(stateFor('tasks', start).images).toEqual([]);
     expect(stateFor('chat', { ...start, images: [image('y1', 'you')] }).images).toHaveLength(1);
     expect(actionsFor('images', actions)).toBe(actions);
-    expect(actionsFor('tasks', actions).map((a) => a.t)).toEqual(['title', 'restore']);
+    expect(actionsFor('tasks', actions)).toBe(actions);
+    expect(actionsFor('chat', actions).map((a) => a.t)).toEqual(['title', 'image', 'restore']);
     const noImages: Action[] = [{ t: 'title', chatId: 'chat-1', title: 'x' }];
     expect(actionsFor('chat', noImages)).toBe(noImages);
   });

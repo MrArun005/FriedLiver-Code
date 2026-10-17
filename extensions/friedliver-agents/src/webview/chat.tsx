@@ -50,7 +50,7 @@ import {
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { questionGroups } from '../shared/questions';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, scrollBehavior, send, useHost, usePersisted } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, scrollBehavior, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -184,22 +184,8 @@ function App() {
 function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState; active?: string; onSelect: Select; tabs: string[]; onClose(chatId: string): void }) {
   const strip = tabs.flatMap((id) => state.chats.find((c) => c.id === id) ?? []);
   const shortcut = IS_MAC ? '⌘W' : 'Ctrl+W';
-  // More tabs than fit: the strip scrolls sideways, its edges fade, and the open tab stays in view.
   const box = useRef<HTMLDivElement>(null);
-  const [over, setOver] = useState(false);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [tabs.length]);
-  // After the tab is in the strip: a chat opened from the list or a notification gets its new tab shown.
-  useEffect(() => {
-    box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [active, tabs.length]);
+  const over = useTabStrip(box, tabs.length, active);
   // A tablist: one Tab stop; ←/→/Home/End move between tabs, Enter or Space opens one, Delete closes it.
   const focusable = active && strip.some((c) => c.id === active) ? active : strip[0]?.id;
   const onKeys = (e: KeyboardEvent) => {

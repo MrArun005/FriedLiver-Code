@@ -27,6 +27,10 @@ export interface ImageItem {
   src: string;
   title: string;
   from: 'agent' | 'you';
+  /** The chat and tool step it came in, and when (the host's clock); optional, older states lack them. */
+  chatId?: string;
+  stepId?: string;
+  at?: number;
 }
 
 /** What a button on a notice does; plain data, so it can cross into a webview. */
