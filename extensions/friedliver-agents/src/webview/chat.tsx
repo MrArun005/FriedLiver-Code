@@ -583,8 +583,8 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       )}
       <QueueList chat={chat} />
       {chat.busy && !waitingNow && (
-        <div class="working">
-          <Dot state="working" /> Working…
+        <div class="working" role="status">
+          <span class="spinner" aria-hidden="true" /> Working…
         </div>
       )}
       {/* Read out what matters, not every streamed word. */}
@@ -728,8 +728,11 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, at }:
       );
     case 'thought':
       return (
-        <details class="thought">
-          <summary>Thinking</summary>
+        <details class="tl thought">
+          <summary>
+            Thinking
+            <Icon name="chevron" />
+          </summary>
           <div class="thought-text">{item.text}</div>
         </details>
       );

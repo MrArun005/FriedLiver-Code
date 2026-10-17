@@ -84,7 +84,7 @@ const STATES = {
   'slash-menu': async (p) => p.click('.cc-slash-btn'),
   'agent-map': async (p) => p.click('.cc-agents'),
   transcript: async (p) => {
-    await p.click('.tl-step:has(.step-verb:text-is("Bash")) .step-main');
+    await p.click('#item-toolu_bash .step-main');
     await p.evaluate(() => document.activeElement?.blur());
   },
 };

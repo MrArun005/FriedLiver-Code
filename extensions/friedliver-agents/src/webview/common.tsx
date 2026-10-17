@@ -340,21 +340,20 @@ export function StepLabel({ title, toolKind, cmd }: { title: string; toolKind?: 
 /** Whether a title reads badly as it is: several lines, or longer than a line. */
 export const longTitle = (title: string) => title.includes('\n') || title.length > 120;
 
-/** A fenced code block: its language, Copy, Insert, and Run in terminal for shell code. */
+/** A fenced code block: the code on its own tone; its language, Run in terminal (shell code), Insert and Copy show on hover. */
 function CodeBlock({ lang, code, chatId }: { lang: string; code: string; chatId?: string }) {
   const run = chatId ? runnableCode(lang, code) : undefined;
   return (
     <div class="code-block">
-      <div class="code-head">
+      <Code code={code} lang={lang} />
+      <div class="code-tools">
         <span class="code-lang">{lang || 'code'}</span>
-        <span class="spacer" />
         {run && chatId && <RunButton chatId={chatId} command={run} />}
         <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
           Insert
         </button>
         <CopyButton text={code} label="Copy code" />
       </div>
-      <Code code={code} lang={lang} />
     </div>
   );
 }

@@ -1,8 +1,9 @@
-// The timeline of a turn's tool calls. Each step is one line: its state, a
-// verb, a short summary, the files and the kind. Opening it shows what it did
-// in a form you can use: the whole command as it ran, its folder, exit code and
-// time, its output, the file a heredoc wrote, and Copy, Run in terminal and
-// Open file.
+// A turn's tool calls on the transcript's timeline: each step is one line, a
+// dot for its state, the tool in bold and its target. Opening it shows an
+// IN/OUT body: the command as it ran (or the tool's input), its output, the
+// file a heredoc wrote and the diffs, each clipped to a few lines until asked,
+// with Copy, Run in terminal and Open file on hover.
+import type { ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { langOf } from '../shared/highlight';
 import { formatDuration, type Item } from '../shared/model';
@@ -16,8 +17,8 @@ import { DiffView } from './controls';
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
 
 const TOOL_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', failed: 'error', pending: 'next' };
-/** Output lines shown before "Show all". */
-const OUTPUT_LINES = 14;
+/** A run of at least this many steps gets a heading that folds it. */
+const FOLD_AT = 6;
 
 /** Whether a step has anything to open. */
 export const hasDetails = (t: ToolItem) => !!t.input || !!t.cmd || !!t.about || !!t.out?.some((o) => o.t !== 'terminal');
@@ -43,36 +44,27 @@ export const Steps = memo(
 function StepsView({ tools, approvals, waiting, busy, chatId, cwd }: StepsProps) {
   // Failed steps show their output; the others open on request.
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // A long run of steps can fold to its heading.
   const [folded, setFolded] = useState(false);
+  const foldable = tools.length >= FOLD_AT;
   return (
-    <section class="step-card" data-folded={folded ? '' : undefined}>
-      <button type="button" class="step-fold" aria-expanded={!folded} onClick={() => setFolded(!folded)}>
-        {stepsHeading(tools)} <Icon name="chevron" />
-      </button>
-      {!folded && (
-        <ol class="steps" aria-label="Steps">
-          {tools.map((t) => {
-            const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
-            const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
-            return <Step key={t.id} tool={t} approval={approvals?.[t.id]} state={state} still={!busy} open={isOpen} onToggle={() => setOpen({ ...open, [t.id]: !isOpen })} chatId={chatId} cwd={cwd} />;
-          })}
-        </ol>
+    <>
+      {foldable && (
+        <div class="tl tl-group" data-state="done">
+          <button type="button" class="tl-group-btn" aria-expanded={!folded} onClick={() => setFolded(!folded)}>
+            <Icon name="chevron" />
+            <span class="tl-group-label">{stepsHeading(tools)}</span>
+          </button>
+        </div>
       )}
-    </section>
+      {!(foldable && folded) &&
+        tools.map((t) => {
+          const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
+          const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
+          return <Step key={t.id} tool={t} approval={approvals?.[t.id]} state={state} still={!busy} open={isOpen} onToggle={() => setOpen({ ...open, [t.id]: !isOpen })} chatId={chatId} cwd={cwd} />;
+        })}
+    </>
   );
-}
-
-/** A step's mark: a check when done, a spinner while it runs, a cross when it failed. */
-function StepMark({ state, still }: { state: string; still: boolean }) {
-  if (state === 'done' || state === 'error' || state === 'denied' || (state === 'working' && !still)) {
-    const bad = state === 'error' || state === 'denied';
-    return (
-      <span class="step-mark" data-state={state} role="img" aria-label={state === 'denied' ? 'Denied' : bad ? 'Failed' : 'Done'}>
-        <Icon name={bad ? 'close' : 'check'} />
-      </span>
-    );
-  }
-  return <span class="step-mark" data-state={state} role="img" aria-label={state === 'working' ? 'Running' : state === 'needs-you' ? 'Needs you' : 'Next'} />;
 }
 
 function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: { tool: ToolItem; approval?: Approval; state: string; still: boolean; open: boolean; onToggle(): void; chatId: string; cwd: string }) {
@@ -82,6 +74,7 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
   const exit = t.exit ?? exitInOutput(t.out);
   const file = t.locations[0];
   const image = useMemo(() => stepImage(t), [t.locations, t.out, t.about]);
+  const denied = !!approval && !approval.ok;
   const head = (
     <>
       <span class="step-verb">{s.verb}</span>
@@ -105,10 +98,10 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
   );
   // Hovering shows the whole title or command; the summary is cut to one line.
   const tip = t.about ? `${t.about}\n\n${s.full}` : s.full;
+  const dot = denied ? 'denied' : state === 'working' && still ? 'stalled' : exit ? 'error' : state;
   return (
-    <li id={`item-${t.id}`} data-state={state} data-open={open ? '' : undefined}>
+    <div class="tl tl-step" id={`item-${t.id}`} data-state={dot} data-open={open ? '' : undefined} role="group" aria-label={`${s.verb} ${s.text}: ${DOT_WORDS[dot] ?? dot}`}>
       <div class="step-row">
-        <StepMark state={approval && !approval.ok ? 'denied' : state} still={still} />
         {more ? (
           <button type="button" class="step-main" title={tip} aria-expanded={open} aria-controls={open ? id : undefined} onClick={onToggle}>
             {head}
@@ -120,13 +113,8 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
         )}
         <span class="step-end">
           {exit !== undefined && exit !== 0 && <span class="tag bad">exit {exit}</span>}
-          {approval && !approval.ok && <span class="step-denied">denied</span>}
-          {t.toolKind && t.toolKind !== 'other' && <span class="tag">{t.toolKind}</span>}
+          {denied && <span class="step-denied">denied</span>}
           {t.ms !== undefined && <span class="step-time">{shortDuration(t.ms)}</span>}
-          {/* The slot stays without details too, so the kinds line up. */}
-          <span class="step-chevron" aria-hidden="true" onClick={more ? onToggle : undefined}>
-            {more && <Icon name="chevron" />}
-          </span>
         </span>
       </div>
       {image && (
@@ -135,9 +123,11 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
         </div>
       )}
       {more && open && <StepDetails id={id} tool={t} chatId={chatId} cwd={cwd} />}
-    </li>
+    </div>
   );
 }
+
+const DOT_WORDS: Record<string, string> = { done: 'done', error: 'failed', denied: 'denied', working: 'running', stalled: 'stopped', 'needs-you': 'needs you', next: 'next' };
 
 function exitInOutput(out: ToolOut[] | undefined): number | undefined {
   const text = out?.find((o): o is Extract<ToolOut, { t: 'text' }> => o.t === 'text');
@@ -151,7 +141,6 @@ function folderLabel(dir: string, cwd: string): string {
 }
 
 function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem; chatId: string; cwd: string }) {
-  const [showInput, setShowInput] = useState(false);
   const cmd = t.cmd;
   const doc = useMemo(() => (cmd && isShell(t) ? heredocOf(cmd.line) : undefined), [cmd?.line, t.toolKind]);
   const outs = (t.out ?? []).filter((o): o is Exclude<ToolOut, { t: 'terminal' }> => o.t !== 'terminal');
@@ -159,62 +148,78 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
   const exit = t.exit ?? texts.find((o) => o.exit !== undefined)?.exit;
   const dir = cmd?.cwd ?? stepSummary(t).dir;
   const meta = [
+    dir ? `in ${folderLabel(dir, cwd)}` : undefined,
     exit !== undefined ? `exit ${exit}` : t.status === 'failed' ? 'failed' : t.status === 'in_progress' ? 'running…' : undefined,
     t.ms !== undefined ? formatDuration(t.ms) : undefined,
   ].filter(Boolean);
   const runnable = cmd && !cmd.cut && isShell(t) && typeable(cmd.line);
-  // A command's input is the command: "Show input" only for other tools.
+  // A command's input is the command; other tools show their raw input.
   const input = !cmd && t.input;
   return (
-    <div class="step-details" id={id}>
+    <div class="tool-body-wrap" id={id}>
       {t.about && <div class="step-about">{t.about}</div>}
-      {/* A heredoc write: the file it writes first, then the command around it. */}
-      {doc?.file && <HeredocFile doc={doc} cwd={cwd} />}
-      {cmd && (
-        <section class="code-block step-command" aria-label="Command">
-          <div class="code-head">
-            <span class="code-lang">command</span>
-            {dir && (
-              <span class="hint mono step-dir" title={dir}>
-                in {folderLabel(dir, cwd)}
-              </span>
-            )}
-            {meta.length > 0 && <span class={`hint step-meta${exit ? ' bad' : ''}`}>{meta.join(' · ')}</span>}
-            <span class="spacer" />
-            {runnable && <RunButton chatId={chatId} command={cmd.line} cwd={cmd.cwd} />}
-            <CopyButton text={cmd.line} label="Copy command" />
-          </div>
-          <Code code={cmd.line} lang="sh" class={doc?.file ? 'scroll short' : 'scroll'} />
-          {cmd.cut && <div class="hint step-cut">The command is longer than the chat keeps; this is its start.</div>}
-        </section>
-      )}
-      {texts.map((o, n) => (
-        <Output key={`t${n}`} text={o.text} lang={o.lang} />
-      ))}
-      {outs.map((o, n) =>
-        o.t === 'diff' ? (
-          <div key={`d${n}`} class="file-change">
-            <div class="file-line">
-              <button class="ref" title={o.path} onClick={() => send({ type: 'openFile', path: o.path })}>
-                {basename(o.path)}
-              </button>
-              <span class="stats">
-                <span class="plus">+{o.added}</span> <span class="minus">−{o.removed}</span>
-              </span>
+      <div class="tool-body">
+        {/* A heredoc write: the file it writes first, then the command around it. */}
+        {doc?.file && <HeredocFile doc={doc} cwd={cwd} />}
+        {cmd && (
+          <ToolRow label="IN" class="step-command" aria-label="Command" text={cmd.line} lang="sh" pre tools={
+            <>
+              {meta.length > 0 && <span class={`tool-meta${exit ? ' bad' : ''}`}>{meta.join(' · ')}</span>}
+              {runnable && <RunButton chatId={chatId} command={cmd.line} cwd={cmd.cwd} />}
+              <CopyButton text={cmd.line} label="Copy command" />
+            </>
+          }>
+            {cmd.cut && <div class="hint step-cut">The command is longer than the chat keeps; this is its start.</div>}
+          </ToolRow>
+        )}
+        {input && <ToolRow label="IN" class="step-input" aria-label="Input" text={input} lang="json" />}
+        {texts.map((o, n) => (o.text.trim() ? <ToolRow key={`t${n}`} label="OUT" class="step-output" aria-label="Output" text={o.text} lang={o.lang && o.lang !== 'console' ? o.lang : ''} out tools={<CopyButton text={o.text} label="Copy output" />} /> : null))}
+        {outs.map((o, n) =>
+          o.t === 'diff' ? (
+            <div key={`d${n}`} class="tool-row file-change">
+              <span class="tool-label">DIFF</span>
+              <div class="tool-cell">
+                <div class="file-line">
+                  <button class="ref" title={o.path} onClick={() => send({ type: 'openFile', path: o.path })}>
+                    {basename(o.path)}
+                  </button>
+                  <span class="stats">
+                    <span class="plus">+{o.added}</span>
+                    <span class="minus">−{o.removed}</span>
+                  </span>
+                </div>
+                {o.lines.length > 0 && <DiffView lines={o.lines} more={o.more} />}
+              </div>
             </div>
-            {o.lines.length > 0 && <DiffView lines={o.lines} more={o.more} />}
-          </div>
-        ) : null,
-      )}
-      {input && (
-        <>
-          <button class="link sm-link" aria-expanded={showInput} onClick={() => setShowInput(!showInput)}>
-            {showInput ? 'Hide input' : 'Show input'}
-          </button>
-          {showInput && <Code code={input} lang="json" class="scroll step-input" />}
-        </>
-      )}
+          ) : null,
+        )}
+      </div>
     </div>
+  );
+}
+
+/** Rows over this many lines start clipped to the first few, with Show all. */
+const CLAMP_LINES = 3;
+
+/** One IN/OUT row: its label, its text (clipped past three lines), and copy/run on hover. */
+function ToolRow({ label, class: className, text, lang, pre, out, tools, children, ...rest }: { label: string; class: string; text: string; lang: string; pre?: boolean; out?: boolean; tools?: ComponentChildren; children?: ComponentChildren; 'aria-label': string }) {
+  const [all, setAll] = useState(false);
+  const lines = useMemo(() => text.replace(/\n$/, '').split('\n').length, [text]);
+  const long = lines > CLAMP_LINES;
+  return (
+    <section class={`tool-row ${className}${out ? ' out' : ''}`} aria-label={rest['aria-label']}>
+      <span class="tool-label">{label}</span>
+      <div class="tool-cell">
+        <Code code={text} lang={lang} class={`${pre ? 'keep ' : ''}${long && !all ? 'capped' : ''}`} />
+        {long && (
+          <button class="link sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
+            {all ? 'Show less' : `Show all ${lines} lines`}
+          </button>
+        )}
+        {children}
+        {tools && <span class="tool-tools">{tools}</span>}
+      </div>
+    </section>
   );
 }
 
@@ -224,51 +229,23 @@ function HeredocFile({ doc, cwd }: { doc: Heredoc; cwd: string }) {
   const inside = inFolder(cwd, file);
   const lines = doc.body ? doc.body.split('\n').length : 0;
   return (
-    <section class="code-block step-file" aria-label={`Written to ${basename(file)}`}>
-      <div class="code-head">
-        <span class="code-lang file-name" title={file}>
-          <Icon name="file" /> {basename(file)}
-        </span>
-        <span class="hint">
-          {doc.append ? 'appended' : 'written'} · {lines} line{lines === 1 ? '' : 's'}
-          {doc.closed ? '' : ' · not closed'}
-        </span>
-        <span class="spacer" />
+    <ToolRow label="FILE" class="step-file" aria-label={`Written to ${basename(file)}`} text={doc.body} lang={langOf(file)} tools={
+      <>
         {inside && (
           <button type="button" class="ghost sm" title={`Open ${inside}`} onClick={() => send({ type: 'openFile', path: inside })}>
-            <Icon name="open" /> Open file
+            Open file
           </button>
         )}
         <CopyButton text={doc.body} label="Copy file text" />
+      </>
+    }>
+      <div class="tool-file">
+        <span class="file-name" title={file}>
+          {basename(file)}
+        </span>{' '}
+        {doc.append ? 'appended' : 'written'} · {lines} line{lines === 1 ? '' : 's'}
+        {doc.closed ? '' : ' · not closed'}
       </div>
-      <Code code={doc.body} lang={langOf(file)} class="scroll" />
-    </section>
-  );
-}
-
-/** A step's output: monospace, its first lines until you ask for all of it. */
-function Output({ text, lang }: { text: string; lang?: string }) {
-  const [all, setAll] = useState(false);
-  const lines = useMemo(() => text.replace(/\n$/, '').split('\n').length, [text]);
-  const long = lines > OUTPUT_LINES;
-  if (!text.trim()) return null;
-  return (
-    <section class="code-block step-output" aria-label="Output">
-      <div class="code-head">
-        <span class="code-lang">output</span>
-        <span class="hint">
-          {lines} line{lines === 1 ? '' : 's'}
-          {text.startsWith('…\n') ? ' · the end of it' : ''}
-        </span>
-        <span class="spacer" />
-        <CopyButton text={text} label="Copy output" />
-      </div>
-      <Code code={text} lang={lang && lang !== 'console' ? lang : ''} class={`scroll${long && !all ? ' capped' : ''}`} />
-      {long && (
-        <button class="link sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
-          {all ? 'Show less' : `Show all ${lines} lines`}
-        </button>
-      )}
-    </section>
+    </ToolRow>
   );
 }
