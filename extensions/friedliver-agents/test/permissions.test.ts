@@ -208,13 +208,34 @@ describe('folder rules', () => {
       'src/claude.md',
       'AGENTS.md',
       'GEMINI.md',
+      // Any dotfile or dot-folder, not a list to chase.
+      '.mcp.json',
+      '.envrc',
+      '.devcontainer/devcontainer.json',
+      '.cursorrules',
+      '.gitlab-ci.yml',
+      'src/.env',
+      '.github/ISSUE_TEMPLATE/bug.md',
+      // Code-running or agent-steering config without a dot.
+      'foo.code-workspace',
+      'docs/copilot-instructions.md',
+      'AGENTS.override.md',
+      'CLAUDE.local.md',
+      // Names Windows and macOS read as another: a trailing dot or space, an alternate data stream, decomposed Unicode.
+      'CLAUDE.md.',
+      'CLAUDE.md ',
+      'CLAUDE.md::$DATA',
+      'src/a.ts:stream',
+      'notes. /a.txt',
+      '.vscode'.normalize('NFD') + '/settings.json',
+      'Cafe\u0301/CLAUDE.md',
     ]) {
       const file = path.join(h, 'proj', f);
       expect(p.folder(file, 'write'), f).toBeUndefined();
       expect(p.folder(file, 'read'), f).toBeDefined();
       expect(p.folderCandidates([file], 'write', [path.join(h, 'proj')]), f).toEqual([]);
     }
-    for (const f of ['src/a.ts', '.github/ISSUE_TEMPLATE/bug.md', 'package.json', 'Makefile', 'build.sh', 'docs/claude-notes.md']) expect(p.folder(path.join(h, 'proj', f), 'write'), f).toBeDefined();
+    for (const f of ['src/a.ts', 'package.json', 'Makefile', 'build.sh', 'docs/claude-notes.md', 'Caf\u00e9/notes.md', 'v1.2/notes.md']) expect(p.folder(path.join(h, 'proj', f), 'write'), f).toBeDefined();
   });
 
   it('offer the file’s folder, the project and the top folder in home, most specific first', () => {

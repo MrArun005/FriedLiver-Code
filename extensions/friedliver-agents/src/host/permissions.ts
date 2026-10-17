@@ -29,17 +29,21 @@ type Saved = Grant & { at?: number; agent?: string };
 const SENSITIVE = ['/etc', '/private/etc', '/Library', '/System', '/usr', '/bin', '/sbin'];
 
 /**
- * Writes no rule covers, anywhere: config that runs code (git hooks, editor tasks and settings,
- * husky, CI workflows) or steers agents (their settings, rules and memory files). Compared
- * ignoring case, as on macOS and Windows file systems.
+ * Writes no rule covers, anywhere (Allow once only). Fail-safe rather than a list to chase: any
+ * dotfile or anything in a dot-folder (.git hooks, .vscode tasks, .husky, .github/workflows, .envrc,
+ * .mcp.json, the agents' own settings…), plus config that runs code or steers agents without a dot.
+ * Names are compared as the file system would read them: Unicode NFC, ignoring case; a segment the
+ * OS could read as another (a trailing dot or space, an alternate data stream after ':') is refused.
  */
-const WRITE_SENSITIVE_FOLDERS = new Set(['.git', '.vscode', '.claude', '.codex', '.gemini', '.cursor', '.idea', '.husky', '.friedliver']);
-const WRITE_SENSITIVE_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'gemini.md']);
+const WRITE_SENSITIVE_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'agents.override.md', 'gemini.md', 'copilot-instructions.md']);
 
 function writeSensitive(real: string): boolean {
-  const parts = real.toLowerCase().split(/[\\/]/);
+  const parts = real.split(/[\\/]/).filter((p, i) => p && !(i === 0 && /^[a-z]:$/i.test(p)));
+  const name = (parts.at(-1) ?? '').normalize('NFC').toLowerCase();
   return (
-    parts.some((p, i) => WRITE_SENSITIVE_FOLDERS.has(p) || (p === '.github' && parts[i + 1] === 'workflows')) || WRITE_SENSITIVE_FILES.has(parts[parts.length - 1])
+    parts.some((p) => /[.\s]$/.test(p) || p.includes(':') || p.normalize('NFC').startsWith('.')) ||
+    WRITE_SENSITIVE_FILES.has(name) ||
+    name.endsWith('.code-workspace')
   );
 }
 
