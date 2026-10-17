@@ -23,6 +23,8 @@ export interface NewChat {
   choices?: Record<string, string | boolean>;
   /** The chat's approval level; the user's default when not given. Full auto must already be confirmed. */
   approval?: ApprovalLevel;
+  /** Continue this agent session (one started outside FriedLiver) in one of the workspace folders. */
+  resume?: { sessionId: string; cwd: string };
 }
 
 /** How a turn ended, and what the agent said in it. */
