@@ -160,6 +160,16 @@ describe('rules reach every agent', () => {
     expect(core.chat(chat.id)!.session?.rules).toEqual(RULES.files);
   });
 
+  it("reach a read-only Claude chat alongside its tool limits: both _meta parts on session/new", async () => {
+    const core = makeCore(await tmp(), { sharedRules: async () => RULES });
+    const chat = await core.createChat('claude', { readOnly: true });
+    await core.send(chat.id, 'session');
+    const meta = JSON.parse(replies(core, chat.id).match(/meta (\{.*\})/)![1]);
+    expect(meta.systemPrompt).toEqual({ append: RULES.text });
+    expect(meta.claudeCode.options.tools).toEqual([]);
+    expect(meta.claudeCode.options.disallowedTools).toContain('Bash');
+  });
+
   it.each(['codex', 'gemini'] as const)('go to %s in front of the first message only', async (agent) => {
     const folder = await tmp();
     const core = makeCore(folder, { sharedRules: async () => RULES });

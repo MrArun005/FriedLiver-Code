@@ -390,3 +390,24 @@ export function applyFile(textValue: string, at: { query: string; start: number 
   const text = textValue.slice(0, at.start) + insert + textValue.slice(at.start + 1 + at.query.length);
   return { text, caret: at.start + insert.length };
 }
+
+/**
+ * The most restrictive setting an agent advertises, for a read-only chat: a
+ * "read-only" choice (Codex's preset) before a "plan" one (Claude, Gemini),
+ * found by id or name in its mode-like options. Undefined when it offers none.
+ */
+export function readOnlyChoice(options: SessionOption[]): { option: SessionOption; value: string } | undefined {
+  const modeLike = options.filter((o) => o.type === 'select' && (o.category === 'mode' || /\bmode\b|_mode\b|approval|sandbox|preset|permission/i.test(`${o.id} ${o.name}`)));
+  for (const re of [/read[-_ ]?only/i, /\bplan\b/i]) {
+    for (const o of modeLike) {
+      const c = o.choices.find((ch) => re.test(ch.value) || re.test(ch.name));
+      if (c) return { option: o, value: c.value };
+    }
+  }
+  return undefined;
+}
+
+/** Claude's adapter (claude-agent-acp): no built-in tools at all, and the risky ones named as disallowed too. */
+export const CLAUDE_READ_ONLY_META = {
+  claudeCode: { options: { tools: [], disallowedTools: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] } },
+};
