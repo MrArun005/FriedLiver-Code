@@ -111,7 +111,8 @@ describe('cards', () => {
   it('reads an agent asking to reach another agent as a decision with its request', () => {
     const c = chat('a', { label: 'Claude 2', items: [said, { kind: 'bridge', requestId: 'br-1', tool: 'ask_agent', target: { agent: 'gemini' }, text: 'Is this safe?', state: 'awaiting' }, waiting] });
     const line = cardLine(state([c]), c);
-    expect(line).toMatchObject({ text: 'Claude 2 wants to ask Gemini', code: 'Is this safe?', waiting: 2 });
+    // On its own card the chat is the subject: no label, no title repeated.
+    expect(line).toMatchObject({ text: 'Wants to ask Gemini', code: 'Is this safe?', waiting: 2 });
     expect(line.decision?.kind).toBe('bridge');
     expect(cardLine(state([chat('b', { busy: true, items: [said] })]), chat('b', { busy: true, items: [said] })).text).toBe('Working…');
   });
@@ -143,22 +144,23 @@ describe('cards', () => {
     expect(planProgress(chat('b'))).toBeNull();
   });
 
-  it('names links from the point of view of each chat', () => {
+  it('names links from the point of view of each chat, by the other chat\'s topic; the label only in the tooltip', () => {
     const s = state(
       [
-        chat('a', { label: 'Claude 2' }),
-        chat('b', { agent: 'gemini', label: 'Gemini 1', busy: true, origin: { kind: 'consult', chatId: 'a', by: 'agent' } }),
-        chat('c', { agent: 'codex', label: 'Codex 3', origin: { kind: 'handoff', chatId: 'a', by: 'user' } }),
-        chat('d', { agent: 'codex', label: 'Codex 4', group: 'g', createdAt: 1 }),
-        chat('e', { agent: 'gemini', label: 'Gemini 2', group: 'g', createdAt: 2 }),
+        chat('a', { label: 'Claude 2', title: 'Fix formatCents' }),
+        chat('b', { agent: 'gemini', label: 'Gemini 1', title: 'Is the minus right?', busy: true, origin: { kind: 'consult', chatId: 'a', by: 'agent' } }),
+        chat('c', { agent: 'codex', label: 'Codex 3', title: 'Make the store swappable', origin: { kind: 'handoff', chatId: 'a', by: 'user' } }),
+        chat('d', { agent: 'codex', label: 'Codex 4', title: 'Add CSV export', group: 'g', createdAt: 1 }),
+        chat('e', { agent: 'gemini', label: 'Gemini 2', title: 'Add CSV export', group: 'g', createdAt: 2 }),
       ],
       [link({ id: 'l1', from: 'a', to: 'b' }), link({ id: 'l2', kind: 'handoff', from: 'a', to: 'c' }), link({ id: 'l3', kind: 'pipe', from: 'c', to: 'd', active: true })],
     );
     const texts = (id: string) => linkBadges(s, s.chats.find((c) => c.id === id)!).map((b) => b.text);
-    expect(texts('a')).toEqual(['asking Gemini 1', 'handed to Codex 3']);
-    expect(texts('b')).toEqual(['asked by Claude 2']);
-    expect(texts('c')).toEqual(['from Claude 2', 'pipes to Codex 4']);
-    expect(texts('d')).toEqual(['piped from Codex 3', '1 of 2 · compare']);
+    expect(texts('a')).toEqual(['asking Is the minus right?', 'handed to Make the store swappable']);
+    expect(texts('b')).toEqual(['asked by Fix formatCents']);
+    expect(texts('c')).toEqual(['from Fix formatCents', 'pipes to Add CSV export']);
+    expect(texts('d')).toEqual(['piped from Make the store swappable', '1 of 2 · compare']);
+    expect(linkBadges(s, s.chats[0]).map((b) => b.tip)).toEqual(['Gemini 1: Is the minus right?', 'Codex 3: Make the store swappable']);
     expect(linkBadges(s, s.chats[3]).find((b) => b.kind === 'pipe')?.linkId).toBe('l3');
   });
 
@@ -421,7 +423,7 @@ describe('what views draw again', () => {
     expect(after.chats[0]).not.toBe(s.chats[0]);
     expect(cardModel(after, after.chats[0], 0).key).toBe(before.key);
     expect(before).toMatchObject({ status: 'working', line: { text: 'Step 1 of 3: Read' }, conflicts: [{ file: 'src/a.ts' }], age: '0s' });
-    expect(before.badges.map((b) => b.text)).toEqual(['asked Claude 2']);
+    expect(before.badges.map((b) => b.text)).toEqual(['asked New chat']);
   });
 
   it('changes the card when its step, status, age, links or another chat it names change', () => {

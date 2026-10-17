@@ -252,7 +252,7 @@ export function cardLine(state: Pick<AppState, 'chats'>, chat: ChatView): CardLi
   const first = all[0];
   if (first?.kind === 'bridge') {
     const item = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === first.id);
-    if (item) return { text: bridgeTitle(state, chat, item), code: item.text || undefined, decision: first, bridge: item, waiting: all.length };
+    if (item) return { text: bridgeTitle(state, chat, item, true), code: item.text || undefined, decision: first, bridge: item, waiting: all.length };
   }
   const line = stateLine(chat);
   if (line.text === 'Not started' && statusOf(chat) === 'done') return { text: 'Done', waiting: all.length };
@@ -289,29 +289,30 @@ export interface Badge {
   chatId?: string;
   /** Pipes can be stopped from the badge. */
   linkId?: string;
+  /** The other chat's label and topic, for the tooltip: the badge names it by topic only. */
+  tip?: string;
   group?: string;
 }
 
-/** "from Claude 2", "asking Gemini", "pipes to Codex 3", "1 of 3 · compare". */
+/** "from Fix formatCents", "asking Is the minus right?", "pipes to Add CSV export", "1 of 3 · compare": other chats by their topic. */
 export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView): Badge[] {
   const byId = new Map(state.chats.map((c) => [c.id, c]));
   const out: Badge[] = [];
+  const to = (other: ChatView, text: string, extra: Partial<Badge> & Pick<Badge, 'kind'>): Badge => ({ text, chatId: other.id, tip: `${other.label}: ${other.title}`, ...extra });
   const parent = chat.origin && byId.get(chat.origin.chatId);
-  if (chat.origin && parent) {
-    out.push({ kind: 'origin', text: `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.label}`, chatId: parent.id });
-  }
+  if (chat.origin && parent) out.push(to(parent, `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.title}`, { kind: 'origin' }));
   for (const l of state.links) {
     if (l.from === chat.id) {
-      const to = byId.get(l.to);
-      if (!to) continue;
-      if (l.kind === 'consult') out.push({ kind: 'consult', text: `${to.busy ? 'asking' : 'asked'} ${to.label}`, chatId: to.id });
-      else if (l.kind === 'handoff') out.push({ kind: 'handoff', text: `handed to ${to.label}`, chatId: to.id });
-      else out.push({ kind: 'pipe', text: l.active ? `pipes to ${to.label}` : `pipe to ${to.label} paused`, chatId: to.id, linkId: l.id });
+      const other = byId.get(l.to);
+      if (!other) continue;
+      if (l.kind === 'consult') out.push(to(other, `${other.busy ? 'asking' : 'asked'} ${other.title}`, { kind: 'consult' }));
+      else if (l.kind === 'handoff') out.push(to(other, `handed to ${other.title}`, { kind: 'handoff' }));
+      else out.push(to(other, l.active ? `pipes to ${other.title}` : `pipe to ${other.title} paused`, { kind: 'pipe', linkId: l.id }));
     } else if (l.to === chat.id && l.from !== chat.origin?.chatId) {
-      const from = byId.get(l.from);
-      if (!from) continue;
-      if (l.kind === 'pipe') out.push({ kind: 'pipe', text: `piped from ${from.label}`, chatId: from.id, linkId: l.id });
-      else out.push({ kind: 'origin', text: `${l.kind === 'handoff' ? 'from' : 'asked by'} ${from.label}`, chatId: from.id });
+      const other = byId.get(l.from);
+      if (!other) continue;
+      if (l.kind === 'pipe') out.push(to(other, `piped from ${other.title}`, { kind: 'pipe', linkId: l.id }));
+      else out.push(to(other, `${l.kind === 'handoff' ? 'from' : 'asked by'} ${other.title}`, { kind: 'origin' }));
     }
   }
   if (chat.group) {

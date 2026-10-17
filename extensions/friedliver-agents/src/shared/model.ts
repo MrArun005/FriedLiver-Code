@@ -638,12 +638,21 @@ export const BROWSER_VERBS: Partial<Record<BridgeTool, string>> = {
   browser_reload: 'reload the page',
 };
 
-export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item: BridgeItem): string {
-  if ('memory' in item.target) return `${chat.label} wants to remember a fact for every agent`;
-  if ('browser' in item.target) return `${chat.label} wants to ${BROWSER_VERBS[item.tool] ?? 'use'} in the browser`;
-  const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : (state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId)?.label ?? 'another chat');
+/** A chat's topic in a sentence: quoted, cut to a phrase. */
+export const topic = (title: string): string => `“${title.length > 40 ? `${title.slice(0, 39).trimEnd()}…` : title}”`;
+
+/**
+ * What an agent asks to do through the FriedLiver tools, chats named by their topic: across chats
+ * ("“Fix formatCents” wants to message “Add tests”"), or on the chat's own card with `self` ("Wants to message “Add tests”").
+ */
+export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item: BridgeItem, self = false): string {
+  const wants = self ? 'Wants to' : `${topic(chat.title)} wants to`;
+  if ('memory' in item.target) return `${wants} remember a fact for every agent`;
+  if ('browser' in item.target) return `${wants} ${BROWSER_VERBS[item.tool] ?? 'use'} in the browser`;
+  const other = 'chatId' in item.target ? state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId) : undefined;
+  const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : other ? topic(other.title) : 'another chat';
   const verb = item.tool === 'ask_agent' ? 'ask' : item.tool === 'send_to_chat' ? 'message' : 'read';
-  return `${chat.label} wants to ${verb} ${target}`;
+  return `${wants} ${verb} ${target}`;
 }
 
 /** Links that start or end at a chat. */
@@ -746,7 +755,10 @@ export function stateLine(chat: ChatView): StateLine {
       const files = item.detail?.files?.map((f) => basename(f.path)).join(', ');
       return { text: `Asks: ${item.title}`, code: item.detail?.command?.line ?? files, decision: waiting };
     }
-    if (waiting.kind === 'bridge') return { text: waiting.title, decision: waiting };
+    if (waiting.kind === 'bridge') {
+      const bridge = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === waiting.id);
+      return { text: bridge ? bridgeTitle({ chats: [chat] }, chat, bridge, true) : waiting.title, decision: waiting };
+    }
     if (waiting.kind === 'question') return { text: `Asks you: ${waiting.title.slice(8)}`, decision: waiting };
   }
   if (!chat.busy && chat.session?.starting) return { text: `Starting ${AGENT_FACES[chat.agent].name}…` };
