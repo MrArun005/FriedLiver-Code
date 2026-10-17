@@ -765,6 +765,8 @@ button.pill,
   gap: 2px;
   min-width: 200px;
   max-width: min(380px, calc(100vw - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px 0 4px;
   color: var(--vscode-menu-foreground, var(--fg));
   background: var(--menu-bg);
@@ -774,6 +776,10 @@ button.pill,
   font-size: var(--t-100);
   text-align: left;
   animation: var(--fade-menu);
+}
+/* Rows keep their height; a menu taller than the room scrolls. */
+.popover > * {
+  flex-shrink: 0;
 }
 .popover[data-end] {
   left: auto;

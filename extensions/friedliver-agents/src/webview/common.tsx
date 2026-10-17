@@ -621,7 +621,7 @@ export function Popover({
   children: (close: (refocus?: boolean) => void) => ComponentChildren;
 }) {
   const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState<{ up: boolean; dx: number }>({ up: false, dx: 0 });
+  const [place, setPlace] = useState<{ up: boolean; dx: number; max?: number }>({ up: false, dx: 0 });
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -633,11 +633,16 @@ export function Popover({
   useLayoutEffect(() => {
     if (!open) setPlace({ up: false, dx: 0 });
     if (!open || !panel.current || !button.current) return;
-    // Open upward when there's no room below, and slide sideways to stay inside the webview.
+    // Open on the side with room (below first), cap the height to that room so a long menu scrolls
+    // inside the window, and slide sideways to stay inside the webview.
     const b = button.current.getBoundingClientRect();
     const p = panel.current.getBoundingClientRect();
+    const below = window.innerHeight - b.bottom - 12;
+    const above = b.top - 12;
+    const up = p.height > below && above > below;
+    const room = Math.floor(up ? above : below);
     const dx = p.right > window.innerWidth - 8 ? window.innerWidth - 8 - p.right : 0;
-    setPlace({ up: b.bottom + p.height + 8 > window.innerHeight && b.top - p.height - 8 > 0, dx: p.left + dx < 8 ? 8 - p.left : dx });
+    setPlace({ up, dx: p.left + dx < 8 ? 8 - p.left : dx, max: p.height > room ? room : undefined });
   }, [open]);
 
   useEffect(() => {
@@ -711,7 +716,7 @@ export function Popover({
           aria-label={label}
           data-up={place.up ? '' : undefined}
           data-end={align === 'end' ? '' : undefined}
-          style={place.dx ? { transform: `translateX(${Math.round(place.dx)}px)` } : undefined}
+          style={{ transform: place.dx ? `translateX(${Math.round(place.dx)}px)` : undefined, maxHeight: place.max ? `${place.max}px` : undefined }}
           onKeyDown={onKeyDown}
         >
           {children(close)}
