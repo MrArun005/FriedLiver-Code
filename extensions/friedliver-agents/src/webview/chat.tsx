@@ -169,7 +169,7 @@ function App() {
             />
           </>
         ) : (
-          <Empty />
+          <Empty chats={state.chats} onSelect={select} />
         )}
         </div>
       </div>
@@ -584,7 +584,10 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
   );
 }
 
-function Empty() {
+/** No tab open: start a chat with an agent, or reopen one of the latest. */
+function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
+  const now = useNow(10_000);
+  const recent = recentChats(chats, undefined, 5).sort((a, b) => b.lastActivity - a.lastActivity);
   return (
     <div class="empty">
       <h2>Start a chat</h2>
@@ -593,7 +596,7 @@ function Empty() {
           <button key={agent} class="pick-agent" onClick={() => send({ type: 'newChat', agent })}>
             <Glyph agent={agent} size="lg" />
             <span>{AGENT_FACES[agent].name}</span>
-            {agent === 'demo' && <span class="hint">offline</span>}
+            {agent === 'demo' && <span class="hint pick-note">offline</span>}
           </button>
         ))}
       </div>
@@ -605,6 +608,18 @@ function Empty() {
           Get another agent extension…
         </button>
       </p>
+      {recent.length > 0 && (
+        <section class="reopen" aria-label="Reopen a chat">
+          <h3 class="pop-title">Reopen</h3>
+          {recent.map((c) => (
+            <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={`${c.title} (${c.label})`} onClick={() => onSelect(c.id)}>
+              <Glyph agent={c.agent} size="sm" />
+              <span class="pick-title">{c.title}</span>
+              <span class="pick-label">{switcherMeta(c, now)}</span>
+            </button>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

@@ -505,6 +505,38 @@ BLOCKS.F16 = async () => {
   await l.close();
 };
 
+// ---- F17: the empty state centres its agents, cards line up, and recent chats can be reopened ----
+BLOCKS.F17 = async () => {
+  for (const w of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&empty=1', w, 800);
+    const g = await p.evaluate(() => {
+      const box = document.querySelector('.empty').getBoundingClientRect();
+      const cards = [...document.querySelectorAll('.pick-agent')].map((c) => c.getBoundingClientRect());
+      const glyphs = [...document.querySelectorAll('.pick-agent .glyph, .pick-agent svg')].map((c) => Math.round(c.getBoundingClientRect().top));
+      return {
+        left: Math.round(cards[0].left - box.left),
+        right: Math.round(box.right - cards.at(-1).right),
+        heights: [...new Set(cards.map((c) => Math.round(c.height)))],
+        glyphs: [...new Set(glyphs)],
+      };
+    });
+    check(Math.abs(g.left - g.right) <= 2, `at ${w}px the agent cards are centred [${g.left} | ${g.right}]`);
+    check(g.heights.length === 1 && g.glyphs.length === 1, `at ${w}px the cards share one height and glyph line [${JSON.stringify(g)}]`);
+    await p.close();
+  }
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  for (let i = 0; i < 40 && (await p.locator('.tab-close').count()); i++) await p.locator('.tab-close').first().click({ force: true });
+  const rows = p.locator('.empty .reopen [data-chat]');
+  check((await rows.count()) === 5, `with every tab closed, five recent chats are offered [${await rows.count()}]`);
+  if (await rows.count()) {
+    await rows.first().click();
+    await p.waitForTimeout(200);
+    const n = await p.locator('.tabs [role="tab"]').count();
+    check(n === 1, `a recent chat reopens in a tab [${n} tabs; ${await p.locator('.empty').count()} empty]`);
+  }
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
