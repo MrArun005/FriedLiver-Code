@@ -80,11 +80,26 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
   const more = hasDetails(t);
   const id = `step-${t.id}`;
   const exit = t.exit ?? exitInOutput(t.out);
+  const file = t.locations[0];
   const image = useMemo(() => stepImage(t), [t.locations, t.out, t.about]);
   const head = (
     <>
       <span class="step-verb">{s.verb}</span>
-      <span class={`step-text${s.mono ? ' mono' : ''}`}>{s.text}</span>
+      <span
+        class={`step-text${s.mono ? ' mono' : ''}${file ? ' step-target' : ''}`}
+        title={file}
+        onClick={
+          file
+            ? (e) => {
+                // The path is the link: it opens the file (an edit's diff shows in the review), the row's other parts expand.
+                e.stopPropagation();
+                send({ type: 'openFile', path: file });
+              }
+            : undefined
+        }
+      >
+        {s.text}
+      </span>
       {s.lines && <span class="step-lines">{s.lines} lines</span>}
     </>
   );
@@ -101,15 +116,6 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
         ) : (
           <span class="step-main" title={tip}>
             {head}
-          </span>
-        )}
-        {t.locations.length > 0 && (
-          <span class="step-files">
-            {t.locations.slice(0, 3).map((l) => (
-              <button key={l} class="ref" title={l} onClick={() => send({ type: 'openFile', path: l })}>
-                {basename(l)}
-              </button>
-            ))}
           </span>
         )}
         <span class="step-end">

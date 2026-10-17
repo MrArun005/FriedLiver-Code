@@ -117,7 +117,7 @@ function page(params) {
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
-<body class="vscode-${theme.kind}" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
+<body class="vscode-${theme.kind}" data-accent="#D97757" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
 <div id="root"></div>
 <script src="/media/dist/${surface}.js"></script>
 </body>
@@ -460,6 +460,24 @@ async function shoot() {
     await p.close();
     const d = await open('surface=chat&theme=black-blue&select=chat-c2', 1200, 800);
     check((await d.locator('.ask .opt-num').first().innerText()) === '1.', 'decision options are numbered');
+    check(await d.evaluate(() => {
+      const yes = window.getComputedStyle(document.querySelector('.ask button.decide'));
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--c-surface)';
+      probe.style.borderColor = 'var(--c-acc)';
+      document.body.append(probe);
+      const want = window.getComputedStyle(probe);
+      const ok = yes.backgroundColor === want.backgroundColor && yes.borderTopColor === want.borderTopColor;
+      probe.remove();
+      return ok;
+    }), 'the recommended option is a neutral surface with the accent border, not a fill');
+    check((await d.locator('.step-files').count()) === 0 && (await d.locator('.step-target').first().innerText()).includes('src/store.ts'), 'a tool line names its file once, as the link');
+    await d.locator('.step-target').first().click();
+    check((await posted(d)).some((m) => m.type === 'openFile' && m.path === 'src/store.ts'), 'the path opens the file');
+    check((await d.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'a busy chat’s placeholder is just Message…');
+    await d.fill('.composer textarea', 'and then');
+    check(await d.locator('.composer-hint:has-text("Sends after this turn · Esc stops")').isVisible(), 'with text in a busy chat, the faint hint says when it sends');
+    await d.fill('.composer textarea', '');
     await d.click('.composer textarea');
     await d.keyboard.press('2');
     const picked = (await posted(d)).find((m) => m.type === 'permission');

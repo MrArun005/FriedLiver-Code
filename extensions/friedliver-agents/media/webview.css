@@ -4203,3 +4203,30 @@ body[data-surface='chat'] .chat-head {
     margin: 0 16px 16px;
   }
 }
+/* Decision options: plain rows; the recommended one a neutral surface with the accent border only. */
+body[data-surface='chat'] .ask .actions button.sm {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  font-weight: 400;
+}
+body[data-surface='chat'] .ask .actions button.sm.decide {
+  border-color: var(--c-acc);
+  background: var(--c-surface);
+}
+body[data-surface='chat'] .ask .actions button.sm:hover:not(:disabled),
+body[data-surface='chat'] .ask .actions button.sm:focus-visible {
+  background: var(--c-surface2);
+  outline: none;
+}
+body[data-surface='chat'] .ask .actions button.sm.danger {
+  color: color-mix(in srgb, var(--c-bad) 75%, var(--c-mute));
+}
+.step-target {
+  cursor: pointer;
+}
+.step-target:hover {
+  color: var(--c-text);
+  text-decoration: underline;
+}
