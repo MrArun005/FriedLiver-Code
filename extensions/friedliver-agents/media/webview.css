@@ -1457,6 +1457,28 @@ th[aria-sort] .th-btn {
 td.c-act {
   white-space: nowrap;
 }
+/* Narrow: the task keeps its room; activity, files and age go first, then the agent. */
+/* Columns collapse to nothing rather than leave the table (the group rows span them all). */
+@media (max-width: 900px) {
+  .chat-table :is(.c-activity, .c-files, .c-age) {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+}
+@media (max-width: 600px) {
+  .chat-table .c-agent {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+  .chat-table .c-agent > *,
+  .chat-table :is(.c-activity, .c-files, .c-age) > * {
+    display: none;
+  }
+}
 td.c-act > * + * {
   margin-left: 4px;
 }
