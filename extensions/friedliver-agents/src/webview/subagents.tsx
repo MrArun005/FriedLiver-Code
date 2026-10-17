@@ -4,7 +4,7 @@
 import { useState } from 'preact/hooks';
 import type { ChatView } from '../shared/model';
 import { shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem } from '../shared/view';
-import { Dot, Markdown, scrollBehavior, send, useNow } from './common';
+import { Markdown, scrollBehavior, send, useNow } from './common';
 import { Steps } from './steps';
 
 const DOT = { working: 'working', done: 'done', failed: 'error' } as const;
@@ -26,10 +26,9 @@ export function SubagentCard({ chat, item, steps }: { chat: ChatView; item: Tool
   const answer = subagentAnswer(item);
   const body = `sa-body-${item.id}`;
   return (
-    <section class="sa-card" id={`item-${item.id}`} data-state={DOT[sub.state]} data-open={open ? '' : undefined} aria-label={`Subagent: ${sub.title}`}>
+    <section class="tl sa-card" id={`item-${item.id}`} data-state={DOT[sub.state]} data-open={open ? '' : undefined} aria-label={`Subagent: ${sub.title}`}>
       <button type="button" class="sa-head" aria-expanded={open} aria-controls={open ? body : undefined} onClick={() => setOpen(!open)}>
-        <Dot state={DOT[sub.state]} still={!chat.busy} />
-        <b class="sa-verb">Task</b>
+        <span class="step-verb">Task</span>
         <span class="sa-title" title={sub.title}>
           {sub.title}
         </span>
