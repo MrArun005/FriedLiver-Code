@@ -295,6 +295,15 @@ again after changing the artwork.
 
   A clean dev rebuild of `out/` is `npm run transpile-client` in the
   checkout (about 20 s, no type check).
+- **`0200-fast-shell-env.patch`**: the extension host no longer waits for the
+  login shell (`friedliver.fastShellEnv`, see [DEFAULTS.md](DEFAULTS.md)). It
+  adds `src/vs/workbench/services/extensions/common/shellEnvCache.ts` (no
+  imports: the allow-list, the cache and a raw protocol message `0xFE
+  'FLSHENV'` + JSON beside Initialized/Ready/Terminate), uses it in
+  `localProcessExtensionHost.ts` and applies the message in
+  `api/node/extensionHostProcess.ts`. `test/shellEnvCache.test.ts` runs that
+  new file straight out of the patch (`test/patchedFile.ts`), so the filter is
+  tested without an upstream checkout.
 - **Built-in extensions**: `friedliver-agents` (`npm ci` + `npm run build`
   first) and `friedliver-theme` are copied without `node_modules` and
   `.vscode-test`. On the copy, the Agents view container moves from

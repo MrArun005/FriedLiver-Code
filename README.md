@@ -225,6 +225,7 @@ Patches:
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 | `0110-modern-workbench` | The FriedLiver workbench stylesheet: regions separate by tone, soft rounded overlays, an activity pill, thin scrollbars, a pill command center. Theme variables only; high contrast untouched |
 | `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |
+| `0200-fast-shell-env` | The extension host starts with the last launch's shell environment instead of waiting for the login shell, then gets the fresh one in the background; only non-secret variables are cached (`friedliver.fastShellEnv`, [DEFAULTS.md](docs/DEFAULTS.md)) |
 
 ### Writing a patch
 
