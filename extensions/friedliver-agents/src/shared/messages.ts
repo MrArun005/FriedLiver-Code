@@ -48,6 +48,8 @@ export type WebviewMessage =
   | { type: 'revealImage'; path: string }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
+  /** A step's input or output, or an agent's text, in an editor tab of its own (word-wrapped, see package.json). */
+  | { type: 'openText'; text: string }
   /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
   | { type: 'createTask'; agent: AgentKey; prompt: string; worktree: boolean; choices?: TaskChoices; approval?: ApprovalLevel }
   /** `item` (optional): a transcript item to scroll to, e.g. a subagent's tool call. */
@@ -315,6 +317,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'unqueue':
     case 'steer':
       return id(m.chatId) && id(m.id) ? { type: m.type, chatId: m.chatId, id: m.id } : null;
+    case 'openText':
+      return str(m.text, LIMITS.copy) && m.text ? { type: 'openText', text: m.text } : null;
     case 'copy':
     case 'insert':
       return str(m.text, LIMITS.copy) && m.text ? { type: m.type, text: m.text } : null;

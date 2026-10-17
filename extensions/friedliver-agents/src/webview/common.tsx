@@ -398,11 +398,16 @@ export const longTitle = (title: string) => title.includes('\n') || title.length
 /** A fenced code block: the code on its own tone; its language, Run in terminal (shell code), Insert and Copy show on hover. */
 function CodeBlock({ lang, code, chatId }: { lang: string; code: string; chatId?: string }) {
   const run = chatId ? runnableCode(lang, code) : undefined;
+  // Long lines wrap; Wrap off keeps them whole, to scroll sideways.
+  const [wrap, setWrap] = useState(true);
   return (
-    <div class="code-block">
+    <div class="code-block" data-wrap={wrap ? '' : undefined}>
       <Code code={code} lang={lang} />
       <div class="code-tools">
         <span class="code-lang">{lang || 'code'}</span>
+        <button type="button" class="ghost sm wrap-btn" aria-pressed={wrap} title={wrap ? 'Long lines wrap: click to keep them whole' : 'Wrap long lines'} onClick={() => setWrap(!wrap)}>
+          Wrap
+        </button>
         {run && chatId && <RunButton chatId={chatId} command={run} />}
         <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
           Insert

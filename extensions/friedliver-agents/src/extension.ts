@@ -807,6 +807,12 @@ export class Controller {
         case 'copy':
           await vscode.env.clipboard.writeText(m.text);
           return;
+        case 'openText': {
+          // An untitled document in FriedLiver's output language, so it wraps; the user's own files keep their setting.
+          const doc = await vscode.workspace.openTextDocument({ content: m.text, language: 'friedliver-output' });
+          await vscode.window.showTextDocument(doc, { preview: true });
+          return;
+        }
         case 'otherAgents':
           await this.otherAgents();
           return;

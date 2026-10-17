@@ -570,6 +570,9 @@ BLOCKS.F19 = async () => {
   c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'Run this:\n\n```ts\nexport const SESSION_STORE_CONNECTION_STRING = process.env.SESSION_STORE_URL ?? \'redis://localhost:6379/0?pool=16&timeout=2500\';\n```' }];
   await snapshot(p, state, 'chat-c5');
   await p.waitForTimeout(200);
+  // Wrap is on by default; with it off, a long line scrolls.
+  await p.locator('.prose .code-block').last().hover();
+  await p.locator('.prose .code-block').last().locator('button.wrap-btn').click();
   const pre = p.locator('pre.code').last();
   const info = await pre.evaluate((el) => ({ over: el.scrollWidth > el.clientWidth, tab: el.tabIndex, bg: window.getComputedStyle(el).backgroundImage, attach: window.getComputedStyle(el).backgroundAttachment }));
   check(info.over && info.tab === 0, `code that scrolls can be focused to scroll by keyboard [${JSON.stringify({ over: info.over, tab: info.tab })}]`);
@@ -1041,6 +1044,43 @@ BLOCKS.VIEWER = async () => {
   const shown = (await p.locator('.gallery-card .gallery-title').allInnerTexts())[3];
   check((await title(p)) === shown, `→ follows the view’s order [${await title(p)} | ${shown}]`);
   await p.close();
+};
+
+// ---- WRAP: long lines wrap in a step's IN/OUT; code blocks wrap too, with a Wrap toggle; output opens in a wrapping editor tab ----
+BLOCKS.WRAP = async () => {
+  const long = 'echo ' + 'a-very-long-argument '.repeat(30);
+  for (const width of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 900);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    c5.items = [
+      ...c5.items,
+      { kind: 'tool', id: 'wrap-1', title: long, tool: 'Bash', toolKind: 'execute', status: 'completed', locations: [], cmd: { line: long }, out: [{ t: 'text', text: 'OUT ' + 'x'.repeat(600) }] },
+      { kind: 'agent', at: Date.now(), text: 'Here:\n\n```sh\n' + long + '\n```' },
+    ];
+    await snapshot(p, state, 'chat-c5');
+    const step = p.locator('#item-wrap-1');
+    await step.waitFor();
+    if (!(await step.locator('.tool-body').count())) await step.locator('.step-main').click();
+    const wide = (sel) => p.locator(sel).evaluateAll((els) => els.map((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 })));
+    const io = await wide('#item-wrap-1 .tool-cell pre.code');
+    check(io.length >= 2 && io.every((r) => r.ws === 'pre-wrap' && !r.over), `at ${width}px IN and OUT wrap long lines [${JSON.stringify(io)}]`);
+    const block = p.locator('.prose .code-block').last();
+    const before = await block.locator('pre.code').evaluate((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 }));
+    check(before.ws === 'pre-wrap' && !before.over, `at ${width}px a code block wraps by default [${JSON.stringify(before)}]`);
+    await block.hover();
+    const toggle = block.locator('button.wrap-btn');
+    check((await toggle.getAttribute('aria-pressed')) === 'true', 'its toolbar has Wrap, on');
+    await toggle.click();
+    const after = await block.locator('pre.code').evaluate((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 }));
+    check(after.ws === 'pre' && after.over && (await toggle.getAttribute('aria-pressed')) === 'false', `at ${width}px Wrap off scrolls it sideways [${JSON.stringify(after)}]`);
+    // Open in editor: the host opens it as friedliver-output, which wraps.
+    await step.locator('.step-output .tool-cell').hover();
+    await step.locator('.step-output button[aria-label="Open in editor"]').click();
+    const sent = (await posted(p)).filter((m) => m.type === 'openText').at(-1);
+    check(sent?.text?.startsWith('OUT xxx'), 'Open in editor sends the output to an editor tab');
+    await p.close();
+  }
 };
 
 await run();
