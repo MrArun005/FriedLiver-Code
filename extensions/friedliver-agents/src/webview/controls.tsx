@@ -447,13 +447,37 @@ export function TaskOptions({
               const key = optionKey(o);
               const value = String(choices[agent]?.[key] ?? defaults[agent]?.chosen[key] ?? o.current);
               return (
-                <select key={o.id} class="mini-select" aria-label={`${AGENT_FACES[agent].name} ${o.name}`} title={`${o.name} for ${AGENT_FACES[agent].name}`} value={value} onChange={(e) => onChange(agent, key, e.currentTarget.value)}>
-                  {o.choices.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <Popover
+                  key={o.id}
+                  label={`${o.name} for ${AGENT_FACES[agent].name}`}
+                  title={`${AGENT_FACES[agent].name} ${o.name}: ${o.choices.find((c) => c.value === value)?.name ?? value}`}
+                  buttonClass="mini-select"
+                  trigger={
+                    <>
+                      <span class="chip-text">{o.choices.find((c) => c.value === value)?.name ?? value}</span>
+                      <Icon name="chevron" />
+                    </>
+                  }
+                >
+                  {(close) =>
+                    o.choices.map((c) => (
+                      <button
+                        key={c.value}
+                        role="menuitemradio"
+                        aria-checked={c.value === value}
+                        data-value={c.value}
+                        title={c.description}
+                        onClick={() => {
+                          close();
+                          onChange(agent, key, c.value);
+                        }}
+                      >
+                        <span class="grow">{c.name}</span>
+                        {c.value === value && <Icon name="check" />}
+                      </button>
+                    ))
+                  }
+                </Popover>
               );
             })}
           </span>
