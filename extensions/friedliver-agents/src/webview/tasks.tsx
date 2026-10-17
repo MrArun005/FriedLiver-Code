@@ -4,17 +4,17 @@ import {
   AGENT_FACES,
   AGENT_KEYS,
   age,
-  boardColumn,
   decisions,
   fileConflicts,
   lastReply,
   type AgentKey,
   type AppState,
-  type BoardColumn,
   type ChatView,
+  type ChatStatus,
 } from '../shared/model';
 import {
-  COLUMN_TITLES,
+  STATUS_TITLES,
+  agentName,
   ago,
   cardModel,
   claudeColumn,
@@ -56,9 +56,12 @@ const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' }[] = [
   { id: 'map', title: 'Map', icon: 'map' },
 ];
 
-const COLUMNS: { id: BoardColumn; empty: string }[] = [
+/** Problem and Idle show only when a chat is in them. */
+const COLUMNS: { id: ChatStatus; empty?: string }[] = [
   { id: 'needs-you', empty: 'Nothing waits for you.' },
   { id: 'working', empty: 'No agent is working.' },
+  { id: 'error' },
+  { id: 'idle' },
   { id: 'done', empty: 'Finished tasks land here.' },
 ];
 
@@ -514,21 +517,21 @@ function Board({ state, chats, outside, now, focusId, onFocus }: { state: AppSta
   const models = new Map(chats.map((c) => [c.id, cardModel(state, c, now, conflicts)]));
   const columns = COLUMNS.map((col) => ({
     ...col,
-    cards: sorted.filter((c) => boardColumn(models.get(c.id)!.status) === col.id),
+    cards: sorted.filter((c) => models.get(c.id)!.status === col.id),
     outside: outside.filter((s) => claudeColumn(s, now) === col.id),
-  }));
+  })).filter((col) => col.empty || col.cards.length > 0);
   const first = chats.some((c) => c.id === focusId) ? focusId : columns.find((c) => c.cards.length)?.cards[0].id;
   return (
     <>
       {groups.map((g) => (
         <Compare key={g.id} group={g} now={now} />
       ))}
-      <div class="columns">
+      <div class="columns" style={{ '--cols': columns.length }}>
         {columns.map((col) => (
-          <section key={col.id} class="column" data-column={col.id} aria-label={COLUMN_TITLES[col.id]}>
+          <section key={col.id} class="column" data-column={col.id} aria-label={STATUS_TITLES[col.id]}>
             <h2 class="col-head">
               <Dot state={col.id} still={col.cards.length === 0} />
-              {COLUMN_TITLES[col.id]}
+              {STATUS_TITLES[col.id]}
               <span class="col-count">{col.cards.length + col.outside.length}</span>
             </h2>
             {col.cards.length + col.outside.length === 0 && <div class="column-empty">{col.empty}</div>}
@@ -681,7 +684,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
     >
       <div class="card-top">
         <Glyph agent={chat.agent} />
-        <span class="card-who">{chat.label}</span>
+        <span class="card-who" title={chat.label}>
+          {agentName(chat.agent)}
+        </span>
         <span class="sep">·</span>
         <span title="Started">{model.age}</span>
         <span class="spacer" />
@@ -778,6 +783,15 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
                 }}
               >
                 <Icon name="diff" /> Changes
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  close();
+                  send({ type: 'renameChat', chatId: chat.id });
+                }}
+              >
+                <Icon name="rename" /> Rename chat
               </button>
               {canMerge && (
                 <button
@@ -900,6 +914,8 @@ function List({
   onFocus,
 }: { state: AppState; chats: ChatView[]; outside: ClaudeSession[]; now: number; sort: Sort; setSort(s: Sort): void } & NavProps) {
   const rows = useSettledOrder(sortChats(chats, sort), `${sort.key}:${sort.dir}`);
+  // Sorted by status, the rows fall into the same groups as the board, each under its header.
+  const grouped = sort.key === 'status';
   const roving = rows.some((c) => c.id === focusId) ? focusId : rows[0]?.id;
   if (!rows.length && !outside.length) return null;
   const conflicts = fileConflicts(state);
@@ -927,8 +943,17 @@ function List({
           </tr>
         </thead>
         <tbody>
-          {rows.map((c) => (
+          {rows.map((c, n) => (
             <Fragment key={c.id}>
+              {grouped && (n === 0 || statusOf(rows[n - 1]) !== statusOf(c)) && (
+                <tr class="group-row">
+                  <th colSpan={SORT_COLUMNS.length + 1} scope="rowgroup">
+                    <Dot state={statusOf(c)} still />
+                    {STATUS_TITLES[statusOf(c)]}
+                    <span class="col-count">{rows.filter((r) => statusOf(r) === statusOf(c)).length}</span>
+                  </th>
+                </tr>
+              )}
               <Row chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
               {subagents(c).map((sub) => (
                 <tr key={sub.id} class="sub-row" data-status={SUB_DOT[sub.state]} onClick={(e) => !(e.target as HTMLElement).closest('button') && openSub(c.id, sub.id)}>
@@ -997,7 +1022,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       </td>
       <td class="c-agent">
         <span class="cell-agent">
-          <Glyph agent={c.agent} size="sm" /> {c.label}
+          <Glyph agent={c.agent} size="sm" /> <span title={c.label}>{agentName(c.agent)}</span>
         </span>
       </td>
       <td class="c-task">

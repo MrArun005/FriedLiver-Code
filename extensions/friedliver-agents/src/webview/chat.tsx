@@ -230,9 +230,9 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
       </label>
       <div class="all-list" id={listId} role="listbox" aria-label="Chats">
         {groups.map((g) => (
-          <div key={g.column} role="group" aria-label={g.title}>
+          <div key={g.status} role="group" aria-label={g.title}>
             <div class="pop-group" aria-hidden="true">
-              <Dot state={g.column} />
+              <Dot state={g.status} />
               {g.title}
               <span class="col-count">{g.chats.length}</span>
             </div>
@@ -248,8 +248,10 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
                 onMouseMove={() => setAt(flat.indexOf(c))}
               >
                 <Glyph agent={c.agent} size="sm" />
-                <span class="pick-title">{c.title}</span>
-                <span class="pick-label">{c.label}</span>
+                <span class="pick-title" title={c.label}>
+                  {c.title}
+                </span>
+                <span class="pick-label">{AGENT_FACES[c.agent].name}</span>
                 <Dot state={statusOf(c)} />
               </div>
             ))}
@@ -280,11 +282,12 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
       <header class="chat-head">
         <Glyph agent={chat.agent} />
         <div class="chat-head-text">
-          <div class="chat-head-title" title={chat.title}>
+          <div class="chat-head-title" title={`${chat.title} (${chat.label})`}>
             {chat.title}
           </div>
           <div class="chat-head-sub">
-            <span>{chat.label}</span>
+            <span title={chat.label}>{AGENT_FACES[chat.agent].name}</span>
+
             <span class="sep">·</span>
             <Dot state={status} />
             <span>{DOT_LABEL[status]}</span>
@@ -304,6 +307,9 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           <HandoffMenu chat={chat} compact={compact} />
           <AskMenu chat={chat} compact={compact} />
           <PipeMenu chat={chat} compact={compact} />
+          <button class="ghost icon-btn sm" title="Rename chat" aria-label="Rename chat" onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
+            <Icon name="rename" />
+          </button>
           <button
             class="ghost icon-btn sm"
             title={chat.archived ? 'Unarchive' : 'Archive'}
