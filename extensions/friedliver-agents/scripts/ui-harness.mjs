@@ -387,15 +387,69 @@ async function shoot() {
     await p.close();
   }
   {
-    // The mic: macOS only; it focuses the message box and asks the host for dictation.
-    const p = await open('surface=chat&side=1&select=chat-c5', 400, 700);
+    // The mic: macOS only. No programmatic start beeps; it focuses the box and says Fn Fn, with a settings link.
+    const p = await open('surface=chat&side=1&select=chat-c5', 900, 700);
     await p.click('.mic-btn');
-    check((await posted(p)).some((m) => m.type === 'dictate'), 'the mic asks for dictation');
-    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box first');
+    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'the mic no longer asks the app to start dictation (it beeped)');
+    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
+    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'the mic shows the Fn Fn hint');
+    await p.click('.mic-hint a');
+    check((await posted(p)).some((m) => m.type === 'dictationSettings'), 'the hint opens Dictation settings');
     await p.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
     check((await linux.locator('.mic-btn').count()) === 0, 'no mic off macOS');
     await linux.close();
+  }
+  {
+    // The composer: centred, 640px at most; plain-word labels; mode border; blue focus ring.
+    for (const width of [480, 900, 1600]) {
+      const p = await open('surface=chat&select=chat-c5', width, 700);
+      const r = await p.evaluate(() => {
+        const c = document.querySelector('.composer').getBoundingClientRect();
+        return { w: c.width, left: c.left, right: window.innerWidth - c.right };
+      });
+      check(r.w <= 640.5 && Math.abs(r.left - r.right) <= 1 && (width > 672 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 640)`);
+      await p.close();
+    }
+    const p = await open('surface=chat&select=chat-c5', 1200, 700);
+    const usage = p.locator('.composer-bar .usage');
+    check(/^Context \d+%/.test(await usage.innerText()), 'context usage reads "Context N%"');
+    check(/% of the model's context window used/.test((await usage.getAttribute('title')) ?? ''), 'its tooltip says what the percentage is');
+    check(/this chat/.test(await usage.innerText()), 'the cost reads "$x this chat"');
+    check(await p.locator('.approval-chip .chip-text').isVisible(), 'the mode dot has its label');
+    const untitled = await p.evaluate(() => [...document.querySelectorAll('.composer-bar button')].filter((b) => !b.title && !b.getAttribute('aria-label')).length);
+    check(untitled === 0, 'every composer control has a tooltip or label');
+    const ring = () => p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
+    await p.evaluate(() => document.activeElement?.blur());
+    check((await ring()) === 'none', 'no ring unfocused');
+    await p.click('.composer textarea');
+    check(/^rgba?\(.*\) 0px 0px 0px 2px$/.test(await ring()), 'focus draws a 2px ring');
+    await p.close();
+    const colour = async (id) => {
+      const q = await open(`surface=chat&select=${id}`, 1200, 700);
+      const out = await q.evaluate(() => [document.querySelector('.composer').dataset.mode, window.getComputedStyle(document.querySelector('.composer')).borderTopColor]);
+      await q.close();
+      return out;
+    };
+    const [ask, edits, full] = [await colour('chat-c5'), await colour('chat-c2'), await colour('chat-c6')];
+    check(ask[0] === 'ask' && edits[0] === 'edits' && full[0] === 'full', 'the composer names its mode: ask, edits, full');
+    check(new Set([ask[1], edits[1], full[1]]).size === 3, `each mode has its own border colour (${ask[1]} / ${edits[1]} / ${full[1]})`);
+    for (const [name, theme, id] of [['composer-clarity-dark', 'black-blue', 'chat-c5'], ['composer-clarity-light', 'light-blue', 'chat-c2'], ['composer-clarity-fullauto', 'black-blue', 'chat-c6']]) {
+      const q = await open(`surface=chat&theme=${theme}&select=${id}`, 1200, 520);
+      const clip = async () => {
+        const b = await q.locator('.composer').boundingBox();
+        return { x: b.x - 24, y: b.y - 40, width: b.width + 48, height: b.height + 56 };
+      };
+      await q.evaluate(() => document.activeElement?.blur());
+      const unfocused = await q.screenshot({ clip: await clip(), animations: 'disabled', caret: 'hide' });
+      await q.click('.composer textarea');
+      await q.click('.mic-btn');
+      const focused = await q.screenshot({ clip: await clip(), animations: 'disabled', caret: 'hide' });
+      // Unfocused above focused, one image.
+      await q.setContent(`<body style="margin:0;padding:16px;background:#888;display:grid;gap:16px"><img src="data:image/png;base64,${unfocused.toString('base64')}"><img src="data:image/png;base64,${focused.toString('base64')}"></body>`);
+      await q.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), fullPage: true });
+      await q.close();
+    }
   }
   {
     // Text size: Cmd/Ctrl + = - 0 in a tab, that tab only, kept in its own webview state, and never reaching the window's zoom.

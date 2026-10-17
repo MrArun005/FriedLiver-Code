@@ -3378,6 +3378,11 @@ body[data-surface='chat'] {
   --c-ok: var(--vscode-charts-green);
   --c-warn: var(--vscode-charts-yellow);
   --c-bad: var(--vscode-errorForeground);
+  /* The composer's border names the approval mode; blue ring on focus. */
+  --c-mode-ask: var(--c-mute);
+  --c-mode-edits: var(--vscode-charts-yellow);
+  --c-mode-full: var(--vscode-charts-purple, #b180d7);
+  --c-focus: var(--vscode-focusBorder, #3794ff);
   /* palette:end */
   --t-xs: calc(var(--fl-font-size) - 2px);
   --t-sm: calc(var(--fl-font-size) - 1px);
@@ -3393,6 +3398,8 @@ body.vscode-light[data-surface='chat'],
 body.vscode-high-contrast-light[data-surface='chat'] {
   /* palette-light:start */
   --c-acc: color-mix(in srgb, var(--fl-accent, var(--vscode-button-background)) 75%, black);
+  --c-mode-edits: color-mix(in srgb, var(--vscode-charts-yellow) 75%, black);
+  --c-mode-full: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 75%, black);
   /* palette-light:end */
 }
 body.vscode-high-contrast[data-surface='chat'],
@@ -4364,4 +4371,66 @@ body[data-surface='chat'] .ask .actions button.sm.danger {
 .step-target:hover {
   color: var(--c-text);
   text-decoration: underline;
+}
+
+/* The composer: a centred box of a fixed comfortable width (the transcript stays full width).
+   Its 1px border names the approval mode; focus adds a 2px blue ring outside it. */
+body[data-surface='chat'] .composer {
+  width: min(640px, calc(100% - 32px));
+  margin: 0 auto 24px;
+  border-color: var(--c-mode-ask);
+}
+body[data-surface='chat'] .composer[data-mode='edits'] {
+  border-color: var(--c-mode-edits);
+}
+body[data-surface='chat'] .composer[data-mode='full'] {
+  border-color: var(--c-mode-full);
+}
+body[data-surface='chat'] .composer:focus-within {
+  border-color: var(--c-mode-ask);
+  box-shadow: 0 0 0 2px var(--c-focus);
+}
+body[data-surface='chat'] .composer[data-mode='edits']:focus-within {
+  border-color: var(--c-mode-edits);
+}
+body[data-surface='chat'] .composer[data-mode='full']:focus-within {
+  border-color: var(--c-mode-full);
+}
+@media (max-width: 640px) {
+  body[data-surface='chat'] .composer {
+    margin: 0 auto 16px;
+  }
+}
+body[data-surface='chat'] .chip-tone[data-tone='edits'],
+body[data-surface='chat'] .chip-tone[data-tone='auto'] {
+  background: var(--c-mode-edits);
+}
+body[data-surface='chat'] .chip-tone[data-tone='full'] {
+  background: var(--c-mode-full);
+}
+body[data-surface='chat'] .chip-tone[data-tone='quiet'] {
+  background: var(--c-mode-ask);
+}
+body[data-surface='chat'] .composer-bar .usage {
+  color: var(--c-mute);
+}
+.mic-hint a {
+  color: var(--c-link);
+}
+/* Full auto is purple, not red: red stays for errors and Stop. */
+body[data-surface='chat'] .approval-chip:has(.chip-tone[data-tone='full']),
+body[data-surface='chat'] .popover .menu-full .menu-label {
+  color: var(--c-mode-full);
+  border-color: color-mix(in srgb, var(--c-mode-full) 45%, transparent);
+}
+/* At 640px the controls wrap to a second row rather than truncate, so every label stays readable. */
+body[data-surface='chat'] .composer-bar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+body[data-surface='chat'] .composer-bar > *,
+body[data-surface='chat'] .composer-bar .session-controls,
+body[data-surface='chat'] .composer-bar button.chip-btn,
+body[data-surface='chat'] .composer-bar .usage {
+  flex: none;
 }

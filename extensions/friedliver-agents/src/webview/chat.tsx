@@ -44,7 +44,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
+import { AlwaysAllow, AutoBadge, approvalTone, composerMode, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -1172,12 +1172,14 @@ function Composer({
   };
 
   const canSend = asking ? !!question : !empty;
+  const [micHint, setMicHint] = useState(false);
   const queueing = chat.busy && !asking;
   return (
     <>
       <EditsBar chat={chat} />
       <div
         class="composer"
+        data-mode={composerMode(approvalTone(chat))}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           const files = Array.from(e.dataTransfer?.files ?? []);
@@ -1298,6 +1300,14 @@ function Composer({
           }}
         />
         {chat.busy && text.trim() && <div class="composer-queued">Queued for after this turn · Esc stops</div>}
+        {micHint && (
+          <span class="composer-queued mic-hint" role="status">
+            Press Fn twice to dictate ·{' '}
+            <a href="#" onClick={(e) => (e.preventDefault(), send({ type: 'dictationSettings' }))}>
+              Dictation settings
+            </a>
+          </span>
+        )}
         <div class="composer-bar">
           <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
             <Icon name="plus" />
@@ -1321,10 +1331,11 @@ function Composer({
             <button
               class="chip-btn icon-btn mic-btn"
               aria-label="Dictate"
-              title="Dictate (Fn Fn)"
+              title="Dictate: press Fn twice in the message box"
               onClick={() => {
+                // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
                 area.current?.focus();
-                send({ type: 'dictate' });
+                setMicHint(true);
               }}
             >
               <Icon name="mic" />
