@@ -320,6 +320,19 @@ export function reportedMode(session: ChatSession | undefined): { name: string; 
   return { name: choice?.name ?? String(mode.current), tone: cls ? MODE_TONE[cls] : 'quiet', cls };
 }
 
+const PERMISSIVE: Record<ModeClass, number> = { ask: 0, plan: 0, edits: 1, auto: 2, full: 3 };
+
+/**
+ * The agent's own mode when it is more permissive than FriedLiver's level (it
+ * won't ask where the level says it would), so the mode button can't read
+ * "Manual" while the agent bypasses permissions.
+ */
+export function agentOverride(level: ApprovalLevel, session: ChatSession | undefined): { name: string; tone: 'auto' | 'full'; cls: ModeClass } | undefined {
+  const r = reportedMode(session);
+  if (!r?.cls || (r.tone !== 'auto' && r.tone !== 'full')) return undefined;
+  return PERMISSIVE[r.cls] > PERMISSIVE[level === 'ask' ? 'ask' : level === 'edits' ? 'edits' : 'full'] ? { name: r.name, tone: r.tone, cls: r.cls } : undefined;
+}
+
 /** What a new chat with an agent starts from: its last known options, and the user's last choices. */
 export interface AgentDefaults {
   /** The options the agent's last session offered, so pickers show before a session starts. */

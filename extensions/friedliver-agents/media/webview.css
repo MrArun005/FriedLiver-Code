@@ -4904,3 +4904,11 @@ button.cc-more-btn > .icon:last-child {
 button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   transform: rotate(180deg);
 }
+/* The agent runs in its own mode that doesn't ask: the mode button says so, loud. */
+button.cc-mode[data-warn='auto'] {
+  color: var(--c-warn);
+}
+button.cc-mode[data-warn='full'] {
+  color: var(--c-bad);
+  border-color: color-mix(in srgb, var(--c-bad) 45%, transparent);
+}
