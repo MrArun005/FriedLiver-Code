@@ -614,10 +614,13 @@ export const FRIEDLIVER_COMMANDS: SlashCommand[] = [
   { name: 'new', description: 'Start a new chat', hint: 'agent (optional)' },
 ];
 
-/** The agent's commands, then FriedLiver's; the agent's win a name both have. */
+/** FriedLiver's commands, then the agent's: one list for the / button and a typed /. The agent's win a name both have. */
 export function slashMenu(agentCommands: SlashCommand[]): SlashCommand[] {
-  return [...agentCommands, ...FRIEDLIVER_COMMANDS.filter((f) => !agentCommands.some((c) => c.name === f.name))];
+  return [...FRIEDLIVER_COMMANDS.filter((f) => !agentCommands.some((c) => c.name === f.name)), ...agentCommands];
 }
+
+/** A command as the menus show it: its arguments in ‹›, not as a trailing word of the description. */
+export const commandLabel = (c: SlashCommand): string => `/${c.name}${c.hint ? ` ‹${c.hint}›` : ''}`;
 
 /**
  * The action a FriedLiver command typed in `chat` asks for, "incomplete" when it

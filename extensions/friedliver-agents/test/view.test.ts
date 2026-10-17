@@ -31,6 +31,7 @@ import {
   settleOrder,
   slashAction,
   slashMenu,
+  commandLabel,
   sortChats,
   statusOf,
   subagents,
@@ -496,11 +497,16 @@ describe('text', () => {
 describe('"/" commands', () => {
   const agentCmds = [{ name: 'review', description: 'Agent review' }, { name: 'help', description: 'Help' }];
 
-  it('adds FriedLiver’s own commands after the agent’s, and the agent’s win a shared name', () => {
+  it('lists FriedLiver’s own commands first, then the agent’s; the agent’s win a shared name', () => {
     expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'review', 'new']);
     const menu = slashMenu(agentCmds);
-    expect(menu.map((c) => c.name)).toEqual(['review', 'help', 'handoff', 'ask', 'pipe', 'new']);
-    expect(menu[0].description).toBe('Agent review');
+    expect(menu.map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'new', 'review', 'help']);
+    expect(menu.find((c) => c.name === 'review')?.description).toBe('Agent review');
+  });
+
+  it('shows what a command takes as its argument, not as a trailing word', () => {
+    expect(commandLabel({ name: 'handoff', description: '', hint: 'agent' })).toBe('/handoff ‹agent›');
+    expect(commandLabel({ name: 'compact', description: '' })).toBe('/compact');
   });
 
   it('turns a FriedLiver command into its action, and leaves the agent’s own alone', () => {

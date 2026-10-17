@@ -285,6 +285,24 @@ BLOCKS.F06 = async () => {
   await map.close();
 };
 
+// ---- F07: one command list: the / button and a typed / show the same commands, FriedLiver's first ----
+BLOCKS.F07 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 900);
+  await p.click('.cc-slash-btn');
+  const button = await p.locator('.cc-slash-menu [role="menuitem"] .cc-item-name').evaluateAll((es) => es.map((e) => e.textContent.trim()).filter((t) => t.startsWith('/')));
+  const more = await p.locator('.cc-slash-menu .cc-menu-list').evaluate((l) => ({ scrolls: l.scrollHeight > l.clientHeight, more: l.hasAttribute('data-more'), mask: window.getComputedStyle(l).maskImage }));
+  await p.keyboard.press('Escape');
+  await p.click('.composer textarea');
+  await p.keyboard.type('/');
+  const typed = await p.locator('.mention-menu [role="option"] .cc-item-name').evaluateAll((es) => es.map((e) => e.textContent.trim()));
+  check(button.length > 4 && JSON.stringify(button) === JSON.stringify(typed), `the / button and a typed / list the same commands [${button.join(' ')}] vs [${typed.join(' ')}]`);
+  check(['/handoff ‹agent›', '/ask ‹agent and question›', '/pipe ‹agent›', '/new ‹agent (optional)›'].every((c, n) => button[n] === c), `FriedLiver's commands come first, with their arguments [${button.slice(0, 4).join(' ')}]`);
+  const descs = await p.locator('.mention-menu [role="option"] .cc-item-value').allInnerTexts();
+  check(descs.every((d) => !/ · (agent|agent and question|agent \(optional\))$/.test(d)), 'descriptions no longer end in the argument word');
+  check(!more.scrolls || (more.more && more.mask !== 'none'), `a list that scrolls says so with a fade at its end [${JSON.stringify(more)}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();

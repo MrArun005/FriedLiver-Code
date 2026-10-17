@@ -2648,6 +2648,13 @@ button.sa-name:hover {
   min-height: 0;
   overflow-y: auto;
 }
+/* More below: the list's end fades while it can scroll further. */
+.cc-menu-list[data-more] {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--sp-5)), transparent);
+}
+.cc-typeahead {
+  overflow-y: auto;
+}
 .cc-model-menu .cc-menu-list {
   max-height: 270px;
 }

@@ -400,7 +400,7 @@ export function slashOptions(commands: SlashCommand[], query: string): SlashComm
   const q = query.toLowerCase();
   const starts = commands.filter((c) => c.name.toLowerCase().startsWith(q));
   const contains = commands.filter((c) => !starts.includes(c) && c.name.toLowerCase().includes(q));
-  return [...starts, ...contains].slice(0, 12);
+  return [...starts, ...contains];
 }
 
 // ---- "#" file references ----
