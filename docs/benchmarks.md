@@ -315,3 +315,4 @@ no other metric regressing), otherwise it moves to "Tried and not kept".
 | C10 tool caches out of the watcher | theme | watcher + extension-host CPU while 20k files are written into `fixture/.venv` | most of that CPU | awaiting CI |
 | C5 one tsserver (`useSyntaxServer: never`) | theme | `files20` footprint, process count; time until the outline fills | −40–80 MB, −1 process | awaiting CI |
 | C7 time-sliced `onStartupFinished` | theme | typing p95 in the first 5 s, with extensions | −10–40 ms | awaiting CI |
+| C2 extension host doesn't wait for the login shell (`friedliver.fastShellEnv`) | patch 0200 | `code/willLoadMainBundle-code/extHost/ready` in a "heavy shell" scenario (`.zshrc` with `sleep 0.8`), second launch on; Quick Open first result at ready + 0.5 s | 0 in the current bench (its throwaway `HOME` has no `.zshrc`); −0.3–2 s on real shells | awaiting CI |
