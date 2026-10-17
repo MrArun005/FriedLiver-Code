@@ -247,7 +247,7 @@ describe('approval levels and the agent’s own modes', () => {
     expect(seen.commands).toEqual([]);
     const command = c.chat(chat.id)!.items.find((i) => i.kind === 'command');
     expect(command).toMatchObject({ state: 'exited', exitCode: 0, auto: 'Auto' });
-    expect(c.chat(chat.id)!.items.some((i) => i.kind === 'review' && i.auto === 'Full auto')).toBe(true);
+    expect(c.chat(chat.id)!.items.some((i) => i.kind === 'review' && i.auto === 'Auto')).toBe(true);
   });
 });
 
