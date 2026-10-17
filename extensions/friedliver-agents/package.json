@@ -571,6 +571,27 @@
           "default": "#D97757",
           "markdownDescription": "The chat's one accent colour, used only as the border of the recommended answer. Leave it empty to use the theme's button colour. Takes effect when a view next opens."
         },
+        "friedliver.voice.language": {
+          "type": "string",
+          "default": "auto",
+          "pattern": "^(auto|[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?)$",
+          "examples": [
+            "auto",
+            "en-US",
+            "en-IN",
+            "hi-IN"
+          ],
+          "scope": "application",
+          "markdownDescription": "Language the composer's mic (macOS) listens for, as a BCP-47 tag such as `en-IN` or `hi-IN`. `auto` uses the system language."
+        },
+        "friedliver.voice.silenceSeconds": {
+          "type": "number",
+          "default": 2.5,
+          "minimum": 0.5,
+          "maximum": 10,
+          "scope": "application",
+          "description": "The composer's mic stops after this many seconds without new words. It always stops after 60 seconds."
+        },
         "friedliver.agents.claude.command": {
           "scope": "machine",
           "type": "string",

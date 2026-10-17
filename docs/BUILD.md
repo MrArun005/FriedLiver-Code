@@ -82,6 +82,29 @@ Environment variables:
 | `FRIEDLIVER_VERSION` | upstream tag | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag |
 | `FRIEDLIVER_REQUIRE_PINS` | unset | When set, a download with no SHA-256 pin in `scripts/checksums.json` fails the build (release builds set it) |
 
+### The dictation helper (macOS)
+
+The composer's mic runs `friedliver-dictate`, a small Swift program
+(`extensions/friedliver-agents/native/friedliver-dictate.swift`) that listens
+with AVAudioEngine and SFSpeechRecognizer (on-device when macOS has the
+language) and writes JSON lines (`{"partial":…}`, `{"final":…}`,
+`{"error":…,"code":…}`) that the extension streams into the message box.
+
+- `extensions/friedliver-agents/native/build.sh` builds it into the
+  extension's `bin/` (gitignored, shipped by `.vscodeignore`), with its
+  `Info.plist` embedded, ad-hoc signed. `build.yml` runs it on macOS before
+  `prepare.mjs`, which copies it into the app; `ci.yml` type-checks it on
+  every push (`build.sh --check`). For a local macOS build, run it before
+  `prepare.mjs`. Needs Xcode or the Command Line Tools.
+- `build.mjs` (macOS installer step) adds `NSMicrophoneUsageDescription`
+  and `NSSpeechRecognitionUsageDescription` to the app's `Info.plist` and
+  signs the helper before it signs the app, so macOS asks for permission
+  once, for FriedLiver (the helper runs as the app's child).
+- The extension only runs the helper at its fixed path inside the
+  extension folder (in the app, inside `FriedLiver.app`), never from `PATH`
+  or the workspace. Without it (a dev build, stock VS Code) the mic shows
+  the old "Press Fn twice" hint.
+
 ### What the scripts handle for you
 
 - **Node version.** Upstream's `.nvmrc` wants **Node 24.18.0** (same major,
