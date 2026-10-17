@@ -375,7 +375,7 @@ export function PermissionOptions({ item, compact }: { item: Permission; compact
   const primary = primaryOption(item.options);
   return (
     <>
-      {item.options.map((o) => {
+      {item.options.map((o, i) => {
         const escalates = ESCALATING.test(o.name) || o.kind === 'allow_always';
         const cls = o === primary ? 'decide' : o.kind.startsWith('reject') ? 'ghost danger' : escalates ? 'escalate' : '';
         const always = o.kind.endsWith('_always') && !/always|again|don['’]t ask/i.test(o.name);
@@ -386,6 +386,7 @@ export function PermissionOptions({ item, compact }: { item: Permission; compact
             title={`${OPTION_KINDS[o.kind] ?? o.kind}${escalates && o.kind.startsWith('allow') ? `. ${ESCALATING.test(o.name) ? 'Changes how the agent asks from now on.' : ''}` : ''}${o === primary && !compact ? ' (Ctrl+Enter)' : ''}`}
             onClick={() => send({ type: 'permission', requestId: item.requestId, optionId: o.optionId })}
           >
+            {!compact && i < 9 && <span class="opt-num">{i + 1}.</span>}
             {o.name}
             {always && <span class="tag">always</span>}
           </button>
@@ -452,7 +453,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
     <section class="ask" id={`item-${item.requestId}`} aria-label={`${chat.label} asks`}>
       <div class="ask-head">
         <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" /> {chat.label} asks
+        Needs your OK
         {item.toolKind && <span class="tag">{KIND_WORDS[item.toolKind] ?? item.toolKind}</span>}
       </div>
       <div class="ask-body">{longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}</div>
@@ -463,7 +464,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
       </div>
       {deny && (
         <div class="hint keys" aria-hidden="true">
-          Ctrl+Enter {primaryOption(item.options) ? 'yes' : ''} · Ctrl+Shift+Backspace no · Alt+1–{Math.min(9, item.options.length)} picks
+          1–{Math.min(9, item.options.length)} picks · Ctrl+Enter {primaryOption(item.options) ? 'yes' : ''} · Ctrl+Shift+Backspace no
         </div>
       )}
     </section>
@@ -524,28 +525,33 @@ export function EditsBar({ chat }: { chat: ChatView }) {
 }
 
 /** The first thing the chat waits on, as the actions a shortcut takes. */
-export function waitingActions(chat: ChatView): { approve(): void; deny(): void; pick(n: number): void } | null {
+export function waitingActions(chat: ChatView): { approve(): void; deny(): void; pick(n: number): boolean } | null {
   for (const i of waitingItems(chat.items)) {
     if (i.kind === 'permission' && !i.answer) {
       const answer = (o?: { optionId: string }) => o && send({ type: 'permission', requestId: i.requestId, optionId: o.optionId });
-      return { approve: () => answer(primaryOption(i.options)), deny: () => answer(denyOption(i.options)), pick: (n) => answer(i.options[n]) };
+      return { approve: () => answer(primaryOption(i.options)), deny: () => answer(denyOption(i.options)), pick: (n) => (i.options[n] ? (answer(i.options[n]), true) : false) };
     }
     if (i.kind === 'review' && i.state === 'pending') {
-      return { approve: () => send({ type: 'review', reviewId: i.reviewId, action: 'accept' }), deny: () => send({ type: 'review', reviewId: i.reviewId, action: 'reject' }), pick: () => {} };
+      return { approve: () => send({ type: 'review', reviewId: i.reviewId, action: 'accept' }), deny: () => send({ type: 'review', reviewId: i.reviewId, action: 'reject' }), pick: () => false };
     }
     if (i.kind === 'command' && i.state === 'awaiting') {
-      return { approve: () => send({ type: 'command', commandId: i.commandId, approve: true }), deny: () => send({ type: 'command', commandId: i.commandId, approve: false }), pick: () => {} };
+      return { approve: () => send({ type: 'command', commandId: i.commandId, approve: true }), deny: () => send({ type: 'command', commandId: i.commandId, approve: false }), pick: () => false };
     }
     if (i.kind === 'question' && i.state === 'awaiting') {
       const only = i.fields.length === 1 && i.fields[0].type === 'choice' ? i.fields[0] : undefined;
       return {
         approve: () => {},
         deny: () => send({ type: 'answerQuestion', requestId: i.requestId, action: 'decline' }),
-        pick: (n) => only?.options?.[n] && send({ type: 'answerQuestion', requestId: i.requestId, action: 'accept', values: { [only.key]: only.options[n].value } }),
+        pick: (n) => {
+          const choice = only?.options?.[n];
+          if (!only || !choice) return false;
+          send({ type: 'answerQuestion', requestId: i.requestId, action: 'accept', values: { [only.key]: choice.value } });
+          return true;
+        },
       };
     }
     if (i.kind === 'bridge' && i.state === 'awaiting') {
-      return { approve: () => send({ type: 'bridge', requestId: i.requestId, answer: 'allow' }), deny: () => send({ type: 'bridge', requestId: i.requestId, answer: 'deny' }), pick: () => {} };
+      return { approve: () => send({ type: 'bridge', requestId: i.requestId, answer: 'allow' }), deny: () => send({ type: 'bridge', requestId: i.requestId, answer: 'deny' }), pick: () => false };
     }
   }
   return null;
@@ -553,7 +559,7 @@ export function waitingActions(chat: ChatView): { approve(): void; deny(): void;
 
 /**
  * Keys for the waiting decision: Ctrl/Cmd+Enter says the loud yes,
- * Ctrl/Cmd+Shift+Backspace says no, Alt+1–9 picks an agent's option. Only
+ * Ctrl/Cmd+Shift+Backspace says no, 1–9 (or Alt+1–9) picks an agent's option. Only
  * while the message box is empty, so typing is never taken over.
  */
 export function decisionKey(e: KeyboardEvent, chat: ChatView, composerEmpty: boolean): boolean {
@@ -563,7 +569,10 @@ export function decisionKey(e: KeyboardEvent, chat: ChatView, composerEmpty: boo
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !e.shiftKey && e.key === 'Enter') actions.approve();
   else if (mod && e.shiftKey && e.key === 'Backspace') actions.deny();
-  else if (e.altKey && !mod && /^Digit[1-9]$/.test(e.code)) actions.pick(Number(e.code.slice(5)) - 1);
+  else if (!mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+    // A digit with nothing to pick types as usual.
+    if (!actions.pick(Number(e.code.slice(5)) - 1)) return false;
+  }
   else return false;
   e.preventDefault();
   return true;

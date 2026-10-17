@@ -3857,7 +3857,7 @@ body[data-surface='chat'] .composer-bar .icon-btn {
     display: none;
   }
 }
-@container (max-width: 380px) {
+@container (max-width: 520px) {
   body[data-surface='chat'] .composer-bar .chip-text {
     display: none;
   }
@@ -4014,4 +4014,192 @@ button.image-thumb,
   padding: var(--sp-2) var(--sp-2) var(--sp-2);
   background: transparent;
   border-right: 0;
+}
+
+/* ---- The transcript reads like a document (owner direction 2026-10-17) ----
+   8px grid: 24px between turns, 12px between a reply's blocks; 32px page padding wide, 16px narrow.
+   No avatars or big headers; tool calls are one line each; the composer is a plain bordered box. */
+body[data-surface='chat'] .transcript {
+  padding: 16px 32px 24px;
+  gap: 12px;
+}
+body[data-surface='chat'] .transcript > * {
+  max-width: 900px;
+}
+.user-msg {
+  margin: 12px 0 0;
+}
+.user-msg .bubble {
+  width: 100%;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+}
+.user-msg .bubble:hover {
+  background: var(--c-surface2);
+}
+body[data-surface='chat'] .md p,
+body[data-surface='chat'] .md ul,
+body[data-surface='chat'] .md ol,
+body[data-surface='chat'] .md pre {
+  margin: 0 0 12px;
+}
+body[data-surface='chat'] .md > :last-child {
+  margin-bottom: 0;
+}
+/* Tool calls: a status bullet, the verb in bold, the target in muted code. */
+.step-card {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+.step-card .step-verb {
+  font-weight: 600;
+  color: var(--c-text);
+}
+.step-card .step-text {
+  font-family: var(--mono);
+  font-size: calc(var(--fl-font-size) - 1px);
+  color: var(--c-mute);
+}
+.step-mark .icon {
+  display: none;
+}
+.step-mark::before,
+.step-mark[data-state='working']::before,
+.step-mark[data-state='next']::before,
+.step-mark[data-state='needs-you']::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: none;
+}
+.step-mark[data-state='working'] {
+  color: var(--c-mute);
+}
+.step-mark[data-state='working']::before {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-mark[data-state='working']::before {
+    animation: none;
+  }
+}
+.step-card .step-details {
+  margin: 6px 0 4px 22px;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: calc(var(--fl-font-size) - 1px);
+}
+details.thought > summary {
+  font-style: italic;
+  color: var(--c-mute);
+  cursor: pointer;
+}
+/* Decisions: a bordered card, numbered options one per line. */
+body[data-surface='chat'] .ask:not(.question) {
+  padding: 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: none;
+}
+.ask-head .glyph {
+  display: none;
+}
+body[data-surface='chat'] .ask:not(.question) .actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+body[data-surface='chat'] .ask .actions button.sm {
+  justify-content: flex-start;
+  text-align: left;
+}
+.opt-num {
+  min-width: 1.4em;
+  color: var(--c-mute);
+  font-variant-numeric: tabular-nums;
+}
+/* The composer: a plain box that brightens its border on focus (the accent stays for the recommended answer). */
+body[data-surface='chat'] .composer {
+  margin: 0 32px 24px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 8px;
+}
+body[data-surface='chat'] .composer:focus-within {
+  border-color: color-mix(in srgb, var(--c-text) 40%, var(--c-bg));
+}
+body[data-surface='chat'] .composer textarea {
+  padding: 4px 0 8px;
+}
+body[data-surface='chat'] .composer-bar button.chip-btn {
+  height: 24px;
+  padding: 0 8px;
+  background: none;
+  color: var(--c-mute);
+  font-size: calc(var(--fl-font-size) - 1px);
+}
+body[data-surface='chat'] .composer-bar button.chip-btn:hover:not(:disabled) {
+  color: var(--c-text);
+  background: var(--c-surface2);
+}
+button.send-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+}
+button.send-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+/* Header: the title and its status; one icon size, muted, 8px apart. */
+body[data-surface='chat'] .chat-head {
+  min-height: 0;
+  padding: 12px 32px 8px;
+}
+.chat-head-actions {
+  gap: 8px;
+}
+.chat-head-actions button.icon-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--c-mute);
+}
+.chat-head-actions button.icon-btn:hover:not(:disabled) {
+  color: var(--c-text);
+}
+.chat-head-actions .icon {
+  width: 16px;
+  height: 16px;
+}
+@media (max-width: 1200px) {
+  .transcript-wrap[data-jump] .transcript {
+    padding-right: 32px;
+  }
+}
+@media (max-width: 640px) {
+  body[data-surface='chat'] .transcript,
+  .transcript-wrap[data-jump] .transcript {
+    padding: 12px 16px 16px;
+  }
+  body[data-surface='chat'] .chat-head {
+    padding: 8px 16px;
+  }
+  body[data-surface='chat'] .composer {
+    margin: 0 16px 16px;
+  }
 }

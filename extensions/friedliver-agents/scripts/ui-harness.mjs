@@ -444,6 +444,33 @@ async function shoot() {
     await list.screenshot({ path: path.join(os.homedir(), 'code/chat-list-sidebar.png'), animations: 'disabled' });
     await list.close();
   }
+  {
+    // The document look: the editor's own background, a plain placeholder, one handoff note, numbered decisions.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    check(await p.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--vscode-editor-background)';
+      document.body.append(probe);
+      const want = window.getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return window.getComputedStyle(document.body).backgroundColor === want;
+    }), 'the chat background is the editor background exactly');
+    check((await p.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'the placeholder is just Message…');
+    check((await p.locator('.link-strip .badge[data-kind="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
+    await p.close();
+    const d = await open('surface=chat&theme=black-blue&select=chat-c2', 1200, 800);
+    check((await d.locator('.ask .opt-num').first().innerText()) === '1.', 'decision options are numbered');
+    await d.click('.composer textarea');
+    await d.keyboard.press('2');
+    const picked = (await posted(d)).find((m) => m.type === 'permission');
+    check(picked?.requestId === 'perm-c2' && (await d.inputValue('.composer textarea')) === '', '2 in an empty box picks the second option');
+    await d.close();
+  }
+  for (const [name, theme, width] of [['chat-final-dark', 'black-blue', 1200], ['chat-final-light', 'light-blue', 1200], ['chat-final-narrow', 'black-blue', 480]]) {
+    const p = await open(`surface=chat&theme=${theme}&select=chat-c2`, width, 900);
+    await p.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), animations: 'disabled', caret: 'hide' });
+    await p.close();
+  }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.
     const p = await open('surface=chat&side=1&select=chat-c5', width, 700);
@@ -465,7 +492,7 @@ async function shoot() {
     const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
     const card = p.locator('#item-perm-c1');
     check(await card.locator('.diff .dl[data-op="add"]').first().isVisible(), 'the permission card shows the diff');
-    check((await card.locator('button.decide').innerText()).trim() === 'Yes', "the loud button is the one-time yes, not \"don't ask again\"");
+    check((await card.locator('button.decide').innerText()).replace(/^\d\.\s*/, '').trim() === 'Yes', "the loud button is the one-time yes, not \"don't ask again\"");
     await card.locator('button:has-text("Open diff")').click();
     check((await posted(p)).some((m) => m.type === 'permissionDiff' && m.requestId === 'perm-c1'), 'Open diff asks for the whole file');
     await p.click('.composer textarea');
