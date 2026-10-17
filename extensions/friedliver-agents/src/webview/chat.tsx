@@ -46,7 +46,7 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
+import { ClampedText, CopyButton, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -180,21 +180,8 @@ function App() {
 function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState; active?: string; onSelect: Select; tabs: string[]; onClose(chatId: string): void }) {
   const strip = tabs.flatMap((id) => state.chats.find((c) => c.id === id) ?? []);
   const shortcut = IS_MAC ? '⌘W' : 'Ctrl+W';
-  // More tabs than fit: the strip scrolls sideways, its edges fade, and the open tab stays in view.
   const box = useRef<HTMLDivElement>(null);
-  const [over, setOver] = useState(false);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [tabs.length]);
-  useEffect(() => {
-    box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [active]);
+  const over = useTabStrip(box, tabs.length, active);
   const open = openChats(state.chats);
   const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
   return (

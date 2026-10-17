@@ -699,33 +699,96 @@ export function Popover({
   );
 }
 
-// ---- Step images: the host hands out a webview URI per path, once it has checked the file. ----
+/** A strip of tabs: with more than fit it scrolls sideways (true: its edges fade), and the open tab stays in view. */
+export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): boolean {
+  const [over, setOver] = useState(false);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [count]);
+  useEffect(() => {
+    box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
+  return over;
+}
 
+// ---- Images from files: the host hands out a data: URI per path, once it has checked the file. ----
+
+type HostImage = 'imageSrc' | 'imageThumb';
 /** undefined: not asked yet or waiting; null: not showable (outside the allowed folders, too big, missing). */
-const imageSrcs = new Map<string, string | null>();
-const imageWaiters = new Set<() => void>();
+const hostImages: Record<HostImage, Map<string, string | null>> = { imageSrc: new Map(), imageThumb: new Map() };
+/** Who waits for which path: an answer re-renders only them. */
+const imageWaiters: Record<HostImage, Map<string, Set<() => void>>> = { imageSrc: new Map(), imageThumb: new Map() };
 window.addEventListener('message', (e: MessageEvent<{ type?: string; path?: string; src?: string }>) => {
-  if (e.data?.type !== 'imageSrc' || typeof e.data.path !== 'string') return;
+  const kind = e.data?.type;
+  if ((kind !== 'imageSrc' && kind !== 'imageThumb') || typeof e.data.path !== 'string') return;
   // Only raster data: URIs: never a URL or a file the webview could fetch.
   const src = e.data.src;
-  imageSrcs.set(e.data.path, typeof src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(src) ? src : null);
-  for (const w of imageWaiters) w();
+  hostImages[kind].set(e.data.path, typeof src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(src) ? src : null);
+  for (const w of imageWaiters[kind].get(e.data.path) ?? []) w();
 });
 
-export function useImageSrc(path: string): string | null | undefined {
+/** The image at `path` from the host, asked for once `enabled` (a thumbnail: once its card is near the screen). */
+export function useHostImage(kind: HostImage, path: string, enabled = true): string | null | undefined {
   const [, bump] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     const w = () => bump((n) => n + 1);
-    imageWaiters.add(w);
-    if (!imageSrcs.has(path)) send({ type: 'imageSrc', path });
-    return () => void imageWaiters.delete(w);
-  }, [path]);
-  return imageSrcs.get(path);
+    const waiting = imageWaiters[kind];
+    if (!waiting.has(path)) waiting.set(path, new Set());
+    waiting.get(path)!.add(w);
+    if (!asked[kind].has(path)) {
+      asked[kind].add(path);
+      send({ type: kind, path });
+    }
+    return () => {
+      waiting.get(path)?.delete(w);
+    };
+  }, [kind, path, enabled]);
+  return enabled ? hostImages[kind].get(path) : undefined;
+}
+/** Paths already asked for, so two cards of one file ask once. */
+const asked: Record<HostImage, Set<string>> = { imageSrc: new Set(), imageThumb: new Set() };
+
+export const useImageSrc = (path: string) => useHostImage('imageSrc', path);
+
+/** Calls `onVisible` once, when the element comes within a screen's reach (one observer for all). */
+const nearScreen = new Map<Element, () => void>();
+let observer: IntersectionObserver | undefined;
+export function useNearScreen(ref: { current: Element | null }): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    observer ??= new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          nearScreen.get(e.target)?.();
+          nearScreen.delete(e.target);
+          observer!.unobserve(e.target);
+        }
+      },
+      { rootMargin: '300px 0px' },
+    );
+    nearScreen.set(el, () => setNear(true));
+    observer.observe(el);
+    return () => {
+      nearScreen.delete(el);
+      observer?.unobserve(el);
+    };
+  }, [near]);
+  return near;
 }
 
 /** A step's image with its title; click opens the editor's image preview. Name only when it can't be shown. */
 export function ImageThumb({ path, title }: { path: string; title: string }) {
-  const src = useImageSrc(path);
+  const src = useHostImage('imageThumb', path);
   const open = () => send({ type: 'openImage', path });
   if (src === null) {
     return (
