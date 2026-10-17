@@ -1,8 +1,10 @@
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { parseDoc, type Block, type Inline, type MarkdownDoc } from '../shared/markdown';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { highlight } from '../shared/highlight';
+import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
 import { AGENT_FACES, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
+import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
 import { settleOrder, type Settled } from '../shared/view';
 
 interface VsCodeApi {
@@ -176,63 +178,246 @@ export function Dot({ state, still }: { state: string; still?: boolean }) {
   return <span class="dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
 }
 
-/** A reply as markdown. While it streams in, only its tail is parsed and drawn again. */
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+/** Where a reply is shown: the chat (for Run in terminal) and its folder (for file links). */
+interface MdPlace {
+  chatId?: string;
+  cwd?: string;
+}
+
+/** Replies longer than this many lines start collapsed, with Show all. */
+const COLLAPSE_LINES = 40;
+
+/**
+ * A reply as markdown. While it streams in, only its tail is parsed and drawn
+ * again. A long reply drawn when it has finished starts collapsed; `full`
+ * means it still streams in, or a card around it does the collapsing.
+ * `chatId` and `cwd` (optional) give its code blocks Run in terminal and its
+ * file paths links.
+ */
+export const Markdown = memo(function Markdown({ text, chatId, cwd, full }: { text: string; full?: boolean } & MdPlace) {
   const doc = useRef<MarkdownDoc>(undefined);
+  // A reply that streamed in on screen stays open when it ends; one drawn finished starts collapsed.
+  const [all, setAll] = useState(!!full);
   doc.current = parseDoc(text, doc.current);
+  const lines = full ? 0 : lineCount(text);
+  const clamped = lines > COLLAPSE_LINES && !all;
   return (
-    <div class="md">
-      {doc.current.blocks.map((b, i) => (
-        <MarkdownBlock key={i} block={b} />
-      ))}
-    </div>
+    <>
+      <div class={`md${clamped ? ' clamped' : ''}`}>
+        {doc.current.blocks.map((b, i) => (
+          <MarkdownBlock key={i} block={b} chatId={chatId} cwd={cwd} />
+        ))}
+      </div>
+      {lines > COLLAPSE_LINES && (
+        <button class="link sm-link md-more" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? 'Show less' : `Show all ${lines} lines`}
+        </button>
+      )}
+    </>
   );
 });
 
-/** Blocks a reply has finished keep their object, so they aren't drawn again. */
-const MarkdownBlock = memo(function MarkdownBlock({ block: b }: { block: Block }) {
-  switch (b.t) {
-    case 'p':
-      return <p>{inline(b.inline)}</p>;
-    case 'h':
-      return b.level === 1 ? <h3>{inline(b.inline)}</h3> : <h4>{inline(b.inline)}</h4>;
-    case 'ul':
-    case 'ol': {
-      const List = b.t;
-      return (
-        <List>
-          {b.items.map((item, n) => (
-            <li key={n}>{inline(item)}</li>
-          ))}
-        </List>
-      );
-    }
-    case 'pre':
-      return (
-        <div class="code-block">
-          <pre>
-            <code>{b.code}</code>
-          </pre>
-          <span class="code-tools">
-            <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: b.code })}>
-              Insert
-            </button>
-            <CopyButton text={b.code} label="Copy code" />
-          </span>
-        </div>
-      );
-  }
-});
+type BlockProps = { block: Block } & MdPlace;
 
-function inline(parts: Inline[]): ComponentChildren[] {
+/** Blocks a reply has finished keep their object, so they aren't drawn again. */
+const MarkdownBlock = memo(
+  function MarkdownBlock({ block: b, chatId, cwd }: BlockProps) {
+    switch (b.t) {
+      case 'p':
+        return <p>{inline(b.inline, cwd)}</p>;
+      case 'h':
+        return b.level === 1 ? <h3>{inline(b.inline, cwd)}</h3> : <h4>{inline(b.inline, cwd)}</h4>;
+      case 'label':
+        return <h5 class="md-label">{inline(b.inline, cwd)}</h5>;
+      case 'ul':
+      case 'ol':
+        return <List list={b} cwd={cwd} />;
+      case 'table':
+        return (
+          <div class="md-table">
+            <table>
+              <thead>
+                <tr>
+                  {b.head.map((c, n) => (
+                    <th key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                      {inline(c, cwd)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.rows.map((r, k) => (
+                  <tr key={k}>
+                    {r.map((c, n) => (
+                      <td key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                        {inline(c, cwd)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      case 'mono':
+        return <pre class="md-mono">{b.text}</pre>;
+      case 'pre':
+        return <CodeBlock lang={b.lang} code={b.code} chatId={chatId} />;
+    }
+  },
+  (a: BlockProps, b: BlockProps) => a.block === b.block && a.chatId === b.chatId && a.cwd === b.cwd,
+);
+
+function List({ list, cwd }: { list: ListBlock; cwd?: string }) {
+  const items = list.items.map((it: ListItem, n) => (
+    <li key={n} data-mark={it.mark ? '' : undefined} data-tone={it.tone}>
+      {it.mark && <span class="li-mark">{it.mark}</span>}
+      {inline(it.inline, cwd)}
+      {it.lists?.map((l, k) => <List key={k} list={l} cwd={cwd} />)}
+    </li>
+  ));
+  return list.t === 'ol' ? <ol start={list.start}>{items}</ol> : <ul>{items}</ul>;
+}
+
+/** Code, coloured by its language when it is short enough. */
+export function Code({ code, lang, class: className }: { code: string; lang: string; class?: string }) {
+  const tokens = useMemo(() => highlight(code, lang), [code, lang]);
+  return (
+    <pre class={`code ${className ?? ''}`}>
+      <code>{tokens ? tokens.map((t, i) => (t.k ? <span key={i} class={`tk-${t.k}`}>{t.v}</span> : t.v)) : code}</code>
+    </pre>
+  );
+}
+
+/**
+ * Types `command` into a new terminal named after the chat and runs it: the
+ * user clicked, and the command is on screen in full. The host runs it only if
+ * the chat showed it.
+ */
+export function RunButton({ chatId, command, cwd }: { chatId: string; command: string; cwd?: string }) {
+  return (
+    <button
+      type="button"
+      class="ghost sm run-btn"
+      aria-label="Run in terminal"
+      title={`Type this into a new terminal and run it:\n${command.length > 600 ? `${command.slice(0, 600)}…` : command}`}
+      onClick={() => send({ type: 'runInTerminal', chatId, command, ...(cwd ? { cwd } : {}) })}
+    >
+      <Icon name="terminal" />
+      <span class="run-long">Run in terminal</span>
+      <span class="run-short">Run</span>
+    </button>
+  );
+}
+
+/**
+ * A tool's title on one line: the verb and a short summary, the whole of it in
+ * the tooltip. Claude titles a shell step with the whole command, heredoc and all.
+ */
+export function StepLabel({ title, toolKind, cmd }: { title: string; toolKind?: string; cmd?: StepCommand }) {
+  const s = stepSummary({ title, toolKind, ...(cmd ? { cmd } : {}) });
+  return (
+    <span class="step-label" title={s.full}>
+      <span class="step-verb">{s.verb}</span>
+      <span class={`step-text${s.mono ? ' mono' : ''}`}>{s.text}</span>
+      {s.lines && <span class="step-lines">{s.lines} lines</span>}
+    </span>
+  );
+}
+
+/** Whether a title reads badly as it is: several lines, or longer than a line. */
+export const longTitle = (title: string) => title.includes('\n') || title.length > 120;
+
+/** A fenced code block: its language, Copy, Insert, and Run in terminal for shell code. */
+function CodeBlock({ lang, code, chatId }: { lang: string; code: string; chatId?: string }) {
+  const run = chatId ? runnableCode(lang, code) : undefined;
+  return (
+    <div class="code-block">
+      <div class="code-head">
+        <span class="code-lang">{lang || 'code'}</span>
+        <span class="spacer" />
+        {run && chatId && <RunButton chatId={chatId} command={run} />}
+        <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
+          Insert
+        </button>
+        <CopyButton text={code} label="Copy code" />
+      </div>
+      <Code code={code} lang={lang} />
+    </div>
+  );
+}
+
+/** Inline text that acts as a button: a real <button> is a box that can't wrap with the line, and long paths would overflow. */
+function InlineButton({ class: className, title, onPress, children }: { class: string; title: string; onPress(): void; children: ComponentChildren }) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      class={className}
+      title={title}
+      onClick={onPress}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onPress();
+        }
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A file path in a reply: opens at its line when it is in the chat's folder, otherwise copies. */
+function PathLink({ at: r, cwd, children }: { at: PathRef; cwd?: string; children: ComponentChildren }) {
+  const [copied, setCopied] = useState(false);
+  const file = cwd ? inFolder(cwd, r.path) : undefined;
+  const where = r.line ? `:${r.line}${r.col ? `:${r.col}` : ''}` : '';
+  if (file) {
+    return (
+      <InlineButton class="path-link" title={`Open ${file}${where}`} onPress={() => send({ type: 'openFile', path: file, ...(r.line ? { line: r.line } : {}) })}>
+        {children}
+      </InlineButton>
+    );
+  }
+  return (
+    <InlineButton
+      class="path-link outside"
+      title={copied ? 'Copied' : `${r.path}: not in this chat’s folder. Click to copy the path.`}
+      onPress={() => {
+        send({ type: 'copy', text: r.path });
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+    >
+      {children}
+    </InlineButton>
+  );
+}
+
+function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
   return parts.map((p, i) => {
     switch (p.t) {
       case 'code':
-        return <code key={i}>{p.v}</code>;
+        return p.ref ? (
+          <PathLink key={i} at={p.ref} cwd={cwd}>
+            <code>{p.v}</code>
+          </PathLink>
+        ) : (
+          <code key={i}>{p.v}</code>
+        );
       case 'strong':
         return <strong key={i}>{p.v}</strong>;
       case 'em':
         return <em key={i}>{p.v}</em>;
+      case 'br':
+        return <br key={i} />;
+      case 'path':
+        return (
+          <PathLink key={i} at={p.ref} cwd={cwd}>
+            {p.v}
+          </PathLink>
+        );
       case 'link':
         // VS Code opens webview links through its own link protection.
         return (

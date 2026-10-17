@@ -28,11 +28,10 @@ import {
   type SessionOption,
   type Usage,
 } from '../shared/session';
-import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile, type ToolOut } from '../shared/tools';
-import { Dot, Glyph, Icon, Markdown, Popover, basename, memo, send } from './common';
+import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
+import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, memo, send } from './common';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
-type Tool = Extract<Item, { kind: 'tool' }>;
 
 const LEVEL_TONE: Record<ApprovalLevel, string> = { ask: 'quiet', edits: 'edits', full: 'full' };
 
@@ -340,7 +339,7 @@ export function PermissionDetailView({ detail, requestId, open }: { detail?: Per
     <>
       {detail.command && (
         <>
-          <pre class="cmdline">
+          <pre class={`cmdline${detail.command.line.includes('\n') ? ' lines' : ''}`}>
             <span class="prompt">$ </span>
             {detail.command.line}
           </pre>
@@ -432,7 +431,8 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
     return (
       <div class="answered-block">
         <div class="answered">
-          <Icon name={/^(no|reject|deny|cancel|stopped)/i.test(item.answer) ? 'close' : 'check'} /> {item.title}{' '}
+          <Icon name={/^(no|reject|deny|cancel|stopped)/i.test(item.answer) ? 'close' : 'check'} />{' '}
+          {longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}{' '}
           <span class="hint">
             · {item.answer}
             {item.auto ? ` · ${item.auto}` : ''}
@@ -455,7 +455,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
         <Glyph agent={chat.agent} size="sm" /> {chat.label} asks
         {item.toolKind && <span class="tag">{KIND_WORDS[item.toolKind] ?? item.toolKind}</span>}
       </div>
-      <div class="ask-body">{item.title}</div>
+      <div class="ask-body">{longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}</div>
       <PermissionDetailView detail={item.detail} requestId={item.requestId} open />
       <div class="actions">
         <PermissionOptions item={item} />
@@ -471,45 +471,6 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
 }
 
 const KIND_WORDS: Record<string, string> = { execute: 'command', edit: 'edit', switch_mode: 'plan', read: 'read', fetch: 'web', delete: 'delete', move: 'move', search: 'search', think: 'think' };
-
-/** What a tool call did: its diffs and output, and its input on request. Failed calls open by themselves. */
-export function ToolDetails({ tool }: { tool: Tool }) {
-  const [showInput, setShowInput] = useState(false);
-  const out = (tool.out ?? []).filter((o): o is Exclude<ToolOut, { t: 'terminal' }> => o.t !== 'terminal');
-  return (
-    <div class="tool-out">
-      {out.map((o, n) =>
-        o.t === 'diff' ? (
-          <div key={n} class="file-change">
-            <div class="file-line">
-              <button class="ref" title={o.path} onClick={() => send({ type: 'openFile', path: o.path })}>
-                {basename(o.path)}
-              </button>
-              <span class="stats">
-                <span class="plus">+{o.added}</span> <span class="minus">−{o.removed}</span>
-              </span>
-            </div>
-            {o.lines.length > 0 && <DiffView lines={o.lines} more={o.more} />}
-          </div>
-        ) : (
-          <pre key={n} class="output tool-text">
-            {o.text}
-          </pre>
-        ),
-      )}
-      {tool.input && (
-        <>
-          <button class="link sm-link" aria-expanded={showInput} onClick={() => setShowInput(!showInput)}>
-            {showInput ? 'Hide input' : 'Show input'}
-          </button>
-          {showInput && <pre class="output tool-text">{tool.input}</pre>}
-        </>
-      )}
-    </div>
-  );
-}
-
-export const hasDetails = (t: Tool) => !!t.input || !!t.out?.some((o) => o.t !== 'terminal');
 
 /** Messages waiting for the agent to finish; Send now joins the running turn where the agent allows it. */
 export function QueueList({ chat }: { chat: ChatView }) {
