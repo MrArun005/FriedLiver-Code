@@ -1804,6 +1804,10 @@ button.count-item .icon {
 .sub-row {
   cursor: pointer;
 }
+.sub-card.static,
+.sub-row.static {
+  cursor: default;
+}
 .task-card:hover {
   border-color: var(--line-strong);
 }
@@ -3352,23 +3356,6 @@ pre.step-input {
 .cc-row {
   cursor: pointer;
 }
-.cc-lane {
-  margin-top: var(--sp-4);
-}
-.cc-lane-nodes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px;
-}
-.cc-lane-item {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.cc-node {
-  border-style: dashed;
-}
-
 /* ---- The chat: 60/30/10 on the editor's theme ----
  * 60: --c-bg, the editor background.
  * 30: --c-surface (sidebar, your messages, steps, composer) and --c-surface2, a step lighter.
@@ -3950,6 +3937,168 @@ body[data-surface='chat'] .md > :first-child {
   background: var(--c-surface2);
   box-shadow: 0 0 0 1px var(--c-line);
   pointer-events: none;
+/* A subagent inside the chat that launched it: one line until opened, then its steps and answer. */
+.sa-card {
+  align-self: stretch;
+  max-width: 720px;
+  padding: 8px var(--sp-4);
+  border-radius: 12px;
+  background: var(--c-surface);
+  font-size: var(--t-md);
+}
+button.sa-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font-weight: 400;
+  text-align: left;
+}
+.sa-kind {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--c-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sa-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.sa-time {
+  flex: none;
+  font-size: var(--t-sm);
+  color: var(--c-mute);
+  font-variant-numeric: tabular-nums;
+}
+.sa-head .icon {
+  flex: none;
+  color: var(--c-mute);
+  transform: rotate(-90deg);
+}
+.sa-card[data-open] .sa-head .icon {
+  transform: none;
+}
+.sa-last {
+  margin: 2px 0 0 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-sm);
+  color: var(--c-soft);
+}
+.sa-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0 22px;
+}
+.sa-body .step-card {
+  padding: 0;
+  background: none;
+}
+.sa-label {
+  font-size: var(--t-xs);
+  color: var(--c-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sa-empty {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--c-mute);
+}
+button.sa-manager {
+  align-self: flex-start;
+  font-size: var(--t-sm);
+}
+/* Above the composer while any subagent runs. */
+.sa-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--sp-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-sm);
+  color: var(--c-soft);
+}
+.sa-strip-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+button.sa-chip {
+  height: auto;
+  max-width: 220px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font-size: var(--t-sm);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.sa-chip:hover {
+  border-color: var(--line-strong);
+}
+
+/* The map: a selected subagent, an outside Claude Code session, and the subagent's details beside the map. */
+.map-sub[data-selected] .box {
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.map-outside .box {
+  stroke-dasharray: 4 3;
+}
+.map-wrap {
+  position: relative;
+}
+.map-detail {
+  position: absolute;
+  top: 40px;
+  right: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 52px);
+  overflow: auto;
+  padding: 10px var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--vscode-editorHoverWidget-background, var(--panel));
+  box-shadow: 0 12px 32px var(--shadow);
+  font-size: var(--t-sm);
+}
+.map-detail-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+.map-detail-steps li[data-state='in_progress'] {
+  color: var(--fg);
+}
+.map-detail-answer {
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+.map-detail button.link {
+  align-self: flex-start;
 }
 /* Step images: a thumbnail under the step, its title below; click opens the editor's image preview. */
 .step-image {

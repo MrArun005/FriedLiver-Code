@@ -77,20 +77,35 @@ function Subagents({ chat }: { chat: ChatView }) {
   return <SubCards label={`Subagents of ${chat.label}`} subs={subagents(chat)} onOpen={(id) => openSub(chat.id, id)} />;
 }
 
-function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; onOpen(id: string): void }) {
+/** `onOpen` (optional): a FriedLiver chat's subagent opens its card in the chat; an outside session's has nowhere to go but resuming that session, so it is just shown. */
+function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; onOpen?(id: string): void }) {
   if (!subs.length) return null;
   return (
     <ul class="sub-cards" aria-label={label}>
       {subs.map((s) => (
         <li key={s.id}>
-          <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => onOpen(s.id)}>
-            <Dot state={SUB_DOT[s.state]} />
-            <span class="sub-title">{s.title}</span>
-            <span class="hint">{[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}</span>
-          </button>
+          {onOpen ? (
+            <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => onOpen(s.id)}>
+              <SubCardBody s={s} />
+            </button>
+          ) : (
+            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={s.title}>
+              <SubCardBody s={s} />
+            </div>
+          )}
         </li>
       ))}
     </ul>
+  );
+}
+
+function SubCardBody({ s }: { s: Subagent }) {
+  return (
+    <>
+      <Dot state={SUB_DOT[s.state]} />
+      <span class="sub-title">{s.title}</span>
+      <span class="hint">{[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}</span>
+    </>
   );
 }
 
@@ -133,7 +148,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
           </button>
         </div>
       </article>
-      <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} onOpen={() => openClaude(s.id)} />
+      <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} />
     </>
   );
 }
@@ -171,7 +186,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         </td>
       </tr>
       {claudeSubagents(s, now).map((sub) => (
-        <tr key={sub.id} class="sub-row" data-status={SUB_DOT[sub.state]}>
+        <tr key={sub.id} class="sub-row static" data-status={SUB_DOT[sub.state]}>
           <td class="c-status">
             <span class="cell-status">
               <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
@@ -194,30 +209,6 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         </tr>
       ))}
     </>
-  );
-}
-
-/** For the Map: the sessions as nodes in a lane of their own, under the chats' lanes. */
-function ClaudeLane({ sessions, now }: { sessions: ClaudeSession[]; now: number }) {
-  if (!sessions.length) return null;
-  return (
-    <section class="cc-lane" aria-label="Claude Code sessions from outside FriedLiver">
-      <h2 class="col-head" title={OUTSIDE_TIP}>
-        <Glyph agent="claude" /> Claude Code <span class="col-count">{sessions.length}</span>
-      </h2>
-      <div class="cc-lane-nodes">
-        {sessions.map((s) => (
-          <div key={s.id} class="cc-lane-item">
-            <button class="sub-card cc-node" data-status={claudeColumn(s, now)} title={openTip(claudeColumn(s, now))} onClick={() => openClaude(s.id)}>
-              <Dot state={claudeColumn(s, now)} />
-              <span class="sub-title">{s.title}</span>
-              <span class="hint">{ago(s.lastActivity, now)}</span>
-            </button>
-            <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} onOpen={() => openClaude(s.id)} />
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -413,8 +404,7 @@ function Manager() {
           )}
           {view === 'board' && <Board state={state} chats={shown} outside={outside} now={now} {...nav} />}
           {view === 'list' && <List state={state} chats={shown} outside={outside} now={now} sort={sort} setSort={setSort} {...nav} />}
-          {view === 'map' && <AgentMap state={shownState} now={now} {...nav} />}
-          {view === 'map' && <ClaudeLane sessions={outside} now={now} />}
+          {view === 'map' && <AgentMap state={shownState} outside={outside} now={now} {...nav} />}
         </div>
 
         <History chats={state.chats.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />
