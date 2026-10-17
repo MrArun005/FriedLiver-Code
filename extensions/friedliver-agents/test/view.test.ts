@@ -31,7 +31,9 @@ import {
   sortChats,
   statusOf,
   subagents,
+  statusGroups,
   switcherGroups,
+  tipPlace,
 } from '../src/shared/view';
 
 const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
@@ -192,6 +194,7 @@ describe('the chat switcher', () => {
   it('groups chats by where they stand, most recent first', () => {
     const groups = switcherGroups(chats, '');
     expect(groups.map((g) => g.title)).toEqual(['Needs you', 'Working', 'Done']);
+    expect(groups.map((g) => g.chats.length)).toEqual([3, 3, 2]);
     expect(groups[0].chats.map((c) => c.id)).toEqual(['c6', 'c3', 'c0']);
     expect(switcherGroups(chats, 'nothing')).toEqual([]);
   });
@@ -456,5 +459,53 @@ describe('a starting agent', () => {
     expect(cardLine(state([starting]), starting).text).toBe('Starting Codex…');
     const started = { ...starting, session: { ...starting.session!, live: true, starting: false } };
     expect(cardLine(state([started]), started).text).not.toContain('Starting');
+  });
+});
+
+describe('status groups', () => {
+  const failed: Item = { kind: 'notice', tone: 'error', text: 'boom' };
+  const chats = [
+    chat('done-old', { items: [said], lastActivity: 1 }),
+    chat('idle', { lastActivity: 9 }),
+    chat('err', { items: [said, failed], lastActivity: 3 }),
+    chat('done-new', { items: [said], lastActivity: 7 }),
+    chat('work', { items: [said], busy: true, lastActivity: 2 }),
+    chat('wait', { items: [said, waiting], lastActivity: 4 }),
+  ];
+  it('orders Needs you, Working, Problem, Idle, Done, most recent first within each', () => {
+    const groups = statusGroups(chats);
+    expect(groups.map((g) => [g.title, g.chats.length])).toEqual([
+      ['Needs you', 1],
+      ['Working', 1],
+      ['Problem', 1],
+      ['Idle', 1],
+      ['Done', 2],
+    ]);
+    expect(groups[4].chats.map((c) => c.id)).toEqual(['done-new', 'done-old']);
+  });
+  it('leaves out empty groups unless asked to keep them', () => {
+    expect(statusGroups([chats[0]]).map((g) => g.status)).toEqual(['done']);
+    expect(statusGroups([chats[0]], true).map((g) => g.status)).toEqual(['needs-you', 'working', 'error', 'idle', 'done']);
+  });
+});
+
+describe('map hover card placement', () => {
+  const view = { w: 1000, h: 600 };
+  const tip = { w: 288, h: 160 };
+  const at = (left: number, top: number) => ({ left, top, right: left + 200, bottom: top + 44 });
+  it('sits to the right of the node when it fits', () => {
+    expect(tipPlace(at(100, 100), tip, view)).toEqual({ left: 312, top: 94, width: 288, side: 'right' });
+  });
+  it('flips to the left near the right edge', () => {
+    expect(tipPlace(at(700, 100), tip, view)).toMatchObject({ left: 400, side: 'left' });
+  });
+  it('goes above when neither side fits, and stays inside the viewport', () => {
+    const narrow = { w: 400, h: 600 };
+    expect(tipPlace(at(100, 300), tip, narrow)).toEqual({ left: 100, top: 128, width: 288, side: 'above' });
+    expect(tipPlace(at(100, 50), tip, narrow)).toEqual({ left: 100, top: 106, width: 288, side: 'below' });
+  });
+  it('never runs off the bottom or past a tiny viewport', () => {
+    expect(tipPlace(at(100, 560), tip, view).top).toBe(600 - 160 - 4);
+    expect(tipPlace(at(0, 0), tip, { w: 200, h: 100 })).toMatchObject({ left: 4, width: 192 });
   });
 });
