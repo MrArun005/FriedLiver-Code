@@ -91,9 +91,28 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
     });
   }
 
-  it('the mic\'s fallback blue (no theme) keeps a white glyph at 4.5:1', () => {
-    const vars = declarations(block());
-    for (const t of ['--mic-bg', '--mic-hover']) expect(contrast(resolve('var(--mic-fg)', vars), resolve(`var(${t})`, vars)), t).toBeGreaterThanOrEqual(4.5);
+  it('the mic keeps a white glyph at 4.5:1 on its brand blue in five themes and with none', () => {
+    const json = (file: string) => JSON.parse(readFileSync(file, 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1')).colors;
+    const blackBlue = json(path.join(__dirname, '../../friedliver-theme/themes/friedliver-black-blue-color-theme.json'));
+    const fixture = (name: string) => theme(name);
+    const themes: Record<string, Record<string, string>> = {
+      'Black Blue': { '--vscode-button-background': blackBlue['button.background'], '--vscode-button-hoverBackground': blackBlue['button.hoverBackground'] },
+      'Dark 2026': fixture('dark-2026'),
+      'Light 2026': fixture('light-2026'),
+      // VS Code's built-in Dark Modern and Light Modern (dark_modern.json, light_modern.json).
+      'Dark Modern': { '--vscode-button-background': '#0078D4', '--vscode-button-hoverBackground': '#026EC1' },
+      'Light Modern': { '--vscode-button-background': '#005FB8', '--vscode-button-hoverBackground': '#0258A8' },
+      none: {},
+    };
+    expect(blackBlue['button.background']).toBe('#7cc4ff');
+    for (const [name, colors] of Object.entries(themes)) {
+      const vars = { ...declarations(block()), ...colors };
+      for (const t of ['--mic-bg', '--mic-hover']) {
+        const back = resolve(`var(${t})`, vars);
+        expect(contrast(resolve('var(--mic-fg)', vars), back), `${name} ${t}`).toBeGreaterThanOrEqual(4.5);
+        expect(back.slice(0, 3), `${name} ${t} is the brand blue`).toEqual(hex(t === '--mic-bg' ? '#0078d4' : '#026ec1').slice(0, 3));
+      }
+    }
   });
 
   it('defines each token once, and every var() the stylesheet reads', () => {
