@@ -3654,6 +3654,399 @@ button.cc-map-node:hover {
   }
 }
 
+/* ---- Decisions and cards in the transcript (§2.10, §2.11) ---- */
+
+/* A decision: the menu tone, r8; the agent's options as full-width rows, the default one in the button colours. */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 70vh;
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--menu-bg);
+}
+.ask-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--sp-1);
+  font-weight: 700;
+  color: var(--fg);
+}
+.ask-head > .dot,
+.ask-head > .glyph {
+  display: none;
+}
+.ask-head > .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-2);
+}
+.ask-body {
+  overflow-wrap: anywhere;
+}
+.ask .actions {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.ask .actions button,
+.ask .actions .pop > button {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  padding: 6px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--option-ring);
+  color: var(--fg);
+  font-size: var(--t-100);
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+}
+.ask .actions .pop {
+  display: flex;
+}
+.ask .actions button:hover:not(:disabled),
+.ask .actions button:focus-visible {
+  background: var(--hover-bg);
+  outline: none;
+}
+.ask .actions button.decide {
+  color: var(--button-fg);
+  background: var(--button-bg);
+  box-shadow: none;
+}
+.ask .actions button.decide:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, var(--button-bg));
+}
+.opt-num {
+  padding-right: var(--sp-1);
+  opacity: 0.6;
+}
+button.escalate {
+  color: var(--fg-2);
+}
+.hint.keys {
+  margin-top: var(--sp-2);
+  font-size: var(--t-85);
+}
+/* What saying yes would do: on the composer's tone inside the card. */
+.cmdline,
+.plan-text,
+.bridge-text {
+  max-height: 20em;
+  overflow: auto;
+  padding: var(--sp-2);
+  border-radius: var(--r-4);
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: var(--t-85);
+}
+.cmdline.lines {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.prompt {
+  color: var(--fg-2);
+}
+.ask .hint.mono {
+  font-size: var(--t-85);
+  overflow-wrap: anywhere;
+}
+.bridge-text {
+  font-family: var(--font);
+  font-size: var(--t-90);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bridge-label {
+  margin-bottom: 2px;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.ask-text {
+  white-space: pre-wrap;
+  color: var(--fg-2);
+  font-size: var(--t-90);
+}
+.quote {
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border);
+  color: var(--fg-2);
+  white-space: pre-wrap;
+}
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+button.file-row {
+  justify-content: flex-start;
+  gap: 6px;
+  height: 26px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-4);
+  background: var(--input-bg);
+}
+button.file-row:hover {
+  background: var(--hover-bg);
+}
+button.file-row .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-2);
+}
+.file-row .file-name {
+  font-family: var(--mono);
+  font-size: var(--t-85);
+}
+.q-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.q-title {
+  font-weight: 600;
+}
+input.q-input {
+  height: 26px;
+}
+.ask label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ask .link-chip {
+  align-self: flex-start;
+}
+/* An answered request, in one muted line. */
+.answered {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: var(--sp-1) 0;
+  color: var(--fg-2);
+  font-size: var(--t-90);
+}
+.answered > .icon {
+  width: 14px;
+  height: 14px;
+}
+.answered:has(> .step-label) {
+  flex-wrap: nowrap;
+}
+.step-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.answered > .step-label {
+  flex: 0 1 auto;
+}
+.answered:has(> .step-label) > :not(.step-label) {
+  flex: none;
+}
+.answered-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.answered-files {
+  padding-left: 20px;
+}
+
+/* A card: a plan, the files a turn changed, a message between chats. */
+.card,
+.link-card,
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--input-bg);
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-weight: 700;
+}
+.card-head .hint {
+  font-size: var(--t-90);
+}
+.changes[data-undone] {
+  opacity: 0.7;
+}
+.plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-steps li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.plan-steps .dot {
+  position: relative;
+  top: -1px;
+}
+.plan-steps li[data-state='next'] .step-title {
+  color: var(--fg-2);
+}
+.plan-steps li[data-state='done'] .step-title {
+  color: var(--fg-2);
+  text-decoration: line-through;
+}
+.step-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notice[data-tone='error'] {
+  border-color: color-mix(in srgb, var(--error) 35%, transparent);
+  background: color-mix(in srgb, var(--bg) 96%, var(--error));
+  color: var(--error);
+}
+.notice .detail {
+  display: block;
+  white-space: pre-wrap;
+}
+.link-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.link-head > .icon {
+  width: 14px;
+  height: 14px;
+}
+.link-card[data-role^='piped'] .link-head > .icon {
+  color: var(--dot-running);
+}
+.link-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--fg);
+}
+.link-body {
+  overflow-wrap: anywhere;
+}
+.link-body.clamped {
+  max-height: 10.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(black 55%, transparent);
+}
+button.link-chip {
+  flex: none;
+  height: 18px;
+  padding: 0 var(--sp-2) 0 2px;
+  gap: var(--sp-1);
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  font-size: var(--t-85);
+}
+button.link-chip:hover {
+  background: var(--pill-hover);
+}
+/* A command FriedLiver ran: the command line and its output, the tool body's look. */
+.command {
+  margin: var(--sp-2) 0;
+  overflow: hidden;
+  border: 0.5px solid var(--border);
+  border-radius: var(--r-5);
+}
+.command[data-failed] {
+  border-color: color-mix(in srgb, var(--error) 50%, transparent);
+}
+.command-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--t-85);
+}
+code.command-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  background: none;
+  color: var(--fg);
+  font-size: var(--t-100);
+}
+.output {
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--sp-1) var(--sp-2);
+  border-top: 0.5px solid var(--border);
+  background: var(--code-bg);
+  color: var(--fg-2);
+}
+/* A message waiting for the turn to end: your message's box, dashed. */
+.bubble.queued {
+  margin: var(--sp-2) 0;
+  padding: var(--sp-1) 6px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-6);
+  white-space: pre-wrap;
+}
+.queued-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.queued-bar .tag .icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 2px;
+}
+/* Cmd/Ctrl + = - 0: the new size, briefly, as a tooltip at the top. */
+.text-size-toast {
+  position: fixed;
+  top: var(--sp-2);
+  left: 50%;
+  z-index: var(--z-overlay);
+  transform: translateX(-50%);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--menu-bg);
+  box-shadow: var(--shadow-tip);
+  font-size: var(--t-90);
+  pointer-events: none;
+  animation: var(--fade-banner);
+}
+
 /* ==== OLD CHAT (being replaced) ==== */
 .switcher {
   display: flex;
@@ -3765,222 +4158,11 @@ button.cc-map-node:hover {
   text-overflow: ellipsis;
   color: var(--fg-2);
 }
-.link-chip {
-  flex: none;
-  height: 22px;
-  padding: 0 var(--sp-2) 0 3px;
-  gap: 6px;
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  border-color: var(--border);
-  font-size: var(--t-90);
-}
 .link-strip {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 var(--sp-3) var(--sp-2);
-}
-.step-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: 10px var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
-}
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  font-size: var(--t-90);
-  font-weight: 600;
-}
-.files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
-}
-.changes[data-undone] {
-  opacity: 0.7;
-}
-.ask {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: 10px var(--sp-3);
-  border: 1px solid var(--decision-line);
-  border-radius: var(--r-8);
-  background: var(--decision-soft);
-}
-.ask-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  font-weight: 600;
-}
-.ask-head > .icon {
-  color: var(--fg-2);
-}
-.ask-body {
-  overflow-wrap: anywhere;
-}
-.file-row {
-  justify-content: flex-start;
-  height: 30px;
-  background: var(--input-bg);
-  border-color: var(--border);
-  font-weight: 400;
-}
-.cmdline {
-  /* A long heredoc scrolls, so the answers under it stay in reach. */
-  max-height: 20em;
-  overflow: auto;
-  padding: var(--sp-2) 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--input-bg);
-  color: var(--fg);
-  font-size: var(--t-90);
-}
-.cmdline.lines {
-  white-space: pre;
-  word-break: normal;
-  overflow-wrap: normal;
-}
-.prompt {
-  color: var(--fg-2);
-}
-.answered {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  color: var(--fg-2);
-  font-size: var(--t-90);
-}
-.command {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
-}
-.command[data-failed] {
-  border-color: color-mix(in srgb, var(--error) 35%, transparent);
-}
-.command-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 6px 10px;
-  font-size: var(--t-90);
-}
-.command-line {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: var(--t-90);
-}
-.output {
-  max-height: 220px;
-  overflow: auto;
-  padding: 6px 10px var(--sp-2);
-  border-top: 1px solid var(--border);
-  color: var(--fg-2);
-  font-size: var(--t-85);
-}
-.notice {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: 10px var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
-}
-.notice[data-tone='error'] {
-  border-color: color-mix(in srgb, var(--error) 35%, transparent);
-  background: color-mix(in srgb, var(--error) 8%, transparent);
-}
-.detail {
-  display: block;
-  white-space: pre-wrap;
-}
-.link-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: 10px var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
-}
-.link-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: var(--t-90);
-  color: var(--fg-2);
-}
-.link-head > .icon {
-  color: var(--fg-2);
-}
-.link-card[data-role^='piped'] .link-head > .icon {
-  color: var(--dot-running);
-}
-.link-title {
-  font-weight: 600;
-  color: var(--fg);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.link-body {
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-.link-body.clamped {
-  max-height: 10.5em;
-  overflow: hidden;
-  mask-image: linear-gradient(black 55%, transparent);
-}
-.quote {
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
-  color: var(--fg-2);
-  white-space: pre-wrap;
-}
-.bridge-text {
-  padding: var(--sp-2) 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--input-bg);
-  white-space: pre-wrap;
-  font-size: var(--t-90);
-  overflow-wrap: anywhere;
-}
-.bridge-label {
-  margin-bottom: 2px;
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-.ask .link-chip {
-  align-self: flex-start;
-  max-width: 100%;
-  overflow: hidden;
 }
 .empty {
   padding: var(--sp-5) var(--sp-4);
@@ -4051,68 +4233,6 @@ button.chip-btn[aria-expanded='true'] {
 }
 .usage[data-level='high'] .usage-bar i {
   background: var(--error);
-}
-.plan-text {
-  max-height: 360px;
-  overflow: auto;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--input-bg);
-}
-.ask-text {
-  white-space: pre-wrap;
-  color: var(--fg-2);
-  font-size: var(--t-90);
-}
-.answered-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-.answered-files {
-  padding-left: 22px;
-}
-button.escalate {
-  color: var(--fg-2);
-  background: transparent;
-  border-color: var(--border);
-  font-weight: 400;
-}
-button.escalate:hover:not(:disabled) {
-  color: var(--fg);
-  border-color: var(--warn);
-}
-.hint.keys {
-  font-size: var(--t-85);
-}
-.queued-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  margin-top: var(--sp-1);
-}
-.queued-bar .tag .icon {
-  width: 11px;
-  height: 11px;
-  margin-right: 3px;
-}
-.q-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-.q-title {
-  font-size: var(--t-90);
-  font-weight: 600;
-}
-.q-input {
-  height: 28px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--input-bg);
-  color: var(--fg);
 }
 body[data-surface='chat'] {
   /* --fl-accent is friedliver.chat.accentColor (Claude orange by default), set by the webview; else the theme's button colour.
@@ -4330,41 +4450,6 @@ button.jump-item[aria-current='true'] {
     transform: rotate(360deg);
   }
 }
-body[data-surface='chat'] .ask.question {
-  padding: 0;
-  border: 0;
-  background: none;
-}
-body[data-surface='chat'] .ask.question .ask-head {
-  display: none;
-}
-body[data-surface='chat'] .ask.question .actions button.sm:not(.danger) {
-  height: 36px;
-  padding: 0 16px;
-  border-radius: var(--r-pill);
-  font-size: var(--fl-font-size);
-  font-weight: 400;
-  color: var(--c-text);
-  border: 1px solid var(--c-line);
-  background: var(--c-surface);
-}
-body[data-surface='chat'] .ask.question .actions button.sm:not(.danger):first-child {
-  border-color: var(--c-acc);
-}
-.text-size-toast {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  z-index: 50;
-  transform: translateX(-50%);
-  padding: 4px 12px;
-  border-radius: var(--r-pill);
-  font-size: 12px;
-  color: var(--c-text);
-  background: var(--c-surface2);
-  box-shadow: 0 0 0 1px var(--c-line);
-  pointer-events: none;
-}
 .chat-side.chat-list-view {
   height: 100vh;
   padding: var(--sp-2) var(--sp-2) var(--sp-2);
@@ -4375,28 +4460,6 @@ body[data-surface='chat'] .ask.question .actions button.sm:not(.danger):first-ch
   50% {
     opacity: 0.35;
   }
-}
-body[data-surface='chat'] .ask:not(.question) {
-  padding: 12px;
-  border: 1px solid var(--c-line);
-  border-radius: 8px;
-  background: none;
-}
-.ask-head .glyph {
-  display: none;
-}
-body[data-surface='chat'] .ask:not(.question) .actions {
-  flex-direction: column;
-  align-items: stretch;
-}
-body[data-surface='chat'] .ask .actions button.sm {
-  justify-content: flex-start;
-  text-align: left;
-}
-.opt-num {
-  min-width: 1.4em;
-  color: var(--c-mute);
-  font-variant-numeric: tabular-nums;
 }
 body[data-surface='chat'] .chat-head {
   min-height: 0;
@@ -4416,25 +4479,6 @@ body[data-surface='chat'] .chat-head {
 .chat-head-actions .icon {
   width: 16px;
   height: 16px;
-}
-body[data-surface='chat'] .ask .actions button.sm {
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: none;
-  color: var(--c-text);
-  font-weight: 400;
-}
-body[data-surface='chat'] .ask .actions button.sm.decide {
-  border-color: var(--c-acc);
-  background: var(--c-surface);
-}
-body[data-surface='chat'] .ask .actions button.sm:hover:not(:disabled),
-body[data-surface='chat'] .ask .actions button.sm:focus-visible {
-  background: var(--c-surface2);
-  outline: none;
-}
-body[data-surface='chat'] .ask .actions button.sm.danger {
-  color: color-mix(in srgb, var(--c-bad) 75%, var(--c-mute));
 }
 /* ==== END OLD CHAT ==== */
 
