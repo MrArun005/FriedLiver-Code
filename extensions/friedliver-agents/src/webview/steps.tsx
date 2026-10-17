@@ -9,7 +9,8 @@ import { formatDuration, type Item } from '../shared/model';
 import { shortDuration, stepsHeading } from '../shared/view';
 import { heredocOf, inFolder, isShell, stepOutput, stepSummary, typeable, type Approval, type Heredoc } from '../shared/steps';
 import type { ToolOut } from '../shared/tools';
-import { Code, CopyButton, Icon, RunButton, basename, memo, send } from './common';
+import { Code, CopyButton, Icon, ImageThumb, RunButton, basename, memo, send } from './common';
+import { stepImage } from '../shared/stepImages';
 import { DiffView } from './controls';
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
@@ -79,6 +80,7 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
   const more = hasDetails(t);
   const id = `step-${t.id}`;
   const exit = t.exit ?? exitInOutput(t.out);
+  const image = useMemo(() => stepImage(t), [t.locations, t.out, t.about]);
   const head = (
     <>
       <span class="step-verb">{s.verb}</span>
@@ -121,6 +123,11 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
           </span>
         </span>
       </div>
+      {image && (
+        <div class="step-image">
+          <ImageThumb path={image.path} title={image.title} />
+        </div>
+      )}
       {more && open && <StepDetails id={id} tool={t} chatId={chatId} cwd={cwd} />}
     </li>
   );

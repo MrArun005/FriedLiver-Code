@@ -658,3 +658,47 @@ export function Popover({
     </span>
   );
 }
+
+// ---- Step images: the host hands out a webview URI per path, once it has checked the file. ----
+
+/** undefined: not asked yet or waiting; null: not showable (outside the allowed folders, too big, missing). */
+const imageSrcs = new Map<string, string | null>();
+const imageWaiters = new Set<() => void>();
+window.addEventListener('message', (e: MessageEvent<{ type?: string; path?: string; src?: string }>) => {
+  if (e.data?.type !== 'imageSrc' || typeof e.data.path !== 'string') return;
+  imageSrcs.set(e.data.path, typeof e.data.src === 'string' ? e.data.src : null);
+  for (const w of imageWaiters) w();
+});
+
+export function useImageSrc(path: string): string | null | undefined {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const w = () => bump((n) => n + 1);
+    imageWaiters.add(w);
+    if (!imageSrcs.has(path)) send({ type: 'imageSrc', path });
+    return () => void imageWaiters.delete(w);
+  }, [path]);
+  return imageSrcs.get(path);
+}
+
+/** A step's image with its title; click opens the editor's image preview. Name only when it can't be shown. */
+export function ImageThumb({ path, title }: { path: string; title: string }) {
+  const src = useImageSrc(path);
+  const open = () => send({ type: 'openImage', path });
+  if (src === null) {
+    return (
+      <span class="image-thumb missing" title={path}>
+        <span class="image-title">{title}</span>
+        <button class="link" onClick={open}>
+          Open
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button class="image-thumb" title={path} aria-label={`Open ${title}`} onClick={open}>
+      {src ? <img src={src} alt="" loading="lazy" /> : <span class="image-wait" />}
+      <span class="image-title">{title}</span>
+    </button>
+  );
+}

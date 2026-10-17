@@ -42,11 +42,12 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
+import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
+import { chatImages } from '../shared/stepImages';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -338,6 +339,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
   const chips = linkBadges(state, chat).filter((b) => !(b.kind === 'origin' && b.chatId === parent?.id));
+  const images = useMemo(() => chatImages(chat.items), [chat.items]);
   return (
     <>
       <header class="chat-head">
@@ -356,6 +358,17 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             {chat.merged && <span class="tag">merged</span>}
           </div>
         </div>
+        {images.length > 0 && (
+          <Popover label="Images in this chat" title="Images in this chat" kind="dialog" align="end" buttonClass="chip-btn images-pill" trigger={<span class="chip-text">Images · {images.length}</span>}>
+            {() => (
+              <div class="image-strip">
+                {images.map((img) => (
+                  <ImageThumb key={img.path} path={img.path} title={img.title} />
+                ))}
+              </div>
+            )}
+          </Popover>
+        )}
         <span class="status-pill" data-state={status}>
           {DOT_LABEL[status]}
         </span>

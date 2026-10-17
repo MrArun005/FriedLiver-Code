@@ -88,6 +88,12 @@ function page(params) {
       postMessage(m) {
         window.__posted.push(m);
         if (m && m.type === 'ready') setTimeout(() => window.postMessage(snapshot, '*'), 0);
+        // Step images: a drawn stand-in for files the host would allow; paths with "outside" are refused.
+        if (m && m.type === 'imageSrc') {
+          const label = m.path.split('/').pop();
+          const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="#e8ecf2"/><rect x="140" y="70" width="200" height="160" rx="10" fill="#fff" stroke="#c6ccd6"/><rect x="165" y="110" width="150" height="18" rx="4" fill="#dfe3ea"/><rect x="165" y="140" width="150" height="18" rx="4" fill="#dfe3ea"/><rect x="165" y="180" width="150" height="26" rx="6" fill="#5b7cfa"/><text x="20" y="285" font-family="sans-serif" font-size="14" fill="#7a8394">' + label + '</text></svg>';
+          setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: 'data:image/svg+xml,' + encodeURIComponent(svg) }) }, '*'), 0);
+        }
       },
       getState: () => saved ?? undefined,
       setState: (s) => { saved = s; },
@@ -359,7 +365,7 @@ async function shoot() {
     check((await p.inputValue('.composer textarea')) === 'draft for Claude 5', 'the draft comes back with its chat');
     await p.fill('.composer textarea', '');
     await p.keyboard.press('ArrowUp');
-    check((await p.inputValue('.composer textarea')) === 'How does the auth middleware decide a session is valid?', 'Up in an empty box recalls the last message');
+    check((await p.inputValue('.composer textarea')) === 'Does the login page still look right?', 'Up in an empty box recalls the last message');
     await p.close();
   }
   {
@@ -401,6 +407,22 @@ async function shoot() {
     check((await other.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '13px', 'another tab keeps the default');
     await other.screenshot({ path: path.join(os.homedir(), 'code/chat-sizes-dark.png'), animations: 'disabled', caret: 'hide' });
     await other.close();
+  }
+  {
+    // Step images: a thumbnail with a title, opening the editor's preview; the header's Images pill lists them.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 900);
+    await p.waitForSelector('.step-image img');
+    const titles = await p.locator('.step-image .image-title').allInnerTexts();
+    check(titles.join('|') === 'Screenshot of localhost:3000/login|Login page mockup', 'image steps show thumbnails titled from the step or the file name');
+    const box = await p.locator('.step-image img').first().boundingBox();
+    check(!!box && box.width <= 240 && box.height <= 160, 'thumbnails fit 240×160');
+    await p.locator('.step-image .image-thumb').nth(1).click();
+    check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
+    check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
+    await p.screenshot({ path: path.join(os.homedir(), 'code/chat-images.png'), animations: 'disabled', caret: 'hide' });
+    await p.click('.images-pill');
+    check((await p.locator('.image-strip .image-thumb').count()) === 2, 'the Images pill opens the gallery');
+    await p.close();
   }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.

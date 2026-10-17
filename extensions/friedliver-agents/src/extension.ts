@@ -14,6 +14,7 @@ import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
 import { startDictation } from './host/dictation';
 import { EditorAgent } from './host/editor';
+import { previewableImage } from './host/imageAccess';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { StateFile } from './host/persist';
@@ -22,12 +23,13 @@ import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
-import { attachSurface, post, type Script, type Surface } from './host/webviews';
+import { attachSurface, post, webviewOptions, type Script, type Surface } from './host/webviews';
 import { LIMITS, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule, isRule, type CommandRule } from './shared/rules';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
+import { isImagePath } from './shared/stepImages';
 import { clip } from './shared/view';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -368,9 +370,14 @@ export class Controller {
     });
   }
 
+  /** Where the images steps show may come from: the workspace and task worktrees, the browser's screenshots, the temp folders agents write to. */
+  private imageRoots(): string[] {
+    return [...new Set([...this.core.roots(), this.context.globalStorageUri.fsPath, os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])];
+  }
+
   private addSurface(surface: Surface, title: string, owner: { onDidDispose: vscode.Event<void> }): void {
     this.surfaces.add(surface);
-    const sub = attachSurface(surface, this.context.extensionUri, title, (s, m) => void this.handle(s, m), (line) => this.log.warn(line));
+    const sub = attachSurface(surface, this.context.extensionUri, title, (s, m) => void this.handle(s, m), (line) => this.log.warn(line), this.imageRoots());
     owner.onDidDispose(() => {
       sub.dispose();
       this.surfaces.delete(surface);
@@ -445,6 +452,20 @@ export class Controller {
           return;
         case 'notice':
           await this.noticeAction(m.chatId, m.action);
+          return;
+        case 'imageSrc': {
+          const roots = this.imageRoots();
+          const file = await previewableImage(m.path, roots);
+          if (file && !(surface.webview.options.localResourceRoots ?? []).some((r) => file.startsWith(r.fsPath))) {
+            // A root that appeared since the view opened (a new task worktree).
+            surface.webview.options = webviewOptions(this.context.extensionUri, roots);
+          }
+          post(surface, { type: 'imageSrc', path: m.path, ...(file ? { src: surface.webview.asWebviewUri(vscode.Uri.file(file)).toString() } : {}) });
+          return;
+        }
+        case 'openImage':
+          // The editor's image preview shows it (no scripts, SVG included); outside the roots too, since the user asked.
+          if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(m.path), vscode.ViewColumn.Beside);
           return;
         case 'dictate':
           await startDictation({
