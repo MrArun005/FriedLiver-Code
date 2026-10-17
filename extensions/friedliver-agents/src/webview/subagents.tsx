@@ -3,8 +3,8 @@
 // answer, and a "Running · N agents" strip above the composer while any work.
 import { useState } from 'preact/hooks';
 import type { ChatView } from '../shared/model';
-import { shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem } from '../shared/view';
-import { Dot, Icon, Markdown, Popover, scrollBehavior, send, useNow } from './common';
+import { sameAgents, shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem } from '../shared/view';
+import { Dot, Icon, Markdown, Popover, memo, scrollBehavior, send, useNow } from './common';
 import { Steps } from './steps';
 
 const DOT = { working: 'working', done: 'done', failed: 'error' } as const;
@@ -93,7 +93,7 @@ function goTo(id: string) {
  * The composer's agents button: how many of this chat's agents run (subagents,
  * hand-offs and consultations), and a list of them. Hidden when there are none.
  */
-export function AgentsButton({ chat, linked }: { chat: ChatView; linked: ChatView[] }) {
+export const AgentsButton = memo(function AgentsButton({ chat, linked }: { chat: ChatView; linked: ChatView[] }) {
   const now = useNow(chat.busy || linked.some((c) => c.busy) ? 1000 : 3_600_000);
   const subs = subagents(chat);
   if (!subs.length && !linked.length) return null;
@@ -132,4 +132,4 @@ export function AgentsButton({ chat, linked }: { chat: ChatView; linked: ChatVie
       )}
     </Popover>
   );
-}
+}, sameAgents);
