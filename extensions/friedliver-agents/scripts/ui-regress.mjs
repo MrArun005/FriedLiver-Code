@@ -626,6 +626,29 @@ BLOCKS.F26 = async () => {
   await p.close();
 };
 
+// ---- F24: a clamped quote on a card shows no sliver of the line after its last ----
+BLOCKS.F24 = async () => {
+  const p = await open('surface=tasks&theme=dark-2026&view=board', 1200, 900);
+  const slivers = await p.locator('.card-quote').evaluateAll((qs) =>
+    qs.map((q) => {
+      const box = q.getBoundingClientRect();
+      const cs = window.getComputedStyle(q);
+      const clipBottom = box.bottom - parseFloat(cs.borderBottomWidth);
+      const contentBottom = clipBottom - parseFloat(cs.paddingBottom);
+      const w = document.createTreeWalker(q, NodeFilter.SHOW_TEXT);
+      let bad = 0;
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const r = document.createRange();
+        r.selectNodeContents(n);
+        for (const t of r.getClientRects()) if (t.top < clipBottom - 0.5 && t.bottom > contentBottom + 0.5) bad++;
+      }
+      return bad;
+    }),
+  );
+  check(slivers.length > 0 && slivers.every((n) => n === 0), `card quotes clip on a line boundary [${slivers.join(',')}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
