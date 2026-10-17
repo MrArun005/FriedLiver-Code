@@ -26,6 +26,8 @@ export type WebviewMessage =
   | { type: 'review'; reviewId: string; action: 'open' | 'accept' | 'reject' }
   | { type: 'command'; commandId: string; approve: boolean }
   | { type: 'undo'; chatId: string; turnId: string }
+  /** Rewind the chat to before a message (its checkpoint); without `turnId`, pick one from the chat's checkpoints. */
+  | { type: 'rewind'; chatId: string; turnId?: string }
   | { type: 'notice'; chatId: string; action: NoticeAction }
   /** `chatId` (optional): the composer the images go to. */
   | { type: 'attach'; chatId?: string }
@@ -336,6 +338,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.commandId) && typeof m.approve === 'boolean' ? { type: 'command', commandId: m.commandId, approve: m.approve } : null;
     case 'undo':
       return id(m.chatId) && id(m.turnId) ? { type: 'undo', chatId: m.chatId, turnId: m.turnId } : null;
+    case 'rewind':
+      if (!id(m.chatId)) return null;
+      if (m.turnId === undefined) return { type: 'rewind', chatId: m.chatId };
+      return id(m.turnId) ? { type: 'rewind', chatId: m.chatId, turnId: m.turnId } : null;
     case 'notice': {
       const action = noticeAction(m.action);
       return id(m.chatId) && action ? { type: 'notice', chatId: m.chatId, action } : null;

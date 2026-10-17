@@ -56,7 +56,7 @@ import {
   type QueuedMessage,
 } from '../shared/model';
 import { BridgeServer } from './bridge';
-import { Checkpoints } from './checkpoints';
+import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
@@ -64,7 +64,7 @@ import { inGitFolder, insideRoots } from './paths';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
 import { loginExtras } from './signin';
-import { relativeFile } from './transcript';
+import { relativeFile, rewoundHistory } from './transcript';
 
 /** Each vendor's key goes only to that vendor's agent process. */
 export const KEY_ENV: Record<VendorAgentId, string> = {
@@ -158,7 +158,12 @@ export interface CoreOptions {
   warmStart?: boolean;
   ui: CoreUi;
   log?(line: string): void;
+  /** Where checkpoints are kept across windows (global storage); folders outside git need it. */
+  checkpointDir?: string;
 }
+
+/** Rewind to a message: its files, the conversation, or both. */
+export type RewindMode = 'both' | 'code' | 'conversation';
 
 export interface AccountStatus {
   status: 'signed-in' | 'needs-sign-in' | 'not-installed' | 'error';
@@ -213,6 +218,8 @@ export class AgentCore {
   /** Chats whose Stop came while their turn was still on its way to the agent. */
   private readonly stopping = new Set<string>();
   private readonly checkpoints: Checkpoints;
+  private readonly checkpointsLoaded: Promise<void>;
+  private readonly rewinding = new Set<string>();
   /** Settings the user chose in each chat (optionKey → value), applied again when its agent restarts. */
   private readonly chosen = new Map<string, Record<string, string | boolean>>();
   /** Chats where the user confirmed Full auto once. */
@@ -236,7 +243,15 @@ export class AgentCore {
 
   constructor(private readonly options: CoreOptions) {
     const limits = options.limits();
-    this.checkpoints = new Checkpoints(options.log);
+    this.checkpoints = new Checkpoints({
+      log: options.log,
+      dir: options.checkpointDir,
+      onGone: (chatId, turnIds) => {
+        // A rewind says itself what went, after it has used the messages' checkpoints.
+        if (this.chat(chatId) && !this.rewinding.has(chatId)) this.dispatch({ t: 'checkpointsGone', chatId, turnIds });
+      },
+    });
+    this.checkpointsLoaded = this.checkpoints.load().catch((err: unknown) => options.log?.(`Couldn't load checkpoints: ${messageOf(err)}`));
     this.hub = new AgentHub({
       cwd: options.folders()[0] ?? os.homedir(),
       clientVersion: options.clientVersion,
@@ -802,6 +817,8 @@ export class AgentCore {
   archive(chatId: string, archived: boolean): void {
     this.requireChat(chatId);
     this.dispatch({ t: 'archive', chatId, archived });
+    // An archived chat keeps its history, not its checkpoints.
+    if (archived) void this.checkpoints.forget(chatId);
   }
 
   /** Stops and forgets a chat. A worktree it had stays on disk; only the record goes. */
@@ -817,7 +834,7 @@ export class AgentCore {
     this.preambles.delete(chatId);
     this.lastPrompt.delete(chatId);
     this.turns.forget(chatId);
-    this.checkpoints.forget(chatId);
+    void this.checkpoints.forget(chatId);
     for (const q of this.queues.get(chatId) ?? []) q.done();
     for (const map of [this.queues, this.chosen, this.openTools, this.approvedWrites, this.turnDecision, this.reported]) map.delete(chatId);
     this.confirmedFull.delete(chatId);
@@ -915,7 +932,14 @@ export class AgentCore {
     }
     this.nextId = Math.max(this.nextId, saved.nextId);
     for (const [agent, n] of Object.entries(saved.chatCount) as [AgentKey, number][]) this.chatCount[agent] = Math.max(this.chatCount[agent] ?? 0, n);
-    this.turns.continueAfter(chats.flatMap((c) => c.items.flatMap((i) => (i.kind === 'changes' ? [i.turnId] : []))));
+    this.turns.continueAfter(chats.flatMap((c) => c.items.flatMap((i) => (i.kind === 'changes' ? [i.turnId] : i.kind === 'user' && i.checkpoint ? [i.checkpoint] : []))));
+    // Messages whose checkpoint is gone (pruned while FriedLiver was closed) lose "Rewind to here".
+    void this.checkpointsLoaded.then(() => {
+      for (const c of this.state.chats) {
+        const gone = c.items.flatMap((i) => (i.kind === 'user' && i.checkpoint && !this.checkpoints.has(c.id, i.checkpoint) ? [i.checkpoint] : []));
+        if (gone.length) this.dispatch({ t: 'checkpointsGone', chatId: c.id, turnIds: gone });
+      }
+    });
     const ids = new Set(chats.map((c) => c.id));
     this.dispatch({ t: 'restore', state: { ...state, chats, links: state.links.filter((l) => ids.has(l.from) && ids.has(l.to)) } });
   }
@@ -983,6 +1007,85 @@ export class AgentCore {
     }
     for (const f of files) this.options.ui.fileChanged?.(f);
     return files;
+  }
+
+  /** The chat's messages that can be rewound to, oldest first. */
+  checkpointList(chatId: string): { turnId: string; text: string; at?: number; files: number }[] {
+    const kept = new Map(this.checkpoints.list(chatId).map((c) => [c.turnId, c]));
+    return this.requireChat(chatId).items.flatMap((i) => {
+      const cp = i.kind === 'user' && i.checkpoint ? kept.get(i.checkpoint) : undefined;
+      return i.kind === 'user' && cp ? [{ turnId: cp.turnId, text: i.text, at: i.at ?? cp.at, files: cp.files.length }] : [];
+    });
+  }
+
+  /** What rewinding the code to before `turnId`'s message would change, with paths relative to the chat's folder. */
+  async rewindPlan(chatId: string, turnId: string): Promise<RewindPlan> {
+    const chat = this.requireChat(chatId);
+    const plan = await this.checkpoints.plan(chatId, turnId);
+    return { ...plan, files: plan.files.map((f) => ({ ...f, file: relativeFile(chat.cwd, f.file) })) };
+  }
+
+  /**
+   * Rewinds the chat to before the message that started `turnId`: its files
+   * (`code`), its transcript (`conversation`), or both. Files changed since
+   * the agent's last turn are kept unless listed in `useCheckpoint` (relative
+   * paths from rewindPlan). The agent's session can't be cut back, so a
+   * rewound conversation continues in a new session that is given a summary
+   * of what's left; the chat says so.
+   */
+  async rewind(chatId: string, turnId: string, mode: RewindMode, useCheckpoint: string[] = []): Promise<{ restored: string[]; kept: string[] }> {
+    const chat = this.requireChat(chatId);
+    if (chat.busy) throw new Error('Wait for the agent to finish, or stop it, before rewinding.');
+    const at = chat.items.findIndex((i) => i.kind === 'user' && i.checkpoint === turnId);
+    const message = chat.items[at];
+    if (message?.kind !== 'user') throw new Error('That message has no checkpoint any more.');
+    let result = { restored: [] as string[], kept: [] as string[] };
+    let gone: string[] = [];
+    if (mode !== 'conversation') {
+      const chosen = new Set(useCheckpoint.map((f) => path.resolve(chat.cwd, f)));
+      // Checked again by checkWrite: a symlink may have appeared since the turn.
+      this.rewinding.add(chatId);
+      const done = await this.checkpoints
+        .rewind(
+          chatId,
+          turnId,
+          {
+            write: async (f, c) => {
+              const file = this.checkWrite(f);
+              await mkdir(path.dirname(file), { recursive: true });
+              await writeFile(file, c);
+            },
+            remove: (f) => rm(this.checkWrite(f), { force: true }),
+          },
+          (f) => chosen.has(f),
+        )
+        .finally(() => this.rewinding.delete(chatId));
+      gone = done.turnIds;
+      result = { restored: done.restored, kept: done.kept };
+      // FriedLiver's own record of these turns is stale now.
+      this.turns.forget(chatId);
+      if (mode === 'code') for (const id of done.turnIds) this.dispatch({ t: 'undone', chatId, turnId: id });
+      for (const f of done.restored) this.options.ui.fileChanged?.(f);
+    }
+    const quote = message.text.length > 60 ? `${message.text.slice(0, 59)}…` : message.text;
+    const notes: string[] = [];
+    if (mode !== 'conversation') notes.push(`Restored ${result.restored.length} file${result.restored.length === 1 ? '' : 's'} to before “${quote}”.`);
+    if (result.kept.length) notes.push(`Kept your changes to ${result.kept.map((f) => relativeFile(chat.cwd, f)).join(', ')}.`);
+    if (mode !== 'code') {
+      const history = rewoundHistory(chat, chat.items.slice(0, at));
+      this.dispatch({ t: 'rewound', chatId, turnId });
+      gone = [];
+      this.hub.resetSession(chatId);
+      this.preambles.delete(chatId);
+      if (history) this.preambles.set(chatId, history);
+      this.lastPrompt.delete(chatId);
+      notes.push(
+        `Conversation rewound. ${chat.label} can't cut its session back to a message, so your next message starts a new session${history ? ' that is given a summary of the conversation up to here' : ''}.${mode === 'conversation' ? ' Files were not changed.' : ''}`,
+      );
+    }
+    if (gone.length) this.dispatch({ t: 'checkpointsGone', chatId, turnIds: gone });
+    this.items(chatId, [{ kind: 'notice', tone: 'info', text: notes.join(' ') }]);
+    return result;
   }
 
   worktree(chatId: string): TaskWorktree | undefined {
@@ -1191,7 +1294,7 @@ export class AgentCore {
     let stopReason: acp.StopReason | null = null;
     try {
       // Before the agent can change anything: the checkpoint Undo goes back to.
-      await this.checkpoints.begin(chatId, start.cwd, turnId);
+      if (await this.checkpoints.begin(chatId, start.cwd, turnId)) this.dispatch({ t: 'checkpoint', chatId, turnId });
       await this.ensureBridge();
       const result: acp.PromptResponse = this.stopping.has(chatId) ? { stopReason: 'cancelled' } : await this.hub.prompt(chatId, blocks);
       stopReason = result.stopReason;
