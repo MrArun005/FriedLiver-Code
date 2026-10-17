@@ -23,6 +23,9 @@ mkdirSync(`${ws}/src`, { recursive: true });
 writeFileSync(`${ws}/package.json`, '{ "name": "prices", "private": true }\n');
 writeFileSync(`${ws}/README.md`, '# Prices\n\nFormats prices in cents.\n');
 writeFileSync(`${ws}/src/format.ts`, 'export function formatCents(cents: number): string {\n  return `$${(cents / 100).toFixed(2)}`;\n}\n');
+// The Demo agent is hidden from pickers unless turned on.
+mkdirSync(`${dir}/ud/User`, { recursive: true });
+writeFileSync(`${dir}/ud/User/settings.json`, JSON.stringify({ 'friedliver.showDemoAgent': true }, null, 2));
 
 const app = await electron.launch({
   executablePath: exe,

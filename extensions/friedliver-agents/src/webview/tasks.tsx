@@ -2,7 +2,6 @@ import { Fragment, render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   AGENT_FACES,
-  AGENT_KEYS,
   age,
   decisions,
   fileConflicts,
@@ -44,7 +43,7 @@ import {
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
-import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useSettledOrder } from './common';
+import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
 import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
 import { AgentMap } from './map';
@@ -414,7 +413,11 @@ function Manager() {
 }
 
 function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefaults>> }) {
-  const [agents, setAgents] = usePersisted<AgentKey[]>('agents', ['claude']);
+  const shown = useRoster().agents;
+  const [saved, setAgents] = usePersisted<AgentKey[]>('agents', ['claude']);
+  // A hidden agent (Demo, once turned off) drops out of a saved choice.
+  const kept = saved.filter((a) => shown.includes(a));
+  const agents: AgentKey[] = kept.length ? kept : [shown[0] ?? 'claude'];
   const [worktree, setWorktree] = useState<boolean | null>(null);
   const [prompt, setPrompt] = useState('');
   // Model and effort per agent, and how much the task may do without asking; Full auto is confirmed by the editor.
@@ -424,7 +427,7 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
   // On by default when several agents take the same task, so they can't clash.
   const own = worktree ?? several;
   const toggle = (a: AgentKey) => {
-    const next = agents.includes(a) ? agents.filter((x) => x !== a) : AGENT_KEYS.filter((x) => x === a || agents.includes(x));
+    const next = agents.includes(a) ? agents.filter((x) => x !== a) : shown.filter((x) => x === a || agents.includes(x));
     if (next.length) setAgents(next);
   };
   const start = () => {
@@ -455,9 +458,10 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
       />
       <div class="new-bar">
         <div class="agent-pick" role="group" aria-label="Agents">
-          {AGENT_KEYS.map((a) => (
+          {shown.map((a) => (
             <button key={a} type="button" class="agent-option" aria-pressed={agents.includes(a)} onClick={() => toggle(a)}>
               <Glyph agent={a} size="sm" /> {AGENT_FACES[a].name}
+              <SignInMark agent={a} />
             </button>
           ))}
         </div>

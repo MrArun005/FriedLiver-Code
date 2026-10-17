@@ -8,7 +8,8 @@
 //   node scripts/ui-harness.mjs --serve      build and serve on http://localhost:5178 to look around
 //        [--no-build] [--out dir] [--port n] [--themes black-blue,light-blue]
 //
-// Pages: /?surface=tasks|chat|images&theme=black-blue&side=1&select=<chat id>&view=board|list|map&empty=1
+// Pages: /?surface=tasks|chat|images|accounts&theme=black-blue&side=1&select=<chat id>&view=board|list|map&empty=1
+//        &focus=<agent> (Agents & Accounts opened on that card, ui-fixture-accounts.mjs)
 //        &fixture=steps (a Claude chat with long heredoc commands and a plain-text summary, ui-fixture-steps.mjs)
 //        &fixture=subagents (a Claude chat with three subagents, and outside Claude Code sessions, ui-fixture-subagents.mjs)
 //        &fixture=reference (the session in the Claude Code reference screenshots, ui-fixture-reference.mjs)
@@ -25,6 +26,7 @@ import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
 import { subagentsFixture } from './ui-fixture-subagents.mjs';
 import { referenceFixture } from './ui-fixture-reference.mjs';
+import { accountsFixture } from './ui-fixture-accounts.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -81,7 +83,7 @@ function readTheme(name) {
 }
 
 function page(params) {
-  const surface = ['tasks', 'chat', 'images'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
+  const surface = ['tasks', 'chat', 'images', 'accounts'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
   const theme = readTheme(params.get('theme') ?? 'black-blue');
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
@@ -95,7 +97,12 @@ function page(params) {
           : params.get('fixture') === 'reference'
             ? referenceFixture(Date.now())
             : fixture(Date.now());
-  const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
+  const focus = params.get('focus');
+  // Agents & Accounts gets its page view instead of a snapshot.
+  const snapshot =
+    surface === 'accounts'
+      ? { type: 'accounts', view: { ...accountsFixture(Date.now()), ...(focus ? { focus: { agent: focus, n: 1 } } : {}) } }
+      : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
   const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
@@ -249,6 +256,9 @@ async function shoot() {
       await save(side, `chat-slash-${theme}`);
     }
     await side.close();
+    const accounts = await open(`surface=accounts&theme=${theme}`, 900, 1900);
+    await save(accounts, `accounts-${theme}`);
+    await accounts.close();
     const center = await open(`surface=chat&theme=${theme}&select=${ids.center}`, 1000, 900);
     await save(center, `chat-center-${theme}`);
     await center.close();
@@ -269,6 +279,41 @@ async function shoot() {
   }
 
   console.log('checks:');
+  {
+    // Agents & Accounts: each button asks the host by agent and id only, never with a command or a key.
+    const p = await open('surface=accounts&focus=gemini', 900, 700);
+    await p.waitForTimeout(50);
+    check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
+    check((await p.locator('.acct-card').count()) === 4, 'a card per agent, Demo included when shown');
+    const codex = p.locator('#card-codex');
+    check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
+    await codex.locator('button:has-text("ChatGPT")').click();
+    check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'signIn', agent: 'codex', methodId: 'chat-gpt' }), 'a sign-in method posts its id');
+    await codex.locator('.acct-key button:has-text("Set…")').click();
+    check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'setKey', agent: 'codex', setup: 'apiKey' }), 'Set… asks the host for the key');
+    await codex.locator('.acct-cli button:has-text("Run in terminal")').click();
+    check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'terminal', agent: 'codex', what: 'signIn' }), 'Run in terminal names the line, not the command');
+    const gemini = p.locator('#card-gemini');
+    check((await gemini.locator('.acct-key[data-active]').innerText()).includes('GEMINI_API_KEY: set'), 'a saved key shows only as set');
+    check(!(await p.content()).includes('sk-'), 'no key text on the page');
+    await gemini.locator('select').selectOption('large');
+    check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'setDefault', agent: 'gemini', key: 'model', value: 'large' }), 'picking a default model posts setDefault');
+    await p.locator('#card-claude button:has-text("Sign out of Claude")').click();
+    check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'signOut', agent: 'claude' }), 'Sign out posts signOut');
+    await p.close();
+  }
+  {
+    // The roster hides Demo from the new-chat menu and marks each agent's sign-in.
+    const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
+    await p.evaluate(() => window.postMessage({ type: 'roster', roster: { agents: ['claude', 'codex', 'gemini'], signIn: { claude: 'signed-in', gemini: 'needs-sign-in' } } }, '*'));
+    await p.click('button[aria-label="New chat"]');
+    const items = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+    check(!items.some((t) => t.includes('Demo')) && items.some((t) => t.includes('Agents & Accounts')), `New chat leaves Demo out and links Agents & Accounts [${items}]`);
+    check((await p.locator('.popover .signin-mark[data-state="needs-sign-in"]').count()) === 1, 'a sign-in mark shows on Gemini');
+    await p.click('.popover [role="menuitem"]:has-text("Agents & Accounts")');
+    check((await posted(p)).some((m) => m.type === 'openAccounts'), 'the menu opens Agents & Accounts');
+    await p.close();
+  }
   {
     const p = await open('surface=tasks&view=board', 1440, 900);
     await p.fill('.new-task textarea', 'Make the reports page load faster');

@@ -1,5 +1,6 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentConnection, isAuthRequired, type ClientHost, type SessionSetup } from './agentConnection';
+import type { AuthStatus } from './signIn';
 import type { AgentId, AgentSpec } from './registry';
 import type { TerminalListener } from './terminals';
 
@@ -45,6 +46,8 @@ export interface HubEvents {
   notice(chatId: string, text: string): void;
   agentsChanged(): void;
   agentStderr?(agentId: AgentId, line: string): void;
+  /** The identity an agent says it runs as, whenever it says so. */
+  authStatus?(agentId: AgentId, status: AuthStatus): void;
 }
 
 export interface FileHost {
@@ -303,17 +306,33 @@ export class AgentHub {
    * Whether the agent is signed in, by asking for a session (no model call).
    * The probe session is never used.
    */
-  async checkSignIn(agentId: AgentId): Promise<{ signedIn: true } | { signedIn: false; methods: acp.AuthMethod[] }> {
+  async checkSignIn(agentId: AgentId): Promise<{ signedIn: true; setup: SessionSetup } | { signedIn: false; methods: acp.AuthMethod[] }> {
     const agent = await this.ensureAgent(agentId);
     try {
       const probe = await agent.conn.newSession(this.options.cwd);
       // Claude lists every session in its history; don't leave a probe there when it can be closed.
       if (agent.conn.supportsCloseSession) await agent.conn.closeSession(probe.sessionId).catch(() => {});
-      return { signedIn: true };
+      const { configOptions, modes, models } = probe;
+      return { signedIn: true, setup: { configOptions, modes, models } };
     } catch (err) {
       if (isAuthRequired(err)) return { signedIn: false, methods: agent.conn.authMethods };
       throw err;
+    } finally {
+      // An agent started only to check stops again after the idle time, like one a chat left.
+      this.scheduleIdleStop(agent);
     }
+  }
+
+  /** Whether the agent signs out itself (ACP `logout`). Starts it. */
+  async supportsLogout(agentId: AgentId): Promise<boolean> {
+    return (await this.ensureAgent(agentId)).conn.supportsLogout;
+  }
+
+  /** The agent's own sign-out; its sessions need a sign-in again afterwards. */
+  async logout(agentId: AgentId): Promise<void> {
+    const agent = await this.ensureAgent(agentId);
+    if (!agent.conn.supportsLogout) throw new Error(`${agent.conn.spec.label} can't sign out from here. Use its own CLI.`);
+    await agent.conn.logout();
   }
 
   /** The running adapter's name and version, from `initialize`. */
@@ -530,6 +549,7 @@ export class AgentHub {
       },
       readTextFile: (req) => files.read(req, chatFor(req.sessionId)?.id),
       writeTextFile: (req) => files.write(chatFor(req.sessionId)?.id, req),
+      authStatus: (status) => events.authStatus?.(agentId, status),
       terminalListener: this.options.terminalListener?.(agentId),
     };
   }
