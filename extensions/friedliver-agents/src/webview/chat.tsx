@@ -442,16 +442,39 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
               {chat.title}
             </button>
             {chat.branch && (
-              <span class="chip" title={chat.cwd}>
+              <span class="chip branch-chip" title={`${chat.branch}\n${chat.cwd}`}>
                 <Icon name="branch" />
-                {chat.branch}
+                <span class="chip-text">{chat.branch}</span>
               </span>
             )}
             {chat.merged && <span class="tag">merged</span>}
             {chat.session?.rules?.length ? (
-              <span class="chip" title={`Shared rules this session got:\n${chat.session.rules.join('\n')}`}>
-                Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}
-              </span>
+              <Popover
+                label="Shared rules this session got"
+                buttonClass="chip rules-chip"
+                trigger={<span class="chip-text">Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}</span>}
+              >
+                {(close) => (
+                  <>
+                    <div class="pop-title" aria-hidden="true">Shared rules this session got</div>
+                    {chat.session!.rules!.map((path) => (
+                      <button
+                        key={path}
+                        role="menuitem"
+                        title={path}
+                        onClick={() => {
+                          close(false);
+                          send({ type: 'openFile', path });
+                        }}
+                      >
+                        <Icon name="file" />
+                        <span class="grow ellipsis">{basename(path)}</span>
+                        <span class="hint ellipsis">{path.slice(0, -basename(path).length - 1)}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Popover>
             ) : null}
           </div>
         </div>

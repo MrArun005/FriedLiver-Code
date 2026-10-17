@@ -354,6 +354,31 @@ BLOCKS.F10 = async () => {
   await q.close();
 };
 
+// ---- F11: the rules chip is a button that lists the rules files; chips cut with an ellipsis ----
+BLOCKS.F11 = async () => {
+  for (const width of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 800);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    c5.branch = 'claude/explain-the-auth-middleware-and-session-store';
+    c5.session = { ...c5.session, rules: ['/home/dev/inventory-app/AGENTS.md', '/home/dev/inventory-app/.friedliver/rules/style.md', '/home/dev/.friedliver/rules/global.md'] };
+    await snapshot(p, state, 'chat-c5');
+    const chip = p.locator('.chat-head .rules-chip');
+    await chip.waitFor();
+    check((await chip.evaluate((b) => b.tagName)) === 'BUTTON' && (await chip.getAttribute('aria-haspopup')) === 'menu', `at ${width}px the rules chip is a button with a menu`);
+    await chip.focus();
+    await p.keyboard.press('Enter');
+    const files = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+    check(files.some((f) => f.includes('AGENTS.md')) && files.length >= 3, `at ${width}px it lists the rules files [${files.join(' | ')}]`);
+    await p.locator('.popover [role="menuitem"]:has-text("AGENTS.md")').click();
+    check((await posted(p)).some((m) => m.type === 'openFile' && m.path.endsWith('AGENTS.md')), `at ${width}px a file opens from it`);
+    const cut = await p.evaluate(() => [...document.querySelectorAll('.chat-head .chip-text')].every((t) => window.getComputedStyle(t).textOverflow === 'ellipsis'));
+    check(cut, `at ${width}px header chips cut with an ellipsis`);
+    if (width === 640) check(await p.locator('.chat-head .branch-chip').evaluate((b) => window.getComputedStyle(b).display === 'none'), 'at 640px the branch chip gives its room to the title');
+    await p.close();
+  }
+};
+
 await run();
 await browser.close();
 server.kill();
