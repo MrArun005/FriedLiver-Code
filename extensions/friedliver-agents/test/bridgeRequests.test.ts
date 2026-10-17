@@ -144,3 +144,42 @@ describe('browser tools', () => {
     await expect(off.requests.call('chat-1', { tool: 'browser_snapshot' }, signal)).rejects.toThrow(/turned off/);
   });
 });
+
+describe('browser requests whose world changed while the user decided', () => {
+  function setup() {
+    let policy: 'ask' | 'off' = 'ask';
+    const h = host();
+    h.policy = () => policy;
+    const done: string[] = [];
+    h.browser = async (_c, call) => (done.push(call.tool), 'ok');
+    const requests = new BridgeRequests(h);
+    const signal = new AbortController().signal;
+    const pending = requests.call('chat-1', { tool: 'browser_reload' }, signal);
+    const item = h.state.chats[0].items.find((i) => i.kind === 'bridge')!;
+    return { h, done, requests, pending, id: item.kind === 'bridge' ? item.requestId : '', off: () => (policy = 'off') };
+  }
+
+  it('does nothing when the tools are turned off mid-approval, even if allowed', async () => {
+    const s = setup();
+    s.off();
+    s.requests.answer(s.id, 'allow');
+    await expect(s.pending).rejects.toThrow(/turned off/);
+    expect(s.done).toEqual([]);
+  });
+
+  it('refuseAll denies everything waiting', async () => {
+    const s = setup();
+    s.off();
+    s.requests.refuseAll();
+    await expect(s.pending).rejects.toThrow(/did not allow/);
+    expect(s.done).toEqual([]);
+  });
+
+  it('does nothing when the chat closed mid-approval', async () => {
+    const s = setup();
+    s.h.dispatch({ t: 'closed', chatId: 'chat-1' });
+    s.requests.answer(s.id, 'allow');
+    await expect(s.pending).rejects.toThrow(/closed/);
+    expect(s.done).toEqual([]);
+  });
+});

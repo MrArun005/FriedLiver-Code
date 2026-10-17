@@ -56,7 +56,7 @@ import {
 } from '../shared/model';
 import { BridgeServer } from './bridge';
 import { Checkpoints } from './checkpoints';
-import { BridgeRequests, type AgentToAgent } from './bridgeRequests';
+import { BridgeRequests, type AgentToAgent, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
 import { inGitFolder, insideRoots } from './paths';
@@ -139,6 +139,8 @@ export interface CoreOptions {
   limits(): { maxRunning: number; idleStopMinutes: number };
   /** The FriedLiver tools' MCP server (dist/bridge.js). Without it, agents get no FriedLiver tools. */
   bridgeScript?: string;
+  /** Does the browser_* tools' calls (browser.ts); without it they say there is no browser. */
+  browser?: ToolHost['browser'];
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -287,6 +289,7 @@ export class AgentCore {
       consult: (chatId, agent, text, targetChatId, started) => this.links.consult(chatId, agent, text, 'agent', { chatId: targetChatId, started }),
       message: (chatId, target, text) => void this.links.message(chatId, target, text, 'agent').catch(() => {}),
       cancel: (chatId) => this.cancel(chatId),
+      browser: options.browser,
     });
   }
 
@@ -804,6 +807,11 @@ export class AgentCore {
   }
 
   /** A FriedLiver tool call made by `chatId`'s agent; the bridge server calls this. */
+  /** The FriedLiver tools were turned off: deny every tool request still waiting on the user. */
+  toolsOff(): void {
+    this.requests.refuseAll();
+  }
+
   bridgeCall(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {
     return this.requests.call(chatId, call, signal);
   }

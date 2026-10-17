@@ -1171,6 +1171,7 @@ export class Controller {
   private onConfig(e: vscode.ConfigurationChangeEvent): void {
     if (!e.affectsConfiguration('friedliver')) return;
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions')) this.refreshClaudeSessions();
+    if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
         if (!this.stateFile) void this.openStateFile(false).then(() => this.stateFile?.schedule());
