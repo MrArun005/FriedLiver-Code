@@ -130,11 +130,21 @@ describe('Claude Code subagents', () => {
     expect(done.ms).toBe(10_000 + 10_000 + 500);
   });
 
-  it('reads them as Done once their transcripts go quiet without a step in flight, and after 30 minutes either way', async () => {
+  it('never calls a silent agent Done: after 30 minutes without completion evidence it is Quiet', async () => {
     const { home } = build();
     const [s] = await listClaudeSessions({ home, folders: [WS], now: NOW });
     expect(states(s, NOW + 2 * min)['Integrate branches, rebuild UI']).toBe('working');
-    expect(states(s, NOW + 31 * min)['Images gallery per agent tab']).toBe('done');
+    const later = claudeSubagents(s, NOW + 27 * min);
+    expect(later.find((a) => a.title === 'Images gallery per agent tab')).toMatchObject({ state: 'quiet', note: 'No activity for 32m' });
+    // Real completion evidence still reads Done, a stop still a Problem.
+    expect(later.find((a) => a.title === 'Audit leave module')?.state).toBe('done');
+    expect(later.find((a) => a.title === 'Fix updater')?.state).toBe('failed');
+  });
+
+  it('reads an unsettled agent with no transcript as Quiet once its session stops, not Done', () => {
+    const s = { id: S, cwd: WS, title: 't', lastActivity: NOW, messages: 1, subagents: [{ id: 'b', title: 'Background, old Claude Code' }] };
+    expect(claudeSubagents(s, NOW + 60_000)[0].state).toBe('working');
+    expect(claudeSubagents(s, NOW + 5 * min)[0]).toMatchObject({ state: 'quiet', note: 'No activity for 5m' });
   });
 
   it('reads only what was appended, and picks up a new agent and a finished one', async () => {
