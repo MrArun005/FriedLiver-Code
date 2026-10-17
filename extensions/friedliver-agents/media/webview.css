@@ -4456,31 +4456,108 @@ body[data-surface='chat'] .composer-bar .bar-right {
   align-items: center;
   gap: var(--sp-2);
 }
-/* Too narrow: drop the cost, then the word Context, then the model and effort labels. */
-@container (max-width: 600px) {
-  body[data-surface='chat'] .composer-bar .usage-cost {
-    display: none;
-  }
+body[data-surface='chat'] .composer-bar .bar-left .composer-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-@container (max-width: 560px) {
-  body[data-surface='chat'] .composer-bar .usage-word {
-    display: none;
-  }
+/* The row is minimal: attach left; Stop, agents, usage/settings, mode icon and send right. */
+body[data-surface='chat'] .composer-bar .bar-right {
+  gap: 2px;
 }
-@container (max-width: 520px) {
-  body[data-surface='chat'] .composer-bar .opt-model .chip-text {
-    display: none;
-  }
-}
-@container (max-width: 480px) {
-  body[data-surface='chat'] .composer-bar .opt-gauge .chip-text {
-    display: none;
-  }
-}
-/* The mode label and the context % stay; the older narrow rules hid them. */
-body[data-surface='chat'] .composer-bar .approval-chip .chip-text {
-  display: inline;
-}
-body[data-surface='chat'] .composer-bar .usage {
+.mode-icon {
   display: inline-flex;
+}
+.mode-icon[data-mode='ask'] {
+  color: var(--c-mode-ask);
+}
+.mode-icon[data-mode='edits'] {
+  color: var(--c-mode-edits);
+}
+.mode-icon[data-mode='full'] {
+  color: var(--c-mode-full);
+}
+body[data-surface='chat'] .composer-bar button.chip-btn.stop-btn {
+  color: var(--c-bad);
+}
+body[data-surface='chat'] .composer-bar .agents-btn {
+  gap: 4px;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-pop .popover {
+  width: 300px;
+  padding: 4px 0;
+}
+.usage-rows {
+  display: grid;
+}
+.usage-row {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  color: var(--c-text);
+  font-size: var(--t-sm);
+}
+.usage-row + .usage-row {
+  border-top: 1px solid var(--c-line);
+}
+.usage-row .hint {
+  color: var(--c-mute);
+}
+.usage-label {
+  color: var(--c-mute);
+  font-size: var(--t-xs);
+}
+.usage-row .pop {
+  justify-self: start;
+}
+.segmented {
+  display: flex;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segmented button {
+  flex: 1;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--c-soft);
+  font-size: var(--t-xs);
+}
+.segmented button + button {
+  border-left: 1px solid var(--c-line);
+}
+.segmented button[aria-checked='true'] {
+  background: var(--c-surface2);
+  color: var(--c-text);
+  font-weight: 600;
+}
+.agents-pop .popover {
+  min-width: 280px;
+  max-width: 360px;
+}
+.agent-row {
+  display: grid !important;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: center;
+  height: auto !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+.agent-row .menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-row .menu-sub {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

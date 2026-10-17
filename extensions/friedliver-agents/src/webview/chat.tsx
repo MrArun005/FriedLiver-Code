@@ -44,11 +44,11 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, approvalTone, composerMode, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
+import { AlwaysAllow, ApprovalMenu, AutoBadge, UsageSettings, approvalTone, composerMode, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
-import { RunningAgents, SubagentCard } from './subagents';
+import { AgentsButton, RunningAgents, SubagentCard } from './subagents';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -130,6 +130,7 @@ function App() {
               setRefs={(fn) => setRefs((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
               focusTick={focusTick}
               found={found?.chatId === chat.id ? found : null}
+              linked={state.chats.filter((c) => c.origin?.chatId === chat.id && !c.archived)}
             />
           </>
         ) : (
@@ -1043,7 +1044,9 @@ function Composer({
   setRefs,
   focusTick,
   found,
+  linked,
 }: {
+  linked: ChatView[];
   chat: ChatView;
   attachments: Attachment[];
   setAttachments(fn: (a: Attachment[]) => Attachment[]): void;
@@ -1060,7 +1063,6 @@ function Composer({
   const [shut, setShut] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
-  const compact = useWidth() < 360;
   useEffect(() => area.current?.focus(), [chat.id, focusTick]);
 
   const setText = (value: string) => {
@@ -1310,48 +1312,54 @@ function Composer({
         )}
         <div class="composer-bar">
           <span class="bar-left">
-          <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
-            <Icon name="plus" />
-          </button>
-          {asking ? (
-            <span class="composer-agent">
-              <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
-            </span>
-          ) : (
-            <SessionControls chat={chat} compact={compact} />
-          )}
-          {hint && <span class="hint composer-hint">{hint}</span>}
+            <Popover label="Add" title="Attach images or dictate" buttonClass="chip-btn icon-btn attach-btn" trigger={<Icon name="plus" />}>
+              {(close) => (
+                <>
+                  <button role="menuitem" onClick={() => (close(false), send({ type: 'attach', chatId: chat.id }))}>
+                    <span class="menu-label">Attach images</span>
+                  </button>
+                  {MAC && (
+                    <button
+                      role="menuitem"
+                      class="mic-item"
+                      onClick={() => {
+                        // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
+                        close(false);
+                        area.current?.focus();
+                        setMicHint(true);
+                      }}
+                    >
+                      <span class="menu-label">Dictate (Fn Fn)</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </Popover>
+            {asking && (
+              <span class="composer-agent">
+                <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
+              </span>
+            )}
+            {hint && <span class="hint composer-hint">{hint}</span>}
           </span>
           <span class="bar-right">
-          <UsageMeter usage={chat.session?.usage} compact={compact} />
-          {chat.busy && (
-            <button class="ghost danger sm" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-              <Icon name="stop" /> {!compact && 'Stop'}
-            </button>
-          )}
-          {MAC && (
+            {chat.busy && (
+              <button class="chip-btn icon-btn stop-btn" aria-label="Stop" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+                <Icon name="stop" />
+              </button>
+            )}
+            <AgentsButton chat={chat} linked={linked} />
+            <UsageSettings chat={chat} />
+            <ApprovalMenu chat={chat} bare />
             <button
-              class="chip-btn icon-btn mic-btn"
-              aria-label="Dictate"
-              title="Dictate: press Fn twice in the message box"
-              onClick={() => {
-                // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
-                area.current?.focus();
-                setMicHint(true);
-              }}
+              class="primary send-btn"
+              onClick={submit}
+              disabled={!canSend}
+              aria-label={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
+              title={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
             >
-              <Icon name="mic" />
+              <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
             </button>
-          )}
-          <button
-            class="primary send-btn"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-            title={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
-          >
-            <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
-          </button>
           </span>
         </div>
       </div>

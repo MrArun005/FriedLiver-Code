@@ -4,7 +4,7 @@
 import { useState } from 'preact/hooks';
 import type { ChatView } from '../shared/model';
 import { shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem } from '../shared/view';
-import { Dot, Markdown, scrollBehavior, send, useNow } from './common';
+import { Dot, Icon, Markdown, Popover, scrollBehavior, send, useNow } from './common';
 import { Steps } from './steps';
 
 const DOT = { working: 'working', done: 'done', failed: 'error' } as const;
@@ -79,5 +79,57 @@ export function RunningAgents({ chat }: { chat: ChatView }) {
         </span>
       ))}
     </nav>
+  );
+}
+
+/** Scrolls the chat to a subagent's card and focuses it. */
+function goTo(id: string) {
+  const el = document.getElementById(`item-${id}`);
+  el?.scrollIntoView({ block: 'center', behavior: scrollBehavior() });
+  el?.querySelector<HTMLButtonElement>('.sa-head')?.focus({ preventScroll: true });
+}
+
+/**
+ * The composer's agents button: how many of this chat's agents run (subagents,
+ * hand-offs and consultations), and a list of them. Hidden when there are none.
+ */
+export function AgentsButton({ chat, linked }: { chat: ChatView; linked: ChatView[] }) {
+  const now = useNow(chat.busy || linked.some((c) => c.busy) ? 1000 : 3_600_000);
+  const subs = subagents(chat);
+  if (!subs.length && !linked.length) return null;
+  const running = subs.filter((s) => s.state === 'working').length + linked.filter((c) => c.busy).length;
+  const title = `${running} agent${running === 1 ? '' : 's'} running in this chat`;
+  return (
+    <Popover label="Agents in this chat" title={title} align="end" buttonClass="chip-btn agents-btn" class="agents-pop" trigger={<><Icon name="tasks" /><span class="agents-count">{running}</span></>}>
+      {(close) => (
+        <>
+          <div class="pop-title" aria-hidden="true">Agents in this chat</div>
+          {subs.map((s) => {
+            const ms = elapsed(s, now);
+            return (
+              <button key={s.id} role="menuitem" class="agent-row" onClick={() => (close(false), goTo(s.id))}>
+                <Dot state={DOT[s.state]} still={s.state !== 'working'} />
+                <span class="menu-label">{s.title}</span>
+                {ms !== undefined && <span class="hint">{shortDuration(ms)}</span>}
+                <span class="menu-sub">{s.last ?? (s.state === 'working' ? 'Starting…' : 'Done')}</span>
+              </button>
+            );
+          })}
+          {linked.map((c) => (
+            <button key={c.id} role="menuitem" class="agent-row" onClick={() => (close(false), send({ type: 'openChat', chatId: c.id }))}>
+              <Dot state={c.busy ? 'working' : 'done'} still={!c.busy} />
+              <span class="menu-label">{c.label}: {c.title}</span>
+              <span class="hint">{shortDuration(Math.max(0, now - c.createdAt))}</span>
+              <span class="menu-sub">{c.origin?.kind === 'consult' ? 'Consultation' : 'Hand-off'}</span>
+            </button>
+          ))}
+          <div class="pop-section">
+            <button role="menuitem" onClick={() => (close(false), send({ type: 'openTasks' }))}>
+              <span class="menu-label">Open Agent Manager</span>
+            </button>
+          </div>
+        </>
+      )}
+    </Popover>
   );
 }

@@ -21,15 +21,15 @@ import {
   planToggle,
   planning,
   reportedMode,
+  turnsLeft,
   usagePercent,
   type AgentDefaults,
   type ApprovalLevel,
   type ChatSession,
   type SessionOption,
-  type Usage,
 } from '../shared/session';
 import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
-import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, memo, send } from './common';
+import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -47,40 +47,12 @@ export function composerMode(tone: string): 'ask' | 'edits' | 'full' {
   return tone === 'full' ? 'full' : tone === 'edits' || tone === 'auto' ? 'edits' : 'ask';
 }
 
-type ControlsProps = { chat: ChatView; compact?: boolean };
-
-/** Approval level, model and effort, as chips under the message box. Drawn again only when they change, not per streamed chunk. */
-export const SessionControls = memo(
-  SessionControlsView,
-  (a: ControlsProps, b: ControlsProps) =>
-    a.compact === b.compact &&
-    a.chat.id === b.chat.id &&
-    a.chat.session === b.chat.session &&
-    a.chat.approval === b.chat.approval &&
-    a.chat.label === b.chat.label &&
-    a.chat.agent === b.chat.agent,
-);
-
-function SessionControlsView({ chat, compact }: ControlsProps) {
-  const session = chat.session;
-  const { model, effort, modelConfig, other } = optionGroups(session);
-  const later = session && !session.live ? ` Applies when ${chat.label} starts.` : '';
-  return (
-    <span class="session-controls">
-      <ApprovalMenu chat={chat} compact={compact} />
-      {model && <OptionMenu chat={chat} option={model} extra={[...modelConfig, ...other]} icon="model" later={later} />}
-      {!model && (modelConfig.length > 0 || other.length > 0) && <OptionMenu chat={chat} option={[...modelConfig, ...other][0]} extra={[...modelConfig, ...other].slice(1)} icon="model" later={later} />}
-      {effort && <OptionMenu chat={chat} option={effort} extra={[]} icon="gauge" later={later} />}
-    </span>
-  );
-}
-
 /**
  * FriedLiver's levels (Ask, Auto-accept edits, Full auto), Plan, and the
  * agent's own modes. The chip reads the level; its color, the mode the agent
  * reports, so a mode FriedLiver didn't choose can't go unseen.
  */
-export function ApprovalMenu({ chat, compact }: { chat: ChatView; compact?: boolean }) {
+export function ApprovalMenu({ chat, compact, bare }: { chat: ChatView; compact?: boolean; bare?: boolean }) {
   const level = chat.approval ?? 'ask';
   const mode = modeOption(chat.session);
   const reported = reportedMode(chat.session);
@@ -94,15 +66,22 @@ export function ApprovalMenu({ chat, compact }: { chat: ChatView; compact?: bool
     <Popover
       label="How much the agent may do without asking"
       title={title}
-      buttonClass="chip-btn approval-chip"
+      buttonClass={bare ? 'chip-btn icon-btn mode-btn' : 'chip-btn approval-chip'}
       class="chip-pop"
+      align={bare ? 'end' : 'start'}
       trigger={
+        bare ? (
+          <span class="mode-icon" data-mode={composerMode(tone)}>
+            <Icon name={level === 'full' && !inPlan ? 'bolt' : 'shield'} />
+          </span>
+        ) : (
         <>
           <span class="chip-tone" data-tone={tone} aria-hidden="true" />
           <Icon name={level === 'full' && !inPlan ? 'bolt' : 'shield'} />
           {!compact && <span class="chip-text">{name}</span>}
           <Icon name="chevron" />
         </>
+        )
       }
     >
       {(close) => (
@@ -263,23 +242,66 @@ function OptionChoices({ chat, option, close, titled }: { chat: ChatView; option
   );
 }
 
-/** How full the agent's context is, and what the session cost, when the agent says. */
-export const UsageMeter = memo(function UsageMeter({ usage, compact }: { usage?: Usage; compact?: boolean }) {
-  if (!usage) return null;
-  const pct = usagePercent(usage);
-  const level = pct >= 90 ? 'high' : pct >= 75 ? 'warn' : undefined;
-  const cost = usage.cost ? formatCost(usage.cost) : '';
-  const title = `${pct}% of the model's context window used (${formatTokens(usage.used)} of ${formatTokens(usage.size)} tokens)${cost ? `. ${cost} spent in this chat so far` : ''}${level ? '. Nearly full: /compact or a new chat clears it.' : ''}`;
+/**
+ * One button for usage, model and effort: hovering or clicking opens a small
+ * dialog with the context and cost, the model, and the effort (or speed).
+ */
+export function UsageSettings({ chat }: { chat: ChatView }) {
+  const usage = chat.session?.usage;
+  const { model, effort, modelConfig, other } = optionGroups(chat.session);
+  const pick = model ?? [...modelConfig, ...other][0];
+  const extra = model ? [...modelConfig, ...other] : [...modelConfig, ...other].slice(1);
+  const later = chat.session && !chat.session.live ? ` Applies when ${chat.label} starts.` : '';
+  const pct = usage ? usagePercent(usage) : undefined;
+  const turns = usage ? turnsLeft(usage, chat.turns) : undefined;
+  const title = [pct !== undefined && `Context ${pct}%`, pick && choiceName(pick), effort && choiceName(effort)].filter(Boolean).join(' · ') || 'Usage and model';
   return (
-    <span class="usage" data-level={level} title={title} role="img" aria-label={title}>
-      <span>
-        {!compact && <span class="usage-word">Context </span>}
-        {pct}%
-      </span>
-      {!compact && cost && <span class="usage-cost">{cost} this chat</span>}
-    </span>
+    <Popover label="Usage, model and effort" title={title} kind="dialog" hover align="end" buttonClass="chip-btn icon-btn usage-btn" class="usage-pop" trigger={<Icon name="gauge" />}>
+      {() => (
+        <div class="usage-rows">
+          <div class="usage-row" data-row="usage">
+            {usage ? (
+              <>
+                <div>
+                  Context {pct}% · {formatTokens(Math.max(0, usage.size - usage.used))} of {formatTokens(usage.size)} tokens left
+                </div>
+                {usage.cost && <div>{formatCost(usage.cost)} this chat</div>}
+                {turns !== undefined && <div class="hint">Context lasts ~{turns} more turns (estimate)</div>}
+              </>
+            ) : (
+              <div class="hint">No usage reported yet</div>
+            )}
+          </div>
+          {pick && (
+            <div class="usage-row" data-row="model">
+              <span class="usage-label">{pick.name}</span>
+              <OptionMenu chat={chat} option={pick} extra={extra} icon="model" later={later} />
+            </div>
+          )}
+          {effort && (
+            <div class="usage-row" data-row="effort">
+              <span class="usage-label">{effort.name}</span>
+              <span class="segmented" role="radiogroup" aria-label={effort.name}>
+                {effort.choices.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={effort.current === c.value}
+                    title={c.description ?? c.name}
+                    onClick={() => send({ type: 'setOption', chatId: chat.id, optionId: effort.id, value: c.value })}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </Popover>
   );
-});
+}
 
 /** The mode the agent says it is in, loud when it runs without asking. */
 export function ModeBadge({ session, agent }: { session?: ChatSession; agent: AgentKey }) {
