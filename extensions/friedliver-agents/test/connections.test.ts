@@ -245,6 +245,6 @@ describe('connected chats on the board', () => {
       ...base,
       items: [{ kind: 'bridge', requestId: 'bridge-1', tool: 'ask_agent', target: { agent: 'claude' }, text: 'hi', state: 'awaiting' }],
     };
-    expect(stateLine(asking)).toMatchObject({ text: 'Gemini wants to ask Claude', decision: { kind: 'bridge', id: 'bridge-1' } });
+    expect(stateLine(asking)).toMatchObject({ text: 'Wants to ask Claude', decision: { kind: 'bridge', id: 'bridge-1' } });
   });
 });
