@@ -402,7 +402,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         </button>
       </div>
       <div class="tip-title">{info?.title ?? sub.title}</div>
-      <div class="tip-meta">of {chat ? `${chat.label}: ${chat.title}` : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
+      <div class="tip-meta" title={chat?.label}>of {chat ? chat.title : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
       {steps.length > 0 && (
         <ol class="map-detail-steps" aria-label="Steps">
           {steps.slice(-8).map((t) => (
@@ -416,7 +416,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
       {!steps.length && !answer && <div class="tip-line">{session ? 'Its steps are in that session\'s transcript; FriedLiver lists only its title and state.' : 'No steps reported yet.'}</div>}
       {chat && (
         <button class="link" onClick={() => send({ type: 'openChat', chatId: chat.id, item: sub.item })}>
-          Show in {chat.label}
+          Show in its chat
         </button>
       )}
     </aside>

@@ -761,6 +761,50 @@ async function shoot() {
   }
 
   {
+    // Board polish: one tidy action row (the primary action, connections on hover or focus, ⋯ for the rest);
+    // other chats by their topic, never "Claude 1"; calm cards (12px rhythm, one meta line, titles at most two lines).
+    const p = await open('surface=tasks&theme=dark-2026&view=board', 1440, 900);
+    const rows = await p.evaluate(() =>
+      [...document.querySelectorAll('.task-card .card-actions')].map((a) => {
+        const mids = [...a.querySelectorAll('button')].filter((b) => b.offsetWidth).map((b) => b.getBoundingClientRect()).map((r) => r.top + r.height / 2);
+        return { spread: Math.max(...mids) - Math.min(...mids), h: a.getBoundingClientRect().height };
+      }),
+    );
+    check(rows.length > 0 && rows.every((r) => r.spread <= 4 && r.h <= 30), `every card's actions are one row [${rows.map((r) => Math.round(r.h)).join(', ')}]`);
+    const card = p.locator('[data-nav="chat-g1"]');
+    const shown = () => card.locator('.card-connect').evaluate((el) => window.getComputedStyle(el).opacity);
+    await p.mouse.move(0, 0);
+    check((await shown()) === '0', 'Hand off, Ask and Pipe to wait out of sight');
+    await card.hover();
+    check((await shown()) === '1', 'they show on hover');
+    await p.mouse.move(0, 0);
+    await card.focus();
+    check((await shown()) === '1', 'and when the card has keyboard focus');
+    await card.locator('.card-more').click();
+    const items = await p.locator('.popover[role="menu"] [role^="menuitem"]').allInnerTexts();
+    check(['Open chat', 'View changes', 'Ask another agent…'].every((t) => items.some((i) => i.includes(t))) && items.some((i) => i.includes('Claude')) && items.some((i) => i.includes('Rename')), `⋯ holds Open, View changes, Hand off, Ask, Pipe to and the rest [${items.join(' | ')}]`);
+    check((await p.locator('.popover .pop-title:text-is("Hand off to")').count()) === 1 && (await p.locator('.popover .pop-title:has-text("Send each finished turn to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
+    await p.keyboard.press('Escape');
+    const calm = await p.evaluate(() => {
+      const c = document.querySelector('.task-card');
+      const cs = window.getComputedStyle(c);
+      const metas = [...document.querySelectorAll('.task-card .card-meta')].map((m) => m.getBoundingClientRect().height / parseFloat(window.getComputedStyle(m).lineHeight));
+      const titles = [...document.querySelectorAll('.task-card .card-title')].map((t) => t.getBoundingClientRect().height / parseFloat(window.getComputedStyle(t).lineHeight));
+      return { pad: cs.paddingTop, side: cs.paddingLeft, gap: cs.rowGap, metas, titles };
+    });
+    check(calm.pad === '12px' && calm.side === '12px' && calm.gap === '12px', `cards keep a 12px rhythm [${calm.pad} ${calm.side} ${calm.gap}]`);
+    check(calm.metas.length > 0 && calm.metas.every((n) => n <= 1.05), `files, turns and age are one muted line [${calm.metas.map((n) => n.toFixed(2))}]`);
+    check(calm.titles.every((n) => n <= 2.05), `titles take at most two lines [${calm.titles.map((n) => n.toFixed(2))}]`);
+    await p.close();
+    for (const view of ['board', 'list', 'map']) {
+      const q = await open(`surface=tasks&theme=dark-2026&view=${view}`, 1440, 900);
+      if (view === 'map') await q.hover('[data-nav="chat-c1"]');
+      const labels = await q.evaluate(() => document.querySelector('.manager').innerText.match(/\b(Claude|Codex|Gemini|Demo) \d+\b/g) ?? []);
+      check(labels.length === 0, `the ${view} names chats by topic, never by label [${labels.slice(0, 5)}]`);
+      await q.close();
+    }
+  }
+  {
     // Nothing spills out of a card, list row or map node, at any card width: pills shrink, wrap or cut with an ellipsis.
     const spills = (p, container) =>
       p.evaluate((sel) => {
