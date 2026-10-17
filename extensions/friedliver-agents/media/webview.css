@@ -1466,6 +1466,9 @@ td.c-act {
     overflow: hidden;
     font-size: 0;
   }
+  .chat-table :is(.c-activity, .c-files, .c-age) > * {
+    display: none;
+  }
 }
 @media (max-width: 600px) {
   .chat-table .c-agent {
@@ -1474,8 +1477,7 @@ td.c-act {
     overflow: hidden;
     font-size: 0;
   }
-  .chat-table .c-agent > *,
-  .chat-table :is(.c-activity, .c-files, .c-age) > * {
+  .chat-table .c-agent > * {
     display: none;
   }
 }
