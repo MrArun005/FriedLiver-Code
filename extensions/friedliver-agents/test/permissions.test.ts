@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Permissions, appBundle, isSensitive, type Store } from '../src/host/permissions';
+import { Permissions, appBundle, isSensitive, userDataDir, type Store } from '../src/host/permissions';
 import { describeGrant, grantId, isGrant, siteOrigin, type Grant } from '../src/shared/permissions';
 
 /** A Memento kept in a plain object, like VS Code's globalState / workspaceState across restarts. */
@@ -169,6 +169,25 @@ describe('folder rules', () => {
     expect(p.folder(path.join(h, 'proj/src/keys/authorized_keys'), 'write')).toBeUndefined();
   });
 
+  it('never cover credentials and config in home, ~/Library, or FriedLiver’s own data, for reading or writing', () => {
+    const h = home();
+    const userData = path.join(h, 'fl-user-data');
+    for (const d of ['.claude', '.codex', '.gemini', '.config/gh', 'Library/LaunchAgents', 'Library/Application Support/Google', 'fl-user-data/User/globalStorage']) mkdirSync(path.join(h, d), { recursive: true });
+    for (const f of ['.npmrc', '.netrc', '.zshrc']) writeFileSync(path.join(h, f), '');
+    const { p } = store(h, undefined, undefined, [userData]);
+    for (const f of ['.claude', '.codex', '.gemini', '.config', '.config/gh', 'Library', 'Library/LaunchAgents', 'Library/Application Support', 'Library/Application Support/Google', 'fl-user-data', 'fl-user-data/User/globalStorage']) {
+      for (const access of ['read', 'write'] as const) expect(p.add({ kind: 'folder', folder: path.join(h, f), access }), `${f} ${access}`).toBe(false);
+    }
+    for (const f of ['.npmrc', '.netrc', '.zshrc', '.claude/settings.json', 'Library/LaunchAgents/x.plist', 'fl-user-data/User/settings.json']) {
+      expect(isSensitive(path.join(h, f), h, [userData], 'read'), f).toBe(true);
+      expect(p.folderCandidates([path.join(h, f)], 'write', []), f).toEqual([]);
+      expect(p.folderCandidates([path.join(h, f)], 'read', []), f).toEqual([]);
+    }
+    // ~/Library is never offered as the top folder; ~/Desktop still is.
+    expect(p.folderCandidates([path.join(h, 'Library/Application Support/Google/x')], 'read', [])).toEqual([]);
+    expect(p.folderCandidates([path.join(h, 'Desktop/trip/plan.txt')], 'write', []).map((g) => g.kind === 'folder' && g.folder)).toContain(path.join(h, 'Desktop'));
+  });
+
   it('offer the file’s folder, the project and the top folder in home, most specific first', () => {
     const { h, p } = store();
     const roots = [path.join(h, 'proj')];
@@ -188,6 +207,7 @@ describe('the app itself', () => {
   it('is the .app bundle around the app root', () => {
     expect(appBundle('/Applications/FriedLiver.app/Contents/Resources/app')).toBe('/Applications/FriedLiver.app');
     expect(appBundle('/opt/friedliver/resources/app')).toBe('/opt/friedliver/resources/app');
+    expect(userDataDir('/Users/a/Library/Application Support/FriedLiver/User/globalStorage/friedliver.friedliver-agents')).toBe('/Users/a/Library/Application Support/FriedLiver');
   });
 });
 

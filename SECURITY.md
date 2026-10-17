@@ -129,10 +129,13 @@ vendors' own permission settings as part of your setup.
   Codex, Gemini, Claude Code outside FriedLiver), and answers the agent's own
   permission prompts with its one-time allow. Websites and tools are kept in
   your profile's global storage, folders and commands in this workspace's.
-  Never offered or applied in read-only chats or inline edits; keys,
-  credentials and system places (`~/.ssh`, `~/.aws`, `~/.gnupg`, keychains,
-  `/etc`, the FriedLiver app, and for writes any `.git` folder) are Allow once
-  only; home and anything above it can't be always allowed. A browser action
+  Never offered or applied in read-only chats or inline edits. Allow once
+  only: every dot file and folder directly in home (`~/.ssh`, `~/.aws`,
+  `~/.claude`, `~/.codex`, `~/.gemini`, `~/.config`, `~/.npmrc`, `~/.netrc`,
+  `~/.zshrc`…), all of `~/Library` (keychains, LaunchAgents, Application
+  Support), system folders (`/etc`, `/Library`, `/System`, `/usr`), the
+  FriedLiver app and its user data, and for writes any `.git` folder; home and
+  anything above it can't be always allowed. A browser action
   allowed by a website rule still checks the page's origin just before it acts.
   **FriedLiver: Manage Permissions** (also "Manage" on approval notifications)
   shows what, where, when and which agent asked, with Revoke and Revoke all.
