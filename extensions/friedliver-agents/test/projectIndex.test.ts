@@ -108,6 +108,28 @@ describe('what is never indexed', () => {
     expect(ix.search('outsideonly', 10)).toEqual([]);
     expect(ix.has('in.ts')).toBe(true);
   });
+
+  it('returns no content from a file swapped for a symlink after indexing', async () => {
+    const outside = await project({ 'leak.ts': 'needle outsidesecret' });
+    const root = await project({ 'a.ts': 'needle inside' });
+    const ix = await build(root);
+    await rm(path.join(root, 'a.ts'));
+    await symlink(path.join(outside, 'leak.ts'), path.join(root, 'a.ts'));
+    const out = await answerIndex([ix], { tool: 'index_search', query: 'needle' }, false);
+    expect(out).not.toContain('outsidesecret');
+    expect(ix.has('a.ts')).toBe(false);
+  });
+
+  it('drops saved entries that point outside the folder or at secrets', async () => {
+    const outside = await project({ 'leak.ts': 'outsidesecret' });
+    const root = await project({ 'ok.ts': 'fine' });
+    await symlink(path.join(outside, 'leak.ts'), path.join(root, 'link.ts'));
+    const doc = (rel: string) => ({ rel, mtime: 0, size: 1, len: 1, tokens: [['outsidesecret', 1]], symbols: [], imports: [] });
+    const ix = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
+    await ix.load({ v: 1, docs: [doc('link.ts'), doc('.env'), doc('gone.ts'), doc('ok.ts')] });
+    expect(['link.ts', '.env', 'gone.ts'].map((r) => ix.has(r))).toEqual([false, false, false]);
+    expect(ix.has('ok.ts')).toBe(true);
+  });
 });
 
 describe('incremental updates and caps', () => {
@@ -119,7 +141,7 @@ describe('incremental updates and caps', () => {
     expect(ix.search('zebra', 5)).toEqual([]);
     expect(ix.search('quokka', 5)[0].rel).toBe('a.ts');
     const copy = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
-    copy.load(JSON.parse(JSON.stringify(ix)));
+    await copy.load(JSON.parse(JSON.stringify(ix)));
     expect(copy.search('quokka', 5)[0].rel).toBe('a.ts');
     await rm(path.join(root, 'a.ts'));
     await ix.update('a.ts');
