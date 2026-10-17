@@ -684,9 +684,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         {(reportedMode(chat.session)?.tone === 'full' || reportedMode(chat.session)?.tone === 'auto') && chat.approval !== 'full' && <ModeBadge session={chat.session} agent={chat.agent} />}
         {chat.merged && <span class="tag">merged</span>}
         {chat.branch && (
-          <span class="chip" title={chat.cwd}>
+          <span class="chip" title={`${chat.branch}\n${chat.cwd}`}>
             <Icon name="branch" />
-            {chat.branch}
+            <span class="chip-text">{chat.branch}</span>
           </span>
         )}
       </div>
@@ -1021,16 +1021,16 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
             {c.title}
           </span>
           {c.branch && (
-            <span class="chip">
+            <span class="chip" title={c.branch}>
               <Icon name="branch" />
-              {c.branch}
+              <span class="chip-text">{c.branch}</span>
             </span>
           )}
         </div>
         <div class="cell-line" data-decision={line.decision ? '' : undefined}>
           <span class="cell-line-text">{line.code ? `${line.text}: ${line.code}` : line.text}</span>
           {badges.map((b) => (
-            <span key={b.text} class="mini-badge" data-kind={b.kind}>
+            <span key={b.text} class="mini-badge" data-kind={b.kind} title={b.text}>
               {b.text}
             </span>
           ))}

@@ -1255,6 +1255,15 @@ button.count-item .icon {
   width: 13px;
   height: 13px;
 }
+/* A card's answers wrap their words rather than run past its edge. */
+.task-card button.sm {
+  max-width: 100%;
+  height: auto;
+  min-height: 26px;
+  padding-block: var(--sp-1);
+  white-space: normal;
+  text-align: left;
+}
 .card-actions {
   display: flex;
   align-items: center;
@@ -1479,7 +1488,13 @@ td.c-act > * + * {
 }
 .cell-title .chip {
   flex: 0 1 auto;
+  min-width: 32px;
   height: 18px;
+}
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cell-line {
   display: flex;
@@ -1494,7 +1509,11 @@ td.c-act > * + * {
   color: var(--decision);
 }
 .mini-badge {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 0 6px;
   border-radius: var(--r-pill);
   background: var(--pill-bg);
