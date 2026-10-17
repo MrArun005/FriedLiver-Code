@@ -33,7 +33,7 @@ import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Sur
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
-import { appBundle, Permissions } from './host/permissions';
+import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
@@ -170,8 +170,8 @@ export class Controller {
       user: context.globalState,
       workspace: context.workspaceState,
       home: os.homedir(),
-      // The app itself: an agent never gets to change FriedLiver without asking.
-      sensitive: [appBundle(vscode.env.appRoot)],
+      // The app itself and its data (settings, extensions' storage, these rules): an agent never gets to change FriedLiver without asking.
+      sensitive: [appBundle(vscode.env.appRoot), userDataDir(context.globalStorageUri.fsPath)],
       onChange: () => this.postPermissions(),
     });
     const noFolderCwd = path.join(context.globalStorageUri.fsPath, 'no-folder');

@@ -21,21 +21,33 @@ const MAX_PER_KEY = 100;
 type Saved = Grant & { at?: number; agent?: string };
 
 /**
- * Places never always allowed: keys, credentials, system settings, FriedLiver itself; for writes
- * also git internals (hooks and config run programs). Allow once still works there.
+ * Places never always allowed, to read or write (Allow once still works there): system folders,
+ * FriedLiver itself and its data (`extra`), and in home every dot file and folder (keys, credentials,
+ * shell and tool config: .ssh, .aws, .claude, .codex, .gemini, .config, .npmrc, .netrc, .zshrc…)
+ * and ~/Library (keychains, LaunchAgents, other apps' data). For writes also git internals.
  */
-const SENSITIVE_IN_HOME = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', 'Library/Keychains'];
-const SENSITIVE = ['/etc', '/private/etc', '/Library/Keychains', '/System', '/usr', '/bin', '/sbin'];
+const SENSITIVE = ['/etc', '/private/etc', '/Library', '/System', '/usr', '/bin', '/sbin'];
+
+function homeSensitive(real: string, home: string): boolean {
+  if (real === home || !within(home, real)) return false;
+  const first = path.relative(home, real).split(path.sep)[0];
+  return first.startsWith('.') || first.toLowerCase() === 'library';
+}
 
 /** The .app around VS Code's appRoot (…/FriedLiver.app/Contents/Resources/app); appRoot itself elsewhere. */
 export function appBundle(appRoot: string): string {
   return /^(.*?\.app)(?=[\\/])/.exec(appRoot)?.[1] ?? appRoot;
 }
 
+/** The editor's user-data folder, from an extension's globalStorage (<user data>/User/globalStorage/<extension>). */
+export function userDataDir(globalStorage: string): string {
+  return path.resolve(globalStorage, '..', '..', '..');
+}
+
 export function isSensitive(real: string, home: string, extra: readonly string[], access: Access = 'write'): boolean {
   if (access === 'write' && real.split(/[\\/]/).includes('.git')) return true;
-  const bases = [...SENSITIVE_IN_HOME.map((p) => path.join(home, p)), ...SENSITIVE, ...extra];
-  return bases.some((b) => [b, realPath(b) ?? b].some((base) => within(base, real)));
+  if ([home, realPath(home) ?? home].some((h) => homeSensitive(real, h))) return true;
+  return [...SENSITIVE, ...extra].some((b) => [b, realPath(b) ?? b].some((base) => within(base, real)));
 }
 
 function within(folder: string, file: string): boolean {
@@ -51,7 +63,7 @@ export class Permissions {
       user: Store;
       workspace: Store;
       home: string;
-      /** More places never always allowed for writes: the FriedLiver app bundle. */
+      /** More places never always allowed: the FriedLiver app bundle and its user data. */
       sensitive?: string[];
       now?: () => number;
       onChange?: () => void;
