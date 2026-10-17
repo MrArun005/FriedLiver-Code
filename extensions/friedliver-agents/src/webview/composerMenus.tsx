@@ -4,14 +4,14 @@ import { Fragment, type ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
-import { APPROVAL_HINTS, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
+import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
 /** Short names, as on the mode button. */
-export const MODE_NAMES: Record<ApprovalLevel | 'plan', string> = { ask: 'Manual', edits: 'Edit automatically', plan: 'Plan', full: 'Auto' };
+export const MODE_NAMES: Record<ApprovalLevel | 'plan', string> = { ...APPROVAL_NAMES, plan: 'Plan' };
 const MODE_ICONS: Record<ApprovalLevel | 'plan', IconName> = { ask: 'hand', edits: 'code', plan: 'plan', full: 'bolt' };
 
 export function currentMode(chat: Pick<ChatView, 'approval' | 'session'>): ApprovalLevel | 'plan' {
@@ -275,7 +275,7 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
     { label: 'Attach file…', run: () => send({ type: 'attach', chatId: chat.id }) },
     { label: 'Mention file from this project…', run: mention },
     ...(commands.some((c) => c.name === 'clear') ? [{ label: 'Clear conversation', run: () => command('clear', true) }] : []),
-    ...(chat.items.some((i) => i.kind === 'user' && i.checkpoint) ? [{ label: 'Rewind', run: () => send({ type: 'rewind', chatId: chat.id }) }] : []),
+    ...(chat.items.some((i) => i.kind === 'user' && i.checkpoint) ? [{ label: 'Rewind…', run: () => send({ type: 'rewind', chatId: chat.id }) }] : []),
   ].filter((i) => !q || i.label.toLowerCase().includes(q));
   const switchModel = !q || 'switch model'.includes(q);
   // One list for the / button and a typed /: FriedLiver's commands, then the agent's (shared/view.ts slashMenu).

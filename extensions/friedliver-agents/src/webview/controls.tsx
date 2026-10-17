@@ -56,9 +56,9 @@ export function ModeBadge({ session, agent }: { session?: ChatSession; agent: Ag
 export function AutoBadge({ chat, short }: { chat: Pick<ChatView, 'approval'>; short?: boolean }) {
   if (chat.approval !== 'full') return null;
   return (
-    <span class="auto-badge" title="Full auto: edits and commands go through without asking">
+    <span class="auto-badge" title="Auto: edits and commands go through without asking">
       <Icon name="bolt" />
-      {!short && 'Full auto'}
+      {!short && 'Auto'}
     </span>
   );
 }

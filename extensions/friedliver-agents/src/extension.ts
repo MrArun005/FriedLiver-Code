@@ -237,7 +237,7 @@ export class Controller {
     this.statusItem.color = new vscode.ThemeColor('friedliver.decision');
     this.workingItem.name = 'FriedLiver agents working';
     this.workingItem.command = 'friedliver.openTasks';
-    this.autoItem.name = 'FriedLiver Full auto';
+    this.autoItem.name = 'FriedLiver Auto mode';
     this.autoItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   }
 
@@ -1049,7 +1049,7 @@ export class Controller {
       this.workingItem.hide();
     }
     if (full.length) {
-      this.autoItem.text = `$(zap) Full auto: ${full.length === 1 ? full[0].label : `${full.length} chats`}`;
+      this.autoItem.text = `$(zap) Auto: ${full.length === 1 ? full[0].label : `${full.length} chats`}`;
       this.autoItem.tooltip = `${full.map((c) => c.label).join(', ')} edit${full.length === 1 ? 's' : ''} and run${full.length === 1 ? 's' : ''} commands without asking. Click to see.`;
       this.autoItem.command = { command: 'friedliver.command.show', title: 'Show', arguments: [full[0].id, ''] };
       this.autoItem.show();
@@ -1187,14 +1187,14 @@ export class Controller {
   private async confirmFullAuto(ask: { label: string; agent: string; mode?: string }): Promise<boolean> {
     const mode = ask.mode ? ` FriedLiver switches ${ask.agent} to its "${ask.mode}" mode.` : '';
     const picked = await vscode.window.showWarningMessage(
-      `Run ${ask.label} in Full auto?`,
+      `Run ${ask.label} in Auto?`,
       {
         modal: true,
         detail: `${APPROVAL_HINTS.full}, until you switch the chat back.${mode} In that mode the agent itself may not ask at all; FriedLiver still asks before commands in folders outside the workspace and before plans. Each turn can still be undone from its "Changed files" card.`,
       },
-      'Use Full auto',
+      'Use Auto',
     );
-    return picked === 'Use Full auto';
+    return picked === 'Use Auto';
   }
 
   /** A new task's level: Full auto is confirmed once for all its chats, here. Null: the user said no; undefined: the default. */

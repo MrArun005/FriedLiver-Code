@@ -313,8 +313,8 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       </text>
       <circle class="node-dot" data-state={status} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
       {chat.approval === 'full' && (
-        <g class="node-auto" transform={`translate(${MAP.nodeW - 30} 4)`} aria-label="Full auto">
-          <title>Full auto: edits and commands go through without asking</title>
+        <g class="node-auto" transform={`translate(${MAP.nodeW - 30} 4)`} aria-label="Auto">
+          <title>Auto: edits and commands go through without asking</title>
           <rect width="22" height="12" rx="6" />
           <path d="M12.2 2.2 8.6 6.8h2.6L10.4 9.8l3.6-4.6h-2.6z" />
         </g>
@@ -350,7 +350,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
         <span class="hint">{DOT_LABEL[status]}</span>
       </div>
       <div class="tip-title">{chat.title}</div>
-      {chat.approval === 'full' && <div class="tip-line tip-auto">Full auto: edits and commands go through without asking</div>}
+      {chat.approval === 'full' && <div class="tip-line tip-auto">Auto: edits and commands go through without asking</div>}
       <div class="tip-line" data-decision={line.decision ? '' : undefined}>
         {line.text}
       </div>

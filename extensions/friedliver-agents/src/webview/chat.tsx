@@ -534,7 +534,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                     send({ type: 'rewind', chatId: chat.id });
                   }}
                 >
-                  <Icon name="history" /> Checkpoints…
+                  <Icon name="history" /> Rewind…
                 </button>
                 <button
                   role="menuitem"

@@ -478,7 +478,7 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
               onClick={() => setApproval(l)}
             >
               {l === 'full' && <Icon name="bolt" />}
-              {l === 'ask' ? 'Ask' : l === 'edits' ? 'Edits' : 'Full auto'}
+              {APPROVAL_NAMES[l]}
             </button>
           ))}
         </div>

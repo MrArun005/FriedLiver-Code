@@ -583,7 +583,7 @@ async function shoot() {
     check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && /^turn-/.test(m.turnId)), 'Rewind to here asks the host for that message');
     await p.click('.chat-head-actions button[aria-label="More"]');
     await p.screenshot({ path: path.join(os.homedir(), 'code/rewind-menu.png'), animations: 'disabled', caret: 'hide' });
-    await p.getByRole('menuitem', { name: 'Checkpoints…' }).click();
+    await p.getByRole('menuitem', { name: 'Rewind…' }).click();
     check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && m.turnId === undefined), 'the ⋯ menu opens the checkpoint list');
     await p.close();
   }

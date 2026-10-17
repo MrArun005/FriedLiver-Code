@@ -455,6 +455,29 @@ BLOCKS.F14 = async () => {
   }
 };
 
+// ---- F15: one set of mode names (the composer's) and one name for rewinding ----
+BLOCKS.F15 = async () => {
+  for (const w of [1200, 640]) {
+    const p = await open('surface=tasks&theme=dark-2026&view=board', w, 900);
+    const seg = (await p.locator('.approval-seg [role="radio"]').allInnerTexts()).map((t) => t.trim());
+    check(JSON.stringify(seg) === JSON.stringify(['Manual', 'Edit automatically', 'Auto']), `at ${w}px the Manager's levels use the composer's names [${seg.join(' | ')}]`);
+    const spill = await p.locator('.approval-seg').evaluate((s) => s.scrollWidth > s.clientWidth + 1 || [...s.children].some((c) => c.scrollWidth > c.clientWidth + 1));
+    check(!spill, `at ${w}px the names fit their buttons`);
+    await p.close();
+  }
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  await p.click('.chat-head-actions button[aria-label^="More"]');
+  const more = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+  check(more.some((t) => t.trim() === 'Rewind…') && !more.some((t) => /Checkpoints/.test(t)), `the ⋯ menu says Rewind… [${more.map((t) => t.trim()).join(' | ')}]`);
+  await p.keyboard.press('Escape');
+  await p.click('.cc-slash-btn');
+  const slash = await p.locator('.cc-slash-menu .cc-item-name').allInnerTexts();
+  check(slash.includes('Rewind…'), `the / menu says Rewind… too [${slash.filter((t) => /rewind/i.test(t)).join(' | ')}]`);
+  const auto = await p.evaluate(() => [...document.querySelectorAll('*')].some((e) => !e.children.length && /Full auto/.test(e.textContent ?? '')));
+  check(!auto, 'no "Full auto" left on the page');
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();

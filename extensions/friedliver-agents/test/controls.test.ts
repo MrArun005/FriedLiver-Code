@@ -231,7 +231,7 @@ describe('approval levels and the agent’s own modes', () => {
     await turn;
     expect(seen.reviews).toEqual([]);
     const review = c.chat(chat.id)!.items.find((i) => i.kind === 'review');
-    expect(review).toMatchObject({ state: 'accepted', auto: 'Auto-accept edits' });
+    expect(review).toMatchObject({ state: 'accepted', auto: 'Edit automatically' });
     const changes = c.chat(chat.id)!.items.find((i) => i.kind === 'changes');
     expect(changes).toMatchObject({ files: [path.join(dir, 'NOTES.md')] });
     await c.undo(chat.id, changes!.kind === 'changes' ? changes!.turnId : '');
@@ -246,7 +246,7 @@ describe('approval levels and the agent’s own modes', () => {
     expect(seen.reviews).toEqual([]);
     expect(seen.commands).toEqual([]);
     const command = c.chat(chat.id)!.items.find((i) => i.kind === 'command');
-    expect(command).toMatchObject({ state: 'exited', exitCode: 0, auto: 'Full auto' });
+    expect(command).toMatchObject({ state: 'exited', exitCode: 0, auto: 'Auto' });
     expect(c.chat(chat.id)!.items.some((i) => i.kind === 'review' && i.auto === 'Full auto')).toBe(true);
   });
 });

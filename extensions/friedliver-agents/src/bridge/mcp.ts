@@ -161,7 +161,7 @@ function browserTools() {
     ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
   });
   const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'A CSS selector, like "#submit" or a [data-fl="12"] one from browser_snapshot.' };
-  const ASKS = ' The user is asked to allow it first unless the chat is on Full auto.';
+  const ASKS = ' The user is asked to allow it first unless the chat is in Auto mode.';
   return [
     tool('browser_open', 'Open a page', 'Opens an http or https URL in FriedLiver\'s browser (opening the browser if needed) and waits for it to load. localhost:3000 works too.' + ASKS, {
       url: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'http://, https://, or a bare localhost:<port> address.' },
