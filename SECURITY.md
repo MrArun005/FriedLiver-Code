@@ -134,8 +134,11 @@ vendors' own permission settings as part of your setup.
   `~/.claude`, `~/.codex`, `~/.gemini`, `~/.config`, `~/.npmrc`, `~/.netrc`,
   `~/.zshrc`…), all of `~/Library` (keychains, LaunchAgents, Application
   Support), system folders (`/etc`, `/Library`, `/System`, `/usr`), the
-  FriedLiver app and its user data, and for writes any `.git` folder; home and
-  anything above it can't be always allowed. A browser action
+  FriedLiver app and its user data; and for writes, config that runs code or
+  steers agents anywhere (`.git`, `.vscode`, `.claude`, `.codex`, `.gemini`,
+  `.cursor`, `.idea`, `.husky`, `.friedliver`, `.github/workflows`, and
+  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, ignoring case). Home and anything
+  above it can't be always allowed. A browser action
   allowed by a website rule still checks the page's origin just before it acts.
   **FriedLiver: Manage Permissions** (also "Manage" on approval notifications)
   shows what, where, when and which agent asked, with Revoke and Revoke all.
