@@ -61,8 +61,11 @@ export interface HubOptions {
   events: HubEvents;
   files: FileHost;
   terminalListener?(agentId: AgentId): TerminalListener;
-  /** MCP servers a chat's session gets, e.g. FriedLiver's own tools. Asked whenever the chat gets a session. */
-  mcpServersFor?(chatId: string): acp.McpServer[];
+  /**
+   * MCP servers a chat's session gets, e.g. FriedLiver's own tools. Asked whenever the chat gets a session;
+   * `agent.http` says whether its agent takes HTTP servers.
+   */
+  mcpServersFor?(chatId: string, agent: { http: boolean }): acp.McpServer[] | Promise<acp.McpServer[]>;
   log?(line: string): void;
 }
 
@@ -409,7 +412,7 @@ export class AgentHub {
   private async openSession(chat: ChatState, agent: RunningAgent): Promise<void> {
     const previous = chat.sessionId;
     const { cwd } = chat;
-    const mcpServers = this.options.mcpServersFor?.(chat.id) ?? [];
+    const mcpServers = (await this.options.mcpServersFor?.(chat.id, { http: agent.conn.supportsHttpMcp })) ?? [];
 
     if (previous && agent.conn.supportsLoadSession) {
       chat.loading = true;

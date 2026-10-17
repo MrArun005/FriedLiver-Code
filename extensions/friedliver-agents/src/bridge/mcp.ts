@@ -1,8 +1,9 @@
-// Just enough of the Model Context Protocol for the FriedLiver tools: a server
-// over stdio that answers initialize, ping, tools/list and tools/call. Every
-// agent session starts its own copy of dist/bridge.js and keeps it for as long
-// as the session lives, so fifteen chats are fifteen of these processes. With
-// the MCP SDK, zod and ajv in it, each one held about 10 MB more than the
+// Just enough of the Model Context Protocol for the FriedLiver tools: answers
+// to initialize, ping, tools/list and tools/call, for the server over stdio
+// (server.ts) and the one over HTTP (http.ts). An agent that takes only stdio
+// servers starts its own copy of dist/bridge.js per session and keeps it for as
+// long as the session lives, so fifteen chats are fifteen of these processes.
+// With the MCP SDK, zod and ajv in it, each one held about 10 MB more than the
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
 import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';

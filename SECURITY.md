@@ -203,7 +203,9 @@ FriedLiver itself contacts Open VSX (extensions, over HTTPS) and, once a week,
 `api.github.com` for the latest FriedLiver release. That check is an anonymous
 GET and can be turned off with `friedliver.updates.check` or `update.mode:
 none`. It runs only in the FriedLiver app. There is no telemetry. Agents talk
-to their own vendors.
+to their own vendors. The Agents extension listens on one port, on 127.0.0.1
+only, for agents that reach the FriedLiver tools over HTTP ("The HTTP
+endpoint" below).
 
 ### Builds
 
@@ -221,8 +223,14 @@ docs/BUILD.md), so verify downloads against `SHA256SUMS.txt`.
 Chats can be connected (docs/CONNECTIONS.md): you hand a chat off, ask another
 agent, pipe one chat's replies into another, or run a task on several agents.
 Agents can do some of that themselves through FriedLiver's MCP server
-(`friedliver`, `dist/bridge.js`), with the tools `list_agents`, `list_chats`,
-`ask_agent`, `send_to_chat` and `read_chat`.
+(`friedliver`), with the tools `list_agents`, `list_chats`, `ask_agent`,
+`send_to_chat` and `read_chat`. An agent that takes MCP servers over HTTP
+(it says so in ACP's `agentCapabilities.mcpCapabilities.http`; Claude's,
+Codex's and Gemini's adapters do) reaches them in the extension host itself
+(`src/bridge/http.ts`); any other starts a tools server for each session
+(`dist/bridge.js`), which talks to the extension host over a socket. Both
+paths answer with the same code (`src/bridge/mcp.ts`) and end in the same
+checks (`parseCall`, `src/host/bridgeRequests.ts`).
 
 - **Your OK.** Under `friedliver.connections.agentToAgent: ask` (the default)
   only the two list tools answer directly. Asking an agent, messaging a chat and
@@ -232,25 +240,46 @@ Agents can do some of that themselves through FriedLiver's MCP server
   sessions that already have them. "Allow for this chat" lasts until the window
   closes and is never saved.
 - **Who is asking.** Each chat gets a random 32-byte token, held in memory and
-  passed only to that chat's tool server. The editor acts only as the chat a
-  token belongs to, looks tokens up by SHA-256, and revokes a chat's token when
-  the chat is removed.
+  passed only to that chat's session: in the tool server's environment, or as
+  the `Authorization: Bearer` header of the session's HTTP server. The editor
+  acts only as the chat a token belongs to, looks tokens up by SHA-256, and
+  revokes a chat's token when the chat is removed.
 - **The socket.** On macOS and Linux it's in a fresh `mkdtemp` directory under
   the temp folder, mode 0700, socket 0600. On Windows it's a named pipe with a
   random name; the token is what keeps other users out there. Every request is
   checked (tool, agent key, chat ID, text size). A line over 1 MB, a malformed
   request, an unknown token, or more than 1000 requests on one connection
   closes the connection.
+- **The HTTP endpoint.** It listens on 127.0.0.1 only, on a random port, from
+  the first session that uses it until the window closes, at
+  `http://127.0.0.1:<port>/mcp`. Unlike the socket, other users on the machine
+  can connect to a loopback port, so, as with the Windows pipe, the token is
+  what keeps them out: a request without a known chat token gets 401 and the
+  connection is closed. A web page can't use it either: the `Host` header must
+  be `127.0.0.1:<port>` (or `localhost:<port>`), and an `Origin`, if there is
+  one, the same, so DNS rebinding gets 403; and only a `POST` of
+  `application/json` (which a page can't send across origins without a
+  preflight the server never allows) to `/mcp` is read. A body over 1 MB, a
+  path, content type or protocol version it doesn't know, and `GET` or
+  `DELETE` (no server stream, no sessions) are refused. Headers must arrive
+  within 10 s and the body within 30 s; a connection takes at most 1000
+  requests and the server at most 128 connections. A tool call's answer
+  streams as server-sent events, so a call that waits minutes for you or for
+  another agent keeps its connection; when the agent hangs up, what the call
+  waited for is cancelled, as when a tool server's socket closes.
 - **No loops.** An agent can't reach its own chat, a busy chat, or a chat that
   waits on it (or that it waits on). Chats agents start may be at most
   `MAX_LINK_DEPTH` (2) steps from one you started. Pipes refuse cycles and pause
   after 20 forwards. Stopping a chat denies its pending requests and stops the
   consultations it waits on. A chat may have at most 3 requests waiting for you;
   further ones are refused, so an agent can't bury its chat in questions.
-- **The token in the agent's hands.** The token reaches the tool server through
-  the session's MCP settings, so the agent process that starts that server
-  sees it too and could talk to the socket directly. That gives it nothing
-  more: the same chat, the same checks and the same need for your OK.
+- **The token in the agent's hands.** The token reaches the tool server, or
+  the agent's own MCP client for HTTP, through the session's MCP settings, so
+  the agent process sees it either way and could talk to the socket or the
+  port directly. That gives it nothing more: the same chat, the same checks
+  and the same need for your OK. A token is worth nothing once its chat is
+  removed or the window closes: the socket and port close with the window,
+  and the next window makes new tokens.
 - **What crosses.** A consulted agent gets the asking chat's title, an excerpt
   of its last reply and its changed files; a hand-off carries the transcript.
   Text from another agent is untrusted input for the agent that gets it, like
@@ -271,7 +300,11 @@ cost each session's server about 10 MB. It answers initialize, ping,
 tools/list and tools/call, answers other requests with "method not found",
 ignores notifications and malformed lines, checks each call with the editor's
 own rules (`parseCall`) before passing it on, and drops input past 1 MB without
-a line break.
+a line break. The HTTP endpoint (`src/bridge/http.ts`, about 180 lines) puts
+the same answers on streamable HTTP; `test/http.test.ts` checks that it
+answers byte for byte what the stdio server answers, and its refusals. The
+MCP SDK's own HTTP client (the one Claude's and Gemini's adapters use) was
+checked against it by hand; Codex's Rust client wasn't.
 
 ## Findings
 

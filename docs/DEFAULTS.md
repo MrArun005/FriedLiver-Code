@@ -136,6 +136,16 @@ The custom title bar is already upstream's default:
 (`src/vs/workbench/electron-browser/desktop.contribution.ts:243-248`). It is
 application-scoped, so the extension couldn't set it anyway.
 
+## Process and engine defaults (patches and the Agents extension)
+
+Not settings, but defaults that change what runs. Measured in
+[benchmarks.md, "Cutting memory at the app level"](benchmarks.md#cutting-memory-at-the-app-level).
+
+| Default | Value | Where | Why, and how to undo |
+|---|---|---|---|
+| Debug task labels for launch.json's schema | collected when the first JSON or JSONC model opens, not 5 s after the window opens | patch 0050, `debugAdapterManager.ts` | memory: collecting them made npm's task provider open `package.json`, which started the JSON language server, `configuration-editing` and `extension-editing` in every JavaScript folder. `preLaunchTask` completions in launch.json work as before |
+| How agents reach the FriedLiver tools | over MCP's streamable HTTP, at `http://127.0.0.1:<port>/mcp` in the extension host, for agents that advertise `mcpCapabilities.http`; otherwise a `dist/bridge.js` process per session | Agents extension (`src/bridge/http.ts`) | memory: no 19 MB process per chat. No setting of its own; `friedliver.connections.agentToAgent: off` still gives sessions no tools at all. Security: SECURITY.md, "The HTTP endpoint" |
+
 ## Settings an extension can't override (for the build owner)
 
 These have `application` or `machine` scope, so the extension point drops
@@ -180,6 +190,7 @@ What the fork keeps or changes from upstream, for the threat model in
 | Extension signature checks (`extensions.verifySignature`) | off | patch 0040; the verifier is Microsoft-only |
 | Agent program (`friedliver.agents.*.command`, `.args`) | machine scope | Agents extension; read from user settings only |
 | Link protection (`linkProtectionTrustedDomains`) | `https://open-vsx.org` | product.json; other links ask before they open |
+| FriedLiver tools endpoint for agents that take MCP over HTTP | 127.0.0.1 only, random port, open from the first such session until the window closes; each request needs its chat's token (`Authorization: Bearer`), and another Host or Origin is refused | Agents extension, `src/bridge/http.ts`; SECURITY.md, "The HTTP endpoint" |
 
 ## Geist fonts: patch pending
 

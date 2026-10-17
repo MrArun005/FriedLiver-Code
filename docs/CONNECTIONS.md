@@ -43,8 +43,11 @@ Replies to Another Chat**.
 
 ## The agent tools
 
-Each agent session gets an MCP server named `friedliver` (`dist/bridge.js`,
-started with the editor's own runtime). Its tools:
+Each agent session gets an MCP server named `friedliver`. Agents that take
+MCP servers over HTTP (Claude's, Codex's and Gemini's adapters say so when
+they start) reach it in the editor itself, at `http://127.0.0.1:<port>/mcp`;
+other agents start `dist/bridge.js` with the editor's own runtime for each
+session, about 19 MB a chat. Its tools:
 
 | Tool | What it does | Needs your OK under "ask" |
 |---|---|---|
@@ -78,13 +81,16 @@ The setting applies to agent sessions started after the change. Switching to
   directly, and only within the policy above. See SECURITY.md, "Agents
   reaching other agents", for the threat model.
 - Each chat has its own random 32-byte token. The tool server passes it with
-  every request, and the editor acts only as the chat that token belongs to.
-  Tokens live in memory and are never saved.
+  every request (over HTTP, the agent sends it as `Authorization: Bearer`),
+  and the editor acts only as the chat that token belongs to. Tokens live in
+  memory and are never saved.
 - The editor listens on a local socket: on macOS and Linux in a fresh
   directory under the temp folder that only you can open (0700, the socket
   0600); on Windows a named pipe with a random name. Malformed requests,
   unknown tokens, lines over 1 MB and more than 1000 requests on one
-  connection close the connection.
+  connection close the connection. Over HTTP it listens on 127.0.0.1 only,
+  refuses any other Host or Origin, any body over 1 MB, and any request
+  without a chat's token (SECURITY.md has the details).
 - An agent can't ask itself, a chat that is waiting on it (or that it waits
   on), or a busy chat. Agents can start chats only 2 steps away from a chat
   you started (`MAX_LINK_DEPTH`), so they can't keep spawning each other.

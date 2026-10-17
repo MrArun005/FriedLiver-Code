@@ -211,6 +211,11 @@ export class AgentConnection {
     return this.info.agentCapabilities?.loadSession === true;
   }
 
+  /** Whether session MCP servers may be HTTP endpoints, not only programs to start. */
+  get supportsHttpMcp(): boolean {
+    return this.info.agentCapabilities?.mcpCapabilities?.http === true;
+  }
+
   get authMethods(): acp.AuthMethod[] {
     return this.info.authMethods ?? [];
   }

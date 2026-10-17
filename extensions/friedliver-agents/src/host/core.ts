@@ -260,7 +260,7 @@ export class AgentCore {
         write: (chatId, req) => this.reviewWrite(chatId, req),
       },
       terminalListener: (agentId) => this.commandHooks(agentId),
-      mcpServersFor: (chatId) => this.mcpServersFor(chatId),
+      mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
     });
     // The connections read the live state, not the one at construction.
     const live = () => this.state;
@@ -1054,10 +1054,16 @@ export class AgentCore {
     return this.options.agentToAgent?.() ?? 'ask';
   }
 
-  /** The FriedLiver tools for a new session: none when they are off or unavailable. */
-  private mcpServersFor(chatId: string): acp.McpServer[] {
+  /**
+   * The FriedLiver tools for a new session: none when they are off or unavailable. An agent that takes
+   * MCP over HTTP reaches them in this process; any other starts a tools server for the session.
+   */
+  private async mcpServersFor(chatId: string, http: boolean): Promise<acp.McpServer[]> {
     const script = this.options.bridgeScript;
     if (!script || !this.bridge || this.policy() === 'off') return [];
+    const token = this.bridge.token(chatId);
+    const url = http ? await this.bridge.httpUrl().catch((err: unknown) => this.options.log?.(`FriedLiver tools over HTTP are unavailable: ${messageOf(err)}`)) : undefined;
+    if (url) return [{ type: 'http', name: 'friedliver', url, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] }];
     return [
       {
         name: 'friedliver',
@@ -1067,7 +1073,7 @@ export class AgentCore {
         env: [
           { name: 'ELECTRON_RUN_AS_NODE', value: '1' },
           { name: BRIDGE_ENV, value: this.bridge.address },
-          { name: TOKEN_ENV, value: this.bridge.token(chatId) },
+          { name: TOKEN_ENV, value: token },
         ],
       },
     ];
