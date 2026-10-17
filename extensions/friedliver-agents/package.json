@@ -277,6 +277,11 @@
         "title": "Retry Inline Edit with Follow-up",
         "category": "FriedLiver",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "friedliver.index.rebuild",
+        "title": "Rebuild Project Index",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
@@ -749,6 +754,23 @@
           "default": "claude",
           "scope": "machine",
           "description": "The agent Inline Edit (Ctrl/Cmd+I) asks. It only proposes text; FriedLiver changes the file when you accept. Rebind the shortcut in Keyboard Shortcuts under FriedLiver: Inline Edit."
+        },
+        "friedliver.index.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Keep a local index of the workspace (file list, definitions, imports, keywords) that agents query with the `index_*` tools to find code faster. Nothing leaves the machine. Skips untrusted folders, `.gitignore`d and `files.exclude`d files, binaries, files over 1 MB, and secret-looking files (`.env*`, `*.pem`, `*.key`, `id_rsa*`)."
+        },
+        "friedliver.index.maxFiles": {
+          "type": "number",
+          "default": 50000,
+          "minimum": 100,
+          "markdownDescription": "Most files the project index holds per workspace folder."
+        },
+        "friedliver.index.maxMemoryMB": {
+          "type": "number",
+          "default": 150,
+          "minimum": 10,
+          "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files."
         }
       }
     },

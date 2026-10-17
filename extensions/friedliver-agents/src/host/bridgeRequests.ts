@@ -1,4 +1,5 @@
-import { isBrowserCall, isExternal, type BridgeCall, type BrowserCall } from '../bridge/protocol';
+import { isBrowserCall, isExternal, isIndexCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
+import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
 import { BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { agentList, chatList, renderChat } from './transcript';
@@ -34,9 +35,11 @@ export interface ToolHost {
   externalAutoApprove?(): boolean;
   /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
   browserPage?(selector?: string): Promise<{ origin?: string; password: boolean }>;
+  /** Answers the read-only index_* tools (projectIndexHost.ts); absent when there is no project index. */
+  index?(call: IndexCall): Promise<string>;
 }
 
-type ChatCall = Exclude<BridgeCall, BrowserCall | { tool: 'list_agents' | 'list_chats' | 'remember' }>;
+type ChatCall = Exclude<BridgeCall, BrowserCall | IndexCall | { tool: 'list_agents' | 'list_chats' | 'remember' }>;
 
 type Answer = 'allowed' | 'denied' | 'timeout';
 
@@ -70,6 +73,8 @@ export class BridgeRequests {
     if (caller.readOnly) throw new Error('This chat only proposes text: FriedLiver tools are off in it.');
     if (call.tool === 'list_agents') return agentList();
     if (call.tool === 'list_chats') return chatList(this.host.state, chatId);
+    // Read-only and local to the project, like reading a file: no approval.
+    if (isIndexCall(call)) return this.host.index ? this.host.index(call) : 'No project index in this editor. Search the files another way.';
     if (isBrowserCall(call)) return this.browser(caller, call, signal);
     if (call.tool === 'remember') return this.memory(caller, call.fact, signal);
 

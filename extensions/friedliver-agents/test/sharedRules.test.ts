@@ -135,6 +135,20 @@ describe('the remember tool', () => {
     expect(saved).toEqual(['Use pnpm', 'No Docker']);
   });
 
+  it('refuses remember and the index tools in a read-only chat, before either host hook runs', async () => {
+    const saved: string[] = [];
+    const indexed: string[] = [];
+    const base = host(saved, 'allow');
+    let state: AppState = reduce(EMPTY_STATE, { t: 'created', chat: { ...chat('chat-1'), readOnly: true } });
+    const h: ToolHost = { ...base, get state() { return state; }, dispatch: (a: Action) => void (state = reduce(state, a)), index: async (c) => (indexed.push(c.tool), 'hit') };
+    const requests = new BridgeRequests(h);
+    const signal = new AbortController().signal;
+    await expect(requests.call('chat-1', { tool: 'remember', fact: 'x' }, signal)).rejects.toThrow(/only proposes text/);
+    await expect(requests.call('chat-1', { tool: 'index_search', query: 'x' } as never, signal)).rejects.toThrow(/only proposes text/);
+    expect(saved).toEqual([]);
+    expect(indexed).toEqual([]);
+  });
+
   it('appends one line per fact to .friedliver/memory.md', async () => {
     const folder = await tmp();
     await remember(folder, 'Use\n pnpm');
