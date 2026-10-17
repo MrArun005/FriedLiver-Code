@@ -26,7 +26,7 @@ describe('settings a repository could set', () => {
     for (const [key, value] of Object.entries(props)) {
       if (/\.(command|args)$|\.updates\./.test(key)) expect(userOnly.has(value.scope ?? 'window'), key).toBe(true);
     }
-    expect(props['friedliver.updates.check'].scope).toBe('application');
+    expect(props['friedliver.update.mode'].scope).toBe('application');
   });
 
   it('reads only the user layer, even where an editor would hand back a workspace value', () => {

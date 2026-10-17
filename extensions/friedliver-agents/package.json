@@ -483,11 +483,16 @@
           "maximum": 6,
           "description": "How many agent processes may run at once. The least recently used idle one stops first."
         },
-        "friedliver.updates.check": {
-          "type": "boolean",
-          "default": true,
+        "friedliver.update.mode": {
+          "type": "string",
+          "enum": ["notify", "off"],
+          "enumDescriptions": [
+            "30 seconds after start and every 4 hours, ask GitHub whether a newer FriedLiver release is out, and offer to install it.",
+            "Never check."
+          ],
+          "default": "notify",
           "scope": "application",
-          "description": "In the FriedLiver app, once a week ask GitHub whether a newer FriedLiver build is out, and say so. Sends nothing but that request."
+          "description": "In the FriedLiver app, check GitHub for newer releases and offer to install them. Sends nothing but that request."
         },
         "friedliver.idleStopMinutes": {
           "type": "integer",
