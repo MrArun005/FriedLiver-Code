@@ -447,6 +447,12 @@ export function recentChats(chats: ChatView[], activeId: string | undefined, n: 
   return recent.sort((a, b) => a.createdAt - b.createdAt || collator.compare(a.id, b.id));
 }
 
+/** What a fresh chat suggests: a few first messages, by agent (the demo's are the words it knows). */
+export function starters(agent: AgentKey): string[] {
+  if (agent === 'demo') return ['tour', 'project', 'help'];
+  return ['Explain how this project is laid out', 'Find a failing test and fix it', 'Review my uncommitted changes', 'Plan a change before writing any code'];
+}
+
 /** The chat tabs, as a browser keeps them: the chats you opened, in the order you opened them. */
 export const openTab = (tabs: readonly string[], id: string): string[] => (tabs.includes(id) ? [...tabs] : [...tabs, id]);
 /** Closing a tab takes it out; nothing takes its place. */

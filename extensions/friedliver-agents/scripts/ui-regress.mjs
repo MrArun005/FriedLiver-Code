@@ -537,6 +537,31 @@ BLOCKS.F17 = async () => {
   await p.close();
 };
 
+// ---- F18: a fresh chat offers a few starters and the keys; they go with the first message ----
+BLOCKS.F18 = async () => {
+  for (const agent of ['claude', 'demo']) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+    const state = fixture(Date.now()).state;
+    const fresh = freshChat(agent);
+    state.chats.push(fresh);
+    await snapshot(p, state, fresh.id);
+    await p.waitForTimeout(150);
+    const starters = (await p.locator('.starters button').allInnerTexts()).map((t) => t.trim());
+    check(starters.length >= 3 && starters.length <= 4, `a fresh ${agent} chat offers 3–4 starters [${starters.join(' | ')}]`);
+    const keys = await p.locator('.starters .starter-keys').innerText().catch(() => '');
+    check(/@/.test(keys) && /\//.test(keys) && /(⇧|Shift\+)Tab/.test(keys), `and the keys [${keys}]`);
+    if (starters.length) {
+      await p.locator('.starters button').first().click();
+      check((await p.inputValue('.composer textarea')) === starters[0], 'a starter goes into the composer to edit or send');
+    }
+    fresh.items = [{ kind: 'user', text: 'hello', images: [] }];
+    await snapshot(p, state, fresh.id);
+    await p.waitForTimeout(150);
+    check(!(await p.locator('.starters').count()), 'the starters go with the first message');
+    await p.close();
+  }
+};
+
 await run();
 await browser.close();
 server.kill();
