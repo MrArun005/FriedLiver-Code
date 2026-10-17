@@ -507,6 +507,40 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   );
 }
 
+/**
+ * A message's text clamped to three lines, with Show more at the box's bottom right when (and only when) it
+ * overflows them. `onMore` replaces expanding in place (the sticky copy sends you to the message instead).
+ * Another part can open it with an `expand` event on the element (see openMessage).
+ */
+export function ClampedText({ text, onMore }: { text: string; onMore?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [over, setOver] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setOver(open || el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const expand = () => setOpen(true);
+    el.addEventListener('expand', expand);
+    return () => (ro.disconnect(), el.removeEventListener('expand', expand));
+  }, [text, open]);
+  return (
+    <>
+      <div ref={box} class="bubble-text" data-clamped={open ? undefined : ''}>
+        {text}
+      </div>
+      {over && (
+        <button type="button" class="link msg-more" aria-expanded={open && !onMore} onClick={() => (onMore ? onMore() : setOpen(!open))}>
+          {open && !onMore ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </>
+  );
+}
+
 /** Puts text on the clipboard through the editor, which a webview may not reach itself. */
 export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);

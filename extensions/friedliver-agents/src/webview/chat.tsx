@@ -42,7 +42,7 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
+import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -549,6 +549,15 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
 
   const asks = items.flatMap((i, at) => (i.kind === 'user' && i.text.trim() ? [{ at, text: i.text }] : []));
   const jump = asks.length >= 2;
+  // The message whose turn you are reading, once it has scrolled out of view: its copy sticks at the top.
+  const [past, setPast] = useState<number | undefined>();
+  const findPast = (el: HTMLElement) => {
+    const top = el.getBoundingClientRect().top;
+    const gone = [...el.querySelectorAll<HTMLElement>('.user-msg')].filter((m) => m.getBoundingClientRect().bottom <= top + 1);
+    const at = gone.length ? Number(gone.at(-1)!.id.slice(4)) : undefined;
+    if (at !== past) setPast(at);
+  };
+  const pastText = past === undefined ? undefined : asks.find((a) => a.at === past)?.text;
   const seen = useInView(box, jump ? asks.map((a) => `msg-${a.at}`) : []);
   return (
     <div class="transcript-wrap" data-jump={jump ? '' : undefined}>
@@ -558,6 +567,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       onScroll={(e) => {
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        findPast(el);
       }}
     >
       {transcriptGroups(items).map((g) =>
@@ -592,6 +602,13 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
         {waitingNow ? `${chat.label} needs your decision` : chat.busy ? '' : chat.turns ? `${chat.label} finished` : ''}
       </div>
     </div>
+      {pastText && (
+        <div class="sticky-prompt" aria-label="Your message for this turn">
+          <div class="bubble">
+            <ClampedText text={pastText} onMore={() => openMessage(past!)} />
+          </div>
+        </div>
+      )}
       {jump && (
         <nav class="jump-list" aria-label="In this chat">
           <b>In this chat</b>
@@ -609,6 +626,13 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
 /** Puts your message at the top of the transcript. */
 function scrollToMessage(at: number) {
   document.getElementById(`msg-${at}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+/** Scrolls to your message and opens it in full there (the sticky copy never grows). */
+function openMessage(at: number) {
+  const msg = document.getElementById(`msg-${at}`);
+  msg?.querySelector('.bubble-text')?.dispatchEvent(new CustomEvent('expand'));
+  msg?.scrollIntoView({ block: 'start' });
 }
 
 /** The id, of `ids`, of the topmost element showing in `root`: the message you're reading. */
@@ -693,7 +717,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, at }:
             onClick={(e) => !(e.target as HTMLElement).closest('button, a') && scrollToMessage(at)}
             onKeyDown={(e) => e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), scrollToMessage(at))}
           >
-            {item.text && <div class="bubble-text">{item.text}</div>}
+            {item.text && <ClampedText text={item.text} />}
             <RefList refs={refsOf(item)} cwd={chat.cwd} />
             {item.images.length > 0 && (
               <div class="thumbs">
