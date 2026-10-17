@@ -21,6 +21,8 @@ export interface SessionStart extends SessionSetup {
   /** The agent takes a message while it works (`_session/steering`). */
   steering: boolean;
   agentInfo?: { name: string; version: string };
+  /** Which shared rules files this new session got (HubOptions.rulesFor). */
+  rules?: string[];
 }
 
 /** No session to change: the chat's agent hasn't started one yet, or was restarted since. */
@@ -66,6 +68,12 @@ export interface HubOptions {
    * `agent.http` says whether its agent takes HTTP servers.
    */
   mcpServersFor?(chatId: string, agent: { http: boolean }): acp.McpServer[] | Promise<acp.McpServer[]>;
+  /**
+   * Shared rules for a new session: `text` goes to Claude as an appended system prompt
+   * (claude-agent-acp's `_meta.systemPrompt.append`); agents without such a way get it in
+   * front of the session's first message. `files` names what it came from.
+   */
+  rulesFor?(chatId: string, agentId: AgentId): Promise<{ text: string; files: string[] } | undefined>;
   log?(line: string): void;
 }
 
@@ -87,6 +95,8 @@ interface ChatState extends Chat {
   cancelled?: boolean;
   /** A session on its way: a prompt and an early start share it. */
   starting?: Promise<void>;
+  /** Rules for an agent without a system prompt, sent with the session's first message. */
+  pendingRules?: string;
 }
 
 interface RunningAgent {
@@ -202,7 +212,9 @@ export class AgentHub {
       this.clearIdleStop(agent);
       await this.ensureSession(chat, agent);
       if (chat.cancelled) return { stopReason: 'cancelled' };
-      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, blocks));
+      const rules = chat.pendingRules;
+      chat.pendingRules = undefined;
+      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, rules ? [{ type: 'text', text: rules }, ...blocks] : blocks));
     } catch (err) {
       if (agent && isAuthRequired(err)) throw new AuthRequiredError(agent.conn.spec, agent.conn.authMethods);
       throw err;
@@ -449,7 +461,10 @@ export class AgentHub {
       }
     }
 
-    const session = await agent.conn.newSession(cwd, mcpServers);
+    const rules = await this.options.rulesFor?.(chat.id, chat.agentId).catch((err: unknown) => void this.options.log?.(`Couldn't read the shared rules: ${String(err)}`));
+    const system = rules && chat.agentId === 'claude';
+    const session = await agent.conn.newSession(cwd, mcpServers, system ? { systemPrompt: { append: rules.text } } : undefined);
+    chat.pendingRules = rules && !system ? rules.text : undefined;
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(
@@ -460,7 +475,7 @@ export class AgentHub {
     chat.sessionId = session.sessionId;
     chat.sessionGeneration = agent.generation;
     this.sessionToChat.set(sessionKey(chat.agentId, session.sessionId), chat.id);
-    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined });
+    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined, ...(rules ? { rules: rules.files } : {}) });
   }
 
   /** Tells the editor what the session offers. Its handler may set options; a failure there doesn't stop the turn. */

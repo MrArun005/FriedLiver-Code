@@ -218,6 +218,21 @@
         "category": "FriedLiver"
       },
       {
+        "command": "friedliver.rules.open",
+        "title": "Rules",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.rules.openMemory",
+        "title": "Open Project Memory",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.rules.import",
+        "title": "Import Rules From CLAUDE.md / AGENTS.md / GEMINI.md",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.otherAgents",
         "title": "Get Another Agent Extension…",
         "category": "FriedLiver",

@@ -26,6 +26,8 @@
 //   "ask <agent> <q>" asks another agent through the session's FriedLiver tools (MCP) and
 //                     replies "<Agent> says: <answer>"; "ask demo hello" needs no sign-in
 //   "chats"           lists FriedLiver's chats through the same tools
+//   "system"          says what session/new appended to its system prompt (_meta.systemPrompt.append,
+//                     as claude-agent-acp takes it), or "no system prompt"
 //   an editor request (Edit with Agent, Review My Changes): see editorRequests.mjs
 //   "busy <s> [stamp]" works like a busy real agent for <s> seconds, for stress tests
 //                     (scripts/stress-demo.mjs): markdown in small chunks, four a second,
@@ -64,6 +66,7 @@ import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { editorRequest, handleEditorRequest } from './editorRequests.mjs';
 
+const systemAppend = new Map();
 const LOGIN_MARKER = process.env.FAKE_AGENT_LOGIN_MARKER ?? path.join(os.tmpdir(), 'friedliver-demo-login');
 
 if (process.argv.includes('--cli')) {
@@ -1058,6 +1061,7 @@ acp
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     sessionMcp.set(sessionId, params.mcpServers ?? []);
+    systemAppend.set(sessionId, params._meta?.systemPrompt?.append);
     if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string' || server.type === 'http') keepMcp(server);
     const state = { ...DEFAULTS, used: 0 };
     choices.set(sessionId, state);
@@ -1206,6 +1210,8 @@ acp
         status: 'completed',
         locations: [{ path }],
       });
+    } else if (command === 'system') {
+      await say(client, sessionId, systemAppend.get(sessionId) ?? 'no system prompt');
     } else {
       const state = stateOf(sessionId);
       // The model and effort show when they aren't the defaults, so tests can see a choice arrive.

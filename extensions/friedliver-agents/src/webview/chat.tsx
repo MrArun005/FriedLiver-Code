@@ -363,6 +363,11 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
               </span>
             )}
             {chat.merged && <span class="tag">merged</span>}
+            {chat.session?.rules?.length ? (
+              <span class="chip" title={`Shared rules this session got:\n${chat.session.rules.join('\n')}`}>
+                Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}
+              </span>
+            ) : null}
           </div>
         </div>
         {images.length > 0 && (
@@ -410,6 +415,9 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                 ))}
                 <PipeTargets chat={chat} close={close} />
                 <div class="pop-sep" role="separator" />
+                <button role="menuitem" onClick={() => (close(), send({ type: 'openRules' }))}>
+                  Rules…
+                </button>
                 <button
                   role="menuitem"
                   disabled={chat.busy}
@@ -873,6 +881,7 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
 }
 
 const BRIDGE_TOOL: Record<BridgeItem['tool'], string> = {
+  remember: 'Fact',
   ask_agent: 'Question',
   send_to_chat: 'Message',
   read_chat: 'Read the transcript',

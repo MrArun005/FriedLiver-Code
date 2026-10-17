@@ -65,6 +65,7 @@ import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
 import { loginExtras } from './signin';
 import { relativeFile, rewoundHistory } from './transcript';
+import { RULES_CAP, type Rules } from './sharedRules';
 
 /** Each vendor's key goes only to that vendor's agent process. */
 export const KEY_ENV: Record<VendorAgentId, string> = {
@@ -156,6 +157,10 @@ export interface CoreOptions {
   rules?: { get(): CommandRule[]; add(rule: CommandRule): void };
   /** Starts a new chat's agent and session at once, before its first message. On unless false. */
   warmStart?: boolean;
+  /** The shared rules for a new session (sharedRules.ts loadRules); none when absent. */
+  sharedRules?(): Promise<Rules | undefined>;
+  /** Appends to the project's memory for the remember tool; absent without a trusted folder. */
+  remember?(fact: string): Promise<string>;
   ui: CoreUi;
   log?(line: string): void;
   /** Where checkpoints are kept across windows (global storage); folders outside git need it. */
@@ -284,6 +289,7 @@ export class AgentCore {
       },
       terminalListener: (agentId) => this.commandHooks(agentId),
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
+      rulesFor: (chatId) => this.rulesFor(chatId),
     });
     // The connections read the live state, not the one at construction.
     const live = () => this.state;
@@ -312,6 +318,9 @@ export class AgentCore {
       browser: options.browser,
       externalAutoApprove: options.externalAutoApprove,
       browserPage: options.browserPage,
+      get remember() {
+        return options.remember;
+      },
     });
   }
 
@@ -714,6 +723,7 @@ export class AgentCore {
       steering: start.steering || undefined,
       live: true,
       ...(start.agentInfo ? { agent: start.agentInfo } : {}),
+      ...(start.loaded ? (prev?.rules ? { rules: prev.rules } : {}) : start.rules ? { rules: start.rules } : {}),
     };
     this.dispatch({ t: 'session', chatId, session });
     const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...this.options.defaults?.get(chat.agent)?.chosen, ...this.chosen.get(chatId) };
@@ -1214,6 +1224,14 @@ export class AgentCore {
   /** Chats working in the same worktree: a task and the chats it handed off to or consulted. */
   private sharing(wt: TaskWorktree): string[] {
     return [...this.worktrees].filter(([, w]) => w.path === wt.path).map(([id]) => id);
+  }
+
+  private async rulesFor(chatId: string): Promise<{ text: string; files: string[] } | undefined> {
+    const rules = await this.options.sharedRules?.();
+    if (rules?.truncated) {
+      this.items(chatId, [{ kind: 'notice', tone: 'error', text: `The shared rules are over ${RULES_CAP / 1024} KB, so this session got only the first ${RULES_CAP / 1024} KB. Shorten .friedliver/rules.md or memory.md.` }]);
+    }
+    return rules && { text: rules.text, files: rules.files };
   }
 
   private policy(): AgentToAgent {
