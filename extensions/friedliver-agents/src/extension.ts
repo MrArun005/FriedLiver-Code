@@ -14,7 +14,9 @@ import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
+import { startDictation } from './host/dictation';
 import { EditorAgent } from './host/editor';
+import { imagePreview } from './host/imageAccess';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { StateFile } from './host/persist';
@@ -29,6 +31,7 @@ import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type C
 import { describeRule, isRule, type CommandRule } from './shared/rules';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
+import { isImagePath } from './shared/stepImages';
 import { clip } from './shared/view';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -224,6 +227,7 @@ export class Controller {
         { resolveWebviewView: (view) => this.resolveView(view, 'chat', 'Agents') },
         { webviewOptions: { retainContextWhenHidden: false } },
       ),
+      vscode.window.registerWebviewViewProvider('friedliver.chats', { resolveWebviewView: (view) => this.resolveView(view, 'chat', 'Chats', true) }),
       vscode.window.registerWebviewViewProvider('friedliver.images', { resolveWebviewView: (view) => this.resolveView(view, 'images', 'Images') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.tasks', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'tasks') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'chat') }),
@@ -346,16 +350,17 @@ export class Controller {
 
   // ---- Surfaces ----
 
-  private resolveView(view: vscode.WebviewView, kind: Script, title: string): void {
+  private resolveView(view: vscode.WebviewView, kind: Script, title: string, list = false): void {
     const surface: Surface = {
       kind,
+      ...(list ? { list } : {}),
       webview: view.webview,
       selected: kind === 'chat' ? this.lastSelected : undefined,
       ready: false,
       visible: () => view.visible,
       reveal: () => view.show(true),
     };
-    if (kind === 'chat') this.agentsView = view;
+    if (kind === 'chat' && !list) this.agentsView = view;
     this.addSurface(surface, title, view);
     this.updateDecisions();
   }
@@ -377,6 +382,11 @@ export class Controller {
       if (this.chatPanel === panel) this.chatPanel = undefined;
       if (this.tasksPanel === panel) this.tasksPanel = undefined;
     });
+  }
+
+  /** Where the images steps show may come from: the workspace and task worktrees, the browser's screenshots, the temp folders agents write to. */
+  private imageRoots(): string[] {
+    return [...new Set([...this.core.roots(), this.context.globalStorageUri.fsPath, os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])];
   }
 
   private addSurface(surface: Surface, title: string, owner: { onDidDispose: vscode.Event<void> }): void {
@@ -424,7 +434,7 @@ export class Controller {
           }
           return;
         case 'newChat':
-          await this.newChat(m.agent, surface);
+          await this.newChat(m.agent, surface.list ? undefined : surface);
           return;
         case 'select':
           surface.selected = m.chatId;
@@ -457,6 +467,23 @@ export class Controller {
         case 'notice':
           await this.noticeAction(m.chatId, m.action);
           return;
+        case 'imageSrc': {
+          const src = await imagePreview(m.path, this.imageRoots());
+          post(surface, { type: 'imageSrc', path: m.path, ...(src ? { src } : {}) });
+          return;
+        }
+        case 'openImage':
+          // The editor's image preview shows it (no scripts, SVG included); outside the roots too, since the user asked.
+          if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(m.path), vscode.ViewColumn.Beside);
+          return;
+        case 'dictate':
+          await startDictation({
+            platform: process.platform,
+            run: (command) => vscode.commands.executeCommand(command),
+            toast: (text, button) => vscode.window.showInformationMessage(text, button),
+            openUrl: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
+          });
+          return;
         case 'attach':
           post(surface, { type: 'attached', images: await this.pickImages(), ...(m.chatId ? { chatId: m.chatId } : {}) });
           return;
@@ -484,6 +511,8 @@ export class Controller {
           return;
         }
         case 'openChat':
+          // From the side bar's list: into the chat tab, opening one when there is none.
+          if (surface.list && !this.chatPanel) await this.moveToCenter();
           await this.showChat(m.chatId, m.item);
           return;
         case 'openClaudeSession': {

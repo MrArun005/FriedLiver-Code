@@ -489,6 +489,7 @@ const ICONS = {
   star: 'M8 2.5l1.7 3.5 3.8.5-2.8 2.6.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.6 3.8-.5z',
   up: 'M8 13V3.5M4 7.5l4-4 4 4',
   queue: 'M2.75 4.5h10.5M2.75 8h10.5M2.75 11.5h6M11 10v3l2-1.5z',
+  mic: 'M8 2.25a1.75 1.75 0 0 1 1.75 1.75v3.5a1.75 1.75 0 0 1-3.5 0V4A1.75 1.75 0 0 1 8 2.25zM4.5 7.25a3.5 3.5 0 0 0 7 0M8 10.75v2.5M6 13.25h4',
 };
 export type IconName = keyof typeof ICONS;
 
@@ -655,5 +656,51 @@ export function Popover({
         </div>
       )}
     </span>
+  );
+}
+
+// ---- Step images: the host hands out a webview URI per path, once it has checked the file. ----
+
+/** undefined: not asked yet or waiting; null: not showable (outside the allowed folders, too big, missing). */
+const imageSrcs = new Map<string, string | null>();
+const imageWaiters = new Set<() => void>();
+window.addEventListener('message', (e: MessageEvent<{ type?: string; path?: string; src?: string }>) => {
+  if (e.data?.type !== 'imageSrc' || typeof e.data.path !== 'string') return;
+  // Only raster data: URIs: never a URL or a file the webview could fetch.
+  const src = e.data.src;
+  imageSrcs.set(e.data.path, typeof src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(src) ? src : null);
+  for (const w of imageWaiters) w();
+});
+
+export function useImageSrc(path: string): string | null | undefined {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const w = () => bump((n) => n + 1);
+    imageWaiters.add(w);
+    if (!imageSrcs.has(path)) send({ type: 'imageSrc', path });
+    return () => void imageWaiters.delete(w);
+  }, [path]);
+  return imageSrcs.get(path);
+}
+
+/** A step's image with its title; click opens the editor's image preview. Name only when it can't be shown. */
+export function ImageThumb({ path, title }: { path: string; title: string }) {
+  const src = useImageSrc(path);
+  const open = () => send({ type: 'openImage', path });
+  if (src === null) {
+    return (
+      <span class="image-thumb missing" title={path}>
+        <span class="image-title">{title}</span>
+        <button class="link" onClick={open}>
+          Open
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button class="image-thumb" title={path} aria-label={`Open ${title}`} onClick={open}>
+      {src ? <img src={src} alt="" loading="lazy" /> : <span class="image-wait" />}
+      <span class="image-title">{title}</span>
+    </button>
   );
 }

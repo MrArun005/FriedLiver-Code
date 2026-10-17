@@ -8,6 +8,8 @@ export type Script = 'chat' | 'tasks' | 'images';
 export interface Surface {
   readonly kind: Script;
   readonly webview: vscode.Webview;
+  /** The side bar's chat list (a chat surface that shows only the list). */
+  list?: boolean;
   /** The chat this surface shows; chat surfaces only. */
   selected?: string;
   ready: boolean;
@@ -16,12 +18,13 @@ export interface Surface {
 }
 
 export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
-  // Only the extension's media folder: styles and the bundled webview scripts.
+  // Only the extension's media folder: styles and the bundled webview scripts. Step images come as data: URIs
+  // the host vetted (imagePreview), so nothing in the workspace is loadable from a webview.
   return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] };
 }
 
 /** Strict CSP: nonce scripts, no remote content, images only from data: URIs and the extension. */
-export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, script: Script, title: string): string {
+export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, script: Script, title: string, list = false): string {
   const nonce = randomBytes(16).toString('base64');
   const chat = vscode.workspace.getConfiguration('friedliver.chat');
   const media = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file)).toString();
@@ -41,7 +44,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <link rel="stylesheet" href="${media('webview.css')}">
 <title>${escapeHtml(title)}</title>
 </head>
-<body data-surface="${script}" data-font="${escapeHtml(chat.get<string>('fontFamily', 'Inter'))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}">
+<body data-surface="${script}"${list ? ' data-view="list"' : ''} data-platform="${process.platform}" data-font="${escapeHtml(chat.get<string>('fontFamily', 'Inter'))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}" data-font-size="${escapeHtml(String(chat.get<number>('fontSize', 13)))}">
 <div id="root"></div>
 <script nonce="${nonce}" src="${media(`dist/${script}.js`)}"></script>
 </body>
@@ -57,7 +60,7 @@ export function attachSurface(
   log: (line: string) => void,
 ): vscode.Disposable {
   surface.webview.options = webviewOptions(extensionUri);
-  surface.webview.html = webviewHtml(surface.webview, extensionUri, surface.kind, title);
+  surface.webview.html = webviewHtml(surface.webview, extensionUri, surface.kind, title, surface.list);
   return surface.webview.onDidReceiveMessage((raw: unknown) => {
     const message = parseWebviewMessage(raw);
     if (!message) {

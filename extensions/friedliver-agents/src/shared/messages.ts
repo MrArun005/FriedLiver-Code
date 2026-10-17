@@ -29,6 +29,12 @@ export type WebviewMessage =
   | { type: 'notice'; chatId: string; action: NoticeAction }
   /** `chatId` (optional): the composer the images go to. */
   | { type: 'attach'; chatId?: string }
+  /** macOS dictation into the focused composer (the webview focuses it first). */
+  | { type: 'dictate' }
+  /** A step's image: the host answers with imageSrc when the webview may show it. */
+  | { type: 'imageSrc'; path: string }
+  /** Opens an image in the editor's image preview, beside the chat. */
+  | { type: 'openImage'; path: string }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
   /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
@@ -102,6 +108,8 @@ export type HostMessage =
   | { type: 'actions'; actions: Action[] }
   | { type: 'select'; chatId: string }
   | { type: 'attached'; images: Attachment[]; chatId?: string }
+  /** `src` (a data: URI the host vetted) only when the image may be shown; else the webview shows its name. */
+  | { type: 'imageSrc'; path: string; src?: string }
   /** Workspace files for the "#" picker, relative to the chat's folder. */
   | { type: 'foundFiles'; chatId: string; query: string; files: string[] }
   | { type: 'reveal'; chatId: string; id: string }
@@ -218,10 +226,14 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'moveToCenter':
     case 'openTasks':
     case 'otherAgents':
+    case 'dictate':
       return { type: m.type };
     case 'attach':
       if (m.chatId === undefined) return { type: 'attach' };
       return id(m.chatId) ? { type: 'attach', chatId: m.chatId } : null;
+    case 'imageSrc':
+    case 'openImage':
+      return str(m.path, LIMITS.path) && m.path ? { type: m.type, path: m.path } : null;
     case 'setOption':
       return id(m.chatId) && str(m.optionId, 128) && m.optionId && optionValue(m.value) ? { type: 'setOption', chatId: m.chatId, optionId: m.optionId, value: m.value } : null;
     case 'approval':
