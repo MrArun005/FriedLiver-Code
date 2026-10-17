@@ -1721,7 +1721,7 @@ button.count-item .icon {
 /* Board */
 .columns {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
   gap: var(--sp-5);
   align-items: start;
 }
@@ -2554,8 +2554,17 @@ svg[data-lit] .map-file-line:not(.lit) {
   stroke-linecap: round;
   opacity: 0.85;
 }
+.chat-table .group-row th {
+  padding: var(--sp-3) var(--sp-2) var(--sp-1);
+  text-align: left;
+  font-weight: 600;
+  display: table-cell;
+}
+.chat-table .group-row .dot {
+  margin-right: 6px;
+}
 .map-tip {
-  position: absolute;
+  position: fixed;
   z-index: 5;
   display: flex;
   flex-direction: column;

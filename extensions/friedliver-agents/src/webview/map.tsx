@@ -2,9 +2,9 @@
 // connection between chats (hand-offs, consultations, pipes, fan-outs, files
 // two chats both changed) as an edge, so you can see how the agents are joined.
 import type { ComponentChildren } from 'preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
-import { MAP, ago, cardLine, linkBadges, mapKey, mapLayout, statusOf, type MapEdge, type MapLayout, type MapNode } from '../shared/view';
+import { MAP, ago, cardLine, linkBadges, mapKey, mapLayout, statusOf, tipPlace, type MapEdge, type MapLayout, type MapNode } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
 
 const TIP_W = 288;
@@ -27,7 +27,7 @@ export function AgentMap({ state, now, focusId, onFocus }: { state: AppState; no
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
           <MapCanvas map={map} tip={tip} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} onFocus={onFocus} />
-          {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} width={map.width} />}
+          {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} />}
         </div>
       </div>
     </div>
@@ -272,11 +272,12 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       {(status === 'working' || status === 'needs-you') && <rect class="ring" x="-3.5" y="-3.5" width={MAP.nodeW + 7} height={MAP.nodeH + 7} rx="11" />}
       <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
       <SvgGlyph agent={chat.agent} x={10} y={10} size={20} />
+      <title>{`${chat.title} (${chat.label})`}</title>
       <text class="node-label" x="40" y="17">
-        {chat.label}
+        {node.title}
       </text>
       <text class="node-title" x="40" y="31">
-        {node.title}
+        {AGENT_FACES[chat.agent].name}
       </text>
       <circle class="node-dot" data-state={status} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
       {chat.approval === 'full' && (
@@ -290,17 +291,28 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
   );
 }
 
-function Tip({ node, chat, state, now, width }: { node: MapNode; chat: ChatView; state: AppState; now: number; width: number }) {
+/** Fixed to the viewport beside the hovered node (see tipPlace), so the map's scroll box never clips it. */
+function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state: AppState; now: number }) {
   const status = statusOf(chat);
   const line = cardLine(state, chat);
   const badges = linkBadges(state, chat);
-  const right = node.x + MAP.nodeW + 12;
-  const left = right + TIP_W > width ? Math.max(4, node.x - TIP_W - 12) : right;
+  const ref = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const anchor = document.querySelector(`.map-node[data-nav="${CSS.escape(node.chat.id)}"] .box`)?.getBoundingClientRect();
+    if (!anchor || !ref.current) return;
+    setPlace(tipPlace(anchor, { w: TIP_W, h: ref.current.offsetHeight }, { w: window.innerWidth, h: window.innerHeight }));
+  }, [node.chat.id, node.x, node.y]);
   return (
-    <div class="map-tip" role="tooltip" style={{ left: `${left}px`, top: `${Math.max(4, node.y - 6)}px`, width: `${TIP_W}px` }}>
+    <div
+      ref={ref}
+      class="map-tip"
+      role="tooltip"
+      style={place ? { left: `${place.left}px`, top: `${place.top}px`, width: `${place.width}px` } : { left: 0, top: 0, width: `${TIP_W}px`, visibility: 'hidden' }}
+    >
       <div class="tip-head">
         <Glyph agent={chat.agent} size="sm" />
-        <b>{chat.label}</b>
+        <b title={chat.label}>{AGENT_FACES[chat.agent].name}</b>
         <span class="spacer" />
         <Dot state={status} />
         <span class="hint">{DOT_LABEL[status]}</span>
