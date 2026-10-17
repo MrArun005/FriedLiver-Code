@@ -282,7 +282,7 @@ async function shoot() {
     await p.click(`[data-nav="chat-c1"] button:has-text("Allow for this chat")`);
     check((await posted(p)).some((m) => m.type === 'bridge' && m.requestId === 'bridge-c1' && m.answer === 'allowChat'), 'a bridge request is answered from its card');
 
-    const trigger = p.locator(`[data-nav="chat-c3"] button[aria-haspopup="menu"]:has-text("Hand off")`);
+    const trigger = p.locator(`[data-nav="chat-c3"] .card-connect button[aria-haspopup="menu"][aria-label="Hand off"]`);
     await trigger.click();
     check(await p.locator('.popover[role="menu"]').isVisible(), 'Hand off opens a menu');
     await p.keyboard.press('ArrowDown');
@@ -772,7 +772,8 @@ async function shoot() {
     );
     check(rows.length > 0 && rows.every((r) => r.spread <= 4 && r.h <= 30), `every card's actions are one row [${rows.map((r) => Math.round(r.h)).join(', ')}]`);
     const card = p.locator('[data-nav="chat-g1"]');
-    const shown = () => card.locator('.card-connect').evaluate((el) => window.getComputedStyle(el).opacity);
+    // After the .15s fade.
+    const shown = async () => (await p.waitForTimeout(250), card.locator('.card-connect').evaluate((el) => window.getComputedStyle(el).opacity));
     await p.mouse.move(0, 0);
     check((await shown()) === '0', 'Hand off, Ask and Pipe to wait out of sight');
     await card.hover();
