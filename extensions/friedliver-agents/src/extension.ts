@@ -136,7 +136,7 @@ export class Controller {
       apiKey: (id) => this.accounts.apiKey(id),
       limits: () => {
         const c = vscode.workspace.getConfiguration('friedliver');
-        return { maxRunning: clamp(c.get<number>('maxRunningAgents', 2), 1, 6), idleStopMinutes: clamp(c.get<number>('idleStopMinutes', 10), 0, 240) };
+        return { maxRunning: clamp(c.get<number>('maxRunningAgents', 3), 1, 6), idleStopMinutes: clamp(c.get<number>('idleStopMinutes', 10), 0, 240) };
       },
       log: (line) => this.log.info(line),
       ui: {
