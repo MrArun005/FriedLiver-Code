@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import {
   AGENT_FACES,
@@ -38,6 +38,7 @@ import {
   statusOf,
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
+import { foldApprovals } from '../shared/steps';
 import { CopyButton, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
 import { AlwaysAllow, AutoBadge, EditsBar, ModeBadge, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
@@ -424,7 +425,8 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     el?.scrollIntoView({ block: 'center' });
     el?.querySelector<HTMLButtonElement>('button')?.focus();
   }, [reveal]);
-  const lastChanges = chat.items.map((i) => i.kind).lastIndexOf('changes');
+  const { items, approvals } = useMemo(() => foldApprovals(chat.items), [chat.items]);
+  const lastChanges = items.map((i) => i.kind).lastIndexOf('changes');
   const waiting = new Set(chat.items.flatMap((i) => (i.kind === 'permission' && !i.answer && i.toolCallId ? [i.toolCallId] : [])));
   const waitingKey = [...waiting].join('\n');
   const waitingNow = waitingItems(chat.items).length > 0;
@@ -438,9 +440,9 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {group(chat.items).map((g) =>
+      {group(items).map((g) =>
         g.kind === 'steps' ? (
-          <Steps key={g.at} tools={g.items} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
+          <Steps key={g.at} tools={g.items} approvals={approvals} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
         ) : (
           <TranscriptItem
             key={g.at}
@@ -452,7 +454,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
             conflictKey={conflictKey}
             onSelect={onSelect}
             canUndo={g.at === lastChanges && !chat.busy}
-            live={chat.busy && g.at === chat.items.length - 1}
+            live={chat.busy && g.at === items.length - 1}
           />
         ),
       )}
