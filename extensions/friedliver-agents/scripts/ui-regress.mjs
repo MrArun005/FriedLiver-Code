@@ -90,6 +90,30 @@ BLOCKS.F01 = async () => {
   }
 };
 
+// ---- F02: decision keys act on one card, the one that shows the hint ----
+BLOCKS.F02 = async () => {
+  // chat-c1 waits on two things: an agent's request to message another chat, then an edit permission.
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
+  const hinted = () => p.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id));
+  check(JSON.stringify(await hinted()) === JSON.stringify(['item-perm-c1']), `only the nearest waiting card shows the key hint [${await hinted()}]`);
+  await p.click('.composer textarea');
+  await p.keyboard.press('1');
+  let last = (await posted(p)).at(-1);
+  check(last?.type === 'permission' && last.requestId === 'perm-c1' && (await p.inputValue('.composer textarea')) === '', `1 picks the hinted card's first option and types nothing [${JSON.stringify(last)}]`);
+  // Out of range: still nothing typed while a decision waits.
+  await p.keyboard.press('9');
+  check((await p.inputValue('.composer textarea')) === '', 'a digit is never typed into the empty composer while a decision waits');
+  // Choosing the other card moves the keys and the hint to it.
+  await p.click('#item-bridge-c1 .ask-head');
+  check(JSON.stringify(await hinted()) === JSON.stringify(['item-bridge-c1']), 'clicking a card makes it the one the keys act on');
+  await p.click('.composer textarea');
+  await p.keyboard.press('ControlOrMeta+Enter');
+  last = (await posted(p)).at(-1);
+  check(last?.type === 'bridge' && last.requestId === 'bridge-c1' && last.answer === 'allow', `Ctrl/Cmd+Enter answers the chosen card [${JSON.stringify(last)}]`);
+  check((await p.locator('#item-bridge-c1 .opt-num').count()) === 3, 'the request card numbers its options too');
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
