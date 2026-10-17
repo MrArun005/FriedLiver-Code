@@ -23,6 +23,7 @@ import {
   nextDecision,
   planProgress,
   recentChats,
+  tabAfterClose,
   relativePath,
   rosterKey,
   settleOrder,
@@ -196,6 +197,15 @@ describe('the chat switcher', () => {
     expect(recentChats(chats, 'c7', 3).map((c) => c.id)).toEqual(['c5', 'c6', 'c7']);
     expect(recentChats(chats, 'c0', 3).map((c) => c.id)).toEqual(['c0', 'c6', 'c7']);
     expect(recentChats([...chats, chat('z', { archived: true, lastActivity: 999 })], undefined, 2).map((c) => c.id)).toEqual(['c6', 'c7']);
+  });
+
+  it('leaves out tabs you closed, and moves to the right neighbour (else the left) when the open one closes', () => {
+    expect(recentChats(chats, 'c7', 3, ['c6']).map((c) => c.id)).toEqual(['c4', 'c5', 'c7']);
+    expect(recentChats(chats, undefined, 3, chats.map((c) => c.id))).toEqual([]);
+    expect(tabAfterClose(['a', 'b', 'c'], 'b', 'b')).toBe('c');
+    expect(tabAfterClose(['a', 'b', 'c'], 'c', 'c')).toBe('b');
+    expect(tabAfterClose(['a', 'b', 'c'], 'a', 'c')).toBe('c');
+    expect(tabAfterClose(['a'], 'a', 'a')).toBeUndefined();
   });
 
   it('groups chats by where they stand, most recent first', () => {

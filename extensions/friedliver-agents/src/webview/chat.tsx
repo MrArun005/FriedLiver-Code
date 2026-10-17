@@ -23,6 +23,7 @@ import {
   type ReviewItem,
 } from '../shared/model';
 import {
+  tabAfterClose,
   applyMention,
   clip,
   linkBadges,
@@ -82,13 +83,39 @@ function App() {
       setFocusTick((n) => n + 1);
     }
   });
-  // The selected chat even when archived (opened from History); otherwise the newest open one.
-  const chat = state.chats.find((c) => c.id === selected) ?? openChats(state.chats).at(-1);
+  // Tabs closed in this window: out of the strip only; the chats go on, in the Chats list and the Agent Manager.
+  const [closed, setClosed] = usePersisted<string[]>('closedTabs', []);
+  // Opening a chat (from the list, a notification, a card) brings its tab back.
+  useEffect(() => {
+    if (selected && closed.includes(selected)) setClosed(closed.filter((id) => id !== selected));
+  }, [selected]);
+  // The selected chat even when archived (opened from History); otherwise the newest open one with a tab.
+  const chat = state.chats.find((c) => c.id === selected && !closed.includes(c.id)) ?? openChats(state.chats).filter((c) => !closed.includes(c.id)).at(-1);
   shown.current = chat?.id;
 
   const select = useCallback((chatId: string) => {
     setSelected(chatId);
     send({ type: 'select', chatId });
+  }, []);
+  const strip = useRef<string[]>([]);
+  const closeTab = (chatId: string) => {
+    const next = tabAfterClose(strip.current, chatId, chat?.id);
+    setClosed([...closed.filter((id) => id !== chatId), chatId]);
+    if (next && next !== chat?.id) select(next);
+    else if (!next) setSelected(undefined);
+  };
+  const closeActive = useRef(() => {});
+  closeActive.current = () => chat && closeTab(chat.id);
+  useEffect(() => {
+    // Cmd/Ctrl+W closes the open chat's tab; caught before the webview forwards it, so the editor's own tab stays.
+    const onKey = (e: KeyboardEvent) => {
+      if (!(IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'w') return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeActive.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, []);
   const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
   // Wide (the chat in the editor area): the chat list stays open beside it. Narrow: tabs and a dropdown.
@@ -108,7 +135,7 @@ function App() {
     <LiveState.Provider value={state}>
       <div class="chat-app">
         <TextSize />
-        <Switcher state={state} active={chat?.id} onSelect={select} />
+        <Switcher state={state} active={chat?.id} onSelect={select} closed={closed} onClose={closeTab} stripRef={strip} />
         <div class="chat-main">
         {chat ? (
           <>
@@ -144,21 +171,36 @@ function App() {
 }
 
 /** Recent chats as tabs, and every open chat one click away in "All chats", for fifteen agents and more. */
-function Switcher({ state, active, onSelect }: { state: AppState; active?: string; onSelect: Select }) {
+function Switcher({ state, active, onSelect, closed, onClose, stripRef }: { state: AppState; active?: string; onSelect: Select; closed: string[]; onClose(chatId: string): void; stripRef: { current: string[] } }) {
   const width = useWidth();
-  const strip = recentChats(state.chats, active, Math.max(1, Math.min(6, Math.floor((width - 140) / 128))));
+  const strip = recentChats(state.chats, active, Math.max(1, Math.min(6, Math.floor((width - 140) / 128))), closed);
+  stripRef.current = strip.map((c) => c.id);
+  const shortcut = IS_MAC ? '⌘W' : 'Ctrl+W';
   const open = openChats(state.chats);
   const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
   return (
     <div class="switcher">
       <div class="tabs" role="tablist" aria-label="Recent chats">
         {strip.map((c) => (
-          <button key={c.id} role="tab" class="tab" aria-selected={c.id === active} title={`${c.label}: ${c.title}`} onClick={() => onSelect(c.id)}>
-            <Glyph agent={c.agent} size="sm" />
-            <span class="tab-title">{c.title}</span>
-            <AutoBadge chat={c} short />
-            <Dot state={statusOf(c)} />
-          </button>
+          <span key={c.id} class="tab-wrap" data-active={c.id === active ? '' : undefined}>
+            <button
+              role="tab"
+              class="tab"
+              data-chat={c.id}
+              aria-selected={c.id === active}
+              title={`${c.title} (${c.label})`}
+              onClick={() => onSelect(c.id)}
+              onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
+            >
+              <Glyph agent={c.agent} size="sm" />
+              <span class="tab-title">{c.title}</span>
+              <AutoBadge chat={c} short />
+              <Dot state={statusOf(c)} />
+            </button>
+            <button type="button" class="tab-close" aria-label={`Close ${c.title}`} title={`Close tab (${shortcut})`} onClick={() => onClose(c.id)}>
+              <Icon name="close" size={12} />
+            </button>
+          </span>
         ))}
       </div>
       <Popover

@@ -4231,13 +4231,22 @@ code.command-line {
   min-width: 0;
   overflow: hidden;
 }
-button.tab {
+/* A tab and its ×: the × shows on hover, on the open tab and on keyboard focus. */
+.tab-wrap {
+  position: relative;
   flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 200px;
+}
+button.tab {
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 200px;
   height: 26px;
   gap: 6px;
-  padding: 0 var(--sp-2) 0 var(--sp-1);
+  padding: 0 22px 0 var(--sp-1);
   border-radius: var(--r-5);
   color: var(--fg-2);
   font-size: var(--t-90);
@@ -4249,6 +4258,25 @@ button.tab:hover {
 button.tab[aria-selected='true'] {
   color: var(--sel-fg);
   background: var(--sel-bg);
+}
+button.tab-close {
+  position: absolute;
+  right: var(--sp-1);
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-4);
+  color: var(--fg-2);
+  opacity: 0;
+}
+.tab-wrap:hover .tab-close,
+.tab-wrap[data-active] .tab-close,
+.tab-wrap:focus-within .tab-close {
+  opacity: 1;
+}
+button.tab-close:hover {
+  color: var(--fg);
+  background: var(--ghost-hover);
 }
 .tab-title {
   min-width: 0;
