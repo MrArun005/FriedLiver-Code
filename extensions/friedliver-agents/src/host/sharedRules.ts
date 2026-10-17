@@ -3,7 +3,8 @@
 // and what agents learned in .friedliver/memory.md. They reach each new session as prompt
 // text only (hub.ts rulesFor), never into CLAUDE.md / AGENTS.md / GEMINI.md, and nothing
 // in them is ever run. No vscode here, so all of it is tested.
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 /** At most this many bytes of rules go into a session; the rest is cut, with a warning. */
@@ -28,16 +29,81 @@ export interface Rules {
 const OPEN = '<friedliver-rules>';
 const CLOSE = '</friedliver-rules>';
 
-const readOrEmpty = (file: string) => readFile(file, 'utf8').catch(() => '');
+const PERSONAL_FILE = 'rules.md';
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+
+/**
+ * `rel` inside `base`, checked a step at a time: no part may be a symlink or `..`, so a cloned
+ * repo can't point .friedliver or memory.md at ~/.zshrc. With `create`, missing folders are made
+ * and checked again. Returns the real path; the file itself may not exist yet.
+ */
+export async function safePath(base: string, rel: string, create = false): Promise<string> {
+  const root = await realpath(base);
+  const parts = rel.split(/[\\/]/);
+  if (parts.some((p) => p === '..' || p === '' || p === '.')) throw new Error(`Refused ${rel}: it points outside ${base}.`);
+  let cur = root;
+  for (const [i, part] of parts.entries()) {
+    cur = path.join(cur, part);
+    const last = i === parts.length - 1;
+    let st = await lstat(cur).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return undefined;
+      throw err;
+    });
+    if (!st && !last) {
+      if (!create) return path.join(root, rel);
+      await mkdir(cur).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EEXIST') throw err;
+      });
+      st = await lstat(cur);
+    }
+    if (st?.isSymbolicLink()) throw new Error(`Refused ${rel}: ${path.relative(root, cur)} is a symlink.`);
+    if (st && !last && !st.isDirectory()) throw new Error(`Refused ${rel}: ${path.relative(root, cur)} is not a folder.`);
+  }
+  if (!cur.startsWith(root + path.sep)) throw new Error(`Refused ${rel}: it points outside ${base}.`);
+  return cur;
+}
+
+/** The file's text, or '' when it is missing, a symlink, or anything else is off: never followed out. */
+async function readSafe(base: string, rel: string): Promise<string> {
+  try {
+    const handle = await open(await safePath(base, rel), constants.O_RDONLY | NO_FOLLOW);
+    try {
+      return await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return '';
+  }
+}
+
+/** Writes (or appends) without following a symlink, even one planted after the check. */
+async function writeSafe(base: string, rel: string, text: string, append: boolean): Promise<void> {
+  const flags = constants.O_WRONLY | constants.O_CREAT | NO_FOLLOW | (append ? constants.O_APPEND : constants.O_TRUNC);
+  const handle = await open(await safePath(base, rel, true), flags, 0o644).catch((err: NodeJS.ErrnoException) => {
+    throw err.code === 'ELOOP' ? new Error(`Refused ${rel}: it is a symlink.`) : err;
+  });
+  try {
+    await handle.writeFile(text);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Makes sure `rel` exists as a plain file in `base` (for opening in the editor); its real path. */
+export async function ensureFile(base: string, rel: string): Promise<string> {
+  await writeSafe(base, rel, '', true);
+  return safePath(base, rel);
+}
 
 /**
  * The rules for a new session. A workspace the user hasn't trusted gives only the
  * personal rules: its files are someone else's words.
  */
-export async function loadRules(opts: { personalFile: string; folder?: string; trusted: boolean }, cap = RULES_CAP): Promise<Rules | undefined> {
-  const parts: { label: string; text: string }[] = [{ label: PERSONAL_LABEL, text: await readOrEmpty(opts.personalFile) }];
+export async function loadRules(opts: { personalDir: string; folder?: string; trusted: boolean }, cap = RULES_CAP): Promise<Rules | undefined> {
+  const parts: { label: string; text: string }[] = [{ label: PERSONAL_LABEL, text: await readSafe(opts.personalDir, PERSONAL_FILE) }];
   if (opts.trusted && opts.folder) {
-    for (const rel of [PROJECT_RULES, PROJECT_MEMORY]) parts.push({ label: rel, text: await readOrEmpty(path.join(opts.folder, rel)) });
+    for (const rel of [PROJECT_RULES, PROJECT_MEMORY]) parts.push({ label: rel, text: await readSafe(opts.folder!, rel) });
   }
   return combineRules(parts, cap);
 }
@@ -80,15 +146,13 @@ export function mergeRules(existing: string, sources: { name: string; text: stri
 export async function importRules(folder: string): Promise<{ added: number; sources: string[] }> {
   const sources: { name: string; text: string }[] = [];
   for (const name of IMPORT_SOURCES) {
-    const text = await readOrEmpty(path.join(folder, name));
+    const text = await readSafe(folder, name);
     if (text.trim()) sources.push({ name, text });
   }
-  const file = path.join(folder, PROJECT_RULES);
-  const merged = mergeRules(await readOrEmpty(file), sources);
-  if (merged.added) {
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, merged.text);
-  }
+  // Checked first, so a symlinked rules.md is refused rather than read as empty and overwritten.
+  await safePath(folder, PROJECT_RULES, true);
+  const merged = mergeRules(await readSafe(folder, PROJECT_RULES), sources);
+  if (merged.added) await writeSafe(folder, PROJECT_RULES, merged.text, false);
   return { added: merged.added, sources: sources.map((s) => s.name) };
 }
 
@@ -97,8 +161,6 @@ export async function remember(folder: string, fact: string): Promise<string> {
   // ponytail: no dedupe or pruning; the user edits memory.md by hand when it grows.
   const line = fact.replace(/\s+/g, ' ').trim().slice(0, MAX_FACT);
   if (!line) throw new Error('Nothing to remember.');
-  const file = path.join(folder, PROJECT_MEMORY);
-  await mkdir(path.dirname(file), { recursive: true });
-  await appendFile(file, `- ${line}\n`);
+  await writeSafe(folder, PROJECT_MEMORY, `- ${line}\n`, true);
   return line;
 }
