@@ -413,7 +413,9 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         </ol>
       )}
       {answer && <div class="map-detail-answer">{answer.length > 600 ? `${answer.slice(0, 599)}…` : answer}</div>}
-      {!steps.length && !answer && <div class="tip-line">{session ? 'Its steps are in that session\'s transcript; FriedLiver lists only its title and state.' : 'No steps reported yet.'}</div>}
+      {session && info?.about && <div class="tip-meta">{info.about}</div>}
+      {session && info?.last && <div class="tip-line">Last step: {info.last}</div>}
+      {!steps.length && !answer && !info?.last && <div class="tip-line">{session ? 'Its steps are in that session\'s transcript; FriedLiver lists only its title and state.' : 'No steps reported yet.'}</div>}
       {chat && (
         <button class="link" onClick={() => send({ type: 'openChat', chatId: chat.id, item: sub.item })}>
           Show in its chat

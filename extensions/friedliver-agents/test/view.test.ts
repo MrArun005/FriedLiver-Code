@@ -320,7 +320,7 @@ describe('subagents inline', () => {
 
   it("draws an outside Claude Code session's subagents under it, and leaves sessions without subagents off the map", () => {
     const outside = [
-      { id: 'cc1', cwd: '/w', title: 'Fan out three reviewers', lastActivity: 10_000, messages: 4, subagents: [{ id: 'x1', title: 'Review A', done: false }, { id: 'x2', title: 'Review B', done: true }] },
+      { id: 'cc1', cwd: '/w', title: 'Fan out three reviewers', lastActivity: 10_000, messages: 4, subagents: [{ id: 'x1', title: 'Review A' }, { id: 'x2', title: 'Review B', end: 'done' as const }] },
       { id: 'cc2', cwd: '/w', title: 'IDE identification question', lastActivity: 10_000, messages: 2, subagents: [] },
     ];
     const map = mapLayout(state([chat('p', { items: [said] })]), outside, 20_000);
