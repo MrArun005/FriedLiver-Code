@@ -2,7 +2,7 @@
 // against Dark 2026 and Light 2026 (test/fixtures/theme-*-2026.css), must keep
 // WCAG contrast: body text 7:1, secondary text and links 4.5:1 on every surface
 // text sits on, selected rows readable, and hover never the same as selected.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -90,8 +90,10 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
     const names = [...block().matchAll(/(--[\w-]+):/g)].map((m) => m[1]);
     expect(new Set(names).size).toBe(names.length);
     const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
-    // Read without a fallback: a var() with one (--fl-accent, a component's inline --cols) may be unset.
+    // Components set some inline (style={{ '--at': … }}); a var() with a fallback (--fl-accent) may be unset.
+    const webview = path.join(__dirname, '../src/webview');
+    const inline = new Set(readdirSync(webview).flatMap((f) => [...readFileSync(path.join(webview, f), 'utf8').matchAll(/'(--[\w-]+)':/g)].map((m) => m[1])));
     const read = new Set([...css.matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]).filter((n) => !n.startsWith('--vscode-')));
-    expect([...read].filter((n) => !defined.has(n))).toEqual([]);
+    expect([...read].filter((n) => !defined.has(n) && !inline.has(n))).toEqual([]);
   });
 });

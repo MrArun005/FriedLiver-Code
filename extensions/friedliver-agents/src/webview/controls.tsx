@@ -279,16 +279,15 @@ export function EditsBar({ chat }: { chat: ChatView }) {
   const waiting = waitingItems(chat.items).filter((i) => i.kind === 'review' || (i.kind === 'permission' && (i.toolKind === 'edit' || !!i.detail?.files?.length))).length;
   if (!waiting || !chat.busy) return null;
   return (
-    <div class="edits-bar" role="group" aria-label="Edits waiting">
-      <Icon name="diff" />
-      <span>
+    <div class="banner edits-bar" role="group" aria-label="Edits waiting">
+      <span class="banner-text">
         {waiting} edit{waiting === 1 ? '' : 's'} waiting
       </span>
       <span class="spacer" />
       <button class="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' })}>
-        <Icon name="check" /> Accept all
+        Accept all
       </button>
-      <button class="ghost danger sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
+      <button class="sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
         Reject all
       </button>
     </div>

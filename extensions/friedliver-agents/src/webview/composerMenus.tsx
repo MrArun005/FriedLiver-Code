@@ -1,5 +1,6 @@
 // The composer's bottom-row menus: Select a model, Modes, the / menu, and the
 // Agent map. Each opens above the composer (the map is a modal); Esc closes.
+import { Fragment } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
@@ -24,6 +25,14 @@ function modeHint(mode: ApprovalLevel | 'plan', agent: string): string {
   return `${agent} will run edits and commands without asking`;
 }
 
+/** The model as the pill names it: "Default (recommended)" names the model it resolves to ("Opus 5.5 · Best for…"). */
+export function modelLabel(model: SessionOption | undefined): string | undefined {
+  const name = choiceName(model);
+  const picked = model?.type === 'select' ? model.choices.find((c) => c.value === model.current) : undefined;
+  const resolved = name && /^default\b/i.test(name) ? picked?.description?.match(/^([^·]+?)\s+·/)?.[1] : undefined;
+  return resolved ?? name;
+}
+
 /** The model pill's tooltip: model, effort, context, cost and the turns-left estimate. */
 export function usageTitle(chat: ChatView, samples: number[]): string {
   const { model, effort } = optionGroups(chat.session);
@@ -38,59 +47,76 @@ export function usageTitle(chat: ChatView, samples: number[]): string {
   return parts.join('\n');
 }
 
-/** Effort as dots on a track: a slider, arrows step it. */
+/** Effort as a slider: a thumb on a 76px track with a notch per level; arrows, Home/End, a click or a drag set it. */
 export function EffortRow({ chat, icon }: { chat: ChatView; icon?: boolean }) {
   const { effort } = optionGroups(chat.session);
   if (!effort || effort.type !== 'select' || !effort.choices.length) return null;
+  const n = effort.choices.length;
   const at = Math.max(0, effort.choices.findIndex((c) => c.value === effort.current));
   const set = (i: number) => {
-    const c = effort.choices[Math.max(0, Math.min(effort.choices.length - 1, i))];
+    const c = effort.choices[Math.max(0, Math.min(n - 1, i))];
     if (c.value !== effort.current) send({ type: 'setOption', chatId: chat.id, optionId: effort.id, value: c.value });
   };
+  const fromPointer = (e: PointerEvent) => {
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    set(Math.round(((e.clientX - box.left - 9) / Math.max(1, box.width - 18)) * (n - 1)));
+  };
   return (
-    <div class="cc-row cc-effort">
-      {icon && <Icon name="gauge" />}
-      <span class="cc-row-name">
-        Effort <span class="cc-mute">({choiceName(effort)})</span>
+    <div class="cc-item cc-effort">
+      {icon && <Icon name="gauge" size={20} />}
+      <span class="cc-item-name">
+        Effort <span class="cc-item-value">({choiceName(effort)})</span>
       </span>
       <span
-        class="cc-dots"
+        class="cc-slider"
         role="slider"
         tabIndex={0}
         aria-label="Effort"
         aria-valuemin={0}
-        aria-valuemax={effort.choices.length - 1}
+        aria-valuemax={n - 1}
         aria-valuenow={at}
         aria-valuetext={choiceName(effort)}
+        style={{ '--at': n > 1 ? at / (n - 1) : 0 }}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          fromPointer(e);
+        }}
+        onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && fromPointer(e)}
         onKeyDown={(e) => {
           const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
           if (step !== undefined) set(at + step);
           else if (e.key === 'Home') set(0);
-          else if (e.key === 'End') set(effort.choices.length - 1);
+          else if (e.key === 'End') set(n - 1);
           else return;
           e.preventDefault();
           e.stopPropagation();
         }}
       >
         {effort.choices.map((c, i) => (
-          <span key={c.value} class="cc-dot" data-on={i === at ? '' : undefined} title={c.name} onClick={() => set(i)} />
+          <span key={c.value} class="cc-notch" style={{ '--i': n > 1 ? i / (n - 1) : 0 }} title={c.name} />
         ))}
+        <span class="cc-thumb" />
       </span>
     </div>
   );
 }
 
-function ToggleRow({ chat, option }: { chat: ChatView; option: SessionOption }) {
+const TOGGLE_ICONS: Record<string, IconName> = { ultracode: 'rocket', fast: 'bolt', 'fast-mode': 'bolt' };
+
+function ToggleRow({ chat, option, icon }: { chat: ChatView; option: SessionOption; icon?: boolean }) {
   const on = option.current === true;
   return (
-    <div class="cc-row">
-      <span class="cc-row-name" title={option.description}>
+    <div class="cc-item cc-toggle-row">
+      {icon && <Icon name={TOGGLE_ICONS[option.id] ?? 'model'} size={20} />}
+      <span class="cc-item-name" title={option.description}>
         {option.name}
       </span>
       <button type="button" role="switch" aria-checked={on} aria-label={option.name} class="cc-switch" onClick={() => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value: !on })} />
     </div>
   );
 }
+
+const Divider = () => <div class="cc-divider" role="separator" />;
 
 /** Up/Down move through a menu's items; Esc closes. */
 function useMenuKeys(close: () => void) {
@@ -126,7 +152,7 @@ export function ModelMenu({ chat, close }: MenuProps) {
   return (
     <div ref={panel} class="cc-menu cc-model-menu" role="menu" aria-label="Select a model" onKeyDown={onKeyDown}>
       <div class="cc-menu-title">Select a model</div>
-      <div class="cc-menu-scroll">
+      <div class="cc-menu-list">
         {pick?.choices.map((c) => (
           <button
             key={c.value}
@@ -142,17 +168,16 @@ export function ModelMenu({ chat, close }: MenuProps) {
               <span class="cc-item-name">{c.name}</span>
               {c.description && <span class="cc-item-desc">{c.description}</span>}
             </span>
-            {pick.current === c.value && <Icon name="check" />}
+            {pick.current === c.value && <Icon name="check" size={16} />}
           </button>
         ))}
-        {!pick && <div class="cc-item-desc cc-pad">{chat.session?.live ? `${chat.label} offers no model choice` : `${chat.label} is starting…`}</div>}
+        {!pick && <div class="cc-empty">{chat.session?.live ? `${chat.label} offers no model choice` : `${chat.label} is starting…`}</div>}
       </div>
-      <div class="cc-menu-foot">
-        <EffortRow chat={chat} />
-        {toggles.map((o) => (
-          <ToggleRow key={o.id} chat={chat} option={o} />
-        ))}
-      </div>
+      <Divider />
+      <EffortRow chat={chat} />
+      {toggles.map((o) => (
+        <ToggleRow key={o.id} chat={chat} option={o} />
+      ))}
     </div>
   );
 }
@@ -178,6 +203,8 @@ export function ModesMenu({ chat, close }: MenuProps) {
     }
     close();
   };
+  const { modelConfig, other } = optionGroups(chat.session);
+  const toggles = [...modelConfig, ...other].filter((o) => o.type === 'boolean');
   return (
     <div ref={panel} class="cc-menu cc-modes-menu" role="menu" aria-label="Modes" onKeyDown={onKeyDown}>
       <div class="cc-menu-title">
@@ -187,23 +214,27 @@ export function ModesMenu({ chat, close }: MenuProps) {
         </span>
       </div>
       {modes.map((m) => (
-        <button key={m} role="menuitemradio" aria-checked={now === m} class="cc-item cc-item-icon" title={m === 'plan' ? undefined : APPROVAL_HINTS[m]} onClick={() => pick(m)}>
-          <Icon name={MODE_ICONS[m]} />
+        <button key={m} role="menuitemradio" aria-checked={now === m} class="cc-item" title={m === 'plan' ? undefined : APPROVAL_HINTS[m]} onClick={() => pick(m)}>
+          <Icon name={MODE_ICONS[m]} size={20} />
           <span class="cc-item-text">
             <span class="cc-item-name">{MODE_NAMES[m]}</span>
             <span class="cc-item-desc">{modeHint(m, agent)}</span>
           </span>
-          {now === m && <Icon name="check" />}
+          {now === m && <Icon name="check" size={16} />}
         </button>
       ))}
-      <div class="cc-menu-foot">
-        <EffortRow chat={chat} icon />
-      </div>
+      <Divider />
+      <EffortRow chat={chat} icon />
+      {toggles.map((o) => (
+        <ToggleRow key={o.id} chat={chat} option={o} icon />
+      ))}
       {extra.length > 0 && (
-        <div class="cc-more">
-          <button role="menuitem" class="cc-item cc-item-line cc-more-btn" aria-expanded={more} onClick={() => setMore(!more)}>
+        <>
+          <Divider />
+          <button role="menuitem" class="cc-item cc-more-btn" aria-expanded={more} onClick={() => setMore(!more)}>
+            <Icon name="more" size={20} />
             <span class="cc-item-name">More modes…</span>
-            <Icon name="chevron" />
+            <Icon name="chevron" size={16} />
           </button>
           {more &&
             extra.map((c) => (
@@ -211,21 +242,22 @@ export function ModesMenu({ chat, close }: MenuProps) {
                 key={c.value}
                 role="menuitemradio"
                 aria-checked={own?.current === c.value}
-                class="cc-item cc-item-small"
+                class="cc-item"
                 title={c.description}
                 onClick={() => {
                   send({ type: 'setOption', chatId: chat.id, optionId: own!.id, value: c.value });
                   close();
                 }}
               >
+                <Icon name={modeClass(c) === 'full' ? 'bolt' : 'shield'} size={20} />
                 <span class="cc-item-text">
                   <span class="cc-item-name">{c.name}</span>
                   {c.description && <span class="cc-item-desc">{c.description}</span>}
                 </span>
-                {own?.current === c.value && <Icon name="check" />}
+                {own?.current === c.value && <Icon name="check" size={16} />}
               </button>
             ))}
-        </div>
+        </>
       )}
     </div>
   );
@@ -237,35 +269,63 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
   const [query, setQuery] = useState('/');
   const q = query.replace(/^\//, '').trim().toLowerCase();
   const commands = chat.session?.commands ?? [];
-  const { model } = optionGroups(chat.session);
+  const { model, modelConfig, other } = optionGroups(chat.session);
+  const toggles = [...modelConfig, ...other].filter((o) => o.type === 'boolean');
   const context = [
     { label: 'Attach file…', run: () => send({ type: 'attach', chatId: chat.id }) },
     { label: 'Mention file from this project…', run: mention },
     ...(commands.some((c) => c.name === 'clear') ? [{ label: 'Clear conversation', run: () => command('clear', true) }] : []),
+    ...(chat.items.some((i) => i.kind === 'user' && i.checkpoint) ? [{ label: 'Rewind', run: () => send({ type: 'rewind', chatId: chat.id }) }] : []),
   ].filter((i) => !q || i.label.toLowerCase().includes(q));
   const switchModel = !q || 'switch model'.includes(q);
   const own = commands.filter((c) => !q || c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
-  const item = (key: string, label: string, run: () => void, right?: string, title?: string) => (
+  const item = (key: string, label: string, run: () => void, right?: string, desc?: string) => (
     <button
       key={key}
       role="menuitem"
-      class="cc-item cc-item-line"
-      title={title}
+      class="cc-item"
+      title={desc}
       onClick={() => {
         close();
         run();
       }}
     >
-      <span class="cc-item-name">{label}</span>
-      {right && <span class="cc-mute">{right}</span>}
+      <span class="cc-item-text">
+        <span class="cc-item-name">{label}</span>
+        {desc && <span class="cc-item-hint">{desc}</span>}
+      </span>
+      {right && <span class="cc-item-value">{right}</span>}
     </button>
   );
+  const sections = [
+    context.length > 0 && (
+      <div key="context" class="cc-menu-section">
+        <div class="cc-menu-sub">Context</div>
+        {context.map((i) => item(i.label, i.label, i.run))}
+      </div>
+    ),
+    (switchModel || !q) && (
+      <div key="model" class="cc-menu-section">
+        <div class="cc-menu-sub">Model</div>
+        {switchModel && item('switch-model', 'Switch model…', openModel, modelLabel(model))}
+        {!q && <EffortRow chat={chat} />}
+        {!q && toggles.map((o) => <ToggleRow key={o.id} chat={chat} option={o} />)}
+      </div>
+    ),
+    own.length > 0 && (
+      <div key="own" class="cc-menu-section">
+        <div class="cc-menu-sub">{AGENT_FACES[chat.agent].name}</div>
+        {own.map((c) => item(`cmd-${c.name}`, `/${c.name}`, () => command(c.name), undefined, c.description))}
+      </div>
+    ),
+  ].filter(Boolean);
   return (
     <div ref={panel} class="cc-menu cc-slash-menu" role="menu" aria-label="Commands" onKeyDown={onKeyDown}>
       <input
         class="cc-search"
         value={query}
         aria-label="Search commands"
+        placeholder="Search commands"
         onInput={(e) => setQuery(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
@@ -274,27 +334,14 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
           }
         }}
       />
-      <div class="cc-menu-scroll">
-        {context.length > 0 && (
-          <div class="cc-menu-section">
-            <div class="cc-menu-sub">Context</div>
-            {context.map((i) => item(i.label, i.label, i.run))}
-          </div>
-        )}
-        {(switchModel || !q) && (
-          <div class="cc-menu-section">
-            <div class="cc-menu-sub">Model</div>
-            {switchModel && item('switch-model', 'Switch model…', openModel, choiceName(model))}
-            {!q && <EffortRow chat={chat} />}
-          </div>
-        )}
-        {own.length > 0 && (
-          <div class="cc-menu-section">
-            <div class="cc-menu-sub">{AGENT_FACES[chat.agent].name}</div>
-            {own.map((c) => item(`cmd-${c.name}`, `/${c.name}`, () => command(c.name), undefined, c.description))}
-          </div>
-        )}
-        {!context.length && !switchModel && !own.length && <div class="cc-item-desc cc-pad">No matching commands</div>}
+      <div class="cc-menu-list">
+        {sections.map((section, i) => (
+          <Fragment key={i}>
+            {i > 0 && <Divider />}
+            {section}
+          </Fragment>
+        ))}
+        {!sections.length && <div class="cc-empty">No matching commands</div>}
       </div>
     </div>
   );
@@ -421,17 +468,17 @@ export const ComposerPills = memo(function ComposerPills({
   return (
     <>
       <button type="button" class="cc-icon-btn cc-slash-btn" aria-label="Commands" title="Commands (/)" onClick={() => open('slash')}>
-        <Icon name="slash" />
+        <Icon name="slash" size={20} />
       </button>
       {agents > 0 && (
         <button type="button" class="cc-pill cc-agents" title={`${running} running · open the agent map`} aria-label={`${agents} agent${agents === 1 ? '' : 's'}, ${running} running: open the agent map`} onClick={() => open('agents')}>
-          <Dot state={running ? 'working' : 'done'} still={!running} />
+          <Dot state={running ? 'working' : 'done'} still />
           {agents} agent{agents === 1 ? '' : 's'}
         </button>
       )}
       <button type="button" class="cc-pill cc-model" title={usageTitle(chat, samples)} aria-label={`Model: ${usageTitle(chat, samples)}`} onClick={() => open('model')}>
-        {choiceName(model) ?? (chat.session?.live ? AGENT_FACES[chat.agent].name : 'Starting…')}
-        {effort && <span class="cc-mute">{choiceName(effort)}</span>}
+        <span class="cc-pill-text">{modelLabel(model) ?? (chat.session?.live ? AGENT_FACES[chat.agent].name : 'Starting…')}</span>
+        {effort && <span class="cc-pill-sub">{choiceName(effort)}</span>}
       </button>
     </>
   );
@@ -448,27 +495,34 @@ export const ModeButton = memo(function ModeButton({ chat, open }: { chat: ChatV
   if (override) {
     return (
       <button type="button" class="cc-mode" data-warn={override.tone} title={`${agent} is in ${override.name} — it won't ask. Click to change.`} aria-label={`Mode: ${override.name} (${agent}'s own mode, it won't ask)`} onClick={() => open('modes')}>
-        <Icon name="bolt" />
+        <span class="cc-icon-box">
+          <Icon name="bolt" size={18} />
+        </span>
         {override.name}
       </button>
     );
   }
   return (
     <button type="button" class="cc-mode" data-mode={m} title={`${MODE_NAMES[m]}: ${modeHint(m, AGENT_FACES[chat.agent].name)}. Shift+Tab switches.`} aria-label={`Mode: ${MODE_NAMES[m]}`} onClick={() => open('modes')}>
-      <Icon name={MODE_ICONS[m]} />
+      <span class="cc-icon-box">
+        <Icon name={MODE_ICONS[m]} size={18} />
+      </span>
       {m === 'edits' ? 'Edits' : MODE_NAMES[m]}
     </button>
   );
 }, sameControls);
 
-/** An image waiting to go: thumbnail, name and size; click removes it. */
+/** An image waiting to go: thumbnail, name and size; click removes it (an × shows on hover). */
 export function AttachmentChip({ a, onRemove }: { a: Attachment; onRemove: () => void }) {
   const [size, setSize] = useState('');
   return (
-    <button type="button" class="thumb cc-chip" title={`Remove ${a.name}`} onClick={onRemove}>
-      <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} onLoad={(e) => setSize(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)} />
+    <button type="button" class="cc-chip" title={`Remove ${a.name}`} onClick={onRemove}>
+      <img src={`data:${a.mimeType};base64,${a.data}`} alt="" onLoad={(e) => setSize(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)} />
       <span class="cc-chip-name">{a.name}</span>
-      {size && <span class="cc-mute">{size}</span>}
+      {size && <span class="cc-chip-meta">{size}</span>}
+      <span class="cc-chip-x" aria-hidden="true">
+        <Icon name="close" size={14} />
+      </span>
     </button>
   );
 }
