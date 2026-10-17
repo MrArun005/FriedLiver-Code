@@ -9,7 +9,7 @@ import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
 import { registerClaude, unregisterClaude, writeTokenFile } from './host/externalBrowser';
-import { EXTERNAL_CLIENT } from './bridge/protocol';
+import { isExternal } from './bridge/protocol';
 import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
@@ -146,6 +146,7 @@ export class Controller {
       agentToAgent: () => this.agentToAgent(),
       browser: (_chatId, call, signal) => this.browser.call(call, signal),
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
+      browserPage: (selector) => this.browser.inspect(selector),
       approvalDefault: () => this.approvalDefault(),
       defaults: {
         get: (agent) => this.context.globalState.get<Partial<Record<AgentKey, AgentDefaults>>>(DEFAULTS_KEY)?.[agent],
@@ -979,11 +980,12 @@ export class Controller {
     ]);
   }
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string }): void {
-    if (ask.chatId === EXTERNAL_CLIENT) {
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string }): void {
+    if (isExternal(ask.chatId)) {
       // No chat holds this request, so it always gets its own popup, whatever else is waiting.
       const buttons = { Allow: 'allow', 'Allow for this session': 'allowChat', Deny: 'deny' } as const;
-      void vscode.window.showWarningMessage(plainText(ask.title), ...Object.keys(buttons)).then((picked) => {
+      // Not modal; the detail (bridgeRequests.externalDetail) says exactly what and where, so consent isn't blind.
+      void vscode.window.showWarningMessage(`${plainText(ask.title)}: ${plainText(ask.detail ?? '')}`, ...Object.keys(buttons)).then((picked) => {
         if (picked) this.core.answerBridge(ask.requestId, buttons[picked as keyof typeof buttons]);
       });
       return;

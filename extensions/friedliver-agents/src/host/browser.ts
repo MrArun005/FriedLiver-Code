@@ -319,6 +319,18 @@ export class BrowserPanel implements vscode.Disposable {
     await this.layout(clampBrowserWidth(this.context.globalState.get(WIDTH_KEY)));
   }
 
+  /** The open page's origin, and whether `selector` is a password field there; when it can't tell, it says password. */
+  async inspect(selector?: string): Promise<{ origin?: string; password: boolean }> {
+    try {
+      const sel = JSON.stringify(selector ?? '');
+      return await (await this.page()).evaluate<{ origin: string; password: boolean }>(
+        `(() => { let el = null; try { el = ${sel} ? document.querySelector(${sel}) : null; } catch {} return { origin: location.origin, password: !${sel} ? false : !el || el.type === 'password' || el.autocomplete === 'current-password' || el.autocomplete === 'new-password' }; })()`,
+      );
+    } catch {
+      return { password: true };
+    }
+  }
+
   /** The CDP session on FriedLiver's own tab; never a tab the user opened. */
   private page(): Promise<Cdp> {
     let tab: vscode.BrowserTab;

@@ -598,7 +598,7 @@ export function decisions(state: Pick<AppState, 'chats'>): Decision[] {
 }
 
 /** "Claude 2 wants to ask Gemini", "Claude 2 wants to read Codex 3". */
-const BROWSER_VERBS: Partial<Record<BridgeTool, string>> = {
+export const BROWSER_VERBS: Partial<Record<BridgeTool, string>> = {
   browser_open: 'open a page',
   browser_click: 'click',
   browser_type: 'type',

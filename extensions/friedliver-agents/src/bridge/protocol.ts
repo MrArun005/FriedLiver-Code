@@ -41,6 +41,9 @@ export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
  */
 export const EXTERNAL_CLIENT = ':external';
 
+/** An external caller's id: EXTERNAL_CLIENT and its MCP session, `:external:<session>`. */
+export const isExternal = (id: string): boolean => id === EXTERNAL_CLIENT || id.startsWith(`${EXTERNAL_CLIENT}:`);
+
 export const isBrowserCall = (call: BridgeCall): call is BrowserCall => call.tool.startsWith('browser_');
 
 export interface BridgeRequest {
