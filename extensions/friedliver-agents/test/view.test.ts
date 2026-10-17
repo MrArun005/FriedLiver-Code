@@ -36,6 +36,7 @@ import {
   statusOf,
   subagents,
   foldSubs,
+  panelTitle,
   statusGroups,
   switcherGroups,
   tipPlace,
@@ -631,5 +632,13 @@ describe('the chat transcript', () => {
   });
   it('says where a chat stands and when it last moved', () => {
     expect(switcherMeta(chat('x', { items: [said, waiting], lastActivity: 1000 }), 43_000)).toBe('Needs you · 42s ago');
+  });
+});
+
+describe("the chat tab's title", () => {
+  it("is the open chat's topic with its agent's face, or New chat", () => {
+    expect(panelTitle(chat('a', { agent: 'codex', title: 'Add CSV export' }))).toEqual({ title: 'Add CSV export', agent: 'codex' });
+    expect(panelTitle(chat('a', { title: '' }))).toMatchObject({ title: 'New chat' });
+    expect(panelTitle(undefined)).toEqual({ title: 'New chat' });
   });
 });

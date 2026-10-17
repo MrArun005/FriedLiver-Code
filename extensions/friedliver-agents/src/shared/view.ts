@@ -486,6 +486,11 @@ export function starters(agent: AgentKey): string[] {
   return ['Explain how this project is laid out', 'Find a failing test and fix it', 'Review my uncommitted changes', 'Plan a change before writing any code'];
 }
 
+/** The editor tab of a chat panel: the topic of the chat it shows (VS Code cuts it) and whose face is its icon. */
+export function panelTitle(chat: ChatView | undefined): { title: string; agent?: AgentKey } {
+  return chat ? { title: chat.title.trim() || 'New chat', agent: chat.agent } : { title: 'New chat' };
+}
+
 /** The chat tabs, as a browser keeps them: the chats you opened, in the order you opened them. */
 export const openTab = (tabs: readonly string[], id: string): string[] => (tabs.includes(id) ? [...tabs] : [...tabs, id]);
 /** Closing a tab takes it out; nothing takes its place. */

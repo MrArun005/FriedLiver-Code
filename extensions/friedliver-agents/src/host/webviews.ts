@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { parseWebviewMessage, type HostMessage, type WebviewMessage } from '../shared/messages';
+import type { ChatView } from '../shared/model';
 
 export type Script = 'chat' | 'tasks' | 'images';
 
@@ -14,6 +15,8 @@ export interface Surface {
   selected?: string;
   ready: boolean;
   visible(): boolean;
+  /** Shows the topic of the chat this surface has open in its own title (chat panels and the Agents view). */
+  retitle?(chat: ChatView | undefined): void;
 }
 
 export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
