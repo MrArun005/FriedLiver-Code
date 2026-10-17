@@ -549,7 +549,8 @@ try {
       const st = longFixture(turns);
       const t0 = await p.evaluate(() => performance.now());
       await snapshot(p, st, 'chat-long');
-      await p.waitForFunction((n) => document.querySelectorAll('.user-msg').length >= n, turns, { timeout: 120000 });
+      // The transcript draws its latest turns (QA F03 windowing); older ones come as you scroll up.
+      await p.waitForFunction((n) => document.querySelectorAll('.user-msg').length >= Math.min(n, 25), turns, { timeout: 120000 });
       const render = await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(performance.now())))));
       const nodes = await p.evaluate(() => document.querySelectorAll('*').length);
       // Scroll: 60 wheel steps up, measure frame times.

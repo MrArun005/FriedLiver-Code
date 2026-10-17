@@ -17,7 +17,8 @@ const b = longFixture(turns);
 b.chats[0] = { ...b.chats[0], id: 'chat-long-2', title: 'Second long chat' };
 const state = { chats: [...a.chats, ...b.chats], images: [], links: [] };
 await p.evaluate((s) => window.postMessage({ type: 'snapshot', state: s, selected: 'chat-long', now: Date.now() }, '*'), state);
-await p.waitForFunction((n) => document.querySelectorAll('.user-msg').length >= n, turns, { timeout: 120000 });
+// The transcript draws its latest turns (QA F03 windowing); older ones come as you scroll up.
+await p.waitForFunction((n) => document.querySelectorAll('.user-msg').length >= Math.min(n, 25), turns, { timeout: 120000 });
 await p.waitForTimeout(300);
 
 const r = await p.evaluate(async () => {
