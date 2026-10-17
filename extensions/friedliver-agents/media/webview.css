@@ -2294,16 +2294,26 @@ svg[data-lit] .map-file-line:not(.lit) {
     0 0 0 3px color-mix(in srgb, var(--mode) 12%, transparent),
     0 1px 2px color-mix(in srgb, var(--mode) 20%, transparent);
 }
-/* Attachments and code references, above the message: one row that scrolls. */
+/* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
 .cc-chips {
   display: flex;
+  align-items: center;
   gap: var(--sp-1);
   padding: 6px;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: thin;
 }
-button.cc-chip,
+.cc-chips[data-over] {
+  mask-image: linear-gradient(to right, black calc(100% - var(--sp-5)), transparent);
+}
+.cc-chips-count {
+  flex: none;
+  padding: 0 var(--sp-1);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.cc-chip,
 .cc-chips .code-ref {
   position: relative;
   flex: none;
@@ -2312,7 +2322,7 @@ button.cc-chip,
   gap: var(--sp-1);
   height: 24px;
   max-width: 180px;
-  padding: 4px 6px 4px 4px;
+  padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--r-4);
   background: var(--chip-bg);
@@ -2320,9 +2330,14 @@ button.cc-chip,
   font-weight: 500;
   overflow: hidden;
 }
-button.cc-chip:hover,
+.cc-chip:hover,
 .cc-chips .code-ref:hover {
   border-color: color-mix(in srgb, var(--border) 60%, var(--fg));
+}
+/* The chip opens a preview; its own × removes it. */
+button.cc-chip-open {
+  min-width: 0;
+  gap: var(--sp-1);
 }
 .cc-chip img {
   flex: none;
@@ -2339,26 +2354,27 @@ button.cc-chip:hover,
 }
 .cc-chip-meta {
   flex: none;
-  color: color-mix(in srgb, var(--fg-2) 60%, transparent);
+  color: var(--fg-2);
   font-weight: 400;
 }
-/* Remove: a strip that fades in over the chip's right end. */
-.cc-chip-x {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  width: 32px;
-  padding-right: var(--sp-1);
-  background: linear-gradient(to right, transparent, var(--chip-bg) 45%);
-  opacity: 0;
+button.cc-chip-remove {
+  flex: none;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-3);
+  color: var(--fg-2);
 }
-.cc-chip:hover .cc-chip-x,
-.cc-chip:focus-visible .cc-chip-x {
-  opacity: 1;
+button.cc-chip-remove:hover {
+  color: var(--fg);
+  background: var(--ghost-hover);
+}
+/* A full look at an attached image. */
+.image-preview img {
+  max-width: calc(100vw - 64px);
+  max-height: calc(100vh - 64px);
+  border-radius: var(--r-6);
+  object-fit: contain;
 }
 .cc-chips .code-ref button.ref {
   height: auto;
