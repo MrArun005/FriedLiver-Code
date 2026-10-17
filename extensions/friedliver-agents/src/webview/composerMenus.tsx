@@ -1,11 +1,11 @@
 // The composer's bottom-row menus: Select a model, Modes, the / menu, and the
 // Agent map. Each opens above the composer (the map is a modal); Esc closes.
-import { Fragment } from 'preact';
+import { Fragment, type ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
-import { sameAgents, sameControls, shortDuration, subagents } from '../shared/view';
+import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
@@ -278,7 +278,10 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
     ...(chat.items.some((i) => i.kind === 'user' && i.checkpoint) ? [{ label: 'Rewind', run: () => send({ type: 'rewind', chatId: chat.id }) }] : []),
   ].filter((i) => !q || i.label.toLowerCase().includes(q));
   const switchModel = !q || 'switch model'.includes(q);
-  const own = commands.filter((c) => !q || c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
+  // One list for the / button and a typed /: FriedLiver's commands, then the agent's (shared/view.ts slashMenu).
+  const listed = slashMenu(commands).filter((c) => !q || c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
+  const ours = listed.filter((c) => FRIEDLIVER_COMMANDS.includes(c));
+  const own = listed.filter((c) => !FRIEDLIVER_COMMANDS.includes(c));
   const item = (key: string, label: string, run: () => void, right?: string, desc?: string) => (
     <button
       key={key}
@@ -298,6 +301,12 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
     </button>
   );
   const sections = [
+    ours.length > 0 && (
+      <div key="ours" class="cc-menu-section">
+        <div class="cc-menu-sub">FriedLiver</div>
+        {ours.map((c) => item(`cmd-${c.name}`, commandLabel(c), () => command(c.name), undefined, c.description))}
+      </div>
+    ),
     context.length > 0 && (
       <div key="context" class="cc-menu-section">
         <div class="cc-menu-sub">Context</div>
@@ -315,7 +324,7 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
     own.length > 0 && (
       <div key="own" class="cc-menu-section">
         <div class="cc-menu-sub">{AGENT_FACES[chat.agent].name}</div>
-        {own.map((c) => item(`cmd-${c.name}`, `/${c.name}`, () => command(c.name), undefined, c.description))}
+        {own.map((c) => item(`cmd-${c.name}`, commandLabel(c), () => command(c.name), undefined, c.description))}
       </div>
     ),
   ].filter(Boolean);
@@ -334,7 +343,7 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
           }
         }}
       />
-      <div class="cc-menu-list">
+      <ScrollList>
         {sections.map((section, i) => (
           <Fragment key={i}>
             {i > 0 && <Divider />}
@@ -342,7 +351,23 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
           </Fragment>
         ))}
         {!sections.length && <div class="cc-empty">No matching commands</div>}
-      </div>
+      </ScrollList>
+    </div>
+  );
+}
+
+/** A menu's list that says when more is below: its end fades while it can scroll further. */
+export function ScrollList({ children, class: extra }: { children: ComponentChildren; class?: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  const measure = () => {
+    const el = box.current;
+    if (el) setMore(el.scrollHeight - el.scrollTop - el.clientHeight > 1);
+  };
+  useLayoutEffect(measure);
+  return (
+    <div ref={box} class={`cc-menu-list ${extra ?? ''}`} data-more={more ? '' : undefined} onScroll={measure}>
+      {children}
     </div>
   );
 }

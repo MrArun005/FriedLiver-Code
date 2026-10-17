@@ -398,7 +398,8 @@ async function shoot() {
     await p.click('.cc-slash-btn');
     check((await p.inputValue('.cc-slash-menu .cc-search')) === '/', 'the / menu opens with its search at /');
     const subs = await p.locator('.cc-slash-menu .cc-menu-sub').allInnerTexts();
-    check(subs[0] === 'Context' && subs[1] === 'Model' && subs.length === 3, `the / menu has Context, Model and the agent’s commands [${subs}]`);
+    // One command list (QA F07): FriedLiver's commands first, then Context, Model and the agent's own.
+    check(subs[0] === 'FriedLiver' && subs[1] === 'Context' && subs[2] === 'Model' && subs.length === 4, `the / menu has FriedLiver, Context, Model and the agent’s commands [${subs}]`);
     await p.fill('.cc-slash-menu .cc-search', '/comp');
     check((await p.locator('.cc-slash-menu [role="menuitem"]').allInnerTexts()).every((t) => /comp/i.test(t)), 'typing filters the / menu');
     await p.keyboard.press('Enter');

@@ -24,6 +24,7 @@ import {
   type ReviewItem,
 } from '../shared/model';
 import {
+  commandLabel,
   tabAfterClose,
   openTab,
   closeTab,
@@ -1292,7 +1293,7 @@ function Composer({
   const slashes = slash === null ? [] : slashOptions(commands, slash);
   const menu: { key: string; title: string; label: string; agent?: (typeof mentions)[number]['agent']; choose(): void }[] = mentions.length
     ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
-    : slashes.map((c) => ({ key: c.name, title: `/${c.name}`, label: c.hint ? `${c.description} · ${c.hint}` : c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
+    : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
   // "#" names a workspace file; the agent gets it as a file, not only as words.
   const hash = shut || mentions.length || slashes.length ? null : hashQuery(text, caret);
   const asked = useRef('');
