@@ -115,7 +115,7 @@ export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: b
   const pipeTo = (id: string) => state.links.find((l) => l.kind === 'pipe' && l.from === chat.id && l.to === id);
   return (
     <>
-      <div class="pop-title" aria-hidden="true">Send each finished turn to</div>
+      <div class="pop-title" aria-hidden="true">Pipe each reply to</div>
       <div class="pop-scroll">
         {others.length === 0 && (
           <button role="menuitem" disabled>

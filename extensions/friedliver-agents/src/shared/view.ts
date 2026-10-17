@@ -294,7 +294,7 @@ export interface Badge {
   group?: string;
 }
 
-/** "from Fix formatCents", "asking Is the minus right?", "pipes to Add CSV export", "1 of 3 · compare": other chats by their topic. */
+/** "from Fix formatCents", "Asking Gemini: Is the minus right?", "pipes to Add CSV export", "1 of 3 · compare": other chats by their topic. */
 export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView): Badge[] {
   const byId = new Map(state.chats.map((c) => [c.id, c]));
   const out: Badge[] = [];
@@ -305,7 +305,8 @@ export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatV
     if (l.from === chat.id) {
       const other = byId.get(l.to);
       if (!other) continue;
-      if (l.kind === 'consult') out.push(to(other, `${other.busy ? 'asking' : 'asked'} ${other.title}`, { kind: 'consult' }));
+      // A consult's topic is the question itself: say who was asked, then the question.
+      if (l.kind === 'consult') out.push(to(other, `${other.busy ? 'Asking' : 'Asked'} ${agentName(other.agent)}: ${other.title}`, { kind: 'consult' }));
       else if (l.kind === 'handoff') out.push(to(other, `handed to ${other.title}`, { kind: 'handoff' }));
       else out.push(to(other, l.active ? `pipes to ${other.title}` : `pipe to ${other.title} paused`, { kind: 'pipe', linkId: l.id }));
     } else if (l.to === chat.id && l.from !== chat.origin?.chatId) {
@@ -615,7 +616,7 @@ export function applyMention(text: string, option: MentionOption): { text: strin
 export const FRIEDLIVER_COMMANDS: SlashCommand[] = [
   { name: 'handoff', description: 'Continue this chat with another agent', hint: 'agent' },
   { name: 'ask', description: 'Ask another agent; the reply comes back here', hint: 'agent and question' },
-  { name: 'pipe', description: "Send each finished turn to that agent's latest chat", hint: 'agent' },
+  { name: 'pipe', description: "Pipe each reply to that agent's latest chat", hint: 'agent' },
   { name: 'review', description: "Review this chat's changes" },
   { name: 'new', description: 'Start a new chat', hint: 'agent (optional)' },
 ];

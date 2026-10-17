@@ -399,7 +399,7 @@ function Manager() {
           {!query && shown.length === 0 && outside.length === 0 && (
             <div class="empty-view">
               <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
-              <p class="hint">Several agents on one task compare side by side.</p>
+              <p class="hint">Describe a task above, pick one or more agents, press ↩.</p>
             </div>
           )}
           {view === 'board' && <Board state={state} chats={shown} outside={outside} now={now} {...nav} />}

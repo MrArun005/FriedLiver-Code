@@ -160,7 +160,7 @@ describe('cards', () => {
       [link({ id: 'l1', from: 'a', to: 'b' }), link({ id: 'l2', kind: 'handoff', from: 'a', to: 'c' }), link({ id: 'l3', kind: 'pipe', from: 'c', to: 'd', active: true })],
     );
     const texts = (id: string) => linkBadges(s, s.chats.find((c) => c.id === id)!).map((b) => b.text);
-    expect(texts('a')).toEqual(['asking Is the minus right?', 'handed to Make the store swappable']);
+    expect(texts('a')).toEqual(['Asking Gemini: Is the minus right?', 'handed to Make the store swappable']);
     expect(texts('b')).toEqual(['asked by Fix formatCents']);
     expect(texts('c')).toEqual(['from Fix formatCents', 'pipes to Add CSV export']);
     expect(texts('d')).toEqual(['piped from Make the store swappable', '1 of 2 · compare']);
@@ -438,7 +438,7 @@ describe('what views draw again', () => {
     expect(after.chats[0]).not.toBe(s.chats[0]);
     expect(cardModel(after, after.chats[0], 0).key).toBe(before.key);
     expect(before).toMatchObject({ status: 'working', line: { text: 'Step 1 of 3: Read' }, conflicts: [{ file: 'src/a.ts' }], age: '0s' });
-    expect(before.badges.map((b) => b.text)).toEqual(['asked New chat']);
+    expect(before.badges.map((b) => b.text)).toEqual(['Asked Claude: New chat']);
   });
 
   it('changes the card when its step, status, age, links or another chat it names change', () => {
