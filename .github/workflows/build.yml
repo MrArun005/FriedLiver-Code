@@ -113,7 +113,8 @@ jobs:
           if-no-files-found: error
 
   # For tags only: the installers and portable apps of this run, with their SHA-256 sums,
-  # attached to a GitHub release. The agents extension's weekly check points people here.
+  # attached to a GitHub release. The Agents extension checks for it every 4 hours and installs
+  # the DMG only when its SHA-256 in SHA256SUMS.txt matches.
   release:
     needs: build
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
@@ -132,6 +133,8 @@ jobs:
         run: |
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          # The app's installer refuses an update whose DMG isn't listed here.
+          grep -Eq '  FriedLiver-darwin-arm64-.+\.dmg$' SHA256SUMS.txt || { echo "::error::no macOS arm64 DMG in the release"; exit 1; }
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
