@@ -990,7 +990,11 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
   if (item.state !== 'awaiting') {
     return (
       <div class="answered">
-        <Icon name={item.state === 'allowed' ? 'check' : 'close'} /> {title} <span class="hint">· {item.state === 'allowed' ? 'allowed' : 'denied'}</span>
+        <Icon name={item.state === 'allowed' ? 'check' : 'close'} /> {title}{' '}
+        <span class="hint">
+          · {item.state === 'allowed' ? 'allowed' : 'denied'}
+          {item.auto ? ` · ${item.auto}` : ''}
+        </span>
       </div>
     );
   }
@@ -1027,6 +1031,15 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
         <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
           Allow for this chat
         </button>
+        {item.always && (
+          <button
+            class="sm"
+            title={`Don't ask again for ${item.always}: every chat, every agent, after restarts. Revoke in Manage Permissions.`}
+            onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowAlways' })}
+          >
+            Always allow <span class="always-scope">{item.always}</span>
+          </button>
+        )}
         <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
           Deny
         </button>

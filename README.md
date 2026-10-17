@@ -121,7 +121,7 @@ check from install to two agents talking to each other.
 The command palette has the rest under "FriedLiver": Agent Manager, Run a Task
 on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a Chat's
 Replies to Another Chat, Go to Next Decision (Ctrl+Alt+D), Accept All Agent
-Edits, Always-Allowed Commands, Get Another Agent Extension…, Move Agents to
+Edits, Manage Permissions, Get Another Agent Extension…, Move Agents to
 the Center (Ctrl/Cmd+Shift+A), Set API Key, Stop All Agents, and the editor
 commands below. `friedliver.connections.agentToAgent` (ask, allow or off) and
 `friedliver.approvals.default` (ask or edits) are read from your user settings

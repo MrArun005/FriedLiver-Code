@@ -6,6 +6,8 @@
 //                     permission request (Ask mode) and in the tool call, no fs/write_text_file
 //   "native-run"      runs a command itself, like Claude and Codex: no terminal/create, the output
 //                     arrives in the tool call
+//   "native-read <p>" / "native-fetch <url>"  a permission request to read a file or fetch a page,
+//                     like Claude outside its folder and its WebFetch
 //   "perm-edit <p>"   like Codex: a tool call with the diff, then a permission request that names
 //                     only its toolCallId, then a native write
 //   "perm-plan"       a plan approval (kind switch_mode, the plan in rawInput.plan), like Claude's
@@ -130,7 +132,7 @@ const COMMANDS = [
 ];
 const HELP = [
   '`tour`, `project`, `heavy` (long shell steps and a plain-text summary, like Claude), `edit <path>`, `run`, `read-image <path>`, `wait`, `ask <agent> <question>`, `chats`,',
-  '`native-edit <path>` and `native-run` (the agent acts itself, like Claude and Codex), `perm-edit <path>` (a Codex-style',
+  '`native-edit <path>` and `native-run` (the agent acts itself, like Claude and Codex), `native-read <path>` and `native-fetch <url>` (it asks first), `perm-edit <path>` (a Codex-style',
   'permission that names only its tool call), `plan` and `perm-plan` (a plan to approve), `/compact`.',
 ].join(' ');
 
@@ -276,6 +278,19 @@ async function permEdit(client, sessionId, file) {
   if (ok) writeNative(file, change.after);
   await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: ok ? 'completed' : 'failed' });
   await say(client, sessionId, ok ? `Patched \`${path.basename(file)}\`.` : 'Not patched.');
+}
+
+/** Like Claude reading a file outside its folder, or its WebFetch: a permission request, nothing else. */
+async function nativeAsk(client, sessionId, kind, target) {
+  const toolCallId = `native-${kind}-1`;
+  const call =
+    kind === 'read'
+      ? { toolCallId, title: `Read ${path.basename(target)}`, kind: 'read', locations: [{ path: target }], rawInput: { file_path: target } }
+      : { toolCallId, title: `Fetch ${target}`, kind: 'fetch', rawInput: { url: target, prompt: 'Summarize the page' } };
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', ...call, status: 'pending' });
+  const ok = await allowed(client, sessionId, kind, call, ASK_OPTIONS);
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: ok ? 'completed' : 'failed' });
+  await say(client, sessionId, ok ? `Allowed to ${kind} ${target}.` : `Not allowed to ${kind} ${target}.`);
 }
 
 /** Like Claude's Bash tool: asks (in Ask mode), runs the command itself, and reports its output in the tool call. */
@@ -1174,6 +1189,8 @@ acp
     else if (command.startsWith('native-edit ')) await nativeEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(12).trim()));
     else if (command.startsWith('perm-edit ')) await permEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(10).trim()));
     else if (command === 'native-run') await nativeRun(client, sessionId);
+    else if (command.startsWith('native-read ')) await nativeAsk(client, sessionId, 'read', path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(12).trim()));
+    else if (command.startsWith('native-fetch ')) await nativeAsk(client, sessionId, 'fetch', command.slice(13).trim());
     else if (command === 'perm-plan') await permPlan(client, sessionId);
     else if (command === 'plan') await planMode(client, sessionId);
     else if (command === 'question') {

@@ -4613,3 +4613,85 @@ button.cc-mic[data-state='stopping']::after {
     animation: none;
   }
 }
+
+/* Manage Permissions (permissions.tsx): the whole width, one table per kind. */
+.perms {
+  padding: 20px 24px 32px;
+}
+.perms-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.perms h1 {
+  margin: 0 0 4px;
+  font-size: 1.4em;
+  font-weight: 600;
+  color: var(--sel-fg);
+}
+.perms h2 {
+  margin: 24px 0 2px;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+.perms h2 .count {
+  color: var(--fg-2);
+  font-weight: normal;
+}
+.perms .hint {
+  margin: 0;
+}
+.perms table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  /* The same columns in every group, so the tables line up. */
+  table-layout: fixed;
+}
+.perms th:nth-child(1) {
+  width: 26%;
+}
+.perms th:nth-child(2) {
+  width: 36%;
+}
+.perms th:nth-child(3) {
+  width: 17%;
+}
+.perms th:nth-child(5) {
+  width: 84px;
+}
+.perms th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--fg-2);
+  padding: 4px 12px 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.perms td {
+  padding: 7px 12px 7px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.perms tr:hover td {
+  background: var(--hover-bg);
+}
+.perms td.scope {
+  word-break: break-all;
+}
+.perms td.act {
+  text-align: right;
+  padding-right: 0;
+}
+.perms td.scope .hint {
+  font-family: var(--font);
+}
+.perms .empty {
+  margin-top: 24px;
+}
+/* What "Always allow" on a browser or agent-tool request would remember. */
+.always-scope {
+  color: var(--fg-2);
+  font-size: 0.92em;
+}

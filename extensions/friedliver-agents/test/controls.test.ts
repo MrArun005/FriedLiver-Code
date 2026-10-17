@@ -8,10 +8,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CoreOptions, CoreUi } from '../src/host/core';
-import type { CommandRule } from '../src/shared/rules';
 import type { AgentDefaults } from '../src/shared/session';
 import { lastReply, type AgentKey, type Item } from '../src/shared/model';
-import { disposeCores, gitRepo, makeCore, waitFor } from './helpers';
+import { disposeCores, gitRepo, makeCore, memoryPermissions, waitFor } from './helpers';
 
 afterEach(disposeCores);
 
@@ -22,10 +21,6 @@ function memoryDefaults(): NonNullable<CoreOptions['defaults']> & { all: Partial
   return { all, get: (a) => all[a], set: (a, v) => (all[a] = v) };
 }
 
-function memoryRules(start: CommandRule[] = []): NonNullable<CoreOptions['rules']> & { list: CommandRule[] } {
-  const list = [...start];
-  return { list, get: () => list, add: (r) => list.push(r) };
-}
 
 /** A core whose UI records what it was asked and decides nothing by itself. */
 function core(folder: string, over: Partial<CoreOptions> = {}, ui: Partial<CoreUi> = {}) {
@@ -279,8 +274,8 @@ describe('the permission request is the review', () => {
 
   it('shows the command and its folder, and an "Always allow" rule answers the next one', async () => {
     const dir = await gitRepo();
-    const rules = memoryRules();
-    const { core: c } = core(dir, { rules });
+    const permissions = memoryPermissions();
+    const { core: c } = core(dir, { permissions });
     const chat = await c.createChat('demo');
     let turn = c.send(chat.id, 'native-run');
     await waitFor(() => !!permission(c, chat.id));
@@ -288,7 +283,8 @@ describe('the permission request is the review', () => {
     expect(p.detail?.command).toEqual({ line: 'node --version', cwd: dir });
     await c.allowAlways({ requestId: p.requestId }, { kind: 'exact', command: p.detail!.command!.line });
     await turn;
-    expect(rules.list).toHaveLength(1);
+    expect(permissions.commands()).toMatchObject([{ kind: 'exact', command: 'node --version' }]);
+    expect(permissions.list()[0].agent).toBe('Demo');
     const tool = c.chat(chat.id)!.items.find((i) => i.kind === 'tool' && i.id === 'native-run-1');
     expect(tool?.kind === 'tool' && tool.out?.[0]).toMatchObject({ t: 'text', text: expect.stringMatching(/^v\d+\./) });
 
