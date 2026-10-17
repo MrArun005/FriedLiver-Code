@@ -109,6 +109,11 @@
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-5: 20px;
+  /* Layout spacing (the spacing pass, 2026-10-17): the chat's side gutter (16 when narrow, to line up with
+     the composer), the tab strip's height, and the extra space above a message that starts a new turn. */
+  --gutter: 20px;
+  --tab-h: 30px;
+  --turn-gap: 8px;
 
   /* Elevation: menus are flat; depth comes from border and tone */
   --shadow-composer: 0 1px 2px #0000001a;
@@ -131,6 +136,11 @@
   --ease-toggle: 0.15s;
 }
 /* tokens:end */
+@media (max-width: 720px) {
+  :root {
+    --gutter: 16px;
+  }
+}
 /* Light themes: the option ring and depth turn dark. */
 body.vscode-light,
 body.vscode-high-contrast-light {
@@ -3013,7 +3023,7 @@ body[data-surface='chat'] {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--sp-5) var(--sp-5) 40px;
+  padding: var(--sp-5) var(--gutter) 40px;
   line-height: 1.5;
 }
 /* The edge of the window: reaching it brings earlier items in. */
@@ -3031,6 +3041,10 @@ body[data-surface='chat'] {
   align-items: flex-start;
   gap: var(--sp-1);
   padding: var(--sp-1) 0;
+}
+/* A new turn: more room above it (24, text to text) than between the steps inside a turn (16). */
+.transcript > * + .user-msg {
+  margin-top: var(--turn-gap);
 }
 .user-msg .bubble {
   position: relative;
@@ -3063,8 +3077,8 @@ button.msg-more {
 .sticky-prompt {
   position: absolute;
   top: 0;
-  left: var(--sp-5);
-  right: var(--sp-5);
+  left: var(--gutter);
+  right: var(--gutter);
   z-index: var(--z-sticky);
   max-height: 30%;
   padding-top: var(--sp-1);
@@ -4506,7 +4520,7 @@ code.command-line {
 }
 .tabs {
   display: flex;
-  gap: 2px;
+  gap: var(--sp-1);
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -4532,9 +4546,9 @@ button.tab {
   flex: 1 1 auto;
   min-width: 0;
   max-width: 200px;
-  height: 26px;
+  height: var(--tab-h);
   gap: 6px;
-  padding: 0 22px 0 var(--sp-1);
+  padding: 0 calc(var(--sp-1) + 16px + var(--sp-1)) 0 var(--sp-2);
   border-radius: var(--r-5);
   color: var(--fg-2);
   font-size: var(--t-90);
@@ -4588,7 +4602,7 @@ button.all-btn {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  padding: var(--sp-2) var(--sp-5);
+  padding: var(--sp-2) var(--gutter);
 }
 .chat-head-text {
   flex: 1;
@@ -4674,7 +4688,7 @@ button.images-pill[aria-expanded='true'] {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  margin: 0 var(--sp-5) var(--sp-2);
+  margin: 0 var(--gutter) var(--sp-2);
   padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--r-6);
@@ -4696,7 +4710,7 @@ button.images-pill[aria-expanded='true'] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-1);
-  padding: 0 var(--sp-5) var(--sp-2);
+  padding: 0 var(--gutter) var(--sp-2);
 }
 /* "In this chat": your messages, beside a wide transcript. */
 .transcript-wrap[data-jump] .transcript {
@@ -4740,10 +4754,10 @@ button.jump-item[aria-current='true'] {
 }
 @media (max-width: 1200px) {
   .transcript-wrap[data-jump] .transcript {
-    padding-right: var(--sp-5);
+    padding-right: var(--gutter);
   }
   .transcript-wrap[data-jump] .sticky-prompt {
-    right: var(--sp-5);
+    right: var(--gutter);
   }
   .jump-list {
     display: none;

@@ -408,7 +408,9 @@ async function measure(page, state, width) {
   }
   if (state === 'transcript') {
     const name = `Transcript ${c}`;
-    row(name, 'padding', '20px 20px 40px', await css('.transcript', 'padding'));
+    // Spacing pass 2026-10-17: the side gutter is 16 at narrow widths, lined up with the composer.
+    const gutter = width <= 720 ? 16 : 20;
+    row(name, 'padding', `20px ${gutter}px 40px`, await css('.transcript', 'padding'));
     const step = await box('#item-toolu_bash');
     const tr = await box('.transcript');
     row(name, 'timeline indent', 30, px(await css('#item-toolu_bash', 'padding-left')));
@@ -417,7 +419,7 @@ async function measure(page, state, width) {
     row(name, 'spine left', 12, px(await css('#item-toolu_bash', 'left', '::after')));
     row(name, 'spine width', 1, px(await css('#item-toolu_bash', 'width', '::after')));
     row(name, 'done dot', '#74c991', await P('color', '#item-toolu_bash', 'background-color', '::before'));
-    row(name, 'full width (no max-width)', tr.width - 40, step.width);
+    row(name, 'full width (no max-width)', tr.width - 2 * gutter, step.width);
     row(name, 'tool name weight', '700', await css('#item-toolu_read .step-verb', 'font-weight'));
     row(name, 'target size (mono .85em)', 11.05, px(await css('#item-toolu_bash .step-text', 'font-size')));
     row(name, 'tool body border', 0.5, px(await css('#item-toolu_bash .tool-body', 'border-top-width')));
@@ -436,7 +438,62 @@ async function measure(page, state, width) {
     row(name, 'inline code border', 0, px(await css('.prose p code', 'border-top-width')));
     row(name, 'text colour', '#bfbfbf', await P('color', '.prose p'));
     row(name, 'line height', 19.5, px(await css('.prose p', 'line-height')));
+    await spacing(page, width, P, box, css);
   }
+}
+
+/** The chat tab's spacing (owner, 2026-10-17): the 4/8/12/16/24 scale, measured against 6.png/8.png and the spec. */
+async function spacing(page, width, P, box, css) {
+  const name = `Spacing @${width}`;
+  const gutter = width <= 720 ? 16 : 20;
+  const tab = await box('.tabs [role="tab"]');
+  row(name, 'tab height (6.png: 30)', 30, tab.height);
+  row(name, 'tab padding left', 8, px(await css('.tabs [role="tab"]', 'padding-left')));
+  row(name, 'gap between tabs', 4, px(await css('.tabs', 'column-gap')));
+  row(name, 'header side padding = gutter', gutter, px(await css('.chat-head', 'padding-left')));
+  row(name, 'header padding top/bottom', 8, px(await css('.chat-head', 'padding-top')));
+  const head = await box('.chat-head');
+  const tr = await box('.transcript');
+  row(name, 'header to transcript text', 20, (await box('.transcript > .user-msg')).top - head.bottom - (tr.top - head.bottom));
+  row(name, 'transcript gutter', gutter, px(await css('.transcript', 'padding-left')));
+  row(name, 'transcript bottom', 40, px(await css('.transcript', 'padding-bottom')));
+  row(name, 'title lines up with the transcript', 0, (await box('.chat-head-title')).left + 6 - (tr.left + gutter));
+  row(name, 'user message padding', '4px 6px', await css('.user-msg .bubble', 'padding'));
+  row(name, 'user message margin (4px 0; the first one 0 on top)', 4, px(await css('.user-msg', 'padding-bottom')));
+  const rows = await page.evaluate(() => [...document.querySelectorAll('.transcript > .tl')].slice(0, 2).map((e) => e.getBoundingClientRect().top));
+  row(name, 'timeline pitch (6.png: 36)', 36, rows[1] - rows[0]);
+  row(name, 'timeline row padding', 8, px(await css('.transcript > .tl', 'padding-top')));
+  row(name, 'IN/OUT block margin', 8, px(await css('#item-toolu_bash .tool-body', 'margin-top')));
+  row(name, 'code block margin', 8, px(await css('.prose .code-block', 'margin-top')));
+  row(name, 'reply padding', 8, px(await css('.prose', 'padding-top')));
+  row(name, 'paragraph gap (.2em)', 2.6, px(await css('.prose .md > p', 'margin-bottom')), 0.1);
+  row(name, 'list indent (2em)', 26, px(await css('.prose .md > ul', 'padding-inline-start')));
+  const comp = await box('.composer');
+  row(name, 'composer side gap', width >= 712 ? (width - 680) / 2 : 16, comp.left);
+  row(name, 'composer gap below', 16, (await page.evaluate(() => window.innerHeight)) - comp.bottom);
+  if (width <= 720) row(name, 'composer lines up with the transcript', 0, comp.left - (tr.left + gutter));
+  // A chat with several turns, and one with a decision card.
+  const other = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 2 });
+  await other.goto(`${base}/?surface=chat&theme=dark-2026&select=chat-c5`);
+  await other.waitForSelector('.transcript > .user-msg ~ .user-msg');
+  const gaps = await other.evaluate(() => {
+    const second = document.querySelectorAll('.transcript > .user-msg')[1];
+    const prev = second.previousElementSibling;
+    const step = document.querySelector('.transcript > .tl + .tl');
+    const pad = (e, side) => parseFloat(window.getComputedStyle(e)[`padding${side}`]);
+    // Text box to text box: the bubble's top against the previous block's content bottom; a step's line against the next.
+    return {
+      turn: second.querySelector('.bubble').getBoundingClientRect().top - (prev.getBoundingClientRect().bottom - pad(prev, 'Bottom')),
+      within: step ? step.getBoundingClientRect().top + pad(step, 'Top') - (step.previousElementSibling.getBoundingClientRect().bottom - pad(step.previousElementSibling, 'Bottom')) : NaN,
+    };
+  });
+  row(name, 'gap between turns', 24, gaps.turn);
+  row(name, 'gap between steps in a turn', 16, gaps.within);
+  await other.goto(`${base}/?surface=chat&theme=dark-2026&select=chat-c2`);
+  await other.waitForSelector('.ask');
+  row(name, 'decision card margin', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.ask')).marginTop)));
+  row(name, 'decision card padding', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.ask')).paddingTop)));
+  await other.close();
 }
 
 const shots = [];
