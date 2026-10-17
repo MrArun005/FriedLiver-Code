@@ -1,4 +1,5 @@
-import type { BridgeCall } from '../bridge/protocol';
+import { isBrowserCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
+import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
 import { bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { agentList, chatList, renderChat } from './transcript';
 
@@ -25,7 +26,11 @@ export interface ToolHost {
   /** Gives another chat a message and starts its turn without waiting for it. */
   message(chatId: string, targetChatId: string, text: string): void;
   cancel(chatId: string): Promise<void>;
+  /** Does a browser tool call for the chat (browser.ts); absent when the editor has no built-in browser. */
+  browser?(chatId: string, call: BrowserCall, signal: AbortSignal): Promise<string>;
 }
+
+type ChatCall = Exclude<BridgeCall, BrowserCall | { tool: 'list_agents' | 'list_chats' }>;
 
 type Answer = 'allowed' | 'denied' | 'timeout';
 
@@ -37,8 +42,8 @@ type Answer = 'allowed' | 'denied' | 'timeout';
  * so they can't loop or deadlock each other.
  */
 export class BridgeRequests {
-  private readonly pending = new Map<string, { chatId: string; resolve(answer: Answer): void }>();
-  /** Chats whose agent the user allowed for the rest of this window. */
+  private readonly pending = new Map<string, { chatId: string; browser: boolean; resolve(answer: Answer): void }>();
+  /** Chats whose agent the user allowed for the rest of this window, as `<chatId>` or, for the browser, `<chatId> browser`. */
   private readonly allowedChats = new Set<string>();
   /** For each chat, the chats it is waiting on through ask_agent. */
   private readonly waits = new Map<string, Set<string>>();
@@ -51,14 +56,19 @@ export class BridgeRequests {
     if (!caller) throw new Error('This chat was closed in FriedLiver.');
     if (call.tool === 'list_agents') return agentList();
     if (call.tool === 'list_chats') return chatList(this.host.state, chatId);
+    if (isBrowserCall(call)) return this.browser(caller, call, signal);
 
     this.check(caller, call);
-    if ([...this.pending.values()].filter((p) => p.chatId === chatId).length >= MAX_WAITING_PER_CHAT) {
-      throw new Error(`${MAX_WAITING_PER_CHAT} of your requests already wait for the user. Wait for their answers before asking again.`);
-    }
-    const answer = await this.approve(caller, call, signal);
-    if (answer === 'timeout') throw new Error('Nobody answered within 10 minutes, so FriedLiver did not allow it. Carry on without it.');
-    if (answer === 'denied') throw new Error('The user did not allow this. Carry on without it, or ask the user about it in your reply.');
+    this.room(chatId);
+    const item: BridgeItem = {
+      kind: 'bridge',
+      requestId: this.host.id('bridge'),
+      tool: call.tool,
+      target: call.tool === 'ask_agent' && !call.chatId ? { agent: call.agent } : { chatId: call.chatId! },
+      text: call.tool === 'ask_agent' ? call.prompt : call.tool === 'send_to_chat' ? call.message : '',
+      state: 'awaiting',
+    };
+    settled(await this.approve(caller, item, this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal));
     // The state may have changed while the user decided.
     this.check(caller, call);
 
@@ -89,11 +99,36 @@ export class BridgeRequests {
     }
   }
 
+  /**
+   * A browser tool call. Looking (snapshot, screenshot, console) goes ahead; acting (open, click,
+   * type, back, reload) waits for the user unless the chat is on Full auto or they allowed the
+   * browser for this chat. Only http and https URLs are opened.
+   */
+  private async browser(caller: ChatView, call: BrowserCall, signal: AbortSignal): Promise<string> {
+    if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
+    if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
+    if (!browserNeedsApproval(call.tool, undefined)) return this.host.browser(caller.id, call, signal);
+    const auto = !browserNeedsApproval(call.tool, caller.approval) || this.allowedChats.has(`${caller.id} browser`);
+    if (!auto) this.room(caller.id);
+    const text =
+      call.tool === 'browser_open' ? call.url : call.tool === 'browser_click' ? (call.selector ?? `"${call.text}"`) : call.tool === 'browser_type' ? `${call.selector} ← ${call.text}` : '';
+    const item: BridgeItem = { kind: 'bridge', requestId: this.host.id('bridge'), tool: call.tool as BridgeItem['tool'], target: { browser: true }, text, state: 'awaiting' };
+    settled(await this.approve(caller, item, auto, signal));
+    return this.host.browser(caller.id, call, signal);
+  }
+
+  /** Throws when the chat already has as many requests waiting on the user as it may. */
+  private room(chatId: string): void {
+    if ([...this.pending.values()].filter((p) => p.chatId === chatId).length >= MAX_WAITING_PER_CHAT) {
+      throw new Error(`${MAX_WAITING_PER_CHAT} of your requests already wait for the user. Wait for their answers before asking again.`);
+    }
+  }
+
   /** The user's answer from a chat view or a notification. */
   answer(requestId: string, answer: 'allow' | 'allowChat' | 'deny'): void {
     const p = this.pending.get(requestId);
     if (!p) return;
-    if (answer === 'allowChat') this.allowedChats.add(p.chatId);
+    if (answer === 'allowChat') this.allowedChats.add(p.browser ? `${p.chatId} browser` : p.chatId);
     p.resolve(answer === 'deny' ? 'denied' : 'allowed');
   }
 
@@ -110,11 +145,12 @@ export class BridgeRequests {
   forget(chatId: string): void {
     this.settle(chatId, true);
     this.allowedChats.delete(chatId);
+    this.allowedChats.delete(`${chatId} browser`);
     this.waits.delete(chatId);
   }
 
   /** Throws, with a message for the agent, when the call must not go ahead. */
-  private check(caller: ChatView, call: Exclude<BridgeCall, { tool: 'list_agents' | 'list_chats' }>): void {
+  private check(caller: ChatView, call: ChatCall): void {
     if (call.tool === 'ask_agent' && !call.chatId) {
       const existing = this.host.consultation(caller.id, call.agent);
       if (existing) {
@@ -170,18 +206,10 @@ export class BridgeRequests {
     else this.waits.delete(chatId);
   }
 
-  /** Records the request in the caller's chat and, under "ask", waits for the user. */
-  private approve(caller: ChatView, call: Exclude<BridgeCall, { tool: 'list_agents' | 'list_chats' }>, signal: AbortSignal): Promise<Answer> {
-    const requestId = this.host.id('bridge');
-    const item: BridgeItem = {
-      kind: 'bridge',
-      requestId,
-      tool: call.tool,
-      target: call.tool === 'ask_agent' && !call.chatId ? { agent: call.agent } : { chatId: call.chatId! },
-      text: call.tool === 'ask_agent' ? call.prompt : call.tool === 'send_to_chat' ? call.message : '',
-      state: 'awaiting',
-    };
-    if (this.host.policy() === 'allow' || this.allowedChats.has(caller.id)) {
+  /** Records the request in the caller's chat and, unless `auto`, waits for the user. */
+  private approve(caller: ChatView, item: BridgeItem, auto: boolean, signal: AbortSignal): Promise<Answer> {
+    const requestId = item.requestId;
+    if (auto) {
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [{ ...item, state: 'allowed' }], at: Date.now() });
       return Promise.resolve('allowed');
     }
@@ -196,7 +224,7 @@ export class BridgeRequests {
       const onAbort = () => done('denied');
       const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
       timer.unref?.();
-      this.pending.set(requestId, { chatId: caller.id, resolve: done });
+      this.pending.set(requestId, { chatId: caller.id, browser: 'browser' in item.target, resolve: done });
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [item], at: Date.now() });
       if (signal.aborted) return done('denied');
       signal.addEventListener('abort', onAbort, { once: true });
@@ -207,4 +235,10 @@ export class BridgeRequests {
   private chat(chatId: string): ChatView | undefined {
     return this.host.state.chats.find((c) => c.id === chatId);
   }
+}
+
+/** Throws, for the agent, unless the user allowed it. */
+function settled(answer: Answer): void {
+  if (answer === 'timeout') throw new Error('Nobody answered within 10 minutes, so FriedLiver did not allow it. Carry on without it.');
+  if (answer === 'denied') throw new Error('The user did not allow this. Carry on without it, or ask the user about it in your reply.');
 }

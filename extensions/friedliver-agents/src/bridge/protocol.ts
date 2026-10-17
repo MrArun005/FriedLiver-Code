@@ -17,6 +17,8 @@ export const BRIDGE_LIMITS = {
   text: 100_000,
   /** Messages read_chat returns at most. */
   last: 50,
+  /** Characters in a URL or CSS selector for the browser tools. */
+  url: 2048,
 };
 
 /** What an agent asks for through the FriedLiver tools. */
@@ -25,7 +27,15 @@ export type BridgeCall =
   | { tool: 'list_chats' }
   | { tool: 'ask_agent'; agent: AgentKey; prompt: string; chatId?: string }
   | { tool: 'send_to_chat'; chatId: string; message: string }
-  | { tool: 'read_chat'; chatId: string; last?: number };
+  | { tool: 'read_chat'; chatId: string; last?: number }
+  | { tool: 'browser_open'; url: string }
+  | { tool: 'browser_click'; selector?: string; text?: string }
+  | { tool: 'browser_type'; selector: string; text: string }
+  | { tool: 'browser_snapshot' | 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' };
+
+export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
+
+export const isBrowserCall = (call: BridgeCall): call is BrowserCall => call.tool.startsWith('browser_');
 
 export interface BridgeRequest {
   id: number;
@@ -42,6 +52,7 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.text;
 const chatId = (v: unknown): v is string => typeof v === 'string' && CHAT_ID.test(v);
+const short = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.url;
 
 /** The tool call in a request, or null when anything about it is off. */
 export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
@@ -62,6 +73,20 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       if (last !== undefined && !(Number.isInteger(last) && (last as number) >= 1 && (last as number) <= BRIDGE_LIMITS.last)) return null;
       return { tool, chatId: a.chat_id, ...(last !== undefined ? { last: last as number } : {}) };
     }
+    case 'browser_open':
+      return short(a.url) ? { tool, url: a.url } : null;
+    case 'browser_click':
+      // Exactly one of the two.
+      if (short(a.selector) === short(a.text) || (a.selector !== undefined && !short(a.selector)) || (a.text !== undefined && !short(a.text))) return null;
+      return short(a.selector) ? { tool, selector: a.selector } : { tool, text: a.text as string };
+    case 'browser_type':
+      return short(a.selector) && typeof a.text === 'string' && a.text.length <= BRIDGE_LIMITS.text ? { tool, selector: a.selector, text: a.text } : null;
+    case 'browser_snapshot':
+    case 'browser_screenshot':
+    case 'browser_console':
+    case 'browser_back':
+    case 'browser_reload':
+      return { tool };
     default:
       return null;
   }

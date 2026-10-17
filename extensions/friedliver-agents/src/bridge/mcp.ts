@@ -13,7 +13,8 @@ export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '202
 
 const INSTRUCTIONS =
   'Tools from FriedLiver, the editor you run in. They reach the other coding agents and chats open there. ' +
-  'The user may be asked to allow each call, and may say no; carry on without it if so.';
+  'The user may be asked to allow each call, and may say no; carry on without it if so. ' +
+  'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code.';
 
 const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
 const CHAT_ID = { type: 'string', pattern: '^[\\w.:-]{1,128}$' };
@@ -88,7 +89,38 @@ export const TOOLS = [
     },
     annotations: { readOnlyHint: true },
   },
+  ...browserTools(),
 ].map((t) => ({ ...t, execution: { taskSupport: 'forbidden' } }));
+
+function browserTools() {
+  const tool = (name: string, title: string, description: string, properties: Record<string, object> = {}, required: string[] = [], readOnly = false) => ({
+    name,
+    title,
+    description,
+    inputSchema: Object.keys(properties).length ? { $schema: DRAFT_07, type: 'object', properties, ...(required.length ? { required } : {}) } : NO_INPUT,
+    ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
+  });
+  const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'A CSS selector, like "#submit" or a [data-fl="12"] one from browser_snapshot.' };
+  const ASKS = ' The user is asked to allow it first unless the chat is on Full auto.';
+  return [
+    tool('browser_open', 'Open a page', 'Opens an http or https URL in FriedLiver\'s browser (opening the browser if needed) and waits for it to load. localhost:3000 works too.' + ASKS, {
+      url: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'http://, https://, or a bare localhost:<port> address.' },
+    }, ['url']),
+    tool('browser_snapshot', 'Read the page', 'The open page as text: its title, URL, visible text, and the links, buttons and fields with a selector for each, to use with browser_click and browser_type.', {}, [], true),
+    tool('browser_click', 'Click', 'Clicks an element on the open page, found by CSS selector or by its visible text (give one of the two).' + ASKS, {
+      selector: SELECTOR,
+      text: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'Visible text of a link, button or label.' },
+    }),
+    tool('browser_type', 'Type', 'Focuses a field on the open page and types text into it, replacing what it held.' + ASKS, {
+      selector: SELECTOR,
+      text: { type: 'string', maxLength: BRIDGE_LIMITS.text, description: 'What to type.' },
+    }, ['selector', 'text']),
+    tool('browser_screenshot', 'Screenshot', 'Saves a PNG of the visible page to a temporary file and returns its path; read that file to see it.', {}, [], true),
+    tool('browser_console', 'Console', 'The open page\'s latest console messages and uncaught errors (up to 100).', {}, [], true),
+    tool('browser_back', 'Go back', 'Goes back one page in the browser\'s history.' + ASKS),
+    tool('browser_reload', 'Reload', 'Reloads the open page.' + ASKS),
+  ];
+}
 
 export interface ToolResult {
   content: { type: 'text'; text: string }[];

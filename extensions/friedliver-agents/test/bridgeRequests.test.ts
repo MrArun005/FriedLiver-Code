@@ -70,3 +70,77 @@ describe('agent requests waiting on the user', () => {
     }
   });
 });
+
+describe('browser tools', () => {
+  function browserHost(approval?: 'ask' | 'edits' | 'full', policy: 'ask' | 'allow' | 'off' = 'ask') {
+    const h = host(policy);
+    if (approval) h.dispatch({ t: 'approval', chatId: 'chat-1', level: approval });
+    const done: string[] = [];
+    h.browser = async (_chatId, call) => {
+      done.push('url' in call ? `${call.tool} ${call.url}` : call.tool);
+      return 'ok';
+    };
+    return { h, done, requests: new BridgeRequests(h), signal: new AbortController().signal };
+  }
+  const bridgeItems = (h: ToolHost) => h.state.chats[0].items.filter((i) => i.kind === 'bridge');
+
+  it('looks without asking', async () => {
+    const { h, done, requests, signal } = browserHost();
+    for (const tool of ['browser_snapshot', 'browser_screenshot', 'browser_console'] as const) await expect(requests.call('chat-1', { tool }, signal)).resolves.toBe('ok');
+    expect(done).toEqual(['browser_snapshot', 'browser_screenshot', 'browser_console']);
+    expect(bridgeItems(h)).toHaveLength(0);
+  });
+
+  it('waits for the user before acting, and does nothing when denied', async () => {
+    const { h, done, requests, signal } = browserHost('edits');
+    const click = requests.call('chat-1', { tool: 'browser_click', text: 'Sign in' }, signal);
+    const [item] = bridgeItems(h);
+    expect(item).toMatchObject({ tool: 'browser_click', target: { browser: true }, text: '"Sign in"', state: 'awaiting' });
+    expect(done).toEqual([]);
+    if (item.kind === 'bridge') requests.answer(item.requestId, 'deny');
+    await expect(click).rejects.toThrow(/did not allow/);
+    expect(done).toEqual([]);
+  });
+
+  it('acts at once on Full auto, and still records it in the chat', async () => {
+    const { h, done, requests, signal } = browserHost('full');
+    await expect(requests.call('chat-1', { tool: 'browser_open', url: 'localhost:3000' }, signal)).resolves.toBe('ok');
+    expect(done).toEqual(['browser_open http://localhost:3000/']);
+    expect(bridgeItems(h)).toEqual([expect.objectContaining({ tool: 'browser_open', text: 'http://localhost:3000/', state: 'allowed' })]);
+  });
+
+  it('asks even when agent-to-agent calls are on "allow": only Full auto skips it', async () => {
+    const { h, requests, signal } = browserHost(undefined, 'allow');
+    void requests.call('chat-1', { tool: 'browser_reload' }, signal).catch(() => {});
+    expect(bridgeItems(h)).toEqual([expect.objectContaining({ state: 'awaiting' })]);
+  });
+
+  it('refuses file:, javascript: and the like before asking anyone', async () => {
+    const { h, done, requests, signal } = browserHost('full');
+    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'chrome://gpu', 'devtools://x']) {
+      await expect(requests.call('chat-1', { tool: 'browser_open', url }, signal)).rejects.toThrow(/only http and https/);
+    }
+    expect(done).toEqual([]);
+    expect(bridgeItems(h)).toHaveLength(0);
+  });
+
+  it('"Allow for this chat" covers later browser actions, not other agents', async () => {
+    const { h, done, requests, signal } = browserHost();
+    const first = requests.call('chat-1', { tool: 'browser_back' }, signal);
+    const [item] = bridgeItems(h);
+    if (item.kind === 'bridge') requests.answer(item.requestId, 'allowChat');
+    await first;
+    await expect(requests.call('chat-1', { tool: 'browser_type', selector: '#q', text: 'hi' }, signal)).resolves.toBe('ok');
+    expect(done).toEqual(['browser_back', 'browser_type']);
+    void requests.call('chat-1', { tool: 'read_chat', chatId: 'chat-2' }, signal).catch(() => {});
+    expect(bridgeItems(h).at(-1)).toMatchObject({ tool: 'read_chat', state: 'awaiting' });
+  });
+
+  it('says so when the editor has no browser, and is off with the other tools', async () => {
+    const requests = new BridgeRequests(host());
+    const signal = new AbortController().signal;
+    await expect(requests.call('chat-1', { tool: 'browser_snapshot' }, signal)).rejects.toThrow(/isn't available/);
+    const off = browserHost('full', 'off');
+    await expect(off.requests.call('chat-1', { tool: 'browser_snapshot' }, signal)).rejects.toThrow(/turned off/);
+  });
+});
