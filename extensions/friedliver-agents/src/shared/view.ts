@@ -137,8 +137,8 @@ export interface Sort {
   dir: 'asc' | 'desc';
 }
 
-/** Waiting on you first, then failed, working, not started, done. */
-const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, error: 1, working: 2, idle: 3, done: 4 };
+/** STATUS_ORDER: waiting on you, working, failed, not started, done. */
+const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, working: 1, error: 2, idle: 3, done: 4 };
 const AGENT_RANK = Object.fromEntries(AGENT_KEYS.map((a, i) => [a, i])) as Record<AgentKey, number>;
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
@@ -426,20 +426,52 @@ export function recentChats(chats: ChatView[], activeId: string | undefined, n: 
   return recent.sort((a, b) => a.createdAt - b.createdAt || collator.compare(a.id, b.id));
 }
 
-export interface ChatGroup {
-  column: BoardColumn;
+export const COLUMN_TITLES: Record<BoardColumn, string> = { 'needs-you': 'Needs you', working: 'Working', done: 'Done' };
+
+/** The order chats are grouped in: what waits on you first, finished work last. */
+export const STATUS_ORDER: ChatStatus[] = ['needs-you', 'working', 'error', 'idle', 'done'];
+export const STATUS_TITLES: Record<ChatStatus, string> = { 'needs-you': 'Needs you', working: 'Working', error: 'Problem', idle: 'Idle', done: 'Done' };
+
+export interface StatusGroup {
+  status: ChatStatus;
   title: string;
   chats: ChatView[];
 }
 
-export const COLUMN_TITLES: Record<BoardColumn, string> = { 'needs-you': 'Needs you', working: 'Working', done: 'Done' };
+/** Chats by where they stand, in STATUS_ORDER, most recent activity first; empty groups only with `all`. */
+export function statusGroups(chats: ChatView[], all = false): StatusGroup[] {
+  const shown = sortChats(chats, { key: 'activity', dir: 'asc' });
+  return STATUS_ORDER.map((status) => ({ status, title: STATUS_TITLES[status], chats: shown.filter((c) => statusOf(c) === status) })).filter((g) => all || g.chats.length > 0);
+}
 
-/** Open chats matching the query, by where they stand, most recent first. */
-export function switcherGroups(chats: ChatView[], query: string): ChatGroup[] {
-  const shown = sortChats(filterChats(openChats(chats), query), { key: 'activity', dir: 'asc' });
-  return (['needs-you', 'working', 'done'] as const)
-    .map((column) => ({ column, title: COLUMN_TITLES[column], chats: shown.filter((c) => boardColumn(statusOf(c)) === column) }))
-    .filter((g) => g.chats.length > 0);
+/** Open chats matching the query, grouped by status. */
+export function switcherGroups(chats: ChatView[], query: string): StatusGroup[] {
+  return statusGroups(filterChats(openChats(chats), query));
+}
+
+// ---- The map's hover card ----
+
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Where a hover card goes, in viewport pixels: beside the node (right, else
+ * left) so it never covers the node's column, else above or below it; always
+ * inside the viewport, shrunk to fit a narrow one.
+ */
+export function tipPlace(node: Box, tip: { w: number; h: number }, view: { w: number; h: number }, gap = 12, margin = 4): { left: number; top: number; width: number; side: 'right' | 'left' | 'above' | 'below' } {
+  const width = Math.min(tip.w, view.w - 2 * margin);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
+  const sideTop = clamp(node.top - 6, margin, view.h - tip.h - margin);
+  if (node.right + gap + width <= view.w - margin) return { left: node.right + gap, top: sideTop, width, side: 'right' };
+  if (node.left - gap - width >= margin) return { left: node.left - gap - width, top: sideTop, width, side: 'left' };
+  const left = clamp(node.left, margin, view.w - width - margin);
+  if (node.top - gap - tip.h >= margin) return { left, top: node.top - gap - tip.h, width, side: 'above' };
+  return { left, top: Math.max(margin, Math.min(node.bottom + gap, view.h - tip.h - margin)), width, side: 'below' };
 }
 
 // ---- @-mentions ----
