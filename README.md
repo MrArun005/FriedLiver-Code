@@ -212,6 +212,7 @@ Patches:
 | `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 | `0110-modern-workbench` | The FriedLiver workbench stylesheet: regions separate by tone, soft rounded overlays, an activity pill, thin scrollbars, a pill command center. Theme variables only; high contrast untouched |
+| `0120-macos-dictation-command` | `friedliver.startDictation` (macOS): starts system dictation in the focused text box, for the agents' composer mic button |
 
 ### Writing a patch
 

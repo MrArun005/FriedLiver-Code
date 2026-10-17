@@ -50,6 +50,8 @@ import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** The mic button: macOS dictation, which only the FriedLiver app on a Mac can start. */
+const MAC = document.body.dataset.platform === 'darwin';
 /** From this width the chat list sits beside the chat. */
 const WIDE = 900;
 
@@ -1294,6 +1296,19 @@ function Composer({
           {chat.busy && (
             <button class="ghost danger sm" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
               <Icon name="stop" /> {!compact && 'Stop'}
+            </button>
+          )}
+          {MAC && (
+            <button
+              class="chip-btn icon-btn mic-btn"
+              aria-label="Dictate"
+              title="Dictate (Fn Fn)"
+              onClick={() => {
+                area.current?.focus();
+                send({ type: 'dictate' });
+              }}
+            >
+              <Icon name="mic" />
             </button>
           )}
           <button

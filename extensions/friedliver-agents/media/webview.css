@@ -3832,7 +3832,8 @@ body[data-surface='chat'] .composer-bar {
   gap: var(--sp-2);
 }
 body[data-surface='chat'] .composer-bar > *,
-body[data-surface='chat'] .composer-bar .session-controls {
+body[data-surface='chat'] .composer-bar .session-controls,
+body[data-surface='chat'] .composer-bar .pop {
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -3842,6 +3843,7 @@ body[data-surface='chat'] .composer-bar .session-controls {
 body[data-surface='chat'] .composer-bar button.chip-btn {
   flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 body[data-surface='chat'] .composer-bar .send-btn,
 body[data-surface='chat'] .composer-bar .icon-btn {
@@ -3855,6 +3857,12 @@ body[data-surface='chat'] .composer-bar .icon-btn {
 }
 @container (max-width: 380px) {
   body[data-surface='chat'] .composer-bar .chip-text {
+    display: none;
+  }
+  body[data-surface='chat'] .composer-bar button.chip-btn {
+    padding: 0 8px;
+  }
+  body[data-surface='chat'] .composer-bar button.chip-btn:not(.icon-btn) .icon:last-child {
     display: none;
   }
 }

@@ -99,7 +99,7 @@ function page(params) {
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
-<body class="vscode-${theme.kind}" data-surface="${surface}">
+<body class="vscode-${theme.kind}" data-surface="${surface}" data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
 <div id="root"></div>
 <script src="/media/dist/${surface}.js"></script>
 </body>
@@ -358,6 +358,17 @@ async function shoot() {
     check((await p.inputValue('.composer textarea')) === 'How does the auth middleware decide a session is valid?', 'Up in an empty box recalls the last message');
     await p.close();
   }
+  {
+    // The mic: macOS only; it focuses the message box and asks the host for dictation.
+    const p = await open('surface=chat&side=1&select=chat-c5', 400, 700);
+    await p.click('.mic-btn');
+    check((await posted(p)).some((m) => m.type === 'dictate'), 'the mic asks for dictation');
+    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box first');
+    await p.close();
+    const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
+    check((await linux.locator('.mic-btn').count()) === 0, 'no mic off macOS');
+    await linux.close();
+  }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.
     const p = await open('surface=chat&side=1&select=chat-c5', width, 700);
@@ -365,10 +376,12 @@ async function shoot() {
     const r = await p.evaluate(() => {
       const box = (s) => document.querySelector(s).getBoundingClientRect();
       const c = box('.composer'), t = box('.composer textarea'), b = box('.composer-bar');
-      return { ratio: t.width / c.width, barInside: b.right <= c.right + 1 && b.left >= c.left - 1, page: document.documentElement.scrollWidth <= window.innerWidth };
+      const kids = [...document.querySelectorAll('.composer-bar button')].map((e) => e.getBoundingClientRect()).filter((k) => k.width > 0).sort((x, y) => x.left - y.left);
+      const apart = kids.every((k, i) => i === 0 || k.left >= kids[i - 1].right - 0.5);
+      return { apart, ratio: t.width / c.width, barInside: b.right <= c.right + 1 && b.left >= c.left - 1, page: document.documentElement.scrollWidth <= window.innerWidth };
     });
     check(r.ratio >= 0.7, `at ${width}px the message box is ${Math.round(r.ratio * 100)}% of the composer (>= 70%)`);
-    check(r.barInside && r.page, `at ${width}px the controls stay inside the composer and nothing scrolls sideways`);
+    check(r.barInside && r.page && r.apart, `at ${width}px the controls don't overlap, stay inside the composer and nothing scrolls sideways`);
     if (width < 1200) await p.screenshot({ path: path.join(os.homedir(), `code/composer-${width}.png`), animations: 'disabled', caret: 'hide' });
     await p.close();
   }
