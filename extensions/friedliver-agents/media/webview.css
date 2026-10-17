@@ -3986,8 +3986,8 @@ button.cc-map-node:hover {
   gap: var(--sp-1);
   margin-top: var(--sp-1);
 }
-.ask .actions button,
-.ask .actions .pop > button {
+.ask .actions button:not(.link),
+.ask .actions .pop > button:not(.link) {
   justify-content: flex-start;
   width: 100%;
   height: auto;
@@ -4123,16 +4123,151 @@ button.file-row .icon {
   font-family: var(--mono);
   font-size: var(--t-85);
 }
-.q-field {
+/* An agent's question: a header chip, the question, the options as full-width numbered rows. */
+.question {
+  gap: var(--sp-2);
+}
+.q-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.q-chip {
+  max-width: 60%;
+}
+.q-step {
+  margin-left: auto;
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
+}
+.q-question {
+  font-weight: 600;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.q-question .md p {
+  margin: 0;
+}
+.q-body {
+  display: grid;
+  gap: var(--sp-2);
+}
+.q-body.with-preview {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .q-body.with-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.q-options {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+button.q-opt {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  width: 100%;
+  height: auto;
+  padding: 6px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  color: var(--fg);
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+}
+button.q-opt:hover {
+  background: var(--hover-bg);
+}
+button.q-opt[data-picked] {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+button.q-opt:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+.q-num,
+.q-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: var(--r-3);
+  background: var(--chip-bg);
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
+}
+.q-check {
+  border: 1px solid var(--fg-2);
+  background: transparent;
+}
+.q-check .icon {
+  width: 14px;
+  height: 14px;
+}
+button.q-opt[data-picked] .q-num {
+  color: var(--fg);
+}
+.q-opt-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.q-opt-label {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.q-opt-desc {
+  color: var(--fg-2);
+  font-size: var(--t-85);
+}
+button.q-opt[data-picked] .q-opt-desc {
+  color: inherit;
+  opacity: 0.8;
+}
+.q-rec {
+  font-size: var(--t-80);
+}
+.q-opt-other .q-opt-label {
+  color: var(--fg-2);
+}
+.q-other {
+  padding: 2px 0 2px calc(18px + var(--sp-4));
+}
+.q-other input,
+input.q-input {
+  width: 100%;
+  height: 26px;
+}
+.q-preview {
+  min-width: 0;
+}
+.q-preview pre.code {
+  max-height: 16em;
+}
+.q-foot {
+  display: flex;
+  align-items: center;
   gap: var(--sp-1);
 }
-.q-title {
-  font-weight: 600;
-}
-input.q-input {
-  height: 26px;
+.q-answered {
+  font-size: var(--t-90);
 }
 .ask label.check {
   display: inline-flex;
