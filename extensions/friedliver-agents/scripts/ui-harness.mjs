@@ -13,18 +13,22 @@
 //        &fixture=subagents (a Claude chat with three subagents, and outside Claude Code sessions, ui-fixture-subagents.mjs)
 //        &fixture=reference (the session in the Claude Code reference screenshots, ui-fixture-reference.mjs)
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
+//        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
+//   --only images    run only the Images view's checks
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
 import { subagentsFixture } from './ui-fixture-subagents.mjs';
 import { referenceFixture } from './ui-fixture-reference.mjs';
+import { IMAGE_ROOTS, exists, imagesFixture } from './ui-fixture-images.mjs';
+import { createRequire } from 'node:module';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -37,6 +41,7 @@ const { values: opts } = parseArgs({
     out: { type: 'string', default: path.join(repo, 'docs/screenshots/agents') },
     port: { type: 'string', default: '5178' },
     themes: { type: 'string', default: 'black-blue,light-blue' },
+    only: { type: 'string' },
   },
 });
 
@@ -44,6 +49,31 @@ if (!opts['no-build']) {
   const built = spawnSync('npm', ['run', 'build'], { cwd: ext, stdio: 'inherit', shell: process.platform === 'win32' });
   if (built.status !== 0) process.exit(built.status ?? 1);
 }
+
+// ---- Images: the host's own thumbnail and preview code, on the fixture's real files ----
+
+const hostCode = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-harness-')), 'imageAccess.cjs');
+{
+  const { build } = await import('esbuild');
+  await build({ entryPoints: [path.join(ext, 'src/host/imageAccess.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: hostCode, logLevel: 'error' });
+}
+const { imagePreview, imageThumb } = createRequire(import.meta.url)(hostCode);
+const thumbCache = path.join(path.dirname(hostCode), 'thumbs');
+/** What the host answers for an image request: the real checks on a real file; a stand-in (drawn by the page) for the made-up paths of other fixtures. */
+async function hostImage(kind, file) {
+  if (exists(file)) {
+    const src = kind === 'imageThumb' ? await imageThumb(file, IMAGE_ROOTS, thumbCache) : await imagePreview(file, IMAGE_ROOTS);
+    return src ? { src } : {};
+  }
+  return file.includes('outside') ? {} : { standIn: true };
+}
+// The images fixture's data: URIs (attachments, a tool's output), made once from their files.
+const imagesData = imagesFixture(Date.now());
+for (const img of imagesData.state.images) {
+  img.src = (await hostImage('imageThumb', img.file)).src ?? '';
+  delete img.file;
+}
+imagesData.state.images = imagesData.state.images.filter((i) => i.src);
 
 // ---- Themes → --vscode-* variables, the way VS Code hands them to webviews ----
 
@@ -94,10 +124,12 @@ function page(params) {
           ? subagentsFixture(Date.now())
           : params.get('fixture') === 'reference'
             ? referenceFixture(Date.now())
-            : fixture(Date.now());
+            : params.get('fixture') === 'images'
+              ? imagesData
+              : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
-  const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
+  const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))], ['imagesTab', params.get('imagesTab')]].filter(([, v]) => v);
   const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
   const stub = `
     window.__posted = [];
@@ -105,24 +137,32 @@ function page(params) {
     let saved = ${JSON.stringify(saved ?? null)};
     const snapshot = ${JSON.stringify(snapshot).replace(/</g, '\\u003c')};
     const claude = ${JSON.stringify(data.claude ?? null).replace(/</g, '\\u003c')};
+    const outside = ${JSON.stringify(data.outside ?? null).replace(/</g, '\\u003c')};
     window.acquireVsCodeApi = () => ({
       postMessage(m) {
         window.__posted.push(m);
         if (m && m.type === 'ready') setTimeout(() => window.postMessage(snapshot, '*'), 0);
-        // Step images: a drawn stand-in for files the host would allow; paths with "outside" are refused.
-        if (m && m.type === 'imageSrc') {
-          const label = m.path.split('/').pop();
-          const c = document.createElement('canvas');
-          c.width = 480;
-          c.height = 300;
-          const g = c.getContext('2d');
-          g.fillStyle = '#e8ecf2'; g.fillRect(0, 0, 480, 300);
-          g.fillStyle = '#fff'; g.fillRect(140, 70, 200, 160);
-          g.fillStyle = '#dfe3ea'; g.fillRect(165, 110, 150, 18); g.fillRect(165, 140, 150, 18);
-          g.fillStyle = '#5b7cfa'; g.fillRect(165, 180, 150, 26);
-          g.fillStyle = '#7a8394'; g.font = '14px sans-serif'; g.fillText(label, 20, 285);
-          setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: c.toDataURL('image/png') }) }, '*'), 0);
+        // Images: the harness answers as the host would (real files through the host's code); a drawn stand-in for made-up paths; paths with "outside" are refused.
+        if (m && (m.type === 'imageSrc' || m.type === 'imageThumb')) {
+          fetch('/host-image?kind=' + m.type + '&path=' + encodeURIComponent(m.path)).then((r) => r.json()).then((a) => {
+            let src = a.src;
+            if (a.standIn) {
+              const label = m.path.split('/').pop();
+              const c = document.createElement('canvas');
+              c.width = 480;
+              c.height = 300;
+              const g = c.getContext('2d');
+              g.fillStyle = '#e8ecf2'; g.fillRect(0, 0, 480, 300);
+              g.fillStyle = '#fff'; g.fillRect(140, 70, 200, 160);
+              g.fillStyle = '#dfe3ea'; g.fillRect(165, 110, 150, 18); g.fillRect(165, 140, 150, 18);
+              g.fillStyle = '#5b7cfa'; g.fillRect(165, 180, 150, 26);
+              g.fillStyle = '#7a8394'; g.font = '14px sans-serif'; g.fillText(label, 20, 285);
+              src = c.toDataURL('image/png');
+            }
+            window.postMessage({ type: m.type, path: m.path, ...(src ? { src } : {}) }, '*');
+          });
         }
+        if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
         if (m && m.type === 'ready' && claude) setTimeout(() => window.postMessage({ type: 'claudeSessions', sessions: claude }, '*'), 0);
       },
       getState: () => saved ?? undefined,
@@ -156,6 +196,13 @@ const server = http.createServer((req, res) => {
     return;
   }
   // The browser asks for a favicon on the first page; no 404 in the console for it.
+  if (url.pathname === '/host-image') {
+    hostImage(url.searchParams.get('kind') === 'imageSrc' ? 'imageSrc' : 'imageThumb', url.searchParams.get('path') ?? '').then(
+      (answer) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer)),
+      () => res.writeHead(200, { 'content-type': 'application/json' }).end('{}'),
+    );
+    return;
+  }
   if (url.pathname === '/favicon.ico') {
     res.writeHead(204).end();
     return;
@@ -211,6 +258,16 @@ async function shoot() {
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`);
     if (!ok) problems.push(what);
   };
+
+  if (opts.only === 'images') {
+    await imagesChecks({ open, check, posted });
+    await browser.close();
+    if (problems.length) {
+      console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   for (const theme of opts.themes.split(',')) {
     console.log(`${theme}:`);
@@ -1103,9 +1160,201 @@ async function shoot() {
     await p.close();
   }
 
+  await imagesChecks({ open, check, posted });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
     process.exitCode = 1;
   }
+}
+
+// ---- The Images view: tabs per chat, filters, search, a lazy grid, the preview, live updates ----
+
+async function imagesChecks({ open, check, posted }) {
+  const review = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  fs.mkdirSync(review, { recursive: true });
+  const { collectGallery, filterGallery } = await import(pathToFileURL(sharedGallery()).href);
+  const { images: all, chats } = collectGallery(imagesData.state, imagesData.outside);
+  const thumbs = (p) => p.evaluate(() => window.__posted.filter((m) => m.type === 'imageThumb').length);
+  const settle = (p) =>
+    p.waitForFunction(() => {
+      const near = [...document.querySelectorAll('.gallery-thumb')].filter((t) => {
+        const r = t.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+      });
+      return near.length > 0 && near.every((t) => t.dataset.state !== 'wait');
+    }, null, { timeout: 15_000 });
+  const shotTo = async (p, name) => {
+    await p.screenshot({ path: path.join(review, `${name}.png`), animations: 'disabled', caret: 'hide' });
+    console.log(`  ${path.join(review, `${name}.png`)}`);
+  };
+
+  for (const width of [1200, 640]) {
+    // The Agent Manager's Images tab: the gallery with the whole width.
+    const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', width, 900);
+    await p.waitForSelector('.gallery-card');
+    await settle(p);
+    const tabs = await p.locator('.gallery-tabs button.tab').allInnerTexts();
+    check(tabs.length === chats.length + 1 && tabs[0].replace(/\s+/g, ' ').trim() === `All ${all.length}`, `${width}: All first with every image counted (${tabs[0]?.replace(/\s+/g, ' ')})`);
+    check(
+      chats.every((c, n) => tabs[n + 1].includes(c.title) && tabs[n + 1].trim().endsWith(String(c.count))),
+      `${width}: a tab per chat with images, newest first, with its topic and count`,
+    );
+    check((await p.locator('.gallery-tabs button.tab .glyph[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
+    const cards = await p.locator('.gallery-card').count();
+    const asked = await thumbs(p);
+    check(cards === all.length && asked > 0 && asked < cards / 2, `${width}: only cards near the screen ask for thumbnails (${asked} of ${cards})`);
+    const natural = await p.locator('.gallery-thumb img').evaluateAll((els) => els.filter((i) => i.src.startsWith('data:')).map((i) => Math.max(i.naturalWidth, i.naturalHeight)));
+    check(natural.length > 0 && natural.every((n) => n <= 320), `${width}: thumbnails come at most 320px (${Math.max(...natural)}px largest)`);
+    const layout = await p.evaluate(() => {
+      const grid = document.querySelector('.gallery-grid').getBoundingClientRect();
+      const items = [...document.querySelectorAll('.gallery-item')].slice(0, 12).map((e) => e.getBoundingClientRect());
+      const cols = new Set(items.map((r) => Math.round(r.left))).size;
+      const right = Math.max(...items.map((r) => r.right));
+      return { cols, slack: Math.round(grid.right - right), page: document.scrollingElement.scrollWidth - window.innerWidth };
+    });
+    check(layout.cols >= (width === 1200 ? 6 : 3) && layout.slack <= 2 && layout.page <= 0, `${width}: the grid fills the width (${layout.cols} columns, ${layout.slack}px left over, no sideways scroll)`);
+    const spill = await p.evaluate(() =>
+      [...document.querySelectorAll('.gallery-card')].slice(0, 40).flatMap((c) => {
+        const box = c.getBoundingClientRect();
+        return [...c.querySelectorAll('.gallery-title, .gallery-meta, .gallery-chat')].filter((el) => el.getBoundingClientRect().right > box.right + 0.5).map((el) => el.textContent);
+      }),
+    );
+    check(spill.length === 0, `${width}: titles and meta stay inside their cards [${spill.slice(0, 3).join('; ')}]`);
+    const firstTitle = await p.locator('.gallery-card .gallery-title').first().innerText();
+    check(firstTitle === all[0].title, `${width}: newest first (${firstTitle})`);
+    if (width === 1200) await shotTo(p, 'images-all');
+    else await shotTo(p, 'images-all-640');
+
+    // Scrolling down asks for more.
+    await p.evaluate(() => document.querySelector('.manager').scrollTo(0, 2400));
+    await p.waitForTimeout(300);
+    check((await thumbs(p)) > asked, `${width}: scrolling down loads the next thumbnails (${await thumbs(p)})`);
+    await p.evaluate(() => document.querySelector('.manager').scrollTo(0, 0));
+
+    if (width === 1200) {
+      // Filters and search.
+      await p.click('button.filter-chip:has-text("Screenshot")');
+      const metas = await p.locator('.gallery-card .gallery-meta').allInnerTexts();
+      check(metas.length === all.filter((i) => i.source === 'screenshot').length && metas.every((m) => m.startsWith('Screenshot')), `the Screenshot chip shows screenshots only (${metas.length})`);
+      await p.click('button.filter-chip:has-text("Created by tool")');
+      check((await p.locator('.gallery-card').count()) === all.filter((i) => i.source === 'screenshot' || i.source === 'created').length, 'two chips show both sources');
+      await p.click('button.filter-chip[aria-pressed="true"] >> nth=0');
+      await p.click('button.filter-chip[aria-pressed="true"]');
+      await p.fill('.mgr-head .search input', 'modes menu');
+      const found = await p.locator('.gallery-card .gallery-title').allInnerTexts();
+      const expected = filterGallery(all, chats, { sources: [], query: 'modes menu' }).map((i) => i.title);
+      check(found.length > 0 && found.join('|') === expected.join('|'), `search narrows the grid by title, file name and chat (${found.length}: ${found.slice(0, 3).join(', ')})`);
+      await p.fill('.mgr-head .search input', 'zzz-nothing');
+      check((await p.locator('.gallery-empty').innerText()).includes('No image matches'), 'a search with no match says so');
+      await p.fill('.mgr-head .search input', '');
+
+      // Name-only cards: an SVG, a file outside the allowed folders.
+      await p.fill('.mgr-head .search input', 'agents.svg');
+      check((await p.locator('.gallery-thumb[data-state="name"] .gallery-ext').innerText()) === 'SVG', 'an SVG shows as its name only');
+      await p.fill('.mgr-head .search input', 'outside secret');
+      await p.waitForSelector('.gallery-thumb[data-state="name"]');
+      check((await p.locator('.gallery-thumb img').count()) === 0, 'a file outside the allowed folders shows no picture');
+      await p.fill('.mgr-head .search input', '');
+
+    }
+    await p.close();
+  }
+
+  {
+    // Live, with a real path: a new read shows first, counts go up.
+    const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', 1200, 900);
+    await p.waitForSelector('.gallery-card');
+    const file = path.join(review, 'tabs-close.png');
+    await p.evaluate(
+      (f) => window.postMessage({ type: 'action', action: { t: 'items', chatId: 'chat-measure', at: Date.now(), items: [{ kind: 'tool', id: 'live-1', title: 'Read live.png', toolKind: 'read', status: 'completed', locations: [f.replace('tabs-close', 'images-all')], startedAt: Date.now() }] } }, '*'),
+      file,
+    );
+    await p.waitForFunction((n) => document.querySelector('.gallery-tabs button.tab .tab-count')?.textContent === String(n), all.length + 1);
+    check((await p.locator('.gallery-card .gallery-title').first().innerText()) === 'Images all', 'a newly read image appears first, live');
+    check((await p.locator('.gallery-tabs button.tab:has-text("Annotate the reference") .tab-count').innerText()) === String(chats.find((c) => c.id === 'chat-measure').count + 1), 'its chat’s count goes up');
+    check((await p.locator('.gallery-tabs button.tab').nth(1).innerText()).includes('Annotate the reference'), 'its chat’s tab moves to the front');
+    await p.close();
+  }
+
+  for (const width of [1200, 640]) {
+    // One chat's tab, then the preview.
+    const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images&imagesTab=chat-review', width, 900);
+    await p.waitForSelector('.gallery-card');
+    await settle(p);
+    const mine = all.filter((i) => i.chatId === 'chat-review');
+    check((await p.locator('.gallery-card').count()) === mine.length, `${width}: a chat’s tab shows its images only (${mine.length})`);
+    check((await p.locator('.gallery-card .gallery-chat').count()) === 0, `${width}: inside a chat's tab the cards don't repeat the chat`);
+    await shotTo(p, width === 1200 ? 'images-tab' : 'images-tab-640');
+
+    await p.locator('.gallery-card').nth(1).click();
+    await p.waitForSelector('.gallery-preview .preview-img');
+    await p.waitForFunction(() => document.querySelector('.preview-img')?.complete);
+    const title = await p.locator('.preview-title').innerText();
+    check(title === mine[1].title && (await p.locator('.preview-meta').innerText()).includes(`2 of ${mine.length}`), `${width}: a card opens the large preview (${title})`);
+    const fit = await p.evaluate(() => {
+      const img = document.querySelector('.preview-img').getBoundingClientRect();
+      const stage = document.querySelector('.preview-stage').getBoundingClientRect();
+      return img.width > 0 && img.right <= stage.right && img.bottom <= stage.bottom + 1 && img.top >= stage.top - 1;
+    });
+    check(fit, `${width}: the preview image fits inside the dialog`);
+    if (width === 1200) await shotTo(p, 'images-preview');
+    else await shotTo(p, 'images-preview-640');
+    await p.keyboard.press('ArrowRight');
+    check((await p.locator('.preview-title').innerText()) === mine[2].title, `${width}: → shows the next image`);
+    await p.keyboard.press('ArrowLeft');
+    await p.keyboard.press('ArrowLeft');
+    check((await p.locator('.preview-title').innerText()) === mine[0].title, `${width}: ← shows the one before`);
+    await p.click('.preview-nav[data-dir="next"]');
+    check((await p.locator('.preview-title').innerText()) === mine[1].title, `${width}: the arrow buttons move too`);
+    if (width === 1200) {
+      await p.click('.preview-actions button:has-text("Open in editor")');
+      await p.click('.preview-actions button:has-text("Reveal in Finder")');
+      await p.click('.preview-actions button:has-text("Copy path")');
+      await p.click('.preview-actions button:has-text("Go to step in chat")');
+      const sent = await posted(p);
+      check(sent.some((m) => m.type === 'openImage' && m.path === mine[1].path), 'Open in editor opens the file');
+      check(sent.some((m) => m.type === 'revealImage' && m.path === mine[1].path), 'Reveal in Finder reveals it');
+      check(sent.some((m) => m.type === 'copy' && m.text === mine[1].path), 'Copy path copies it');
+      check(sent.some((m) => m.type === 'openChat' && m.chatId === 'chat-review' && m.item === mine[1].stepId), 'Go to step opens the chat at the step');
+    }
+    await p.keyboard.press('Escape');
+    check((await p.locator('.gallery-overlay').count()) === 0, `${width}: Esc closes the preview`);
+    await p.waitForTimeout(50);
+    check((await p.evaluate(() => document.activeElement?.closest('.gallery-card')?.dataset.key)) === mine[1].key, `${width}: focus goes back to the card last shown`);
+    await p.close();
+  }
+
+  {
+    // What can't be done isn't offered: no file for an attachment, no step outside FriedLiver.
+    const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images&imagesTab=chat-tabs', 1200, 900);
+    await p.waitForSelector('.gallery-card');
+    await p.locator('.gallery-card:has-text("Chrome tab strip")').click();
+    check((await p.locator('.preview-actions button:has-text("Open in editor")').count()) === 0 && (await p.locator('.preview-actions button:has-text("Go to chat")').count()) === 1, 'an attachment has no file to open, but goes to its chat');
+    await p.keyboard.press('Escape');
+    await p.close();
+    const q = await open(`surface=tasks&theme=dark-2026&view=images&fixture=images&imagesTab=claude:${imagesData.outside[0].id}`, 1200, 900);
+    await q.waitForSelector('.gallery-card');
+    await q.locator('.gallery-card').first().click();
+    check((await q.locator('.preview-actions button:has-text("Go to step")').count()) === 0 && (await q.locator('.preview-actions button:has-text("Open in editor")').count()) === 1, 'a session outside FriedLiver has no step to go to');
+    await q.close();
+  }
+
+  {
+    // The side bar's Images view: the same gallery, its own search, 2 columns at 300px.
+    const p = await open('surface=images&theme=dark-2026&side=1&fixture=images', 300, 800);
+    await p.waitForSelector('.gallery-card');
+    const cols = await p.evaluate(() => new Set([...document.querySelectorAll('.gallery-item')].slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().left))).size);
+    check(cols === 1 || cols === 2, `the side view fits ${cols} column(s) at 300px`);
+    await p.fill('.gallery-search input', 'pair');
+    check((await p.locator('.gallery-card').count()) === all.filter((i) => /pair/i.test(i.title) || /pair/i.test(i.path ?? '')).length, 'the side view searches by name');
+    check(await p.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth), 'no sideways scroll at 300px');
+    await p.close();
+  }
+}
+
+function sharedGallery() {
+  const out = path.join(path.dirname(hostCode), 'gallery.mjs');
+  if (!fs.existsSync(out)) spawnSync(process.execPath, [path.join(ext, 'node_modules/esbuild/bin/esbuild'), path.join(ext, 'src/shared/gallery.ts'), '--bundle', '--format=esm', '--platform=node', `--outfile=${out}`, '--log-level=error']);
+  return out;
 }
