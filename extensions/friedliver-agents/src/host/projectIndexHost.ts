@@ -23,7 +23,10 @@ export class ProjectIndexHost implements vscode.Disposable {
   private changeTimer?: NodeJS.Timeout;
   private saveTimer?: NodeJS.Timeout;
 
-  constructor(private readonly storage: string) {
+  constructor(
+    private readonly storage: string,
+    private readonly log: (message: string) => void = () => {},
+  ) {
     this.item.name = 'FriedLiver Project Index';
     this.item.command = 'friedliver.index.rebuild';
     this.disposables.push(
@@ -66,7 +69,7 @@ export class ProjectIndexHost implements vscode.Disposable {
       const exclude = Object.entries(vscode.workspace.getConfiguration('files', f.uri).get<Record<string, boolean>>('exclude') ?? {})
         .filter(([, on]) => on === true)
         .map(([glob]) => glob);
-      return new ProjectIndex(f.uri.fsPath, { maxFiles: cfg.maxFiles, maxBytes: cfg.maxBytes, exclude });
+      return new ProjectIndex(f.uri.fsPath, { maxFiles: cfg.maxFiles, maxBytes: cfg.maxBytes, exclude, log: this.log });
     });
     this.watcher = vscode.workspace.createFileSystemWatcher('**/*');
     const queue = (uri: vscode.Uri) => {
