@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmod, lstat, mkdir, open, readFile, rename, writeFile, type FileHandle } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, utimes, writeFile, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { insideRoots } from './paths';
@@ -11,6 +11,8 @@ export const MAX_IMAGE_FILE_BYTES = 20 * 1024 * 1024;
 export const MAX_PREVIEW_BYTES = 5 * 1024 * 1024;
 /** A thumbnail's longest side. */
 export const THUMB_PX = 320;
+/** The thumbnail cache's size; past it the least recently used go. */
+export const THUMB_CACHE_BYTES = 200 * 1024 * 1024;
 
 /** Raster types by their first bytes. SVG is not here: it shows as its name only. */
 const MAGIC: [string, (b: Buffer) => boolean][] = [
@@ -74,6 +76,29 @@ export function thumbKey(file: string, mtimeMs: number, size: number): string {
   return createHash('sha256').update(`${file}\0${mtimeMs}\0${size}`).digest('hex').slice(0, 40);
 }
 
+let writes = 0;
+/** The cache is looked over on the first thumbnail written and then every this many. */
+const PRUNE_EVERY = 50;
+
+/** Removes the least recently used thumbnails (by modified time, which a hit renews) until the cache is under `cap` bytes. */
+export async function pruneThumbs(cacheDir: string, cap: number): Promise<void> {
+  const names = (await readdir(cacheDir).catch(() => [] as string[])).filter((n) => n.endsWith('.png'));
+  const files = (
+    await Promise.all(
+      names.map(async (n) => {
+        const st = await lstat(path.join(cacheDir, n)).catch(() => null);
+        return st?.isFile() ? { file: path.join(cacheDir, n), size: st.size, used: st.mtimeMs } : null;
+      }),
+    )
+  ).flatMap((f) => (f ? [f] : []));
+  let total = files.reduce((n, f) => n + f.size, 0);
+  for (const f of files.sort((a, b) => a.used - b.used)) {
+    if (total <= cap) break;
+    await rm(f.file, { force: true }).catch(() => {});
+    total -= f.size;
+  }
+}
+
 /** Scales a PNG to fit max × max, or null (see downscalePng); off the extension host's thread in the app (thumbWorker.ts). */
 export type Scaler = (png: Buffer, max: number) => Promise<Buffer | null>;
 export const scaleHere: Scaler = async (png, max) => downscalePng(png, max);
@@ -85,7 +110,6 @@ export const scaleHere: Scaler = async (png, max) => downscalePng(png, max);
  * format up to MAX_PREVIEW_BYTES, comes as it is.
  */
 // ponytail: only PNG is scaled (no image library here); a JPEG/GIF/WebP over 5 MB shows its name. Add a decoder if they turn up.
-// ponytail: the cache is never pruned; a few hundred KB per hundred images. Prune by age if it grows.
 export function imageThumb(file: string, roots: readonly string[], cacheDir: string, scale: Scaler = scaleHere): Promise<string | null> {
   return withVetted(file, roots, MAX_IMAGE_FILE_BYTES, async (handle, inside, info) => {
     // A cached thumbnail needs only the file's first bytes read, to know it is still a PNG.
@@ -95,7 +119,12 @@ export function imageThumb(file: string, roots: readonly string[], cacheDir: str
     if (pngSize(head)) {
       const hit = await lstat(cached).catch(() => null);
       const bytes = hit?.isFile() ? await readFile(cached).catch(() => null) : null;
-      if (bytes && pngSize(bytes)) return dataUri('image/png', bytes);
+      if (bytes && pngSize(bytes)) {
+        // Its modified time is its last use, for pruning.
+        const now = new Date();
+        await utimes(cached, now, now).catch(() => {});
+        return dataUri('image/png', bytes);
+      }
     }
     // A read at a given position doesn't move the file's own, so this is the whole file.
     const bytes = await handle.readFile();
@@ -104,8 +133,10 @@ export function imageThumb(file: string, roots: readonly string[], cacheDir: str
     const asIs = bytes.length <= MAX_PREVIEW_BYTES ? dataUri(type, bytes) : null;
     const size = pngSize(bytes);
     if (type !== 'image/png' || !size || (size.width <= THUMB_PX && size.height <= THUMB_PX)) return asIs;
+    // A PNG that can't be scaled here (damaged, cut short, too big, too slow) shows its name only:
+    // the whole file is never handed on in its place.
     const small = await scale(bytes, THUMB_PX).catch(() => null);
-    if (!small || !pngSize(small)) return asIs;
+    if (!small || !pngSize(small)) return null;
     try {
       await mkdir(cacheDir, { recursive: true, mode: 0o700 });
       await chmod(cacheDir, 0o700);
@@ -113,6 +144,7 @@ export function imageThumb(file: string, roots: readonly string[], cacheDir: str
       const tmp = `${cached}.${process.pid}.tmp`;
       await writeFile(tmp, small, { mode: 0o600 });
       await rename(tmp, cached);
+      if (writes++ % PRUNE_EVERY === 0) await pruneThumbs(cacheDir, THUMB_CACHE_BYTES);
     } catch {
       // No cache this time; the thumbnail still shows.
     }
@@ -122,10 +154,11 @@ export function imageThumb(file: string, roots: readonly string[], cacheDir: str
 
 /**
  * A Scaler that runs in a worker thread (`script` is the built thumbWorker.js), one
- * image at a time: an 11-megapixel screenshot takes about 0.4 s to scale. A worker
- * that fails or exits answers null for what it had, and the next call starts another.
+ * image at a time: an 11-megapixel screenshot takes about 0.4 s to scale. The worker
+ * has a heap cap and each image a time limit; a worker that fails, exits, runs out
+ * of memory or time answers null for what it had, and the next call starts another.
  */
-export function workerScaler(script: string): Scaler & { dispose(): void } {
+export function workerScaler(script: string, { timeoutMs = 2000, maxOldMb = 128, maxYoungMb = 32 } = {}): Scaler & { dispose(): void } {
   let worker: Worker | undefined;
   let next = 0;
   const waiting = new Map<number, (out: Buffer | null) => void>();
@@ -137,7 +170,8 @@ export function workerScaler(script: string): Scaler & { dispose(): void } {
   const scaler = (png: Buffer, max: number) =>
     new Promise<Buffer | null>((resolve) => {
       if (!worker) {
-        const w = new Worker(script);
+        // A crafted image can't take more than this memory, or time (below), from the extension host.
+        const w = new Worker(script, { resourceLimits: { maxOldGenerationSizeMb: maxOldMb, maxYoungGenerationSizeMb: maxYoungMb } });
         w.unref();
         w.on('message', (m: { id: number; out: Uint8Array | null }) => {
           const done = waiting.get(m.id);
@@ -149,8 +183,17 @@ export function workerScaler(script: string): Scaler & { dispose(): void } {
         worker = w;
       }
       const id = next++;
-      waiting.set(id, resolve);
-      worker.postMessage({ id, png, max });
+      const w = worker;
+      // Too slow: the worker is stopped (everything it had answers null) and the next call starts another.
+      const timer = setTimeout(() => {
+        if (worker === w) drop();
+        void w.terminate();
+      }, timeoutMs);
+      waiting.set(id, (out) => {
+        clearTimeout(timer);
+        resolve(out);
+      });
+      w.postMessage({ id, png, max });
     });
   return Object.assign(scaler, {
     dispose: () => {
