@@ -91,17 +91,7 @@ const TARGET_KEYS = ['file_path', 'filePath', 'path', 'abs_path', 'notebook_path
 /** Messages that can wait for a busy chat. */
 const MAX_QUEUE = 10;
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const OUTPUT_FLUSH_MS = 50;
-const IMAGE_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.bmp': 'image/bmp',
-};
 
 export interface PendingReview {
   reviewId: string;
@@ -228,7 +218,6 @@ export class AgentCore {
   private readonly lastPrompt = new Map<string, acp.ContentBlock[]>();
   private readonly chatCount: Partial<Record<AgentKey, number>> = {};
   private readonly signingIn = new Set<AgentKey>();
-  private readonly shownImages = new Set<string>();
   private readonly output = new Map<string, string>();
   /** Hand-off context waiting for the chat's first message. */
   private readonly preambles = new Map<string, string>();
@@ -281,7 +270,7 @@ export class AgentCore {
           this.noteTool(chatId, update);
           this.dispatch({ t: 'update', chatId, update: compactUpdate(update), at: Date.now() });
           if (update.sessionUpdate === 'available_commands_update') this.updateKnown(chatId);
-          void this.collectImages(update);
+          this.collectImages(chatId, update);
         },
         session: (chatId, start) => this.sessionStarted(chatId, start),
         notice: (chatId, text) => this.items(chatId, [{ kind: 'notice', text, tone: 'info' }]),
@@ -501,7 +490,7 @@ export class AgentCore {
       if (!src) throw new Error(`${img.name || 'An attachment'} is not an image FriedLiver can send.`);
       const id = this.id('you');
       ids.push(id);
-      this.addImage(id, src, img.name || 'Attached image', 'you');
+      this.addImage(id, src, img.name || 'Attached image', 'you', { chatId });
     }
     if (options.title) this.dispatch({ t: 'title', chatId, title: titleFrom(options.title) });
     else this.retitle(chat, text);
@@ -800,7 +789,7 @@ export class AgentCore {
     const bad = images.find((_, n) => !srcs[n]);
     if (bad) throw new Error(`${bad.name || 'An attachment'} is not an image FriedLiver can send.`);
     // Shown like any attachment; an agent that can't take images gets the text and says so in its chat.
-    images.forEach((img, n) => this.addImage(this.id('you'), srcs[n]!, img.name || 'Attached image', 'you'));
+    images.forEach((img, n) => this.addImage(this.id('you'), srcs[n]!, img.name || 'Attached image', 'you', { chatId }));
     // A chat whose first message is a question for another agent is about that question.
     const chat = this.requireChat(chatId);
     if (by === 'user') this.retitle(chat, text);
@@ -1943,38 +1932,26 @@ export class AgentCore {
     this.output.clear();
   }
 
-  private addImage(id: string, src: string, title: string, from: 'agent' | 'you'): void {
-    this.shownImages.add(id);
-    this.dispatch({ t: 'image', image: { id, src, title, from } });
+  private addImage(id: string, src: string, title: string, from: 'agent' | 'you', where: { chatId?: string; stepId?: string } = {}): void {
+    this.dispatch({ t: 'image', image: { id, src, title, from, ...where, at: Date.now() } });
   }
 
-  /** Images the agent sends or reads go to the Images view. */
-  private async collectImages(update: acp.SessionUpdate): Promise<void> {
+  /**
+   * Images the agent sends as data (in a reply, or as a tool's output) go to the Images view.
+   * An image file a step reads or makes isn't copied here: the view shows the step's file.
+   */
+  private collectImages(chatId: string, update: acp.SessionUpdate): void {
     // The agent names the type; only the image types the views show are taken (see imageDataUri).
     if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'image') {
       const src = imageDataUri(update.content.mimeType, update.content.data);
-      if (src) this.addImage(this.id('msg'), src, 'From the agent', 'agent');
+      if (src) this.addImage(this.id('msg'), src, 'From the agent', 'agent', { chatId });
       return;
     }
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
     for (const item of update.content ?? []) {
       if (item.type === 'content' && item.content.type === 'image') {
         const src = imageDataUri(item.content.mimeType, item.content.data);
-        if (src) this.addImage(this.id('tool'), src, update.title ?? 'Tool output', 'agent');
-      }
-    }
-    for (const loc of update.locations ?? []) {
-      const type = IMAGE_TYPES[path.extname(loc.path).toLowerCase()];
-      const file = type && insideRoots(loc.path, this.roots());
-      if (!file || this.shownImages.has(file)) continue;
-      try {
-        // Size first: a huge file named .png must not be read into memory.
-        const info = await stat(file);
-        if (!info.isFile() || info.size > MAX_IMAGE_BYTES) continue;
-        const bytes = await readFile(file);
-        if (bytes.length <= MAX_IMAGE_BYTES) this.addImage(file, `data:${type};base64,${bytes.toString('base64')}`, path.basename(file), 'agent');
-      } catch {
-        // The agent may report paths that don't exist yet.
+        if (src) this.addImage(this.id('tool'), src, update.title ?? 'Tool output', 'agent', { chatId, stepId: update.toolCallId });
       }
     }
   }

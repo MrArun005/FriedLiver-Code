@@ -15,12 +15,17 @@ describe('which steps are images', () => {
     for (const f of ['a.ts', 'png', 'a.png.txt', '', 'a.tiff']) expect(isImagePath(f)).toBe(false);
   });
   it('a Read of an image', () => {
-    expect(stepImage(tool({ locations: ['/w/docs/login-page_final.png'] }))).toEqual({ path: '/w/docs/login-page_final.png', title: 'Login page final' });
+    expect(stepImage(tool({ locations: ['/w/docs/login-page_final.png'] }))).toEqual({ path: '/w/docs/login-page_final.png', title: 'Login page final', source: 'read' });
     expect(stepImage(tool({ locations: ['/w/src/a.ts'] }))).toBeNull();
   });
   it('a browser screenshot: the path from its result, the title from its first line', () => {
     const t = tool({ title: 'browser_screenshot', out: [{ t: 'text', text: 'Screenshot of myntra.com/puma\nSaved to /store/shots-x/screenshot-3.png. Read that file to see it.' }] });
-    expect(stepImage(t)).toEqual({ path: '/store/shots-x/screenshot-3.png', title: 'Screenshot of myntra.com/puma' });
+    expect(stepImage(t)).toEqual({ path: '/store/shots-x/screenshot-3.png', title: 'Screenshot of myntra.com/puma', source: 'screenshot' });
+  });
+  it('a screenshot tool, or a write, says so', () => {
+    expect(stepImage(tool({ tool: 'mcp__plugin_playwright_playwright__browser_take_screenshot', locations: ['/w/s.png'] }))?.source).toBe('screenshot');
+    expect(stepImage(tool({ toolKind: 'edit', title: 'Write chart.png', locations: ['/w/chart.png'] }))?.source).toBe('created');
+    expect(stepImage(tool({ tool: 'Write', locations: ['/w/chart.png'] }))?.source).toBe('created');
   });
   it("the step's own description wins", () => {
     expect(stepImage(tool({ locations: ['/w/x.png'], about: 'The header after the fix' }))?.title).toBe('The header after the fix');

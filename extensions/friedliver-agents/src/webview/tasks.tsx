@@ -50,12 +50,15 @@ import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, r
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
 import { AgentMap } from './map';
+import { Gallery } from './gallery';
+import type { OutsideImages } from '../shared/gallery';
 
-type View = 'board' | 'list' | 'map';
-const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' }[] = [
+type View = 'board' | 'list' | 'map' | 'images';
+const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' | 'grid' }[] = [
   { id: 'board', title: 'Board', icon: 'tasks' },
   { id: 'list', title: 'List', icon: 'list' },
   { id: 'map', title: 'Map', icon: 'map' },
+  { id: 'images', title: 'Images', icon: 'grid' },
 ];
 
 /** Problem and Idle show only when a chat is in them. */
@@ -287,7 +290,9 @@ function reveal(chatId: string) {
 function Manager() {
   const [defaults, setDefaults] = useState<Partial<Record<AgentKey, AgentDefaults>>>({});
   const [claude, setClaude] = useState<ClaudeSession[]>([]);
+  const [outsideImages, setOutsideImages] = useState<OutsideImages[]>([]);
   const { state } = useHost((m) => {
+    if (m.type === 'claudeImages') setOutsideImages(m.sessions);
     if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
     if (m.type === 'defaults') setDefaults(m.defaults);
     if (m.type === 'claudeSessions') setClaude(m.sessions);
@@ -334,8 +339,10 @@ function Manager() {
       if (e.key === '/') {
         e.preventDefault();
         search.current?.focus();
-      } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+      } else if (e.key >= '1' && e.key <= String(VIEWS.length)) {
         setView(VIEWS[Number(e.key) - 1].id);
+      } else if (view === 'images' || document.querySelector('.gallery-overlay')) {
+        // The gallery has its own keys.
       } else if (e.key === 'j' || (onNav && e.key === 'ArrowDown')) {
         e.preventDefault();
         move(1);
@@ -419,8 +426,8 @@ function Manager() {
               ref={search}
               type="search"
               value={query}
-              placeholder="Search tasks, agents, branches"
-              aria-label="Search tasks"
+              placeholder={view === 'images' ? 'Search images, chats, agents' : 'Search tasks, agents, branches'}
+              aria-label={view === 'images' ? 'Search images' : 'Search tasks'}
               onInput={(e) => setQuery(e.currentTarget.value)}
             />
             {!query && <Kbd>/</Kbd>}
@@ -451,11 +458,12 @@ function Manager() {
           </div>
         </header>
 
-        <NewTask defaults={defaults} />
+        {view !== 'images' && <NewTask defaults={defaults} />}
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
-          {query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
-          {!query && shown.length === 0 && outside.length === 0 && (
+          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} />}
+          {view !== 'images' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
+          {view !== 'images' && !query && shown.length === 0 && outside.length === 0 && (
             <div class="empty-view">
               <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
               <p class="hint">Describe a task above, pick one or more agents, press ↩.</p>
@@ -466,7 +474,7 @@ function Manager() {
           {view === 'map' && <AgentMap state={shownState} outside={outside} now={now} {...nav} />}
         </div>
 
-        <History chats={state.chats.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />
+        {view !== 'images' && <History chats={state.chats.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />}
       </div>
     </LiveState.Provider>
   );
