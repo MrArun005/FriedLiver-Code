@@ -3951,3 +3951,64 @@ body[data-surface='chat'] .md > :first-child {
   box-shadow: 0 0 0 1px var(--c-line);
   pointer-events: none;
 }
+/* Step images: a thumbnail under the step, its title below; click opens the editor's image preview. */
+.step-image {
+  padding: 4px 0 6px 26px;
+}
+button.image-thumb,
+.image-thumb {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  height: auto;
+  max-width: 240px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-soft, var(--fg-2));
+  font-size: calc(var(--fl-font-size, 13px) - 1px);
+  text-align: left;
+  cursor: pointer;
+}
+.image-thumb img,
+.image-thumb .image-wait {
+  display: block;
+  max-width: 240px;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--c-line, var(--line));
+  background: var(--c-surface, var(--sunken));
+}
+.image-thumb .image-wait {
+  width: 240px;
+  height: 120px;
+}
+.image-thumb .image-title {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-thumb.missing {
+  flex-direction: row;
+  align-items: center;
+  cursor: default;
+}
+.image-strip {
+  display: flex;
+  gap: 12px;
+  max-width: min(80vw, 760px);
+  overflow-x: auto;
+  padding: 4px;
+}
+.image-strip .image-thumb img,
+.image-strip .image-thumb .image-wait {
+  max-width: 160px;
+  max-height: 110px;
+}
+.image-strip .image-thumb .image-wait {
+  width: 160px;
+  height: 90px;
+}

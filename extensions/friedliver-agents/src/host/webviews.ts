@@ -15,9 +15,10 @@ export interface Surface {
   reveal(): void;
 }
 
-export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
-  // Only the extension's media folder: styles and the bundled webview scripts.
-  return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] };
+export function webviewOptions(extensionUri: vscode.Uri, imageRoots: readonly string[] = []): vscode.WebviewOptions {
+  // The extension's media folder (styles, the bundled webview scripts), and the folders steps' images may come
+  // from; the host still checks each image (previewableImage) before it hands the webview a URI.
+  return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media'), ...imageRoots.map((r) => vscode.Uri.file(r))] };
 }
 
 /** Strict CSP: nonce scripts, no remote content, images only from data: URIs and the extension. */
@@ -55,8 +56,9 @@ export function attachSurface(
   title: string,
   onMessage: (surface: Surface, message: WebviewMessage) => void,
   log: (line: string) => void,
+  imageRoots: readonly string[] = [],
 ): vscode.Disposable {
-  surface.webview.options = webviewOptions(extensionUri);
+  surface.webview.options = webviewOptions(extensionUri, imageRoots);
   surface.webview.html = webviewHtml(surface.webview, extensionUri, surface.kind, title);
   return surface.webview.onDidReceiveMessage((raw: unknown) => {
     const message = parseWebviewMessage(raw);

@@ -226,6 +226,13 @@ export function fixture(now = Date.now()) {
       items: [
         user('How does the auth middleware decide a session is valid?'),
         agent('It reads the `sid` cookie on every request and looks it up in the in-memory map in `src/auth/sessions.ts`. Expired entries are swept every minute.'),
+        user('Does the login page still look right?'),
+        {
+          ...tool('img-shot', 'mcp__friedliver__browser_screenshot', 'completed', [], 'other'),
+          out: [{ t: 'text', text: 'Screenshot of localhost:3000/login\nSaved to /tmp/friedliver-shots/screenshot-1.png. Read that file to see it.' }],
+        },
+        tool('img-read', `Read ${ROOT}/docs/login-page_mockup.png`, 'completed', [`${ROOT}/docs/login-page_mockup.png`], 'read'),
+        agent('Yes: the form matches the mockup.'),
         link('link-handoff-1', 'handoff-to', c.x3, ''),
       ],
       session: session('claude', 'default', { effort: 'medium', used: 12_000 }),
