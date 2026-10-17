@@ -559,7 +559,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       <QueueList chat={chat} />
       {chat.busy && !waitingNow && (
         <div class="working">
-          <Dot state="working" /> {chat.label} is working…
+          <Dot state="working" /> Working…
         </div>
       )}
       {/* Read out what matters, not every streamed word. */}
@@ -1229,7 +1229,7 @@ function Composer({
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
           placeholder={
             chat.busy
-              ? `Message ${AGENT_FACES[chat.agent].name}: it goes when the turn ends · Esc stops`
+              ? 'Message…'
               : chat.session?.starting
                 ? `Starting ${AGENT_FACES[chat.agent].name}…`
                 : 'Message…   / commands  # files  @ another agent'
@@ -1298,6 +1298,7 @@ function Composer({
             }
           }}
         />
+        {chat.busy && text.trim() && <div class="composer-queued">Queued for after this turn · Esc stops</div>}
         <div class="composer-bar">
           <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
             <Icon name="plus" />

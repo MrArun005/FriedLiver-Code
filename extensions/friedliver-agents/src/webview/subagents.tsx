@@ -4,7 +4,7 @@
 import { useState } from 'preact/hooks';
 import type { ChatView } from '../shared/model';
 import { shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem } from '../shared/view';
-import { Dot, Icon, Markdown, scrollBehavior, send, useNow } from './common';
+import { Dot, Markdown, scrollBehavior, send, useNow } from './common';
 import { Steps } from './steps';
 
 const DOT = { working: 'working', done: 'done', failed: 'error' } as const;
@@ -29,12 +29,11 @@ export function SubagentCard({ chat, item, steps }: { chat: ChatView; item: Tool
     <section class="sa-card" id={`item-${item.id}`} data-state={DOT[sub.state]} data-open={open ? '' : undefined} aria-label={`Subagent: ${sub.title}`}>
       <button type="button" class="sa-head" aria-expanded={open} aria-controls={open ? body : undefined} onClick={() => setOpen(!open)}>
         <Dot state={DOT[sub.state]} still={!chat.busy} />
-        <span class="sa-kind">Subagent</span>
+        <b class="sa-verb">Task</b>
         <span class="sa-title" title={sub.title}>
           {sub.title}
         </span>
         <Elapsed sub={sub} />
-        <Icon name="chevron" />
       </button>
       {!open && <div class="sa-last">{sub.state === 'failed' ? 'Stopped with a problem' : sub.last ?? (sub.state === 'working' ? 'Starting…' : answer ? 'Answered' : 'Done')}</div>}
       {open && (
@@ -70,13 +69,14 @@ export function RunningAgents({ chat }: { chat: ChatView }) {
   };
   return (
     <nav class="sa-strip" aria-label="Running subagents">
-      <span class="sa-strip-head">
-        <Dot state="working" /> Running · {running.length} agent{running.length === 1 ? '' : 's'}
-      </span>
+      {running.length} agent{running.length === 1 ? '' : 's'} running
       {running.map((s) => (
-        <button key={s.id} type="button" class="sa-chip" title={s.title} onClick={() => go(s.id)}>
-          {s.title}
-        </button>
+        <span key={s.id}>
+          {' · '}
+          <button type="button" class="sa-name" title={s.title} onClick={() => go(s.id)}>
+            {s.title}
+          </button>
+        </span>
       ))}
     </nav>
   );
