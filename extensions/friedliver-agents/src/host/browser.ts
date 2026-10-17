@@ -242,7 +242,13 @@ export class BrowserPanel implements vscode.Disposable {
   }
 
   /** One agent tool call (bridgeRequests.ts already checked the URL and got the user's OK). */
-  async call(call: BrowserCall, signal: AbortSignal): Promise<string> {
+  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string> {
+    // An OK given for one origin never acts on another: checked right before acting, after the target is found again.
+    const sameOrigin = async (cdp: Cdp) => {
+      if (expectOrigin === undefined) return;
+      const now = await cdp.evaluate<string>('location.origin').catch(() => 'an unknown page');
+      if (now !== expectOrigin) throw new Error(`The page changed to ${now.slice(0, 120)} after you approved; ask again.`);
+    };
     if (!this.supported()) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
     if (signal.aborted) throw new Error('Cancelled.');
     switch (call.tool) {
@@ -260,6 +266,7 @@ export class BrowserPanel implements vscode.Disposable {
       case 'browser_click': {
         const cdp = await this.page();
         const at = await this.find(cdp, call.selector, call.text, false);
+        await sameOrigin(cdp);
         for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
           await cdp.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: type === 'mouseMoved' ? 0 : 1 });
         }
@@ -269,6 +276,7 @@ export class BrowserPanel implements vscode.Disposable {
       case 'browser_type': {
         const cdp = await this.page();
         const at = await this.find(cdp, call.selector, undefined, true);
+        await sameOrigin(cdp);
         if (call.text) await cdp.send('Input.insertText', { text: call.text });
         else await cdp.evaluate('document.execCommand("delete")');
         return `Typed into ${at.what}.`;
@@ -287,6 +295,7 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'browser_back': {
         const cdp = await this.page();
+        await sameOrigin(cdp);
         const h = (await cdp.send('Page.getNavigationHistory')) as { currentIndex: number; entries: { id: number }[] };
         if (h.currentIndex <= 0) return 'There is no earlier page to go back to.';
         const loaded = cdp.nextLoad();
@@ -296,6 +305,7 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'browser_reload': {
         const cdp = await this.page();
+        await sameOrigin(cdp);
         const loaded = cdp.nextLoad();
         await cdp.send('Page.reload');
         await loaded;

@@ -27,7 +27,7 @@ export interface ToolHost {
   message(chatId: string, targetChatId: string, text: string): void;
   cancel(chatId: string): Promise<void>;
   /** Does a browser tool call for the chat (browser.ts); absent when the editor has no built-in browser. */
-  browser?(chatId: string, call: BrowserCall, signal: AbortSignal): Promise<string>;
+  browser?(chatId: string, call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string>;
   /** Whether browser actions by the external client (EXTERNAL_CLIENT) skip the user's OK. Default no. */
   externalAutoApprove?(): boolean;
   /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
@@ -141,7 +141,6 @@ export class BridgeRequests {
     if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
     if (browserNeedsApproval(call.tool, undefined)) {
       const page = (await this.host.browserPage?.(call.tool === 'browser_type' ? call.selector : undefined).catch(() => undefined)) ?? { password: true };
-      // ponytail: the origin is read at ask time; a page that navigates before the action runs keeps the OK.
       const origin = call.tool === 'browser_open' ? new URL(call.url).origin : (page.origin ?? 'an unknown page');
       const allowKey = `${id} browser ${origin}`;
       if (!this.host.externalAutoApprove?.() && !this.allowedChats.has(allowKey)) {
@@ -149,6 +148,12 @@ export class BridgeRequests {
         const title = `Claude Code wants to ${BROWSER_VERBS[call.tool as BridgeItem['tool']] ?? 'use'} in the browser`;
         settled(await this.waitFor(id, allowKey, title, `${clean(origin)}: ${externalDetail(call, page.password)}`, signal));
         if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
+      }
+      if (!this.host.externalAutoApprove?.() && call.tool !== 'browser_open') {
+        // The OK was for this origin: if the page moved on meanwhile, nothing happens. browser.ts checks again just before it acts.
+        const now = (await this.host.browserPage?.().catch(() => undefined))?.origin;
+        if (now !== origin) throw new Error(`The page changed to ${clean(now ?? 'an unknown page')} after you approved; ask again.`);
+        return this.host.browser(id, call, signal, origin);
       }
     }
     return this.host.browser(id, call, signal);
