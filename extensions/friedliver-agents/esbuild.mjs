@@ -40,6 +40,8 @@ const builds = [
   { ...node, entryPoints: ['src/bridge/server.ts'], outfile: 'dist/bridge.js' },
   // The browser tools for Claude Code outside FriedLiver: the stdio server its ~/.claude.json entry starts.
   { ...node, entryPoints: ['src/bridge/externalStdio.ts'], outfile: 'dist/externalStdio.js' },
+  // Scales the Images view's thumbnails off the extension host's thread.
+  { ...node, entryPoints: ['src/host/thumbWorker.ts'], outfile: 'dist/thumbWorker.js' },
   { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx' }, outdir: 'media/dist' },
   // Integration tests that run inside the editor (see src/test).
   { ...node, entryPoints: { run: 'src/test/run.ts', suite: 'src/test/suite.ts' }, outdir: 'dist/test', external: ['vscode'] },
