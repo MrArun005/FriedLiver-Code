@@ -1804,6 +1804,10 @@ button.count-item .icon {
 .sub-row {
   cursor: pointer;
 }
+.sub-card.static,
+.sub-row.static {
+  cursor: default;
+}
 .task-card:hover {
   border-color: var(--line-strong);
 }
@@ -3352,23 +3356,6 @@ pre.step-input {
 .cc-row {
   cursor: pointer;
 }
-.cc-lane {
-  margin-top: var(--sp-4);
-}
-.cc-lane-nodes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px;
-}
-.cc-lane-item {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.cc-node {
-  border-style: dashed;
-}
-
 /* ---- The chat: 60/30/10 on the editor's theme ----
  * 60: --c-bg, the editor background.
  * 30: --c-surface (sidebar, your messages, steps, composer) and --c-surface2, a step lighter.
@@ -3946,6 +3933,154 @@ body[data-surface='chat'] .md > :first-child {
   background: var(--c-surface2);
   box-shadow: 0 0 0 1px var(--c-line);
   pointer-events: none;
+}
+
+/* A subagent inside the chat that launched it: one tool line ("● Task  title  12s"); opened, its steps hang under a thin guide, then its answer. */
+.sa-card {
+  align-self: stretch;
+  font-size: 13px;
+}
+button.sa-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font-weight: 400;
+  text-align: left;
+}
+.sa-verb {
+  flex: none;
+  font-weight: 600;
+}
+.sa-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-mute);
+}
+.sa-time {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-mute);
+  font-variant-numeric: tabular-nums;
+}
+.sa-last,
+.sa-body {
+  margin-left: 4px;
+  padding-left: 14px;
+  border-left: 1px solid var(--c-line, var(--line));
+}
+.sa-last {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--c-mute);
+}
+.sa-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: 2px;
+}
+.sa-body .step-card {
+  padding: 0;
+  background: none;
+}
+.sa-label {
+  font-size: 12px;
+  color: var(--c-mute);
+}
+.sa-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--c-mute);
+}
+button.sa-manager {
+  align-self: flex-start;
+  font-size: 12px;
+}
+/* One muted line above the composer while any subagent runs. */
+.sa-strip {
+  padding: 4px var(--sp-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--c-mute);
+}
+button.sa-name {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-soft);
+  font-size: 12px;
+  font-weight: 400;
+}
+button.sa-name:hover {
+  color: var(--c-text);
+  text-decoration: underline;
+}
+.composer-queued {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--c-mute);
+}
+
+/* The map: a selected subagent, an outside Claude Code session, and the subagent's details docked beside the map, which shrinks so it never covers a node. */
+.map-sub[data-selected] .box {
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.map-outside .box {
+  stroke-dasharray: 4 3;
+}
+.map-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.map-body > .map-scroll {
+  flex: 1;
+  min-width: 0;
+}
+.map-detail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 10px var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  font-size: var(--t-sm);
+}
+.map-detail-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+.map-detail-steps li[data-state='in_progress'] {
+  color: var(--fg);
+}
+.map-detail-answer {
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+.map-detail button.link {
+  align-self: flex-start;
 }
 /* Step images: a thumbnail under the step, its title below; click opens the editor's image preview. */
 .step-image {

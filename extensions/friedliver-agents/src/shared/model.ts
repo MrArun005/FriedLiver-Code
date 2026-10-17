@@ -441,6 +441,8 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate, at?: numbe
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {
       if (update.content.type !== 'text') return items;
+      // A subagent's own words (Claude's Task/Agent) belong to its card, which shows its result, not to this chat's reply.
+      if (claudeMeta(update._meta).parent) return items;
       const kind = update.sessionUpdate === 'agent_message_chunk' ? 'agent' : 'thought';
       if (last?.kind === kind) {
         if (last.text.length > MAX_ITEM_TEXT) return items; // Already cut off.

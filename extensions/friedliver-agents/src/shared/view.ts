@@ -67,6 +67,11 @@ export interface Subagent {
   state: 'working' | 'done' | 'failed';
   /** Tool calls the subagent made, when the agent says which call they ran in. */
   tools: number;
+  /** Its latest step's title. */
+  last?: string;
+  /** When it started running, and how long it took once it ended. */
+  startedAt?: number;
+  ms?: number;
 }
 
 const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
@@ -76,12 +81,26 @@ export function subagents(chat: ChatView): Subagent[] {
   const tools = chat.items.filter((i) => i.kind === 'tool');
   return tools
     .filter((t) => t.tool && SUBAGENT_TOOLS.has(t.tool))
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      state: t.status === 'failed' ? 'failed' : chat.busy && (t.status === 'pending' || t.status === 'in_progress' || !t.status) ? 'working' : 'done',
-      tools: tools.filter((i) => i.parent === t.id).length,
-    }));
+    .map((t) => {
+      const own = tools.filter((i) => i.parent === t.id);
+      return {
+        id: t.id,
+        title: t.title,
+        state: t.status === 'failed' ? 'failed' : chat.busy && (t.status === 'pending' || t.status === 'in_progress' || !t.status) ? 'working' : 'done',
+        tools: own.length,
+        ...(own.length ? { last: own.at(-1)!.title } : {}),
+        ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
+        ...(t.ms !== undefined ? { ms: t.ms } : {}),
+      };
+    });
+}
+
+export const isSubagentCall = (t: Item): boolean => t.kind === 'tool' && !!t.tool && SUBAGENT_TOOLS.has(t.tool);
+
+/** What a subagent answered: the text of its call's result. */
+export function subagentAnswer(t: ToolItem): string | undefined {
+  const text = (t.out ?? []).flatMap((o) => (o.t === 'text' ? [o.text] : [])).join('\n\n').trim();
+  return text || undefined;
 }
 
 // ---- Claude Code sessions from outside FriedLiver ----
@@ -460,14 +479,28 @@ export function switcherMeta(chat: ChatView, now: number): string {
 // ---- The transcript ----
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
-export type TranscriptGroup = { kind: 'steps'; items: ToolItem[]; at: number } | { kind: 'one'; item: Item; at: number };
+export type TranscriptGroup =
+  | { kind: 'steps'; items: ToolItem[]; at: number }
+  | { kind: 'one'; item: Item; at: number }
+  /** A subagent's card, where it was spawned, with the steps it took. */
+  | { kind: 'subagent'; item: ToolItem; steps: ToolItem[]; at: number };
 
-/** Consecutive tool calls read as one card of numbered steps; `at` is where each group starts. */
+/**
+ * Consecutive tool calls read as one card of numbered steps; `at` is where each group starts.
+ * A subagent (Claude's Task/Agent call) is a card of its own, and the steps it took go in it, not in the boxes around it.
+ */
 export function transcriptGroups(items: Item[]): TranscriptGroup[] {
   const out: TranscriptGroup[] = [];
+  const cards = new Map<string, Extract<TranscriptGroup, { kind: 'subagent' }>>();
   items.forEach((item, at) => {
     const last = out.at(-1);
-    if (item.kind === 'tool' && last?.kind === 'steps') last.items.push(item);
+    const card = item.kind === 'tool' && item.parent ? cards.get(item.parent) : undefined;
+    if (card) card.steps.push(item as ToolItem);
+    else if (isSubagentCall(item)) {
+      const g = { kind: 'subagent' as const, item: item as ToolItem, steps: [] as ToolItem[], at };
+      cards.set(g.item.id, g);
+      out.push(g);
+    } else if (item.kind === 'tool' && last?.kind === 'steps') last.items.push(item);
     else if (item.kind === 'tool') out.push({ kind: 'steps', items: [item], at });
     else out.push({ kind: 'one', item, at });
   });
@@ -654,9 +687,24 @@ export interface MapSub {
   x: number;
   y: number;
   cy: number;
+  /** Of a Claude Code session from outside FriedLiver: `chatId` is `cc:<session id>`. */
+  outside?: boolean;
+}
+
+/** A Claude Code session from outside FriedLiver that has subagents, drawn so they have a parent. */
+export interface MapOutside {
+  /** The session id. */
+  id: string;
+  title: string;
+  state: 'working' | 'done';
+  x: number;
+  y: number;
+  cy: number;
 }
 
 export interface MapLane {
+  /** The lane of Claude Code sessions from outside FriedLiver. */
+  outside?: boolean;
   agent: AgentKey;
   y: number;
   h: number;
@@ -715,6 +763,7 @@ export interface MapLayout {
   lanes: MapLane[];
   nodes: MapNode[];
   subs: MapSub[];
+  outside: MapOutside[];
   edges: MapEdge[];
   groups: MapGroup[];
   conflicts: MapConflict[];
@@ -725,8 +774,9 @@ export interface MapLayout {
  * the same, so the map is laid out again only when a chat starts, stops,
  * changes status or files, or a link changes, not on every streamed chunk.
  */
-export function mapKey(state: Pick<AppState, 'chats' | 'links'>): string {
+export function mapKey(state: Pick<AppState, 'chats' | 'links'>, outside: ClaudeSession[] = [], now = 0): string {
   return JSON.stringify([
+    mapSessions(outside).map((s) => [s.id, s.title, claudeColumn(s, now), claudeSubagents(s, now)]),
     openChats(state.chats).map((c) => [c.id, c.agent, c.label, c.title, c.createdAt, c.origin, c.group, c.merged, c.busy, statusOf(c), c.files, subagents(c)]),
     state.links,
   ]);
@@ -746,7 +796,10 @@ const COLUMN_TITLES_MAP = ['Started by you', '1 link away', '2 links away', '3 l
  * its target's column: no line ever crosses a node. Deterministic: the same
  * state draws the same map.
  */
-export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
+/** Only outside sessions that launched subagents go on the map: the rest are on the board and the list. */
+const mapSessions = (outside: ClaudeSession[]) => outside.filter((s) => s.subagents.length && !s.archived);
+
+export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessions: ClaudeSession[] = [], now = 0): MapLayout {
   const M = MAP;
   const chats = openChats(state.chats);
   const byId = new Map(chats.map((c) => [c.id, c]));
@@ -785,7 +838,8 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
   };
 
   const subsOf = new Map(chats.map((c) => [c.id, subagents(c)]));
-  const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), 0);
+  const sessions = mapSessions(outsideSessions);
+  const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), sessions.length ? 1 : 0);
   const colX = (col: number) => M.col0 + col * (M.nodeW + M.gutter);
   const nodesRight = colX(maxCol) + M.nodeW;
 
@@ -813,7 +867,24 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     lanes.push({ agent, y: top, h, chats: inLane.length, working: statuses.filter((s) => s === 'working').length, needsYou: statuses.filter((s) => s === 'needs-you').length });
     y = top + h + M.laneGap;
   }
+  const outside: MapOutside[] = [];
+  if (sessions.length) {
+    const top = y;
+    let row = 0;
+    for (const s of sessions) {
+      const ny = top + M.laneHead + row++ * M.row;
+      outside.push({ id: s.id, title: clip(s.title, 27), state: claudeColumn(s, now), x: colX(0), y: ny, cy: ny + M.nodeH / 2 });
+      for (const sub of claudeSubagents(s, now)) {
+        const sy = top + M.laneHead + row++ * M.row;
+        subs.push({ id: `cc:${s.id}:${sub.id}`, chatId: `cc:${s.id}`, item: sub.id, agent: 'claude', state: sub.state, title: clip(sub.title, 27), x: colX(1), y: sy, cy: sy + M.nodeH / 2, outside: true });
+      }
+    }
+    const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
+    lanes.push({ agent: 'claude', outside: true, y: top, h, chats: sessions.length, working: outside.filter((o) => o.state === 'working').length, needsYou: 0 });
+    y = top + h + M.laneGap;
+  }
   const node = new Map(nodes.map((n) => [n.chat.id, n]));
+  const anchor = new Map<string, { x: number; cy: number }>([...nodes.map((n) => [n.chat.id, n] as const), ...outside.map((o) => [`cc:${o.id}`, o] as const)]);
 
   // Links, plus an edge for any origin whose link is gone, so no chat floats.
   const links: ChatLink[] = state.links.filter((l) => node.has(l.from) && node.has(l.to) && l.from !== l.to);
@@ -909,7 +980,7 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     };
   });
   for (const sub of subs) {
-    const a = node.get(sub.chatId)!;
+    const a = anchor.get(sub.chatId)!;
     const xs = a.x + M.nodeW;
     const gx = Math.max(xs, sub.x - M.gutter);
     edges.push({
@@ -988,6 +1059,7 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     lanes,
     nodes,
     subs,
+    outside,
     edges,
     groups,
     conflicts,
