@@ -260,6 +260,21 @@ describe('the external client (Claude Code outside FriedLiver)', () => {
     expect(asks).toHaveLength(4);
   });
 
+  it('never acts on another origin than the one approved, once or for the session', async () => {
+    const { h, done, asks, page, requests, signal } = ext();
+    const origins: (string | undefined)[] = [];
+    h.browser = async (_c, call, _s, expect) => (done.push(call.tool), origins.push(expect), 'ok');
+    const click = requests.call(S1, { tool: 'browser_click', text: 'Pay' }, signal);
+    await tick();
+    page.origin = 'https://evil.example';
+    requests.answer(asks[0].requestId, 'allowChat');
+    await expect(click).rejects.toThrow('The page changed to https://evil.example after you approved; ask again.');
+    page.origin = 'http://localhost:3000';
+    await expect(requests.call(S1, { tool: 'browser_type', selector: '#q', text: 'x' }, signal)).resolves.toBe('ok');
+    expect(origins).toEqual(['http://localhost:3000']);
+    expect(done).toEqual(['browser_type']);
+  });
+
   it('auto-approves only by setting, and URL rules still apply', async () => {
     const auto = ext(true);
     await expect(auto.requests.call(S1, { tool: 'browser_open', url: 'localhost:3000' }, auto.signal)).resolves.toBe('ok');

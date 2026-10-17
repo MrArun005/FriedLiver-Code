@@ -142,7 +142,7 @@ export class Controller {
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
       agentToAgent: () => this.agentToAgent(),
-      browser: (_chatId, call, signal) => this.browser.call(call, signal),
+      browser: (_chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin),
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
       approvalDefault: () => this.approvalDefault(),
