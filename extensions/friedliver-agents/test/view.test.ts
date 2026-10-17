@@ -28,6 +28,7 @@ import {
   settleOrder,
   sortChats,
   statusOf,
+  subagents,
   switcherGroups,
 } from '../src/shared/view';
 
@@ -219,6 +220,45 @@ describe('@-mentions', () => {
     expect(mentionedAgent('@gp')).toBeNull();
     expect(mentionedAgent('hi @gpt')).toBeNull();
     for (const o of MENTION_OPTIONS) for (const w of o.words) expect(parseMention(`@${w} hi`)?.agent).toBe(o.agent);
+  });
+});
+
+describe('subagents', () => {
+  const task = (id: string, status: string, tool = 'Task'): Item => ({ kind: 'tool', id, title: `Job ${id}`, status, locations: [], tool });
+  const inner = (id: string, parent: string): Item => ({ kind: 'tool', id, title: 'Read', status: 'completed', locations: [], tool: 'Read', parent });
+  const items = [said, task('t1', 'in_progress'), inner('i1', 't1'), inner('i2', 't1'), task('t2', 'completed', 'Agent'), task('t3', 'failed'), inner('i3', 't3')];
+
+  it("lists a chat's Task and Agent calls with their state and inner tool count", () => {
+    expect(subagents(chat('p', { busy: true, items }))).toEqual([
+      { id: 't1', title: 'Job t1', state: 'working', tools: 2 },
+      { id: 't2', title: 'Job t2', state: 'done', tools: 0 },
+      { id: 't3', title: 'Job t3', state: 'failed', tools: 1 },
+    ]);
+  });
+
+  it('stops counting a subagent as working once its chat stopped', () => {
+    expect(subagents(chat('p', { items }))[0].state).toBe('done');
+    expect(subagents(chat('p', { items: [said, inner('i1', 'x')] }))).toEqual([]);
+  });
+
+  it('draws each subagent on the map under its chat, with an edge from the chat', () => {
+    const map = mapLayout(state([chat('p', { busy: true, items }), chat('q', { createdAt: 1 })]));
+    expect(map.subs.map((n) => [n.id, n.chatId, n.state])).toEqual([
+      ['p:t1', 'p', 'working'],
+      ['p:t2', 'p', 'done'],
+      ['p:t3', 'p', 'failed'],
+    ]);
+    const p = map.nodes.find((n) => n.chat.id === 'p')!;
+    const q = map.nodes.find((n) => n.chat.id === 'q')!;
+    expect(map.subs.every((n) => n.y > p.y && n.y < q.y && n.x > p.x)).toBe(true);
+    const e = map.edges.filter((x) => x.kind === 'subagent');
+    expect(e.map((x) => [x.from, x.to])).toEqual([
+      ['p', 'p:t1'],
+      ['p', 'p:t2'],
+      ['p', 'p:t3'],
+    ]);
+    expect(e[0].d.startsWith(`M ${p.x + MAP.nodeW} `)).toBe(true);
+    expect(mapKey(state([chat('p', { busy: true, items })]))).not.toBe(mapKey(state([chat('p', { items })])));
   });
 });
 

@@ -489,7 +489,7 @@ function StepsView({ tools, waiting, busy }: StepsProps) {
         const more = hasDetails(t);
         const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
         return (
-          <li key={t.id} data-state={state} data-open={isOpen ? '' : undefined}>
+          <li key={t.id} id={`item-${t.id}`} data-state={state} data-open={isOpen ? '' : undefined}>
             <div class="step-row">
               <Dot state={state} still={!busy} />
               <span class="step-title">{t.title}</span>

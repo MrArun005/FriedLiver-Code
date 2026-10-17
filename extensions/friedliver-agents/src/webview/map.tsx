@@ -134,6 +134,34 @@ function MapCanvasView({ map, tip, roving, waiting, chats, setTip, onFocus }: Ca
                 }}
               />
             ))}
+            {map.subs.map((n) => (
+              <g
+                key={n.id}
+                class={`map-node map-sub ${lit && !lit.has(n.id) ? 'dim' : ''}`}
+                data-status={n.state === 'failed' ? 'error' : n.state}
+                data-agent={n.agent}
+                transform={`translate(${n.x} ${n.y})`}
+                tabIndex={-1}
+                role="button"
+                aria-label={`Subagent: ${n.title}`}
+                onClick={() => send({ type: 'openChat', chatId: n.chatId, item: n.item })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    send({ type: 'openChat', chatId: n.chatId, item: n.item });
+                  }
+                }}
+              >
+                <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
+                <text class="node-label" x="14" y="17">
+                  subagent
+                </text>
+                <text class="node-title" x="14" y="31">
+                  {n.title}
+                </text>
+                <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+              </g>
+            ))}
             {map.conflicts.map((f) => (
               <g
                 key={f.file}
@@ -327,6 +355,7 @@ function Legend({ still, working }: { still: boolean; working: boolean }) {
         )}
         Pipe
       </li>
+      <li>{sample('subagent', <path class="line" d="M1 6 H26" marker-end="url(#map-arrow)" />)}Subagent</li>
       <li>{sample('pipe', <path class="flow" d="M1 6 H29" />)}Live</li>
       <li>
         <svg class="legend-sample" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true">

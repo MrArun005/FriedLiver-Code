@@ -1,4 +1,4 @@
-import { render } from 'preact';
+import { Fragment, render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   AGENT_FACES,
@@ -27,6 +27,7 @@ import {
   matchesQuery,
   nextDecision,
   openChats,
+  subagents,
   sortChats,
   statusOf,
   type Badge,
@@ -58,6 +59,30 @@ const COLUMNS: { id: BoardColumn; empty: string }[] = [
 ];
 
 const open = (chatId: string) => send({ type: 'openChat', chatId });
+/** Opens the chat that launched a subagent, scrolled to its tool call. */
+const openSub = (chatId: string, item: string) => send({ type: 'openChat', chatId, item });
+const SUB_DOT = { working: 'working', done: 'done', failed: 'error' } as const;
+const SUB_LABEL = { working: 'Working', done: 'Done', failed: 'Failed' } as const;
+const toolCount = (n: number) => (n ? `${n} tool${n === 1 ? '' : 's'}` : '');
+
+/** A chat's subagents, as small cards under its own: not chats, so no composer and nothing to save. */
+function Subagents({ chat }: { chat: ChatView }) {
+  const subs = subagents(chat);
+  if (!subs.length) return null;
+  return (
+    <ul class="sub-cards" aria-label={`Subagents of ${chat.label}`}>
+      {subs.map((s) => (
+        <li key={s.id}>
+          <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => openSub(chat.id, s.id)}>
+            <Dot state={SUB_DOT[s.state]} />
+            <span class="sub-title">{s.title}</span>
+            <span class="hint">{[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /** Focus the card, row or node for a chat, and flash it so the eye finds it. */
 function reveal(chatId: string) {
@@ -364,7 +389,10 @@ function Board({ state, chats, now, focusId, onFocus }: { state: AppState; chats
             </h2>
             {col.cards.length === 0 && <div class="column-empty">{col.empty}</div>}
             {col.cards.map((c) => (
-              <Card key={c.id} chat={c} model={models.get(c.id)!} tabbable={c.id === first} onFocus={onFocus} />
+              <Fragment key={c.id}>
+                <Card chat={c} model={models.get(c.id)!} tabbable={c.id === first} onFocus={onFocus} />
+                <Subagents chat={c} />
+              </Fragment>
             ))}
           </section>
         ))}
@@ -744,7 +772,36 @@ function List({ state, chats, now, sort, setSort, focusId, onFocus }: { state: A
         </thead>
         <tbody>
           {rows.map((c) => (
-            <Row key={c.id} chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
+            <Fragment key={c.id}>
+              <Row chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
+              {subagents(c).map((sub) => (
+                <tr key={sub.id} class="sub-row" data-status={SUB_DOT[sub.state]} onClick={(e) => !(e.target as HTMLElement).closest('button') && openSub(c.id, sub.id)}>
+                  <td class="c-status">
+                    <span class="cell-status">
+                      <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
+                    </span>
+                  </td>
+                  <td class="c-agent">
+                    <span class="hint">subagent</span>
+                  </td>
+                  <td class="c-task">
+                    <div class="cell-title">
+                      <span class="cell-title-text" title={sub.title}>
+                        ↳ {sub.title}
+                      </span>
+                    </div>
+                  </td>
+                  <td class="c-activity num" />
+                  <td class="c-files num">{toolCount(sub.tools)}</td>
+                  <td class="c-age num" />
+                  <td class="c-act">
+                    <button class="ghost icon-btn sm" title="Show in chat" aria-label={`Show ${sub.title} in ${c.label}`} onClick={() => openSub(c.id, sub.id)}>
+                      <Icon name="open" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
           ))}
         </tbody>
       </table>

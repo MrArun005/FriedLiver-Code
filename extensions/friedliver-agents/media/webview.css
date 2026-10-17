@@ -1647,6 +1647,42 @@ button.count-item .icon {
     border-color 0.15s,
     box-shadow 0.3s;
 }
+/* A chat's subagents: small cards tucked under its card. */
+.sub-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -6px 0 0 var(--sp-4);
+  padding: 0 0 0 10px;
+  list-style: none;
+  border-left: 1px solid var(--line);
+}
+.sub-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sub-card:hover {
+  border-color: var(--line-strong);
+}
+.sub-card .sub-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub-row {
+  cursor: pointer;
+}
 .task-card:hover {
   border-color: var(--line-strong);
 }
@@ -2206,6 +2242,12 @@ svg.map {
 .edge.consult .line {
   stroke-dasharray: 5 4;
   stroke-linecap: butt;
+}
+.edge.subagent .line {
+  stroke-dasharray: 1 4;
+}
+.map-sub .box {
+  fill: var(--lane);
 }
 .edge .pipe-outer {
   stroke: var(--edge);

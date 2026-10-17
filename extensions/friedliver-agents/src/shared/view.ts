@@ -55,6 +55,31 @@ export function statusOf(chat: ChatView): ChatStatus {
   return status === 'idle' && chat.items.some((i) => i.kind === 'agent') ? 'done' : status;
 }
 
+/** A subagent a chat launched (Claude's Task/Agent tool): a card under its chat, not a chat of its own. */
+export interface Subagent {
+  /** The tool call's id, to scroll the chat to. */
+  id: string;
+  title: string;
+  state: 'working' | 'done' | 'failed';
+  /** Tool calls the subagent made, when the agent says which call they ran in. */
+  tools: number;
+}
+
+const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
+
+/** The subagents in a chat's transcript; one still pending in a chat that stopped reads done. */
+export function subagents(chat: ChatView): Subagent[] {
+  const tools = chat.items.filter((i) => i.kind === 'tool');
+  return tools
+    .filter((t) => t.tool && SUBAGENT_TOOLS.has(t.tool))
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      state: t.status === 'failed' ? 'failed' : chat.busy && (t.status === 'pending' || t.status === 'in_progress' || !t.status) ? 'working' : 'done',
+      tools: tools.filter((i) => i.parent === t.id).length,
+    }));
+}
+
 /** Chats on the board and in the tab strip: archived ones live in History. */
 export function openChats(chats: ChatView[]): ChatView[] {
   return chats.filter((c) => !c.archived);
@@ -477,6 +502,20 @@ export interface MapNode {
   title: string;
 }
 
+/** A subagent on the map: in its chat's lane, on the row under it, one column right. */
+export interface MapSub {
+  /** `chatId:toolCallId`. */
+  id: string;
+  chatId: string;
+  item: string;
+  agent: AgentKey;
+  state: Subagent['state'];
+  title: string;
+  x: number;
+  y: number;
+  cy: number;
+}
+
 export interface MapLane {
   agent: AgentKey;
   y: number;
@@ -488,7 +527,7 @@ export interface MapLane {
 
 export interface MapEdge {
   id: string;
-  kind: LinkKind;
+  kind: LinkKind | 'subagent';
   from: string;
   to: string;
   d: string;
@@ -535,6 +574,7 @@ export interface MapLayout {
   columns: MapColumn[];
   lanes: MapLane[];
   nodes: MapNode[];
+  subs: MapSub[];
   edges: MapEdge[];
   groups: MapGroup[];
   conflicts: MapConflict[];
@@ -547,7 +587,7 @@ export interface MapLayout {
  */
 export function mapKey(state: Pick<AppState, 'chats' | 'links'>): string {
   return JSON.stringify([
-    openChats(state.chats).map((c) => [c.id, c.agent, c.label, c.title, c.createdAt, c.origin, c.group, c.merged, c.busy, statusOf(c), c.files]),
+    openChats(state.chats).map((c) => [c.id, c.agent, c.label, c.title, c.createdAt, c.origin, c.group, c.merged, c.busy, statusOf(c), c.files, subagents(c)]),
     state.links,
   ]);
 }
@@ -604,22 +644,31 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     return fa - fb || collator.compare(ka, kb) || colOf(a) - colOf(b) || a.createdAt - b.createdAt || collator.compare(a.id, b.id);
   };
 
-  const maxCol = chats.reduce((m, c) => Math.max(m, colOf(c)), 0);
+  const subsOf = new Map(chats.map((c) => [c.id, subagents(c)]));
+  const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), 0);
   const colX = (col: number) => M.col0 + col * (M.nodeW + M.gutter);
   const nodesRight = colX(maxCol) + M.nodeW;
 
   const lanes: MapLane[] = [];
   const nodes: MapNode[] = [];
+  const subs: MapSub[] = [];
   let y = M.pad + M.youH + 18;
   for (const agent of AGENT_KEYS) {
     const inLane = chats.filter((c) => c.agent === agent).sort(order);
     if (!inLane.length) continue;
     const top = y;
-    inLane.forEach((chat, r) => {
-      const ny = top + M.laneHead + r * M.row;
+    let row = 0;
+    for (const chat of inLane) {
+      const ny = top + M.laneHead + row++ * M.row;
       nodes.push({ chat, status: statusOf(chat), lane: agent, col: colOf(chat), x: colX(colOf(chat)), y: ny, cy: ny + M.nodeH / 2, title: clip(chat.title, 27) });
-    });
-    const h = M.laneHead + (inLane.length - 1) * M.row + M.nodeH + M.lanePad;
+      // Each subagent takes the next row, so its edge drops straight from its chat without crossing a node.
+      for (const sub of subsOf.get(chat.id)!) {
+        const sy = top + M.laneHead + row++ * M.row;
+        const sx = colX(Math.min(colOf(chat) + 1, M.maxCol));
+        subs.push({ id: `${chat.id}:${sub.id}`, chatId: chat.id, item: sub.id, agent, state: sub.state, title: clip(sub.title, 27), x: sx, y: sy, cy: sy + M.nodeH / 2 });
+      }
+    }
+    const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
     const statuses = inLane.map((c) => boardColumn(statusOf(c)));
     lanes.push({ agent, y: top, h, chats: inLane.length, working: statuses.filter((s) => s === 'working').length, needsYou: statuses.filter((s) => s === 'needs-you').length });
     y = top + h + M.laneGap;
@@ -719,6 +768,23 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
       by: l.by,
     };
   });
+  for (const sub of subs) {
+    const a = node.get(sub.chatId)!;
+    const xs = a.x + M.nodeW;
+    const gx = Math.max(xs, sub.x - M.gutter);
+    edges.push({
+      id: `sub:${sub.id}`,
+      kind: 'subagent',
+      from: sub.chatId,
+      to: sub.id,
+      d: `M ${r(xs)} ${r(a.cy)} ${gx > xs ? `L ${r(gx)} ${r(a.cy)} ` : ''}${curve(gx, a.cy, sub.x, sub.cy)}`,
+      label: 'subagent',
+      lx: (gx + sub.x) / 2,
+      ly: (a.cy + sub.cy) / 2,
+      flowing: sub.state === 'working',
+      by: 'agent',
+    });
+  }
   // Labels that would overlap step down until they don't.
   const labels: MapEdge[] = [];
   for (const e of [...edges].sort((p, q) => p.lx - q.lx || p.ly - q.ly)) {
@@ -781,6 +847,7 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     columns,
     lanes,
     nodes,
+    subs,
     edges,
     groups,
     conflicts,
