@@ -2361,7 +2361,8 @@ button.cc-chip:hover,
 .cc-input textarea {
   flex: 1;
   min-height: calc(1.5em + 20px);
-  max-height: 200px;
+  /* Eight lines, then it scrolls inside; never more than a quarter of the panel. */
+  max-height: min(calc(8lh + 20px), 25vh);
   field-sizing: content;
   padding: 10px 36px 10px 14px;
   border: 0;
@@ -2903,17 +2904,12 @@ body[data-surface='chat'] {
   padding-top: 0;
 }
 
-/* Your message: a box that fits its text; the current turn's sticks to the top, full width. */
+/* Your message: a box that fits its text, three lines until Show more. */
 .user-msg {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-sticky);
-  container-type: scroll-state;
   display: flex;
   align-items: flex-start;
   gap: var(--sp-1);
   padding: var(--sp-1) 0;
-  background: var(--bg);
 }
 .user-msg .bubble {
   position: relative;
@@ -2929,25 +2925,59 @@ body[data-surface='chat'] {
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-.user-msg .bubble::after {
+.bubble-text[data-clamped] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+/* Show more: over the end of the third line, at the box's bottom right; Show less under the text. */
+button.msg-more {
+  position: absolute;
+  right: 6px;
+  bottom: var(--sp-1);
+  padding-left: var(--sp-5);
+  background: linear-gradient(to right, transparent, var(--input-bg) var(--sp-4));
+  font-size: var(--t-85);
+  line-height: 1.5;
+}
+button.msg-more[aria-expanded='true'] {
+  position: static;
+  display: block;
+  margin-left: auto;
+  padding-left: 0;
+  background: none;
+}
+/* The current turn's message, once scrolled away: a copy at the top, full width, never past three lines. */
+.sticky-prompt {
+  position: absolute;
+  top: 0;
+  left: var(--sp-5);
+  right: var(--sp-5);
+  z-index: var(--z-sticky);
+  max-height: 30%;
+  padding-top: var(--sp-1);
+  background: var(--bg);
+}
+.sticky-prompt::after {
   content: '';
   position: absolute;
-  left: -1px;
-  right: -1px;
-  top: calc(100% + 1px);
+  left: 0;
+  right: 0;
+  top: 100%;
   height: var(--sp-3);
   background: linear-gradient(to bottom, var(--bg), transparent);
-  opacity: 0;
   pointer-events: none;
 }
-@container scroll-state(stuck: top) {
-  .user-msg .bubble {
-    flex: 1;
-  }
-  .user-msg .bubble::after {
-    top: calc(100% + 5px);
-    opacity: 1;
-  }
+.sticky-prompt .bubble {
+  position: relative;
+  margin: var(--sp-1) 0;
+  padding: var(--sp-1) 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--input-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .bubble .refs,
 .bubble .thumbs {
@@ -4153,6 +4183,7 @@ code.command-line {
 }
 /* A message waiting for the turn to end: your message's box, dashed. */
 .bubble.queued {
+  position: relative;
   margin: var(--sp-2) 0;
   padding: var(--sp-1) 6px;
   border: 1px dashed var(--border);
@@ -4339,6 +4370,9 @@ button.images-pill[aria-expanded='true'] {
 .transcript-wrap[data-jump] .transcript {
   padding-right: 250px;
 }
+.transcript-wrap[data-jump] .sticky-prompt {
+  right: 250px;
+}
 .jump-list {
   position: absolute;
   top: var(--sp-5);
@@ -4375,6 +4409,9 @@ button.jump-item[aria-current='true'] {
 @media (max-width: 1200px) {
   .transcript-wrap[data-jump] .transcript {
     padding-right: var(--sp-5);
+  }
+  .transcript-wrap[data-jump] .sticky-prompt {
+    right: var(--sp-5);
   }
   .jump-list {
     display: none;

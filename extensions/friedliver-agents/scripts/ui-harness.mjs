@@ -761,6 +761,51 @@ async function shoot() {
   }
 
   {
+    // A very long message never takes the chat over: 3 lines and Show more, in place and in the sticky copy; the composer caps.
+    for (const width of [640, 1200]) {
+      const p = await open('surface=chat&theme=dark-2026&fixture=reference&select=chat-long', width, 900);
+      const msg = p.locator('.user-msg').first();
+      const lines = (sel) => p.locator(sel).first().evaluate((el) => el.getBoundingClientRect().height / parseFloat(window.getComputedStyle(el).lineHeight));
+      check((await lines('.user-msg .bubble-text')) <= 3.05, `at ${width}px a 3,000-character message shows 3 lines`);
+      const more = msg.locator('.msg-more');
+      const corner = await p.evaluate(() => {
+        const b = document.querySelector('.user-msg .bubble').getBoundingClientRect();
+        const m = document.querySelector('.user-msg .msg-more').getBoundingClientRect();
+        return { right: b.right - m.right, bottom: b.bottom - m.bottom };
+      });
+      check((await more.isVisible()) && (await more.innerText()).trim() === 'Show more' && (await more.getAttribute('aria-expanded')) === 'false' && corner.right >= 0 && corner.right < 16 && corner.bottom >= 0 && corner.bottom < 12, `at ${width}px Show more sits at the bottom right [${JSON.stringify(corner)}]`);
+      if (width === 1200) await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/long-message-collapsed.png') }).catch(() => {});
+      await more.click();
+      check((await lines('.user-msg .bubble-text')) > 3.5 && (await more.innerText()).trim() === 'Show less' && (await more.getAttribute('aria-expanded')) === 'true', `at ${width}px Show more expands it in place and reads Show less`);
+      if (width === 1200) await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/long-message-expanded.png') }).catch(() => {});
+      // Scrolled past, the sticky copy stays at 3 lines and under 30% of the view, even with the message expanded.
+      await p.evaluate(() => (document.querySelector('.transcript').scrollTop = document.querySelector('.user-msg').getBoundingClientRect().bottom + 400));
+      await p.waitForTimeout(150);
+      const sticky = p.locator('.sticky-prompt');
+      const sh = await sticky.evaluate((el) => el.getBoundingClientRect().height).catch(() => -1);
+      check(sh > 0 && sh <= 0.3 * 900 && (await lines('.sticky-prompt .bubble-text')) <= 3.05, `at ${width}px the sticky copy is 3 lines, ${Math.round(sh)}px (<= 30% of the view)`);
+      await more.click(); // collapse the in-flow one again (it is out of view; the click scrolls it in)
+      await sticky.locator('.msg-more').click();
+      await p.waitForTimeout(400);
+      const back = await p.evaluate(() => {
+        const t = document.querySelector('.transcript').getBoundingClientRect();
+        const m = document.querySelector('.user-msg').getBoundingClientRect();
+        return m.top >= t.top - 1 && m.top < t.top + 60;
+      });
+      check(back && (await more.getAttribute('aria-expanded')) === 'true', `at ${width}px the sticky copy's Show more scrolls to the message and expands it there`);
+      check((await more.focus().then(() => p.keyboard.press('Enter')).then(() => more.getAttribute('aria-expanded'))) === 'false', `at ${width}px Show less works from the keyboard`);
+      // A 5,000-character paste: the box scrolls inside, the composer stays under 40% of the panel, the transcript stays on screen.
+      await p.fill('.composer textarea', 'x'.repeat(40).concat(' ').repeat(122).slice(0, 5000));
+      await p.waitForTimeout(100);
+      const box = await p.evaluate(() => {
+        const ta = document.querySelector('.composer textarea');
+        return { composer: document.querySelector('.composer').getBoundingClientRect().height, transcript: document.querySelector('.transcript').getBoundingClientRect().height, scrolls: ta.scrollHeight > ta.clientHeight + 1, lines: ta.clientHeight / parseFloat(window.getComputedStyle(ta).lineHeight) };
+      });
+      check(box.scrolls && box.lines <= 9.1 && box.composer <= 0.4 * 900 && box.transcript >= 0.3 * 900, `at ${width}px a 5,000-character paste scrolls inside the box: composer ${Math.round(box.composer)}px (<= 40%), transcript ${Math.round(box.transcript)}px`);
+      await p.close();
+    }
+  }
+  {
     // Board polish: one tidy action row (the primary action, connections on hover or focus, ⋯ for the rest);
     // other chats by their topic, never "Claude 1"; calm cards (12px rhythm, one meta line, titles at most two lines).
     const p = await open('surface=tasks&theme=dark-2026&view=board', 1440, 900);

@@ -10,6 +10,11 @@ export const ROOT = '/Users/dev/code/wt-composer2';
 export const PROMPT =
   "we don't need to have everything as such or label to it. We can just hover on it and see the details. The first row will be the composer, the second row will be selection of a model. In the third row will be selection of a um, how fast it should be, medium, fast, extra fast. And how much context would be available? And here there would be a link where I can just click on it and it will redirect me to agent manager. For a full view, so on click it opens the map and there's an option to move to agent manager.";
 
+/** 3,000 characters of a pasted spec: the long user message the transcript must not let take over. */
+export const LONG_PROMPT = Array.from({ length: 30 }, (_, n) => `${n + 1}. The composer row keeps the model and effort pills; the map opens from the agents pill and lists every agent.`)
+  .join(' ')
+  .slice(0, 3000);
+
 export const DICTATED = "I don't really understand why these designs are really bad. Is there anything, is something I have to do or what? It's not looking good at all. Just copy paste Claude. Just copy paste Claude code. I'll get you the image.";
 
 export const ATTACHMENTS = [
@@ -183,5 +188,17 @@ export function referenceFixture(now = Date.now()) {
   }));
   // Busy agents' time runs to now: pin the first one's start so it reads 15m 57s.
   linked[0].createdAt = s(957);
-  return { state: { chats: [chat, ...linked], images: [], links: [] }, ids: { chat: chat.id } };
+  // A prompt of 3,000 characters, then enough of a turn to scroll it out of view.
+  const long = {
+    ...chat,
+    id: 'chat-long',
+    title: 'A very long prompt',
+    approval: 'ask',
+    items: [
+      { kind: 'user', text: LONG_PROMPT, images: [], checkpoint: 'turn-l1' },
+      ...items.slice(1),
+      ...items.slice(1),
+    ],
+  };
+  return { state: { chats: [chat, long, ...linked], images: [], links: [] }, ids: { chat: chat.id } };
 }

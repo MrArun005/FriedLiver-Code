@@ -12,7 +12,7 @@ import {
   type ChatSession,
 } from '../shared/session';
 import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
-import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
+import { ClampedText, Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -252,7 +252,7 @@ export function QueueList({ chat }: { chat: ChatView }) {
     <>
       {chat.queue.map((q) => (
         <div key={q.id} class="bubble queued" aria-label="Queued message">
-          {q.text && <div class="bubble-text">{q.text}</div>}
+          {q.text && <ClampedText text={q.text} />}
           <div class="queued-bar">
             <span class="tag">
               <Icon name="queue" /> queued{q.images ? ` · ${q.images} image${q.images === 1 ? '' : 's'}` : ''}
