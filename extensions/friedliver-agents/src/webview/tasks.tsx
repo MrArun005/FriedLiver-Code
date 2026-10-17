@@ -89,7 +89,7 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
               <SubCardBody s={s} />
             </button>
           ) : (
-            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={s.title}>
+            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={[s.title, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}>
               <SubCardBody s={s} />
             </div>
           )}

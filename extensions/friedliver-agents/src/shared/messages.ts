@@ -136,10 +136,30 @@ export interface ClaudeSession {
   /** When its transcript last changed, ms since the epoch. */
   lastActivity: number;
   messages: number;
-  /** Its Task/Agent calls; `done` once a result came back. */
-  subagents: { id: string; title: string; done: boolean }[];
+  /** Its Task/Agent calls and the agents in its subagents/ folder, one entry per agent however often it was resumed. */
+  subagents: ClaudeSubagent[];
   /** Idle for over a week: counted under Archived, not on the board. */
   archived?: boolean;
+}
+
+/** What the transcripts say about one subagent; the view turns it into a state with the current time (see claudeSubagents). */
+export interface ClaudeSubagent {
+  /** The Agent/Task call's id. */
+  id: string;
+  /** What it was asked to do: the call's description. */
+  title: string;
+  /** Settled: it handed back, a completion notice came after its last step, or its result came back. Absent while it may still run. */
+  end?: 'done' | 'failed';
+  agentType?: string;
+  model?: string;
+  /** From its own transcript (subagents/agent-<id>.jsonl), ms since the epoch. */
+  startedAt?: number;
+  lastActivity?: number;
+  /** Its latest record is a reply with no tool call in flight. */
+  idle?: boolean;
+  /** Its latest tool call, e.g. "Bash · npm test". */
+  last?: string;
+  tools?: number;
 }
 
 export const LIMITS = {

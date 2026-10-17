@@ -36,8 +36,8 @@ describe('Claude Code sessions', () => {
     // One real prompt and two assistant messages; meta, tool results and sidechain lines don't count.
     expect(s.messages).toBe(3);
     expect(s.subagents).toEqual([
-      { id: 'toolu_A', title: 'Write the exporter', done: true },
-      { id: 'toolu_B', title: 'Review the exporter', done: false },
+      { id: 'toolu_A', title: 'Write the exporter', end: 'done' },
+      { id: 'toolu_B', title: 'Review the exporter' },
     ]);
   });
 
@@ -77,7 +77,7 @@ describe('Claude Code sessions', () => {
   });
 
   it('puts a session in Working while it changed in the last two minutes, its open subagents with it', () => {
-    const s: ClaudeSession = { id: A, cwd: '/w', title: 'Payroll export', lastActivity: 1_000_000, messages: 3, subagents: [{ id: 't1', title: 'x', done: false }, { id: 't2', title: 'y', done: true }] };
+    const s: ClaudeSession = { id: A, cwd: '/w', title: 'Payroll export', lastActivity: 1_000_000, messages: 3, subagents: [{ id: 't1', title: 'x' }, { id: 't2', title: 'y', end: 'done' }] };
     expect(claudeColumn(s, 1_000_000 + 119_000)).toBe('working');
     expect(claudeSubagents(s, 1_000_000 + 119_000).map((a) => a.state)).toEqual(['working', 'done']);
     expect(claudeColumn(s, 1_000_000 + 121_000)).toBe('done');
