@@ -299,3 +299,19 @@ which 57 MB JavaScript heap), the main process (about 100), the extension
 host (72–79), the shared process (45–71, dropping after the first minute),
 the file watcher (35–41), the network service and zygotes (about 45 together)
 and the GPU process (30–38). The Agents chat view adds 47 MB.
+
+## Core performance work (branch `perf/core`)
+
+The plan, with the reasoning and estimates behind each change, is
+`FriedLiver-Code-design/CORE-PERF-PLAN.md` (C1–C10). Nothing below has a
+measured number yet: each change is kept only if editor-bench on CI shows it
+(the keep rule in that plan, section 4.4: beyond noise in two separate CI runs,
+no other metric regressing), otherwise it moves to "Tried and not kept".
+
+| Change | Where | Metric to check | Estimate | Status |
+|---|---|---|---|---|
+| C6 caret `blink` (drop FriedLiver's `smooth`) | theme `configurationDefaults` | renderer + GPU CPU in the 9 s after a keystroke | −1–5 % of a core | awaiting CI |
+| C8 `workbench.startupEditor: none` | theme | `restore_ms`, renderer footprint at `idle` | −5–15 MB, up to −25 ms restore | awaiting CI |
+| C10 tool caches out of the watcher | theme | watcher + extension-host CPU while 20k files are written into `fixture/.venv` | most of that CPU | awaiting CI |
+| C5 one tsserver (`useSyntaxServer: never`) | theme | `files20` footprint, process count; time until the outline fills | −40–80 MB, −1 process | awaiting CI |
+| C7 time-sliced `onStartupFinished` | theme | typing p95 in the first 5 s, with extensions | −10–40 ms | awaiting CI |

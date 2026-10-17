@@ -299,8 +299,9 @@ it('contributes four themes, with Black Blue as the default and Light Blue as th
 
 it('sets the modern editor defaults and keeps the memory-related ones (docs/DEFAULTS.md)', () => {
   const defaults = manifest.contributes.configurationDefaults;
+  // Upstream's `blink` (a 500 ms JS toggle); `smooth` ran a CSS animation for 10 s after every caret move.
+  expect(defaults['editor.cursorBlinking']).toBeUndefined();
   expect(defaults).toMatchObject({
-    'editor.cursorBlinking': 'smooth',
     'editor.cursorSmoothCaretAnimation': 'on',
     'editor.smoothScrolling': true,
     'editor.guides.bracketPairs': 'active',
@@ -312,8 +313,17 @@ it('sets the modern editor defaults and keeps the memory-related ones (docs/DEFA
     'terminal.integrated.smoothScrolling': true,
     'editor.minimap.enabled': false,
     'typescript.disableAutomaticTypeAcquisition': true,
-    'files.watcherExclude': { '**/node_modules/*/**': true },
+    'typescript.tsserver.useSyntaxServer': 'never',
+    'workbench.startupEditor': 'none',
+    'extensions.experimental.deferredStartupFinishedActivation': true,
   });
+  const watcherExclude = defaults['files.watcherExclude'] as Record<string, boolean>;
+  for (const dir of ['node_modules/*', '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.next', '.nuxt', '.turbo', '.parcel-cache', '.gradle']) {
+    expect(watcherExclude[`**/${dir}/**`], dir).toBe(true);
+  }
+  // Build outputs stay watched: extensions' recursive watchers inherit files.watcherExclude, so tsc -b
+  // project references, cargo and gradle outputs would go stale (docs/DEFAULTS.md).
+  for (const dir of ['dist', 'build', 'target', 'out', 'node_modules']) expect(watcherExclude[`**/${dir}/**`], dir).toBeUndefined();
 });
 
 it('the committed theme files match palette.json', () => {
