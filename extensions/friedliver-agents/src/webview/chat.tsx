@@ -747,7 +747,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, at }:
             <span>Plan</span>
             <span class="hint">{current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`}</span>
           </div>
-          <ol class="steps">
+          <ol class="plan-steps">
             {item.entries.map((e, i) => {
               const s = PLAN_STATE[e.status] ?? 'next';
               return (
