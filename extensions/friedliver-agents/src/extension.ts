@@ -11,6 +11,7 @@ import { runRewind } from './host/rewindFlow';
 import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
+import { ProjectIndexHost } from './host/projectIndexHost';
 import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
@@ -101,6 +102,7 @@ export class Controller {
   private readonly statusItem = vscode.window.createStatusBarItem('friedliver.decisions', vscode.StatusBarAlignment.Right, 100);
   /** "2 agents working", and a warning while any chat runs in Full auto. */
   private readonly workingItem = vscode.window.createStatusBarItem('friedliver.working', vscode.StatusBarAlignment.Right, 99);
+  private projectIndex?: ProjectIndexHost;
   private readonly autoItem = vscode.window.createStatusBarItem('friedliver.fullAuto', vscode.StatusBarAlignment.Right, 101);
   private shownStatus?: string;
   private agentsView?: vscode.WebviewView;
@@ -153,6 +155,7 @@ export class Controller {
       browser: (_chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin),
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
+      index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
       approvalDefault: () => this.approvalDefault(),
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {
@@ -231,6 +234,7 @@ export class Controller {
       this.statusItem,
       this.workingItem,
       this.autoItem,
+      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m))),
       this.reviews,
       this.accounts,
       vscode.window.registerTreeDataProvider('friedliver.accounts', this.accounts),
