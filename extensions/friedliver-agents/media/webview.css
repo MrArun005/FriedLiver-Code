@@ -1275,7 +1275,10 @@ button.count-item .icon {
   overflow: hidden;
 }
 .card-quote {
-  padding: 6px 10px;
+  /* Vertical room as transparent borders, not padding: the clamp clips at the padding edge, so a padding would show a sliver of line 4. */
+  padding: 0 10px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
   border-left: 2px solid var(--decision-line);
   border-radius: 2px;
   font-size: var(--t-90);
