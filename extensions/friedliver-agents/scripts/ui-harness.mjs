@@ -761,6 +761,51 @@ async function shoot() {
   }
 
   {
+    // Tabs close: an × (hover, active, focus), middle-click, Cmd/Ctrl+W; the chat itself stays in the Chats list.
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+    await p.evaluate(() => {
+      window.__forwarded = 0;
+      window.addEventListener('keydown', (e) => e.key !== 'Meta' && e.key !== 'Control' && window.__forwarded++);
+    });
+    const strip = () => p.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.chat));
+    const before = await strip();
+    const closes = await p.locator('.tabs .tab-close').evaluateAll((bs) => bs.map((b) => ({ label: b.getAttribute('aria-label'), title: b.title, w: b.getBoundingClientRect().width })));
+    check(before.length >= 3 && closes.length === before.length && closes.every((c) => /^Close /.test(c.label ?? '') && /^Close tab \((⌘|Ctrl\+)W\)$/.test(c.title) && c.w >= 15.5), `every tab has a labelled × with its shortcut [${closes.length} of ${before.length}]`);
+    const opacity = (id) => p.locator(`.tab-wrap:has([data-chat="${id}"]) .tab-close`).evaluate((b) => (new Promise((r) => setTimeout(r, 200))).then(() => window.getComputedStyle(b).opacity));
+    const other = before.find((id) => id !== 'chat-c5');
+    await p.mouse.move(0, 400);
+    check((await opacity('chat-c5')) === '1' && (await opacity(other)) === '0', 'the active tab shows its ×; the others wait for the pointer');
+    await p.hover(`.tabs [data-chat="${other}"]`);
+    check((await opacity(other)) === '1', 'hovering a tab shows its ×');
+    await p.locator(`.tab-wrap:has([data-chat="${other}"]) .tab-close`).click();
+    let now = await strip();
+    check(!now.includes(other) && (await p.locator('.chat-head-title').innerText()).length > 0 && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === 'chat-c5', '× closes that tab and leaves the open chat as it is');
+    const third = now.find((id) => id !== 'chat-c5');
+    await p.locator(`.tabs [data-chat="${third}"]`).click({ button: 'middle' });
+    now = await strip();
+    check(!now.includes(third), 'a middle-click closes a tab');
+    // Cmd/Ctrl+W closes the open chat's tab and shows its right neighbour (else the left), without reaching the editor.
+    const order = await strip();
+    const at = order.indexOf('chat-c5');
+    const expected = order[at + 1] ?? order[at - 1];
+    await p.click('.composer textarea');
+    await p.keyboard.press('ControlOrMeta+KeyW');
+    await p.waitForTimeout(100);
+    check(!(await strip()).includes('chat-c5') && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === expected && (await posted(p)).some((m) => m.type === 'select' && m.chatId === expected), `Cmd/Ctrl+W closes the open tab and shows its neighbour (${expected})`);
+    check((await p.evaluate(() => window.__forwarded)) === 0, 'Cmd/Ctrl+W never reaches the editor (its own tab stays)');
+    check(((await p.evaluate(() => window.__vscodeState()?.closedTabs)) ?? []).includes('chat-c5'), 'the closed tabs are kept in this window’s state');
+    // The chats themselves are untouched: still in the Chats list, nothing stopped or archived.
+    await p.click('.all-btn');
+    const listed = await p.locator('.all-chats [role="option"]').evaluateAll((os) => os.map((o) => o.id));
+    check([other, third, 'chat-c5'].every((id) => listed.some((l) => l.endsWith(`-${id}`))) && !(await posted(p)).some((m) => ['stop', 'archive'].includes(m.type)), 'closed tabs stay in the Chats list; nothing is stopped or archived');
+    await p.keyboard.press('Escape');
+    await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/tabs-close.png'), clip: { x: 0, y: 0, width: 1200, height: 140 } }).catch(() => {});
+    // Close them all: the empty state.
+    for (let n = 0; n < 40 && (await p.locator('.tabs .tab-close').count()); n++) await p.locator('.tabs .tab-close').first().click();
+    check((await p.locator('.empty').count()) === 1, 'closing the last tab shows the empty state');
+    await p.close();
+  }
+  {
     // A very long message never takes the chat over: 3 lines and Show more, in place and in the sticky copy; the composer caps.
     for (const width of [640, 1200]) {
       const p = await open('surface=chat&theme=dark-2026&fixture=reference&select=chat-long', width, 900);

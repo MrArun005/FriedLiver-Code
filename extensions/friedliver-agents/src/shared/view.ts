@@ -439,12 +439,20 @@ export function keepPlan(group: FanoutGroup, keepId: string): { merge?: string; 
  * the open one, shown in the order they were started so tabs don't jump about
  * while agents stream.
  */
-export function recentChats(chats: ChatView[], activeId: string | undefined, n: number): ChatView[] {
-  const open = openChats(chats);
+export function recentChats(chats: ChatView[], activeId: string | undefined, n: number, closed: readonly string[] = []): ChatView[] {
+  const hidden = new Set(closed);
+  const open = openChats(chats).filter((c) => !hidden.has(c.id));
   const recent = [...open].sort((a, b) => b.lastActivity - a.lastActivity || b.createdAt - a.createdAt).slice(0, Math.max(1, n));
   const active = open.find((c) => c.id === activeId);
   if (active && !recent.includes(active)) recent[recent.length - 1] = active;
   return recent.sort((a, b) => a.createdAt - b.createdAt || collator.compare(a.id, b.id));
+}
+
+/** The tab to show after closing `closing` in `strip` (ids in order): the active one stays, else the right neighbour, else the left. */
+export function tabAfterClose(strip: readonly string[], closing: string, active: string | undefined): string | undefined {
+  if (active !== closing) return active;
+  const at = strip.indexOf(closing);
+  return strip[at + 1] ?? (at > 0 ? strip[at - 1] : undefined);
 }
 
 export const COLUMN_TITLES: Record<BoardColumn, string> = { 'needs-you': 'Needs you', working: 'Working', done: 'Done' };
