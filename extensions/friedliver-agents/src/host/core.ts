@@ -12,7 +12,7 @@ import { allowedSignInUrl, signInMethods } from '@friedliver/main/agents/signIn'
 import { visibleText, type TerminalListener } from '@friedliver/main/agents/terminals';
 import { TurnLog } from '@friedliver/main/agents/turnLog';
 import * as git from '@friedliver/main/workspace/git';
-import { BRIDGE_ENV, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
+import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
 import type { Attachment } from '../shared/messages';
 import { describeRule, matchesRule, type CommandRule } from '../shared/rules';
 import {
@@ -142,6 +142,8 @@ export interface CoreOptions {
   bridgeScript?: string;
   /** Does the browser_* tools' calls (browser.ts); without it they say there is no browser. */
   browser?: ToolHost['browser'];
+  /** Whether the external client's browser actions skip the user's OK (friedliver.browser.externalAutoApprove). */
+  externalAutoApprove?: () => boolean;
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -291,6 +293,7 @@ export class AgentCore {
       message: (chatId, target, text) => void this.links.message(chatId, target, text, 'agent').catch(() => {}),
       cancel: (chatId) => this.cancel(chatId),
       browser: options.browser,
+      externalAutoApprove: options.externalAutoApprove,
     });
   }
 
@@ -828,6 +831,22 @@ export class AgentCore {
   /** The FriedLiver tools were turned off: deny every tool request still waiting on the user. */
   toolsOff(): void {
     this.requests.refuseAll();
+  }
+
+  /**
+   * The URL and this launch's token for clients outside FriedLiver (externalBrowser.ts), minted on
+   * first use; undefined when the tools are off or unavailable.
+   */
+  async externalAccess(): Promise<{ url: string; token: string } | undefined> {
+    await this.ensureBridge();
+    if (!this.bridge || this.policy() === 'off') return undefined;
+    return { url: await this.bridge.httpUrl(), token: this.bridge.token(EXTERNAL_CLIENT) };
+  }
+
+  /** The external token stops working and anything it has waiting on the user is denied. */
+  revokeExternal(): void {
+    this.requests.forget(EXTERNAL_CLIENT);
+    this.bridge?.revoke(EXTERNAL_CLIENT);
   }
 
   bridgeCall(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {

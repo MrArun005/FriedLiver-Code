@@ -141,8 +141,12 @@ const result = (id: string | number, value: object) => ({ jsonrpc: '2.0', id, re
 const error = (id: string | number, code: number, message: string) => ({ jsonrpc: '2.0', id, error: { code, message } });
 export const toolError = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
 
-/** One JSON-RPC message from the agent. */
-export function handle(raw: unknown): Handled {
+/** Only the browser tools: what a client outside FriedLiver (EXTERNAL_CLIENT) is offered. */
+export const BROWSER_TOOLS = TOOLS.filter((t) => t.name.startsWith('browser_'));
+
+/** One JSON-RPC message from the agent; `browserOnly` offers and takes the browser tools only. */
+export function handle(raw: unknown, browserOnly = false): Handled {
+  const tools = browserOnly ? BROWSER_TOOLS : TOOLS;
   if (!isObj(raw)) return null;
   const m = raw as Message;
   // Notifications (initialized, cancelled, progress) need no answer.
@@ -164,10 +168,10 @@ export function handle(raw: unknown): Handled {
     case 'ping':
       return { reply: result(id, {}) };
     case 'tools/list':
-      return { reply: result(id, { tools: TOOLS }) };
+      return { reply: result(id, { tools }) };
     case 'tools/call': {
       const name = params.name;
-      const tool = TOOLS.find((t) => t.name === name);
+      const tool = tools.find((t) => t.name === name);
       if (!tool) return { reply: result(id, toolError(`MCP error -32602: Tool ${String(name)} not found`)) };
       const args = params.arguments === undefined ? {} : params.arguments;
       // The editor checks every call again; this is so the agent hears what is wrong at once.

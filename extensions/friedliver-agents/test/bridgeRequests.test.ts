@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { EXTERNAL_CLIENT } from '../src/bridge/protocol';
 import { BridgeRequests, MAX_WAITING_PER_CHAT, type ToolHost } from '../src/host/bridgeRequests';
 import { EMPTY_STATE, reduce, type Action, type AppState, type ChatView } from '../src/shared/model';
 
@@ -181,5 +182,52 @@ describe('browser requests whose world changed while the user decided', () => {
     s.requests.answer(s.id, 'allow');
     await expect(s.pending).rejects.toThrow(/closed/);
     expect(s.done).toEqual([]);
+  });
+});
+
+describe('the external client (Claude Code outside FriedLiver)', () => {
+  const ext = (auto = false) => {
+    const h = host();
+    const done: string[] = [];
+    const asked: string[] = [];
+    h.browser = async (_c, call) => (done.push(call.tool), 'ok');
+    h.notify = (a) => asked.push(a.title);
+    h.externalAutoApprove = () => auto;
+    return { h, done, asked, requests: new BridgeRequests(h), signal: new AbortController().signal };
+  };
+
+  it('reaches only the browser tools', async () => {
+    const { requests, signal } = ext(true);
+    for (const call of [{ tool: 'list_chats' }, { tool: 'list_agents' }, { tool: 'read_chat', chatId: 'chat-1' }] as const) {
+      await expect(requests.call(EXTERNAL_CLIENT, call, signal)).rejects.toThrow(/Only the browser_\* tools/);
+    }
+  });
+
+  it('asks the user before acting, as "Claude Code", and does nothing when denied', async () => {
+    const { done, asked, requests, signal } = ext();
+    await expect(requests.call(EXTERNAL_CLIENT, { tool: 'browser_snapshot' }, signal)).resolves.toBe('ok');
+    let id = '';
+    const notify = new Promise<void>((r) => (requests['host'].notify = (a) => ((id = a.requestId), asked.push(a.title), r())));
+    const click = requests.call(EXTERNAL_CLIENT, { tool: 'browser_click', text: 'Buy' }, signal);
+    await notify;
+    expect(asked).toEqual(['Claude Code wants to click in the browser']);
+    requests.answer(id, 'deny');
+    await expect(click).rejects.toThrow(/did not allow/);
+    expect(done).toEqual(['browser_snapshot']);
+  });
+
+  it('"Allow for this session" covers later actions; auto-approve only by setting; URL rules still apply', async () => {
+    const { done, requests, signal } = ext();
+    let id = '';
+    requests['host'].notify = (a) => (id = a.requestId);
+    const first = requests.call(EXTERNAL_CLIENT, { tool: 'browser_reload' }, signal);
+    requests.answer(id, 'allowChat');
+    await first;
+    await expect(requests.call(EXTERNAL_CLIENT, { tool: 'browser_back' }, signal)).resolves.toBe('ok');
+    expect(done).toEqual(['browser_reload', 'browser_back']);
+    const auto = ext(true);
+    await expect(auto.requests.call(EXTERNAL_CLIENT, { tool: 'browser_open', url: 'localhost:3000' }, auto.signal)).resolves.toBe('ok');
+    await expect(auto.requests.call(EXTERNAL_CLIENT, { tool: 'browser_open', url: 'file:///etc/passwd' }, auto.signal)).rejects.toThrow(/only http and https/);
+    expect(auto.asked).toEqual([]);
   });
 });
