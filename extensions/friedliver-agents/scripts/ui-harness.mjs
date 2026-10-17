@@ -155,6 +155,11 @@ const server = http.createServer((req, res) => {
     res.end(page(url.searchParams));
     return;
   }
+  // The browser asks for a favicon on the first page; no 404 in the console for it.
+  if (url.pathname === '/favicon.ico') {
+    res.writeHead(204).end();
+    return;
+  }
   const media = path.join(ext, 'media');
   const file = path.resolve(media, `.${decodeURIComponent(url.pathname).replace(/^\/media/, '')}`);
   if (!url.pathname.startsWith('/media/') || !file.startsWith(media + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -251,9 +256,9 @@ async function shoot() {
     const steps = await open(`surface=chat&theme=${theme}&side=1&fixture=steps`, 460, 900);
     await steps.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
     await save(steps, `chat-steps-${theme}`);
-    await steps.click('.steps li:has(.step-text:text("cat << EOF | python3 minidb.py")) .step-main');
-    await steps.click('.steps li:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md")) .step-main');
-    await steps.evaluate(() => document.querySelector('.steps li[data-open]')?.scrollIntoView({ block: 'start' }));
+    await steps.click('.tl-step:has(.step-text:text("cat << EOF | python3 minidb.py")) .step-main');
+    await steps.click('.tl-step:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md")) .step-main');
+    await steps.evaluate(() => document.querySelector('.tl-step[data-open]')?.scrollIntoView({ block: 'start' }));
     await save(steps, `chat-steps-open-${theme}`);
     await steps.evaluate(() => {
       const t = document.querySelector('.transcript');
@@ -353,7 +358,7 @@ async function shoot() {
     const modes = await p.locator('.cc-modes-menu .cc-item-name').allInnerTexts();
     check(['Manual', 'Edit automatically', 'Plan', 'Auto'].every((m) => modes.includes(m)), `Modes lists Manual, Edit automatically, Plan, Auto [${modes}]`);
     check(await p.locator('.cc-modes-menu .cc-keys:has-text("tab to switch")').isVisible(), 'Modes says ⇧ + tab switches');
-    check((await p.locator('.cc-modes-menu .cc-dots[role="slider"]').count()) === 1, 'Modes has the effort slider');
+    check((await p.locator('.cc-modes-menu .cc-slider[role="slider"]').count()) === 1, 'Modes has the effort slider');
     await p.click('.cc-modes-menu [role="menuitemradio"]:has(.cc-item-name:text-is("Edit automatically"))');
     check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'picking a mode posts its level');
     await p.click('.cc-mode');
@@ -375,7 +380,7 @@ async function shoot() {
     check(picked?.type === 'setOption' && picked.optionId === 'model' && picked.value === 'small', 'picking a model posts setOption');
     check(!(await p.locator('.cc-model-menu').count()), 'picking a model closes the menu');
     await p.click('.cc-model');
-    await p.focus('.cc-model-menu .cc-dots');
+    await p.focus('.cc-model-menu .cc-slider');
     await p.keyboard.press('End');
     const effort = await last();
     check(effort?.optionId === 'effort' && effort.value === 'max', 'the effort slider posts setOption (End = Max)');
@@ -556,14 +561,15 @@ async function shoot() {
     check(await d.evaluate(() => {
       const yes = window.getComputedStyle(document.querySelector('.ask button.decide'));
       const probe = document.createElement('div');
-      probe.style.background = 'var(--c-surface)';
-      probe.style.borderColor = 'var(--c-acc)';
+      probe.style.background = 'var(--button-bg)';
+      probe.style.color = 'var(--button-fg)';
       document.body.append(probe);
       const want = window.getComputedStyle(probe);
-      const ok = yes.backgroundColor === want.backgroundColor && yes.borderTopColor === want.borderTopColor;
+      const others = [...document.querySelectorAll('.ask .actions button:not(.decide)')].map((b) => window.getComputedStyle(b));
+      const ok = yes.backgroundColor === want.backgroundColor && yes.color === want.color && others.length > 0 && others.every((o) => o.backgroundColor !== want.backgroundColor && o.boxShadow.includes('inset'));
       probe.remove();
       return ok;
-    }), 'the recommended option is a neutral surface with the accent border, not a fill');
+    }), 'the default option is in the button colours; the others are rows on a hairline ring (Claude Code’s card)');
     check((await d.locator('.step-files').count()) === 0 && (await d.locator('.step-target').first().innerText()).includes('src/store.ts'), 'a tool line names its file once, as the link');
     await d.locator('.step-target').first().click();
     check((await posted(d)).some((m) => m.type === 'openFile' && m.path === 'src/store.ts'), 'the path opens the file');
@@ -590,7 +596,7 @@ async function shoot() {
         const c = document.querySelector('.composer').getBoundingClientRect();
         return { w: c.width, left: c.left, right: window.innerWidth - c.right };
       });
-      check(r.w <= 640.5 && Math.abs(r.left - r.right) <= 1 && (width > 672 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 640)`);
+      check(r.w <= 680.5 && Math.abs(r.left - r.right) <= 1 && (width > 712 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 680, 16px gutters)`);
       await p.close();
     }
     for (const [width, id] of [[320, 'chat-c6'], [480, 'chat-c6'], [640, 'chat-c6'], [320, 'chat-c5'], [900, 'chat-pay&fixture=subagents']]) {
@@ -626,16 +632,20 @@ async function shoot() {
     const idle = await border();
     await p.click('.composer textarea');
     const focused = await border();
-    const acc = await p.evaluate(() => {
+    const tone = (v) => p.evaluate((v) => {
       const d = document.createElement('div');
-      d.style.color = 'var(--c-acc)';
+      d.style.color = `var(${v})`;
       document.querySelector('.composer').appendChild(d);
       const c = window.getComputedStyle(d).color;
       d.remove();
       return c;
-    });
-    check(idle !== focused && focused === acc, `focus turns the border the accent orange (${idle} → ${focused})`);
-    check((await p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow)) === 'none', 'no blue ring');
+    }, v);
+    // Auto (Full auto): the mode's colour is errorForeground, as in Claude Code; Manual's is the orange accent.
+    check(idle !== focused && focused === (await tone('--error')), `focus turns the border the mode's colour (${idle} → ${focused})`);
+    const ring = await p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
+    check(/ 0px 0px 3px/.test(ring) && !ring.includes('rgb(0, 120'), `a 3px halo in the mode's colour, no blue ring [${ring}]`);
+    await p.evaluate(() => window.postMessage({ type: 'action', action: { t: 'approval', chatId: 'chat-c6', level: 'ask' } }, '*'));
+    await p.waitForTimeout(50);
     await p.close();
     // Agent map: modal with this chat and its agents; each opens its card or chat; Open Agent Manager.
     const ag = await open('surface=chat&select=chat-pay&fixture=subagents', 1200, 800);
@@ -712,7 +722,10 @@ async function shoot() {
     await p.keyboard.press('Control+Enter');
     const answer = (await posted(p)).filter((m) => m.type === 'bridge' || m.type === 'permission').at(-1);
     check(answer?.type === 'bridge' && answer.answer === 'allow', 'Ctrl+Enter answers the first waiting decision');
+    check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '') === 'Stop', 'with nothing typed, a busy chat’s send button stops the turn');
+    await p.fill('.composer textarea', 'and the tests');
     check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Queue'), 'a busy chat queues the message');
+    await p.fill('.composer textarea', '');
     await p.click('.bubble.queued button[aria-label="Remove from the queue"]');
     check((await posted(p)).some((m) => m.type === 'unqueue' && m.id === 'queued-c1'), 'a queued message can be removed');
     check(await p.locator('.edits-bar').isVisible(), 'edits waiting get Accept all');
@@ -728,7 +741,7 @@ async function shoot() {
     await p.click('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")');
     const rule = (await posted(p)).find((m) => m.type === 'allowAlways');
     check(rule?.requestId === 'perm-c2' && rule.rule.kind === 'exact', 'Always allow posts the rule');
-    check(await p.locator('.mode-badge[data-tone="edits"]').isVisible(), 'the header shows the mode the agent reports');
+    check((await p.locator('.cc-mode').getAttribute('aria-label')) === 'Mode: Edit automatically' && (await p.locator('.composer').getAttribute('data-mode')) === 'edits', 'the mode button shows the mode in use');
     await p.close();
   }
   {
@@ -750,10 +763,10 @@ async function shoot() {
   {
     // Steps read as one line each and open to something you can use; replies keep their shape.
     const p = await open('surface=chat&side=1&fixture=steps', 460, 900);
-    const row = (text) => p.locator(`.steps li:has(.step-text:text("${text}"))`);
-    const rows = await p.locator('.steps .step-row').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
+    const row = (text) => p.locator(`.tl-step:has(.step-text:text("${text}"))`);
+    const rows = await p.locator('.tl-step .step-row').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
     check(rows.length >= 8 && rows.every((h) => h <= 26), `every step is one line (${rows.join(', ')} px)`);
-    const tagSameRow = await p.locator('.steps .step-row').evaluateAll((els) =>
+    const tagSameRow = await p.locator('.tl-step .step-row').evaluateAll((els) =>
       els.every((el) => {
         const tag = el.querySelector('.step-end .tag');
         const dot = el.querySelector('.dot');
@@ -765,13 +778,13 @@ async function shoot() {
     );
     check(tagSameRow, 'the kind tag sits on the row of its dot');
     check((await row('cat << EOF | python3 minidb.py').locator('.step-lines').innerText()) === '15 lines', 'a heredoc command shows its line count');
-    check(await p.locator('.steps li:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))').count() === 1, 'cat << EOF > README.md reads as Write README.md');
+    check(await p.locator('.tl-step:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))').count() === 1, 'cat << EOF > README.md reads as Write README.md');
     check((await row('python3 minidb.py test.sql 2>&1').locator('.step-main').getAttribute('title'))?.includes(`cd ${STEPS_ROOT} && python3`) ?? false, 'the tooltip has the full command');
-    check(await p.locator('.steps li[data-open]:has(.tag.bad:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
+    check(await p.locator('.tl-step[data-open]:has(.tag.bad:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
     const answered = p.locator('.answered:has(.step-label)');
     check((await answered.count()) === 1 && (await answered.evaluate((el) => Math.round(el.getBoundingClientRect().height))) <= 26, 'an answered request for a long command is one line');
     await row('cat << EOF | python3 minidb.py').locator('.step-main').click();
-    const opened = p.locator('.steps li[data-open]:has(.step-text:text("cat << EOF | python3 minidb.py"))');
+    const opened = p.locator('.tl-step[data-open]:has(.step-text:text("cat << EOF | python3 minidb.py"))');
     check((await opened.locator('.step-command pre.code').innerText()) === COMMANDS.users, 'the command shows in full with every line');
     check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre', 'the command never wraps');
     check(await opened.locator('.step-output pre.code.capped').count() === 1, 'long output starts capped');
@@ -781,7 +794,7 @@ async function shoot() {
     check((await posted(p)).some((m) => m.type === 'copy' && m.text === COMMANDS.users), 'Copy copies the exact command');
     await opened.locator('.step-command .run-btn').click();
     check((await posted(p)).some((m) => m.type === 'runInTerminal' && m.chatId === 'chat-sql' && m.command === COMMANDS.users), 'Run in terminal sends the exact command');
-    const readme = p.locator('.steps li:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))');
+    const readme = p.locator('.tl-step:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))');
     await readme.locator('.step-main').click();
     check((await readme.locator('.step-file .file-name').innerText()).includes('README.md'), 'a heredoc write shows the file it writes');
     check((await readme.locator('.step-file pre.code').innerText()).startsWith('# Mini SQL Database Engine'), 'the file text shows without the command around it');
