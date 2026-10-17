@@ -890,6 +890,17 @@ BLOCKS.QUESTION = async () => {
   }
 };
 
+// ---- HANDOFF: a hand-off card names the chat it went to by its topic, not "Codex 3" ----
+BLOCKS.HANDOFF = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  const card = p.locator('.link-card[data-role="handoff-to"]');
+  await card.waitFor();
+  const title = (await card.locator('.link-title').innerText()).trim();
+  check(title === 'Handed off to Make the session store swappable', `the card names the target chat's topic [${title}]`);
+  check((await card.locator('.link-title').getAttribute('title')) === 'Codex 3: Make the session store swappable', 'the agent label is in its tooltip');
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();

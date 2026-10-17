@@ -1127,7 +1127,7 @@ async function shoot() {
     await menu.filter({ hasText: '/Users/arun/Desktop' }).filter({ hasNotText: 'trip' }).click();
     check((await posted(p)).some((m) => m.type === 'allowAlways' && m.requestId === 'perm-read' && m.grant?.kind === 'folder' && m.grant.folder === '/Users/arun/Desktop' && m.grant.access === 'read'), 'picking a folder sends that folder, read only');
     const site = p.locator('#item-bridge-irctc');
-    check((await site.locator('button').allInnerTexts()).join(' | ').replace(/\s+/g, ' ') === 'Allow | Allow for this chat | Always allow https://www.irctc.co.in | Deny', 'a browser request offers Allow once, for this chat, always for the site, and Deny');
+    check((await site.locator('button').allInnerTexts()).join(' | ').replace(/\s+/g, ' ') === '1. Allow | 2. Allow for this chat | 3. Deny | Always allow https://www.irctc.co.in', 'a browser request offers Allow once, for this chat and Deny (numbered), then always for the site');
     await site.locator('button:has-text("Always allow")').click();
     check((await posted(p)).some((m) => m.type === 'bridge' && m.requestId === 'bridge-irctc' && m.answer === 'allowAlways'), 'Always allow answers allowAlways');
     check(await p.locator('#item-bridge-codex button:has-text("Always allow")').count() === 1, 'an agent-to-agent request offers Always allow');

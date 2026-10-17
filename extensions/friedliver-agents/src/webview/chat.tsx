@@ -1077,12 +1077,17 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   const other = state.chats.find((c) => c.id === item.chatId);
   const long = item.text.length > 700 || item.text.split('\n').length > 12;
   const [expanded, setExpanded] = useState(!long);
+  // A hand-off names the chat it went to (or came from) by its topic, like the header chips; the label is in the tooltip.
+  const name = item.role.startsWith('handoff') && other ? other.title : item.label;
+  const head = LINK_HEAD[item.role](name);
   return (
-    <section class="link-card" data-role={item.role} aria-label={LINK_HEAD[item.role](item.label)}>
+    <section class="link-card" data-role={item.role} aria-label={head}>
       <div class="link-head">
         <Icon name={LINK_ICON[item.role]} />
         <Glyph agent={item.agent} size="sm" />
-        <span class="link-title">{LINK_HEAD[item.role](item.label)}</span>
+        <span class="link-title" title={other ? `${other.label}: ${other.title}` : item.label}>
+          {head}
+        </span>
         {item.role.startsWith('piped') && <span class="tag">pipe</span>}
         {item.by === 'agent' && <span class="tag">by agent</span>}
         <span class="spacer" />
@@ -1181,18 +1186,19 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
         <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
           <span class="opt-num">2.</span>Allow for this chat
         </button>
+        <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
+          <span class="opt-num">3.</span>Deny
+        </button>
+        {/* Last and a link, as on a permission card: not one more numbered choice. */}
         {item.always && (
           <button
-            class="sm"
+            class="link always-allow"
             title={`Don't ask again for ${item.always}: every chat, every agent, after restarts. Revoke in Manage Permissions.`}
             onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowAlways' })}
           >
             Always allow <span class="always-scope">{item.always}</span>
           </button>
         )}
-        <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
-          <span class="opt-num">3.</span>Deny
-        </button>
       </div>
       <KeyHint chat={chat} id={item.requestId} n={3} />
     </section>
