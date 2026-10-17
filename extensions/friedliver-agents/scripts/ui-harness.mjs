@@ -17,7 +17,6 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -552,7 +551,7 @@ async function shoot() {
     await restored.close();
     const other = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
     check((await other.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '13px', 'another tab keeps the default');
-    await other.screenshot({ path: path.join(os.homedir(), 'code/chat-sizes-dark.png'), animations: 'disabled', caret: 'hide' });
+    await other.screenshot({ path: path.join(opts.out, 'chat-sizes-dark.png'), animations: 'disabled', caret: 'hide' });
     await other.close();
   }
   {
@@ -566,7 +565,7 @@ async function shoot() {
     await p.locator('.step-image .image-thumb').nth(1).click();
     check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
     check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
-    await p.screenshot({ path: path.join(os.homedir(), 'code/chat-images.png'), animations: 'disabled', caret: 'hide' });
+    await p.screenshot({ path: path.join(opts.out, 'chat-images.png'), animations: 'disabled', caret: 'hide' });
     await p.click('.images-pill');
     check((await p.locator('.image-strip .image-thumb').count()) === 2, 'the Images pill opens the gallery');
     await p.close();
@@ -578,11 +577,11 @@ async function shoot() {
     await msg.hover();
     const btn = msg.locator('.rewind-btn');
     check((await btn.count()) === 1 && (await btn.evaluate((b) => window.getComputedStyle(b).opacity)) === '1', 'hovering a message shows Rewind to here');
-    await p.screenshot({ path: path.join(os.homedir(), 'code/rewind.png'), animations: 'disabled', caret: 'hide' });
+    await p.screenshot({ path: path.join(opts.out, 'rewind.png'), animations: 'disabled', caret: 'hide' });
     await btn.click();
     check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && /^turn-/.test(m.turnId)), 'Rewind to here asks the host for that message');
     await p.click('.chat-head-actions button[aria-label="More"]');
-    await p.screenshot({ path: path.join(os.homedir(), 'code/rewind-menu.png'), animations: 'disabled', caret: 'hide' });
+    await p.screenshot({ path: path.join(opts.out, 'rewind-menu.png'), animations: 'disabled', caret: 'hide' });
     await p.getByRole('menuitem', { name: 'Rewind…' }).click();
     check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && m.turnId === undefined), 'the ⋯ menu opens the checkpoint list');
     await p.close();
@@ -596,7 +595,7 @@ async function shoot() {
     check((await list.locator('.chat-list-view .new-chat').count()) === 1 && (await list.locator('.transcript').count()) === 0, 'the side bar view is the list only');
     await list.locator('.chat-list-view [role="option"]').first().click();
     check((await posted(list)).some((m) => m.type === 'openChat'), 'picking a chat in the list opens it in the chat tab');
-    await list.screenshot({ path: path.join(os.homedir(), 'code/chat-list-sidebar.png'), animations: 'disabled' });
+    await list.screenshot({ path: path.join(opts.out, 'chat-list-sidebar.png'), animations: 'disabled' });
     await list.close();
   }
   {
@@ -657,7 +656,7 @@ async function shoot() {
   }
   for (const [name, theme, width] of [['chat-final-dark', 'black-blue', 1200], ['chat-final-light', 'light-blue', 1200], ['chat-final-narrow', 'black-blue', 480]]) {
     const p = await open(`surface=chat&theme=${theme}&select=chat-c2`, width, 900);
-    await p.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), animations: 'disabled', caret: 'hide' });
+    await p.screenshot({ path: path.join(opts.out, `${name}.png`), animations: 'disabled', caret: 'hide' });
     await p.close();
   }
   {
@@ -745,7 +744,7 @@ async function shoot() {
       const left = Math.max(0, Math.min(c.x, m ? m.x : c.x) - 16);
       const right = Math.max(c.x + c.width, m ? m.x + m.width : 0) + 16;
       const bottom = Math.max(c.y + c.height, m ? m.y + m.height : 0) + 16;
-      await q.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), clip: { x: left, y: top, width: right - left, height: bottom - top }, animations: 'disabled', caret: 'hide' });
+      await q.screenshot({ path: path.join(opts.out, `${name}.png`), clip: { x: left, y: top, width: right - left, height: bottom - top }, animations: 'disabled', caret: 'hide' });
     };
     for (const [name, theme, id, act, sel] of [
       ['cc-composer', 'black-blue', 'chat-pay&fixture=subagents', 'focus', null],
@@ -763,7 +762,7 @@ async function shoot() {
     }
     const map = await open('surface=chat&theme=black-blue&select=chat-pay&fixture=subagents', 1200, 860);
     await map.click('.cc-agents');
-    await map.screenshot({ path: path.join(os.homedir(), 'code/cc-agent-map.png'), animations: 'disabled', caret: 'hide' });
+    await map.screenshot({ path: path.join(opts.out, 'cc-agent-map.png'), animations: 'disabled', caret: 'hide' });
     await map.close();
   }
   for (const width of [320, 480, 700, 1200]) {
@@ -779,7 +778,7 @@ async function shoot() {
     });
     check(r.ratio >= 0.7, `at ${width}px the message box is ${Math.round(r.ratio * 100)}% of the composer (>= 70%)`);
     check(r.barInside && r.page && r.apart, `at ${width}px the controls don't overlap, stay inside the composer and nothing scrolls sideways`);
-    if (width < 1200) await p.screenshot({ path: path.join(os.homedir(), `code/composer-${width}.png`), animations: 'disabled', caret: 'hide' });
+    if (width < 1200) await p.screenshot({ path: path.join(opts.out, `composer-${width}.png`), animations: 'disabled', caret: 'hide' });
     await p.close();
   }
   {
@@ -882,7 +881,7 @@ async function shoot() {
     await p.waitForTimeout(100);
     const reopened = await strip();
     check(reopened.at(-1) === other && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === other, 'opening a chat from the list adds its tab at the end');
-    await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/tabs-close.png'), clip: { x: 0, y: 0, width: 1200, height: 140 } }).catch(() => {});
+    await p.screenshot({ path: path.join(opts.out, 'tabs-close.png'), clip: { x: 0, y: 0, width: 1200, height: 140 } }).catch(() => {});
     // More tabs than fit: the strip scrolls sideways, fading at its edges; the tabs keep their size.
     const many = await open('surface=chat&theme=dark-2026&select=chat-c5', 520, 700);
     const fit = await many.evaluate(() => {
@@ -924,10 +923,10 @@ async function shoot() {
           return lines.length > 0 && lines.every((r) => r.bottom <= b.top + 0.5 || r.top >= b.bottom - 0.5 || r.right <= b.left || r.left >= b.right);
         }, scope);
       check(await clear('.user-msg'), `at ${width}px Show more covers no text`);
-      if (width === 1200) await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/long-message-collapsed.png') }).catch(() => {});
+      if (width === 1200) await p.screenshot({ path: path.join(opts.out, 'long-message-collapsed.png') }).catch(() => {});
       await more.click();
       check((await lines('.user-msg .bubble-text')) > 3.5 && (await more.innerText()).trim() === 'Show less' && (await more.getAttribute('aria-expanded')) === 'true', `at ${width}px Show more expands it in place and reads Show less`);
-      if (width === 1200) await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/long-message-expanded.png') }).catch(() => {});
+      if (width === 1200) await p.screenshot({ path: path.join(opts.out, 'long-message-expanded.png') }).catch(() => {});
       // Scrolled past, the sticky copy stays at 3 lines and under 30% of the view, even with the message expanded.
       await p.evaluate(() => {
         const t = document.querySelector('.transcript');
