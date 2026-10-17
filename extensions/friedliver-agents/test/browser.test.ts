@@ -128,3 +128,15 @@ describe('browser tool arguments', () => {
     expect(handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } })).toMatchObject({ reply: { result: { isError: true } } });
   });
 });
+
+describe('security: only FriedLiver-opened tabs, local-only CORS, private screenshots', () => {
+  it('never adopts a tab FriedLiver did not open', async () => {
+    const { ownTab } = await import('../src/host/browserRules');
+    const mine = { id: 1 };
+    const users = { id: 2 };
+    expect(ownTab(mine, [users, mine])).toBe(mine);
+    expect(() => ownTab(undefined, [users])).toThrow(/browser_open first/);
+    expect(() => ownTab(mine, [users])).toThrow(/browser_open first/);
+  });
+
+});

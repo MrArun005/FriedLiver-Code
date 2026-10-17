@@ -31,6 +31,15 @@ export function checkBrowserUrl(raw: string): string {
   return url.href;
 }
 
+/**
+ * The tab agents may drive: only the one FriedLiver opened (an approved
+ * browser_open or the user's Open Browser), never another tab of the user's.
+ */
+export function ownTab<T>(tab: T | undefined, open: readonly T[]): T {
+  if (!tab || !open.includes(tab)) throw new Error("FriedLiver's browser has no page open. Use browser_open first.");
+  return tab;
+}
+
 export function isLocalhost(url: string): boolean {
   try {
     const u = new URL(url);

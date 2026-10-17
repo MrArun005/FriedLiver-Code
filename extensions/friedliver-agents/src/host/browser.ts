@@ -12,7 +12,7 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
-import { clampBrowserWidth, relaxLocalhostCors, type PausedResponse } from './browserRules';
+import { clampBrowserWidth, ownTab, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
 const URL_KEY = 'friedliver.browser.lastUrl';
@@ -323,15 +323,14 @@ export class BrowserPanel implements vscode.Disposable {
     await this.layout(clampBrowserWidth(this.context.globalState.get(WIDTH_KEY)));
   }
 
-  /** The CDP session on the browser's page: FriedLiver's tab, else the one the user has active. */
+  /** The CDP session on FriedLiver's own tab; never a tab the user opened. */
   private page(): Promise<Cdp> {
-    if (!this.live()) {
-      const other = vscode.window.activeBrowserTab ?? vscode.window.browserTabs[0];
-      if (!other) return Promise.reject(new Error('No page is open in the browser. Use browser_open first.'));
-      this.tab = other;
-      this.cdp = undefined;
+    let tab: vscode.BrowserTab;
+    try {
+      tab = ownTab(this.tab, vscode.window.browserTabs);
+    } catch (err) {
+      return Promise.reject(err);
     }
-    const tab = this.tab!;
     const cdp = this.cdp?.then((c) => (c.closed ? Cdp.attach(tab, () => this.corsRelaxed()) : c));
     this.cdp = cdp ?? Cdp.attach(tab, () => this.corsRelaxed());
     this.cdp.catch(() => (this.cdp = undefined));
