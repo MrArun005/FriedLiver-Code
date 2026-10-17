@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import { langOf } from '../shared/highlight';
 import { formatDuration, type Item } from '../shared/model';
-import { heredocOf, inFolder, isShell, stepOutput, stepSummary, typeable, type Heredoc } from '../shared/steps';
+import { heredocOf, inFolder, isShell, stepOutput, stepSummary, typeable, type Approval, type Heredoc } from '../shared/steps';
 import type { ToolOut } from '../shared/tools';
 import { Code, CopyButton, Dot, Icon, RunButton, basename, memo, send } from './common';
 import { DiffView } from './controls';
@@ -24,7 +24,7 @@ export const hasDetails = (t: ToolItem) => !!t.input || !!t.cmd || !!t.about || 
  * `busy`: the chat's turn is running; a step left in progress after it ends doesn't pulse.
  * `chatId` and `cwd`: the chat, for Run in terminal and for opening files in its folder.
  */
-export type StepsProps = { tools: ToolItem[]; waiting: Set<string>; waitingKey: string; busy: boolean; chatId: string; cwd: string };
+export type StepsProps = { tools: ToolItem[]; approvals?: Record<string, Approval>; waiting: Set<string>; waitingKey: string; busy: boolean; chatId: string; cwd: string };
 
 /** A run of tool calls; drawn again when one of them or the questions about them change. */
 export const Steps = memo(
@@ -35,10 +35,10 @@ export const Steps = memo(
     a.chatId === b.chatId &&
     a.cwd === b.cwd &&
     a.tools.length === b.tools.length &&
-    a.tools.every((t, n) => t === b.tools[n]),
+    a.tools.every((t, n) => t === b.tools[n] && a.approvals?.[t.id]?.text === b.approvals?.[t.id]?.text),
 );
 
-function StepsView({ tools, waiting, busy, chatId, cwd }: StepsProps) {
+function StepsView({ tools, approvals, waiting, busy, chatId, cwd }: StepsProps) {
   // Failed steps show their output; the others open on request.
   const [open, setOpen] = useState<Record<string, boolean>>({});
   return (
@@ -46,13 +46,13 @@ function StepsView({ tools, waiting, busy, chatId, cwd }: StepsProps) {
       {tools.map((t) => {
         const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
         const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
-        return <Step key={t.id} tool={t} state={state} still={!busy} open={isOpen} onToggle={() => setOpen({ ...open, [t.id]: !isOpen })} chatId={chatId} cwd={cwd} />;
+        return <Step key={t.id} tool={t} approval={approvals?.[t.id]} state={state} still={!busy} open={isOpen} onToggle={() => setOpen({ ...open, [t.id]: !isOpen })} chatId={chatId} cwd={cwd} />;
       })}
     </ol>
   );
 }
 
-function Step({ tool: t, state, still, open, onToggle, chatId, cwd }: { tool: ToolItem; state: string; still: boolean; open: boolean; onToggle(): void; chatId: string; cwd: string }) {
+function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: { tool: ToolItem; approval?: Approval; state: string; still: boolean; open: boolean; onToggle(): void; chatId: string; cwd: string }) {
   const s = useMemo(() => stepSummary(t), [t.title, t.toolKind, t.cmd]);
   const more = hasDetails(t);
   const id = `step-${t.id}`;
@@ -90,7 +90,8 @@ function Step({ tool: t, state, still, open, onToggle, chatId, cwd }: { tool: To
         )}
         <span class="step-end">
           {exit !== undefined && exit !== 0 && <span class="tag bad">exit {exit}</span>}
-          {t.toolKind && <span class="tag">{t.toolKind}</span>}
+          {approval && <span class={`tag${approval.ok ? ' ok' : ' bad'}`}>{approval.text}</span>}
+          {t.toolKind && t.toolKind !== 'other' && <span class="tag">{t.toolKind}</span>}
           {/* The slot stays without details too, so the kinds line up. */}
           <span class="step-chevron" aria-hidden="true" onClick={more ? onToggle : undefined}>
             {more && <Icon name="chevron" />}

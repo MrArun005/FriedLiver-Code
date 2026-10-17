@@ -1021,10 +1021,13 @@ button.badge:hover:not(:disabled) {
 }
 .bubble {
   align-self: flex-end;
-  max-width: 88%;
+  /* A visible container even where the theme's secondary button colour is the background. */
+  max-width: 70%;
+  margin: var(--sp-2) 0;
   padding: 10px 14px;
   border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg);
-  background: var(--raised);
+  background: color-mix(in srgb, var(--focus) 16%, var(--ground));
+  border: 1px solid color-mix(in srgb, var(--focus) 30%, transparent);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -3011,6 +3014,10 @@ button.step-main:hover:not(:disabled) {
 }
 .steps li[data-open] > .step-row .step-chevron .icon {
   transform: none;
+}
+.tag.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
 }
 .tag.bad {
   color: var(--bad);
