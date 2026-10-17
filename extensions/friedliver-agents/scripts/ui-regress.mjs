@@ -91,28 +91,52 @@ BLOCKS.F01 = async () => {
   }
 };
 
-// ---- F02: decision keys act on one card, the one that shows the hint ----
+// ---- F02 + security: the keys act on the one marked card; arrivals never take it over ----
+const GRACE = 650;
 BLOCKS.F02 = async () => {
-  // chat-c1 waits on two things: an agent's request to message another chat, then an edit permission.
+  // chat-c1 waits on two things: an agent's request to message another chat (older), then an edit permission.
   const p = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
   const hinted = () => p.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id));
-  check(JSON.stringify(await hinted()) === JSON.stringify(['item-perm-c1']), `only the nearest waiting card shows the key hint [${await hinted()}]`);
+  check(JSON.stringify(await hinted()) === JSON.stringify(['item-bridge-c1']), `only the oldest waiting card is marked [${await hinted()}]`);
+  const outline = await p.locator('#item-bridge-c1').evaluate((c) => window.getComputedStyle(c).outlineStyle);
+  check(outline === 'solid', 'the marked card has a visible outline');
   await p.click('.composer textarea');
+  await p.waitForTimeout(GRACE);
   await p.keyboard.press('1');
   let last = (await posted(p)).at(-1);
-  check(last?.type === 'permission' && last.requestId === 'perm-c1' && (await p.inputValue('.composer textarea')) === '', `1 picks the hinted card's first option and types nothing [${JSON.stringify(last)}]`);
-  // Out of range: still nothing typed while a decision waits.
+  check(last?.type === 'bridge' && last.answer === 'allow' && (await p.inputValue('.composer textarea')) === '', `1 picks the marked card's first option and types nothing [${JSON.stringify(last)}]`);
   await p.keyboard.press('9');
   check((await p.inputValue('.composer textarea')) === '', 'a digit is never typed into the empty composer while a decision waits');
-  // Choosing the other card moves the keys and the hint to it.
-  await p.click('#item-bridge-c1 .ask-head');
-  check(JSON.stringify(await hinted()) === JSON.stringify(['item-bridge-c1']), 'clicking a card makes it the one the keys act on');
+  // Choosing the other card moves the keys and the mark, after the grace period.
+  const before = (await posted(p)).length;
+  await p.click('#item-perm-c1 .ask-head');
+  check(JSON.stringify(await hinted()) === JSON.stringify(['item-perm-c1']), 'clicking a card marks it');
   await p.click('.composer textarea');
   await p.keyboard.press('ControlOrMeta+Enter');
+  check((await posted(p)).length === before, 'a shortcut right after the mark moved does nothing');
+  await p.waitForTimeout(GRACE);
+  await p.keyboard.press('ControlOrMeta+Enter');
   last = (await posted(p)).at(-1);
-  check(last?.type === 'bridge' && last.requestId === 'bridge-c1' && last.answer === 'allow', `Ctrl/Cmd+Enter answers the chosen card [${JSON.stringify(last)}]`);
+  check(last?.type === 'permission' && last.requestId === 'perm-c1', `after the grace period Ctrl/Cmd+Enter answers the marked card [${JSON.stringify(last)}]`);
   check((await p.locator('#item-bridge-c1 .opt-num').count()) === 3, 'the request card numbers its options too');
   await p.close();
+  // A new request that arrives just before the keypress never takes the keys.
+  const q = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 900);
+  await q.click('.composer textarea');
+  await q.waitForTimeout(GRACE);
+  await q.evaluate(() => window.postMessage({ type: 'action', action: { t: 'items', chatId: 'chat-c2', items: [{ kind: 'command', commandId: 'cmd-new', commandLine: 'rm -rf build', cwd: '/w', state: 'awaiting' }] } }, '*'));
+  await q.keyboard.press('1');
+  last = (await posted(q)).at(-1);
+  check(last?.type === 'permission' && last.requestId === 'perm-c2', `1 pressed as a new request arrives applies to the card already marked [${JSON.stringify(last)}]`);
+  check(JSON.stringify(await q.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
+  await q.close();
+  // Each chat keeps its own mark.
+  const r = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
+  await r.click('#item-perm-c1 .ask-head');
+  await r.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c2' }, '*'));
+  await r.waitForTimeout(200);
+  check(JSON.stringify(await r.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
+  await r.close();
 };
 
 // ---- F09: a question's options are numbered, with their descriptions and the key hint ----
@@ -127,6 +151,7 @@ BLOCKS.F09 = async () => {
   check(opts[0]?.startsWith('1. Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3. In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
   check(await p.locator('#item-q-1 .hint.keys').isVisible(), 'the question shows the key hint');
   await p.click('.composer textarea');
+  await p.waitForTimeout(GRACE);
   await p.keyboard.press('2');
   const last = (await posted(p)).at(-1);
   check(last?.type === 'answerQuestion' && last.values?.store === 'sqlite', `2 answers with the second option [${JSON.stringify(last)}]`);

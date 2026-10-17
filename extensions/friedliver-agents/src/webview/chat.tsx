@@ -48,7 +48,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { ClampedText, CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
+import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -625,6 +625,8 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     el?.querySelector<HTMLButtonElement>('button')?.focus();
   }, [reveal]);
   const { items, approvals } = useMemo(() => foldApprovals(chat.items), [chat.items]);
+  // The marked decision card moves on when it is answered: its hint and outline follow.
+  useEffect(() => syncDecisionTarget(chat), [chat.items]);
   const lastChanges = items.map((i) => i.kind).lastIndexOf('changes');
   const waiting = new Set(chat.items.flatMap((i) => (i.kind === 'permission' && !i.answer && i.toolCallId ? [i.toolCallId] : [])));
   const waitingKey = [...waiting].join('\n');
@@ -1017,7 +1019,7 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
     );
   }
   return (
-    <section class="ask bridge" id={`item-${item.requestId}`} aria-label={title} {...chooseOn(item.requestId)}>
+    <section class="ask bridge" id={`item-${item.requestId}`} aria-label={title} {...chooseOn(chat, item.requestId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         <Glyph agent={chat.agent} size="sm" />
@@ -1096,7 +1098,7 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
     );
   }
   return (
-    <section class="ask" id={`item-${item.reviewId}`} aria-label="Edit to review" {...chooseOn(item.reviewId)}>
+    <section class="ask" id={`item-${item.reviewId}`} aria-label="Edit to review" {...chooseOn(chat, item.reviewId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         <Glyph agent={chat.agent} size="sm" /> {item.isNew ? 'New file to review' : 'Edit to review'}
@@ -1128,7 +1130,7 @@ const COMMAND_STATE: Record<CommandItem['state'], string> = { awaiting: 'needs-y
 function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
   if (item.state === 'awaiting') {
     return (
-      <section class="ask" id={`item-${item.commandId}`} aria-label="Command to approve" {...chooseOn(item.commandId)}>
+      <section class="ask" id={`item-${item.commandId}`} aria-label="Command to approve" {...chooseOn(chat, item.commandId)}>
         <div class="ask-head">
           <Dot state="needs-you" />
           <Glyph agent={chat.agent} size="sm" /> {chat.label} wants to run a command

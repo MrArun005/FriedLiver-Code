@@ -3925,6 +3925,11 @@ button.decide .opt-desc {
   color: inherit;
   opacity: 0.8;
 }
+/* The card the decision keys act on: outlined, and the only one with the key hint. */
+.ask:has(> .hint.keys) {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
 button.escalate {
   color: var(--fg-2);
 }
