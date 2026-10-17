@@ -124,7 +124,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
         <div class="card-top">
           <Glyph agent="claude" />
           <span class="tag" title={OUTSIDE_TIP}>
-            Claude Code
+            {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
           <span class="sep">·</span>
           <span title="Last activity">{ago(s.lastActivity, now)}</span>
@@ -166,7 +166,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         </td>
         <td class="c-agent">
           <span class="tag" title={OUTSIDE_TIP}>
-            Claude Code
+            {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
         </td>
         <td class="c-task">

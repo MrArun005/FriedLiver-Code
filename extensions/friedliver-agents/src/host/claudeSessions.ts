@@ -43,6 +43,7 @@ const clipTitle = (t: string) => clipTo(t, TITLE_MAX);
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
 type Line = {
   type?: string;
+  cwd?: string;
   isMeta?: boolean;
   isSidechain?: boolean;
   timestamp?: string;
@@ -62,6 +63,8 @@ const tag = (body: string, name: string) => new RegExp(`<${name}>([^<]*)</${name
 // ---- One session transcript ----
 
 interface SessionState {
+  /** The folder it started in, as its first record says. */
+  cwd?: string;
   custom: string;
   auto: string;
   prompt: string;
@@ -89,6 +92,7 @@ const newSession = (): SessionState => ({
 });
 
 function feedSession(s: SessionState, o: Line): void {
+  if (s.cwd === undefined && typeof o.cwd === 'string') s.cwd = o.cwd;
   // The latest title wins: Claude Code appends a new one as the session goes on, and a name the user gave beats its own.
   if (o.type === 'custom-title' && typeof o.customTitle === 'string') s.custom = o.customTitle;
   else if (o.type === 'ai-title' && typeof o.aiTitle === 'string') s.auto = o.aiTitle;
@@ -339,6 +343,7 @@ async function sessionSubagents(dir: string, s: SessionState, touched: Set<strin
 export interface ListOptions {
   /** The current user's home; sessions are only read under its .claude/projects. */
   home: string;
+  /** The workspace folders. None (a window with no folder): every project's sessions from the last week, grouped by project. */
   folders: readonly string[];
   /** Session ids FriedLiver's own chats already have. */
   skip?: ReadonlySet<string>;
@@ -364,9 +369,13 @@ async function list({ home, folders, skip, limit = 50, showAll = false, now = Da
   const base = path.join(home, '.claude', 'projects');
   const realBase = await realpath(base).catch(() => null);
   if (!realBase) return [];
-  const found: { id: string; cwd: string; dir: string; file: string; mtime: number; ino: number; size: number }[] = [];
-  for (const cwd of folders) {
-    const dir = path.join(base, encodeCwd(cwd));
+  const all = folders.length === 0;
+  // With no folder, each project folder's own sessions say which folder they ran in (see below).
+  const projects: { cwd?: string; dir: string }[] = all
+    ? (await readdir(realBase).catch(() => [] as string[])).map((name) => ({ dir: path.join(realBase, name) }))
+    : folders.map((cwd) => ({ cwd, dir: path.join(base, encodeCwd(cwd)) }));
+  const found: { id: string; cwd?: string; dir: string; file: string; mtime: number; ino: number; size: number }[] = [];
+  for (const { cwd, dir } of projects) {
     const real = await realpath(dir).catch(() => null);
     if (!real || path.dirname(real) !== realBase) continue;
     const names = await readdir(real).catch(() => [] as string[]);
@@ -375,7 +384,8 @@ async function list({ home, folders, skip, limit = 50, showAll = false, now = Da
       if (!m || skip?.has(m[1])) continue;
       const file = path.join(real, name);
       const st = await lstat(file).catch(() => null);
-      if (st?.isFile()) found.push({ id: m[1], cwd, dir: real, file, mtime: st.mtimeMs, ino: st.ino, size: st.size });
+      if (!st?.isFile() || (all && !showAll && now - st.mtimeMs > WEEK_MS)) continue;
+      found.push({ id: m[1], cwd, dir: real, file, mtime: st.mtimeMs, ino: st.ino, size: st.size });
     }
   }
   found.sort((a, b) => b.mtime - a.mtime);
@@ -385,6 +395,9 @@ async function list({ home, folders, skip, limit = 50, showAll = false, now = Da
     touched.add(f.file);
     const state = await advance(f.file, f, newSession, feedSession).catch(() => null);
     if (!state) continue;
+    // Only a folder whose name is this project folder's: resuming runs Claude Code there.
+    const cwd = f.cwd ?? (state.cwd && encodeCwd(state.cwd) === path.basename(f.dir) ? state.cwd : undefined);
+    if (!cwd) continue;
     const { trivial, title, messages } = summarize(state);
     const { subs, lastActivity: agentsActive } = await sessionSubagents(path.join(f.dir, f.id, 'subagents'), state, touched);
     // A session that launched subagents is never trivial.
@@ -392,17 +405,24 @@ async function list({ home, folders, skip, limit = 50, showAll = false, now = Da
     const lastActivity = Math.max(f.mtime, agentsActive);
     out.push({
       id: f.id,
-      cwd: f.cwd,
+      cwd,
+      ...(all ? { project: path.basename(cwd) || cwd } : {}),
       lastActivity,
       messages,
       subagents: subs,
-      title: title || `${path.basename(f.cwd) || f.cwd} · ${new Date(f.mtime).toISOString().slice(0, 10)}`,
+      title: title || `${path.basename(cwd) || cwd} · ${new Date(f.mtime).toISOString().slice(0, 10)}`,
       ...(!showAll && now - lastActivity > WEEK_MS ? { archived: true } : {}),
     });
   }
   // Forget files no longer listed, so memory follows what the Manager shows.
   for (const file of tails.keys()) if (!touched.has(file)) tails.delete(file);
   for (const file of metas.keys()) if (!touched.has(file.replace(/\.meta\.json$/, '.jsonl'))) metas.delete(file);
+  if (all) {
+    // By project, the most recently active project first; newest first within one (sort is stable).
+    const rank = new Map<string, number>();
+    for (const s of out) if (!rank.has(s.cwd)) rank.set(s.cwd, rank.size);
+    out.sort((a, b) => rank.get(a.cwd)! - rank.get(b.cwd)!);
+  }
   // Archived ones last, so the board's newest-first order is unchanged.
   return [...out.filter((s) => !s.archived), ...out.filter((s) => s.archived)];
 }

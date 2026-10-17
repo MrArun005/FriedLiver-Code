@@ -132,6 +132,8 @@ export interface ClaudeSession {
   id: string;
   /** The workspace folder it ran in. */
   cwd: string;
+  /** Its folder's name, in a window with no folder: there the Manager lists every project's recent sessions, grouped by this. */
+  project?: string;
   title: string;
   /** When its transcript last changed, ms since the epoch. */
   lastActivity: number;
