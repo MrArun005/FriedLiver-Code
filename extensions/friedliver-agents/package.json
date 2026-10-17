@@ -440,6 +440,11 @@
           "default": "Inter",
           "markdownDescription": "Font for the chat, the Agent Manager and the other FriedLiver views. `Inter` is bundled; leave it empty to use the editor's UI font. Takes effect when a view next opens."
         },
+        "friedliver.chat.accentColor": {
+          "type": "string",
+          "default": "#D97757",
+          "markdownDescription": "The chat's one accent colour, used only as the border of the recommended answer. Leave it empty to use the theme's button colour. Takes effect when a view next opens."
+        },
         "friedliver.agents.claude.command": {
           "scope": "machine",
           "type": "string",

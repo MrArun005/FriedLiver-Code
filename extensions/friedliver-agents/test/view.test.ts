@@ -34,7 +34,7 @@ import {
   statusGroups,
   switcherGroups,
   tipPlace,
-  clockTime,
+  stepsHeading,
   shortDuration,
   transcriptGroups,
   switcherMeta,
@@ -525,11 +525,15 @@ describe('the chat transcript', () => {
     expect(groups.map((g) => g.at)).toEqual([0, 1, 3, 4]);
   });
   it('reads times and durations short', () => {
-    expect(clockTime(new Date(2026, 0, 1, 22, 24).getTime())).toBe('10:24 PM');
-    expect(clockTime(new Date(2026, 0, 1, 9, 5).getTime())).toBe('9:05 AM');
     expect(shortDuration(340)).toBe('340ms');
     expect(shortDuration(1400)).toBe('1s');
     expect(shortDuration(125_000)).toBe('2m 5s');
+  });
+  it('heads a step box with what the steps did, how many and how long', () => {
+    const b = (id: string, ms: number) => ({ ...(tool(id) as Extract<Item, { kind: 'tool' }>), title: `mcp__friedliver__browser_${id}`, ms });
+    expect(stepsHeading([b('open', 1200), b('click', 3100), b('click', 2000), b('screenshot', 900)])).toBe('Used the browser · 4 steps · 7s');
+    expect(stepsHeading([{ ...(tool('x') as Extract<Item, { kind: 'tool' }>), cmd: { line: 'ls' } }])).toBe('Ran commands · 1 step');
+    expect(stepsHeading([tool('a') as Extract<Item, { kind: 'tool' }>, tool('b') as Extract<Item, { kind: 'tool' }>])).toBe('Used tools · 2 steps');
   });
   it('says where a chat stands and when it last moved', () => {
     expect(switcherMeta(chat('x', { items: [said, waiting], lastActivity: 1000 }), 43_000)).toBe('Needs you · 42s ago');

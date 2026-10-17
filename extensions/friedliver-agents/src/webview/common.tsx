@@ -46,6 +46,12 @@ export function usePersisted<T>(key: string, initial: T): [T, (value: T) => void
   }
 }
 
+// friedliver.chat.accentColor: any CSS colour; empty keeps the theme's button colour.
+{
+  const accent = document.body?.dataset.accent?.trim();
+  if (accent && CSS.supports('color', accent)) document.documentElement.style.setProperty('--fl-accent', accent);
+}
+
 export function useWidth(): number {
   const [width, setWidth] = useState(window.innerWidth);
   useEffect(() => {
