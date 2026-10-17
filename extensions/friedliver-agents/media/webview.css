@@ -2043,6 +2043,21 @@ svg[data-lit] .map-file-line:not(.lit) {
 .chat-table .group-row .dot {
   margin-right: 6px;
 }
+.chat-table .group-row .col-count {
+  margin-left: var(--sp-2);
+}
+/* Grouped by status, the group header already says it: at narrow widths the column gives its room to the task. */
+@media (max-width: 800px) {
+  .chat-table[data-grouped] .c-status {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+  .chat-table[data-grouped] .c-status > * {
+    display: none;
+  }
+}
 .map-tip {
   position: fixed;
   z-index: 5;

@@ -901,7 +901,7 @@ function List({
   const conflicts = fileConflicts(state);
   return (
     <div class="table-wrap">
-      <table class="chat-table">
+      <table class="chat-table" data-grouped={grouped ? '' : undefined}>
         <thead>
           <tr>
             {SORT_COLUMNS.map((col) => {

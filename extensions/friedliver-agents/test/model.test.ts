@@ -214,6 +214,13 @@ describe('status and task cards', () => {
     expect(stateLine(plan).text).toBe('Step 2 of 4: two');
   });
 
+  it('says a permission for a command once, not "rm x: rm x" (QA F14)', () => {
+    const perm = (title: string) =>
+      chat({ items: [{ kind: 'permission', requestId: 'p1', title, options: [], detail: { command: { line: 'rm src/legacyStore.ts' } } } as never] });
+    expect(stateLine(perm('rm src/legacyStore.ts'))).toMatchObject({ text: 'Asks to run', code: 'rm src/legacyStore.ts' });
+    expect(stateLine(perm('Delete the old store'))).toMatchObject({ text: 'Asks: Delete the old store', code: 'rm src/legacyStore.ts' });
+  });
+
   it('shortens titles and ages', () => {
     expect(titleFrom('fix it\nmore')).toBe('fix it');
     expect(titleFrom('x'.repeat(80))).toHaveLength(58);
