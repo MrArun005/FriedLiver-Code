@@ -4656,6 +4656,16 @@ button.starter:hover {
   margin: var(--sp-2) 0 0;
   font-size: var(--t-85);
 }
+.chat-item-time {
+  flex: none;
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
+}
+.chat-item:hover .chat-item-time,
+.chat-item[aria-selected='true'] .chat-item-time {
+  display: none;
+}
 .reopen {
   display: flex;
   flex-direction: column;

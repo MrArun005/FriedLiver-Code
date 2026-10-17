@@ -41,6 +41,7 @@ import {
   slashAction,
   slashMenu,
   switcherGroups,
+  ago,
   starters,
   switcherMeta,
   transcriptGroups,
@@ -367,11 +368,13 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
                 onClick={() => onPick(c.id)}
                 onMouseMove={() => setAt(flat.indexOf(c))}
               >
+                <Glyph agent={c.agent} size="sm" />
                 <span class="chat-item-text">
                   <span class="pick-title" title={`${c.title} (${c.label}) · ${switcherMeta(c, now)}`}>
                     {c.title}
                   </span>
                 </span>
+                <span class="chat-item-time">{ago(c.lastActivity, now)}</span>
                 <span class="chat-item-more" onClick={(e) => e.stopPropagation()}>
                   <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="ghost icon-btn sm" trigger={<Icon name="more" />}>
                     {(close) => (
