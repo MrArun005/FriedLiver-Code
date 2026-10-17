@@ -494,17 +494,17 @@
         "id": "friedliver.decision",
         "description": "The one loud color: something waits for your decision (waiting badge, Accept, Run).",
         "defaults": {
-          "dark": "#7cc4ff",
-          "light": "#0a68c7",
+          "dark": "#d97757",
+          "light": "#a6461f",
           "highContrast": "#ffffff",
-          "highContrastLight": "#0a68c7"
+          "highContrastLight": "#a6461f"
         }
       },
       {
         "id": "friedliver.decisionForeground",
         "description": "Text on the decision color.",
         "defaults": {
-          "dark": "#03121f",
+          "dark": "#1f1209",
           "light": "#ffffff",
           "highContrast": "#000000",
           "highContrastLight": "#ffffff"
