@@ -6,9 +6,10 @@
 import { useMemo, useState } from 'preact/hooks';
 import { langOf } from '../shared/highlight';
 import { formatDuration, type Item } from '../shared/model';
+import { shortDuration } from '../shared/view';
 import { heredocOf, inFolder, isShell, stepOutput, stepSummary, typeable, type Approval, type Heredoc } from '../shared/steps';
 import type { ToolOut } from '../shared/tools';
-import { Code, CopyButton, Dot, Icon, RunButton, basename, memo, send } from './common';
+import { Code, CopyButton, Icon, RunButton, basename, memo, send } from './common';
 import { DiffView } from './controls';
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
@@ -41,24 +42,46 @@ export const Steps = memo(
 function StepsView({ tools, approvals, waiting, busy, chatId, cwd }: StepsProps) {
   // Failed steps show their output; the others open on request.
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [folded, setFolded] = useState(false);
+  const ms = tools.reduce((sum, t) => sum + (t.ms ?? 0), 0);
   return (
-    <ol class="steps" aria-label="Steps">
-      {tools.map((t) => {
-        const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
-        const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
-        return <Step key={t.id} tool={t} approval={approvals?.[t.id]} state={state} still={!busy} open={isOpen} onToggle={() => setOpen({ ...open, [t.id]: !isOpen })} chatId={chatId} cwd={cwd} />;
-      })}
-    </ol>
+    <section class="step-card" data-folded={folded ? '' : undefined}>
+      <button type="button" class="ghost sm step-fold" aria-expanded={!folded} onClick={() => setFolded(!folded)}>
+        {folded ? `${tools.length} step${tools.length === 1 ? '' : 's'}${ms ? ` · ${shortDuration(ms)}` : ''}` : 'Collapse'} <Icon name="chevron" />
+      </button>
+      {!folded && (
+        <ol class="steps" aria-label="Steps">
+          {tools.map((t, n) => {
+            const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
+            const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
+            return <Step key={t.id} n={n + 1} tool={t} approval={approvals?.[t.id]} state={state} still={!busy} open={isOpen} onToggle={() => setOpen({ ...open, [t.id]: !isOpen })} chatId={chatId} cwd={cwd} />;
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 
-function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: { tool: ToolItem; approval?: Approval; state: string; still: boolean; open: boolean; onToggle(): void; chatId: string; cwd: string }) {
-  const s = useMemo(() => stepSummary(t), [t.title, t.toolKind, t.cmd]);
+/** A step's mark: a check when done, a spinner while it runs, a cross when it failed. */
+function StepMark({ state, still }: { state: string; still: boolean }) {
+  if (state === 'done' || state === 'error' || (state === 'working' && !still)) {
+    return (
+      <span class="step-mark" data-state={state} role="img" aria-label={state === 'error' ? 'Failed' : 'Done'}>
+        <Icon name={state === 'error' ? 'close' : 'check'} />
+      </span>
+    );
+  }
+  return <span class="step-mark" data-state={state} role="img" aria-label={state === 'working' ? 'Running' : state === 'needs-you' ? 'Needs you' : 'Next'} />;
+}
+
+function Step({ n, tool: t, approval, state, still, open, onToggle, chatId, cwd }: { n: number; tool: ToolItem; approval?: Approval; state: string; still: boolean; open: boolean; onToggle(): void; chatId: string; cwd: string }) {
+  const s = useMemo(() => stepSummary(t), [t.title, t.toolKind, t.cmd, t.input]);
   const more = hasDetails(t);
   const id = `step-${t.id}`;
   const exit = t.exit ?? exitInOutput(t.out);
   const head = (
     <>
+      <span class="step-n">{n}.</span>
       <span class="step-verb">{s.verb}</span>
       <span class={`step-text${s.mono ? ' mono' : ''}`}>{s.text}</span>
       {s.lines && <span class="step-lines">{s.lines} lines</span>}
@@ -69,7 +92,7 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
   return (
     <li id={`item-${t.id}`} data-state={state} data-open={open ? '' : undefined}>
       <div class="step-row">
-        <Dot state={state} still={still} />
+        <StepMark state={state} still={still} />
         {more ? (
           <button type="button" class="step-main" title={tip} aria-expanded={open} aria-controls={open ? id : undefined} onClick={onToggle}>
             {head}
@@ -92,6 +115,7 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
           {exit !== undefined && exit !== 0 && <span class="tag bad">exit {exit}</span>}
           {approval && <span class={`tag${approval.ok ? ' ok' : ' bad'}`}>{approval.text}</span>}
           {t.toolKind && t.toolKind !== 'other' && <span class="tag">{t.toolKind}</span>}
+          {t.ms !== undefined && <span class="step-time">{shortDuration(t.ms)}</span>}
           {/* The slot stays without details too, so the kinds line up. */}
           <span class="step-chevron" aria-hidden="true" onClick={more ? onToggle : undefined}>
             {more && <Icon name="chevron" />}

@@ -435,6 +435,10 @@ export class AgentCore {
     else if (!chat.items.some((i) => i.kind === 'user' || i.kind === 'link') && text.trim()) this.dispatch({ t: 'title', chatId: chat.id, title: titleFrom(text) });
   }
 
+  star(chatId: string, starred: boolean): void {
+    this.dispatch({ t: 'star', chatId, starred });
+  }
+
   /** A name you gave: the title stops following the conversation. */
   renameChat(chatId: string, title: string): void {
     const name = title.trim();

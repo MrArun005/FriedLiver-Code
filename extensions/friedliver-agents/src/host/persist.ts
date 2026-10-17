@@ -199,6 +199,7 @@ export function parseSaved(raw: unknown): SavedState | null {
       lastActivity: num(c.lastActivity, createdAt),
       turns: num(c.turns, 0),
       archived: c.archived === true || undefined,
+      starred: c.starred === true || undefined,
       session: savedSession(c.session),
       // Full auto is never restored: a reopened chat asks again.
       approval: c.approval === 'edits' ? 'edits' : undefined,

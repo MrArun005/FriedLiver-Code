@@ -107,7 +107,7 @@ export function PipeMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Ch
 const byLabel = new Intl.Collator('en', { numeric: true });
 
 /** The other open chats, read from the live state only while the menu is open. */
-function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: boolean): void }) {
+export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: boolean): void }) {
   const state = useContext(LiveState);
   const others = openChats(state.chats)
     .filter((c) => c.id !== chat.id)

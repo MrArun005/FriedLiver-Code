@@ -201,6 +201,8 @@ describe('the chat switcher', () => {
     expect(groups.map((g) => g.chats.length)).toEqual([3, 3, 2]);
     expect(groups[0].chats.map((c) => c.id)).toEqual(['c6', 'c3', 'c0']);
     expect(switcherGroups(chats, 'nothing')).toEqual([]);
+    const starred = switcherGroups(chats.map((c) => (c.id === 'c2' ? { ...c, starred: true } : c)), '');
+    expect(starred.map((g) => [g.title, g.chats.length])).toEqual([['Starred', 1], ['Needs you', 3], ['Working', 3], ['Done', 1]]);
   });
 });
 

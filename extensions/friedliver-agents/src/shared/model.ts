@@ -210,6 +210,8 @@ export interface ChatView {
   lastActivity: number;
   /** Finished turns. */
   turns: number;
+  /** Starred: kept at the top of the chat list. */
+  starred?: boolean;
   /** Put away: kept for its history, hidden from the board and the tab bar. */
   archived?: boolean;
   /** What the agent's session offers (model, effort, modes, commands) and reports (mode, usage). */
@@ -260,6 +262,7 @@ export type Action =
   /** Files a turn proposed or changed, relative to the chat's cwd; merged into `files`. */
   | { t: 'files'; chatId: string; files: string[] }
   | { t: 'archive'; chatId: string; archived: boolean }
+  | { t: 'star'; chatId: string; starred: boolean }
   /** The chat's session as the agent started or reloaded it; undefined forgets it. */
   | { t: 'session'; chatId: string; session: ChatSession | undefined }
   | { t: 'approval'; chatId: string; level: ApprovalLevel }
@@ -310,6 +313,8 @@ export function reduce(state: AppState, action: Action): AppState {
         turns: c.busy && !action.busy ? c.turns + 1 : c.turns,
         lastActivity: action.at ?? c.lastActivity,
       }));
+    case 'star':
+      return editChat(state, action.chatId, (c) => ({ ...c, starred: action.starred || undefined }));
     case 'title':
       return editChat(state, action.chatId, (c) => (c.titlePinned && !action.pinned ? c : { ...c, title: action.title, ...(action.pinned ? { titlePinned: true } : {}) }));
     case 'permissionAnswered':

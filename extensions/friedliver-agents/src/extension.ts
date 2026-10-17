@@ -532,6 +532,9 @@ export class Controller {
         case 'archive':
           this.core.archive(m.chatId, m.archived);
           return;
+        case 'star':
+          this.core.star(m.chatId, m.starred);
+          return;
         case 'renameChat': {
           const chat = this.core.chat(m.chatId);
           if (!chat) return;

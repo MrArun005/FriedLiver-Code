@@ -1,4 +1,4 @@
-import { render } from 'preact';
+import { Fragment, render } from 'preact';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import {
@@ -11,6 +11,7 @@ import {
   waitingItems,
   parseMention,
   shortCommand,
+  type AgentKey,
   type AppState,
   type BridgeItem,
   type ChatView,
@@ -35,18 +36,24 @@ import {
   slashAction,
   slashMenu,
   switcherGroups,
+  switcherMeta,
+  transcriptGroups,
+  type TranscriptGroup,
+  clockTime,
   statusOf,
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { foldApprovals } from '../shared/steps';
-import { CopyButton, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
-import { AskMenu, HandoffMenu, PipeMenu } from './connect';
+import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
+import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, EditsBar, ModeBadge, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
 import { Steps } from './steps';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** From this width the chat list sits beside the chat. */
+const WIDE = 900;
 
 type Select = (chatId: string) => void;
 
@@ -79,11 +86,20 @@ function App() {
     send({ type: 'select', chatId });
   }, []);
   const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
+  // Wide (the chat in the editor area): the chat list stays open beside it. Narrow: tabs and a dropdown.
+  const wide = useWidth() >= WIDE;
 
   return (
     <LiveState.Provider value={state}>
-      <div class="chat-app">
-        <Switcher state={state} active={chat?.id} onSelect={select} />
+      <div class="chat-app" data-wide={wide ? '' : undefined}>
+        {wide ? (
+          <aside class="chat-side" aria-label="Chats">
+            <AllChats state={state} active={chat?.id} onPick={select} newAgent={chat?.agent} />
+          </aside>
+        ) : (
+          <Switcher state={state} active={chat?.id} onSelect={select} />
+        )}
+        <div class="chat-main">
         {chat ? (
           <>
             <ChatHeader chat={chat} state={state} onSelect={select} />
@@ -110,6 +126,7 @@ function App() {
         ) : (
           <Empty />
         )}
+        </div>
       </div>
     </LiveState.Provider>
   );
@@ -190,10 +207,11 @@ function Switcher({ state, active, onSelect }: { state: AppState; active?: strin
   );
 }
 
-function AllChats({ state, active, onPick }: { state: AppState; active?: string; onPick: Select }) {
+function AllChats({ state, active, onPick, newAgent }: { state: AppState; active?: string; onPick: Select; newAgent?: AgentKey }) {
   const [query, setQuery] = useState('');
   const [at, setAt] = useState(0);
   const listId = useId();
+  const now = useNow(10_000);
   const groups = switcherGroups(state.chats, query);
   const flat = groups.flatMap((g) => g.chats);
   const current = flat[Math.min(at, flat.length - 1)];
@@ -203,6 +221,12 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
   }, [current?.id]);
   return (
     <div class="all-chats">
+      <button class="primary new-chat" onClick={() => send({ type: 'newChat', agent: newAgent ?? 'claude' })} title="New chat">
+        <span>
+          <Icon name="plus" /> New chat
+        </span>
+        <kbd>{IS_MAC ? '⌘N' : 'Ctrl+N'}</kbd>
+      </button>
       <label class="search">
         <Icon name="search" />
         <input
@@ -210,7 +234,7 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
           aria-controls={listId}
           aria-activedescendant={current ? `${listId}-${current.id}` : undefined}
           aria-label="Search chats"
-          placeholder="Search chats"
+          placeholder="Search chats…"
           value={query}
           onInput={(e) => {
             setQuery(e.currentTarget.value);
@@ -232,7 +256,7 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
         {groups.map((g) => (
           <div key={g.status} role="group" aria-label={g.title}>
             <div class="pop-group" aria-hidden="true">
-              <Dot state={g.status} />
+              {g.status === 'starred' ? <Icon name="star" /> : <Dot state={g.status} still />}
               {g.title}
               <span class="col-count">{g.chats.length}</span>
             </div>
@@ -241,18 +265,53 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
                 key={c.id}
                 id={`${listId}-${c.id}`}
                 role="option"
-                class="pick-row"
+                class="pick-row chat-item"
                 aria-selected={c === current}
                 data-open={c.id === active ? '' : undefined}
                 onClick={() => onPick(c.id)}
                 onMouseMove={() => setAt(flat.indexOf(c))}
               >
-                <Glyph agent={c.agent} size="sm" />
-                <span class="pick-title" title={c.label}>
-                  {c.title}
+                <span class="chat-item-text">
+                  <span class="pick-title" title={`${c.title} (${c.label})`}>
+                    {c.title}
+                  </span>
+                  <span class="pick-label">{switcherMeta(c, now)}</span>
                 </span>
-                <span class="pick-label">{AGENT_FACES[c.agent].name}</span>
-                <Dot state={statusOf(c)} />
+                <span class="chat-item-more" onClick={(e) => e.stopPropagation()}>
+                  <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="ghost icon-btn sm" trigger={<Icon name="more" />}>
+                    {(close) => (
+                      <>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            close();
+                            send({ type: 'renameChat', chatId: c.id });
+                          }}
+                        >
+                          <Icon name="rename" /> Rename
+                        </button>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            close();
+                            send({ type: 'star', chatId: c.id, starred: !c.starred });
+                          }}
+                        >
+                          <Icon name="star" /> {c.starred ? 'Unstar' : 'Star'}
+                        </button>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            close();
+                            send({ type: 'archive', chatId: c.id, archived: true });
+                          }}
+                        >
+                          <Icon name="archive" /> Archive
+                        </button>
+                      </>
+                    )}
+                  </Popover>
+                </span>
               </div>
             ))}
           </div>
@@ -270,9 +329,10 @@ function AllChats({ state, active, onPick }: { state: AppState; active?: string;
   );
 }
 
+const IS_MAC = /Mac/.test(navigator.platform);
+
 /** The open chat: who and what, its connections, and the actions that join it to other agents. */
 function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState; onSelect: Select }) {
-  const compact = useWidth() < 640;
   const status = statusOf(chat);
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
@@ -280,17 +340,21 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
   return (
     <>
       <header class="chat-head">
-        <Glyph agent={chat.agent} />
         <div class="chat-head-text">
-          <div class="chat-head-title" title={`${chat.title} (${chat.label})`}>
-            {chat.title}
+          <div class="chat-head-row">
+            <h1 class="chat-head-title" title={`${chat.title} (${chat.label})`}>
+              {chat.title}
+            </h1>
+            <button class="ghost icon-btn sm" title="Rename chat" aria-label="Rename chat" onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
+              <Icon name="rename" />
+            </button>
+            <span class="status-pill" data-state={status}>
+              {DOT_LABEL[status]}
+            </span>
           </div>
           <div class="chat-head-sub">
+            <Glyph agent={chat.agent} size="sm" />
             <span title={chat.label}>{AGENT_FACES[chat.agent].name}</span>
-
-            <span class="sep">·</span>
-            <Dot state={status} />
-            <span>{DOT_LABEL[status]}</span>
             {chat.session?.starting && <span class="tag">Starting {AGENT_FACES[chat.agent].name}…</span>}
             <ModeBadge session={chat.session} agent={chat.agent} />
             <AutoBadge chat={chat} />
@@ -304,20 +368,48 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </div>
         </div>
         <div class="chat-head-actions">
-          <HandoffMenu chat={chat} compact={compact} />
-          <AskMenu chat={chat} compact={compact} />
-          <PipeMenu chat={chat} compact={compact} />
-          <button class="ghost icon-btn sm" title="Rename chat" aria-label="Rename chat" onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
-            <Icon name="rename" />
-          </button>
+          <AskMenu chat={chat} compact />
           <button
-            class="ghost icon-btn sm"
-            title={chat.archived ? 'Unarchive' : 'Archive'}
-            aria-label={chat.archived ? 'Unarchive' : 'Archive'}
-            onClick={() => send({ type: 'archive', chatId: chat.id, archived: !chat.archived })}
+            class="ghost icon-btn"
+            title={chat.starred ? 'Unstar' : 'Star: keep it at the top of the list'}
+            aria-label={chat.starred ? 'Unstar' : 'Star'}
+            aria-pressed={!!chat.starred}
+            onClick={() => send({ type: 'star', chatId: chat.id, starred: !chat.starred })}
           >
-            <Icon name={chat.archived ? 'unarchive' : 'archive'} />
+            <Icon name="star" />
           </button>
+          <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="more" />}>
+            {(close) => (
+              <>
+                <div class="pop-title" aria-hidden="true">Hand off to</div>
+                {AGENT_KEYS.map((agent) => (
+                  <button
+                    key={agent}
+                    role="menuitem"
+                    onClick={() => {
+                      close();
+                      send({ type: 'handoff', chatId: chat.id, agent });
+                    }}
+                  >
+                    <Glyph agent={agent} size="sm" />
+                    <span class="grow">{AGENT_FACES[agent].name}</span>
+                    {agent === chat.agent && <span class="hint">new chat</span>}
+                  </button>
+                ))}
+                <PipeTargets chat={chat} close={close} />
+                <div class="pop-sep" role="separator" />
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    close();
+                    send({ type: 'archive', chatId: chat.id, archived: !chat.archived });
+                  }}
+                >
+                  <Icon name={chat.archived ? 'unarchive' : 'archive'} /> {chat.archived ? 'Unarchive' : 'Archive'}
+                </button>
+              </>
+            )}
+          </Popover>
         </div>
       </header>
       {chat.origin && parent && (
@@ -379,20 +471,6 @@ function Empty() {
   );
 }
 
-type Group = { kind: 'steps'; items: Extract<Item, { kind: 'tool' }>[]; at: number } | { kind: 'one'; item: Item; at: number };
-
-/** Consecutive tool calls read as one timeline of steps. */
-function group(items: Item[]): Group[] {
-  const out: Group[] = [];
-  items.forEach((item, at) => {
-    const last = out.at(-1);
-    if (item.kind === 'tool' && last?.kind === 'steps') last.items.push(item);
-    else if (item.kind === 'tool') out.push({ kind: 'steps', items: [item], at });
-    else out.push({ kind: 'one', item, at });
-  });
-  return out;
-}
-
 interface TranscriptProps {
   chat: ChatView;
   /** For other chats' names, images and shared files; what the transcript reads of it is in `roster`, `conflictKey` and `state.images`. */
@@ -446,8 +524,13 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {group(items).map((g) =>
-        g.kind === 'steps' ? (
+      {transcriptGroups(items).map((g, n, all) => {
+        // Each turn of the agent's opens with its face, name and time.
+        const prev = all[n - 1];
+        const mine = g.kind === 'one' && g.item.kind === 'user';
+        const head = !mine && (!prev || (prev.kind === 'one' && prev.item.kind === 'user'));
+        const at = head ? turnTime(all, n) : undefined;
+        const body = g.kind === 'steps' ? (
           <Steps key={g.at} tools={g.items} approvals={approvals} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
         ) : (
           <TranscriptItem
@@ -462,8 +545,20 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
             canUndo={g.at === lastChanges && !chat.busy}
             live={chat.busy && g.at === items.length - 1}
           />
-        ),
-      )}
+        );
+        return head ? (
+          <Fragment key={g.at}>
+            <div class="agent-head">
+              <Glyph agent={chat.agent} />
+              <b>{AGENT_FACES[chat.agent].name}</b>
+              {at !== undefined && <span class="msg-time">{clockTime(at)}</span>}
+            </div>
+            {body}
+          </Fragment>
+        ) : (
+          body
+        );
+      })}
       <QueueList chat={chat} />
       {chat.busy && !waitingNow && (
         <div class="working">
@@ -476,6 +571,16 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       </div>
     </div>
   );
+}
+
+/** When the agent's turn starting at group `n` began: its first reply's time. */
+function turnTime(groups: TranscriptGroup[], n: number): number | undefined {
+  for (let i = n; i < groups.length; i++) {
+    const g = groups[i];
+    if (g.kind === 'one' && g.item.kind === 'user') return undefined;
+    if (g.kind === 'one' && g.item.kind === 'agent' && g.item.at !== undefined) return g.item.at;
+  }
+  return undefined;
 }
 
 const PLAN_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', pending: 'next' };
@@ -519,17 +624,25 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live }: Ite
   switch (item.kind) {
     case 'user':
       return (
-        <div class="bubble">
-          {item.text && <div class="bubble-text">{item.text}</div>}
-          <RefList refs={refsOf(item)} cwd={chat.cwd} />
-          {item.images.length > 0 && (
-            <div class="thumbs">
-              {item.images.map((id) => {
-                const img = state.images.find((i) => i.id === id);
-                return img ? <img key={id} src={img.src} alt={img.title} /> : null;
-              })}
+        <div class="user-msg">
+          <div class="user-col">
+            <div class="bubble">
+              {item.text && <div class="bubble-text">{item.text}</div>}
+              <RefList refs={refsOf(item)} cwd={chat.cwd} />
+              {item.images.length > 0 && (
+                <div class="thumbs">
+                  {item.images.map((id) => {
+                    const img = state.images.find((i) => i.id === id);
+                    return img ? <img key={id} src={img.src} alt={img.title} /> : null;
+                  })}
+                </div>
+              )}
             </div>
-          )}
+            {item.at !== undefined && <div class="msg-time">{clockTime(item.at)}</div>}
+          </div>
+          <span class="avatar" aria-hidden="true">
+            <Icon name="user" />
+          </span>
         </div>
       );
     case 'agent':
@@ -1078,7 +1191,13 @@ function Composer({
           aria-autocomplete="list"
           aria-controls={picking ? listId : undefined}
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
-          placeholder={chat.busy ? `Message ${chat.label}: it goes when the turn ends · Esc stops` : chat.session?.starting ? `Starting ${chat.label}… · / commands · # files · @ another agent` : `Message ${chat.label} · / commands · # files · @ another agent`}
+          placeholder={
+            chat.busy
+              ? `Message ${AGENT_FACES[chat.agent].name}: it goes when the turn ends · Esc stops`
+              : chat.session?.starting
+                ? `Starting ${AGENT_FACES[chat.agent].name}…`
+                : `Ask ${AGENT_FACES[chat.agent].name} anything…   / commands   # files   @ another agent`
+          }
           onInput={(e) => {
             setText(e.currentTarget.value);
             track(e.currentTarget);
@@ -1144,8 +1263,8 @@ function Composer({
           }}
         />
         <div class="composer-bar">
-          <button class="ghost icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
-            <Icon name="attach" />
+          <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
+            <Icon name="plus" />
           </button>
           {asking ? (
             <span class="composer-agent">
@@ -1162,8 +1281,14 @@ function Composer({
               <Icon name="stop" /> {!compact && 'Stop'}
             </button>
           )}
-          <button class="primary sm" onClick={submit} disabled={!canSend} title={queueing ? `Sends when ${chat.label} finishes this turn` : undefined}>
-            <Icon name={asking ? 'ask' : queueing ? 'queue' : 'send'} /> {asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
+          <button
+            class="primary send-btn"
+            onClick={submit}
+            disabled={!canSend}
+            aria-label={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
+            title={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
+          >
+            <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
           </button>
         </div>
       </div>
