@@ -3499,6 +3499,161 @@ button.image-thumb,
   height: 90px;
 }
 
+/* ---- Agent map (§2.7): a modal over a 75% overlay; this chat, then its agents on elbow connectors ---- */
+
+.cc-overlay {
+  position: fixed;
+  z-index: var(--z-overlay);
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay);
+  animation: var(--fade-menu);
+}
+.cc-map {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  margin: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--dialog-border);
+  border-radius: var(--r-8);
+  background: var(--dialog-bg);
+  color: var(--fg);
+}
+.cc-map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+.cc-map-title {
+  font-size: var(--t-title);
+  font-weight: 600;
+}
+.cc-map-actions {
+  display: flex;
+  gap: 2px;
+}
+.cc-map-sub {
+  margin-bottom: var(--sp-3);
+  color: var(--fg-2);
+}
+.cc-map-body {
+  min-height: 0;
+  overflow: auto;
+}
+.cc-map-tree {
+  display: flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-2) var(--sp-2) 0;
+}
+.cc-map-node {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 300px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  background: var(--menu-bg);
+  color: var(--fg);
+  line-height: 1.25;
+  text-align: left;
+}
+button.cc-map-node:hover {
+  background: linear-gradient(var(--hover-bg), var(--hover-bg)), var(--menu-bg);
+}
+.cc-map-main {
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  width: 320px;
+}
+.cc-map-main .cc-map-name {
+  font-weight: 600;
+}
+.cc-map-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-map-meta {
+  padding-left: 14px;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Elbows: a 16px stub out of this chat, a spine from the first agent to the last, a stub into each. */
+.cc-map-children {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-left: 32px;
+}
+.cc-map-children::before {
+  content: '';
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  left: -16px;
+  width: 1px;
+  background: var(--border);
+}
+.cc-map-children > .cc-map-node::before,
+.cc-map-main:has(+ .cc-map-children)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 1px;
+  background: var(--border);
+}
+.cc-map-children > .cc-map-node::before {
+  left: -17px;
+}
+.cc-map-main::after {
+  right: -17px;
+}
+/* Narrow: this chat on top, its agents under it. */
+@media (max-width: 720px) {
+  .cc-map {
+    width: auto;
+  }
+  .cc-map-tree {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cc-map-node,
+  .cc-map-main {
+    position: relative;
+    width: auto;
+  }
+  .cc-map-children {
+    margin-top: var(--sp-2);
+  }
+  .cc-map-children::before {
+    top: -8px;
+  }
+  .cc-map-main:has(+ .cc-map-children)::after {
+    display: none;
+  }
+}
+
 /* ==== OLD CHAT (being replaced) ==== */
 .switcher {
   display: flex;
@@ -4280,126 +4435,6 @@ body[data-surface='chat'] .ask .actions button.sm:focus-visible {
 }
 body[data-surface='chat'] .ask .actions button.sm.danger {
   color: color-mix(in srgb, var(--c-bad) 75%, var(--c-mute));
-}
-.cc-overlay {
-  position: fixed;
-  z-index: 50;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.5);
-}
-.cc-map {
-  display: flex;
-  flex-direction: column;
-  width: min(820px, 100%);
-  max-height: min(80vh, 760px);
-  padding: 20px;
-  border: 1px solid var(--c-line);
-  border-radius: 10px;
-  background: var(--c-surface);
-  color: var(--c-text);
-}
-.cc-map-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-.cc-map-title {
-  font-size: calc(var(--fl-font-size) + 4px);
-  font-weight: 600;
-}
-.cc-map-sub {
-  margin-top: 6px;
-  color: var(--c-soft);
-}
-button.cc-map-close {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--c-soft);
-}
-.cc-map-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 36px;
-  min-height: 0;
-  margin-top: 16px;
-  overflow-y: auto;
-}
-.cc-map-parent {
-  display: flex;
-  align-items: center;
-}
-.cc-map-parent .cc-map-node {
-  width: 100%;
-}
-.cc-map-children {
-  display: grid;
-  gap: 10px;
-  padding-left: 18px;
-  border-left: 1px solid var(--c-line);
-}
-.cc-map-node {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--c-line);
-  border-radius: 4px;
-  background: var(--c-surface2);
-  color: var(--c-text);
-  text-align: left;
-  font: inherit;
-}
-button.cc-map-node:hover {
-  border-color: var(--c-soft);
-}
-.cc-map-node .dot {
-  margin-top: 6px;
-}
-.cc-map-text {
-  display: grid;
-  min-width: 0;
-}
-.cc-map-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-map-meta {
-  color: var(--c-mute);
-  font-size: var(--t-85);
-}
-.cc-map-foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-button.cc-map-manager {
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--c-line);
-  border-radius: 6px;
-  background: none;
-  color: var(--c-text);
-}
-button.cc-map-manager:hover {
-  background: var(--c-surface2);
-}
-@media (max-width: 560px) {
-  .cc-map-body {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-  }
-}
-button.cc-map-node {
-  align-items: flex-start;
 }
 /* ==== END OLD CHAT ==== */
 

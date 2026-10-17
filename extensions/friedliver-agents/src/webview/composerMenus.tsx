@@ -365,12 +365,13 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
   }, [close]);
   const subs = subagents(chat);
   const usage = chat.session?.usage;
-  const model = choiceName(optionGroups(chat.session).model);
+  const model = modelLabel(optionGroups(chat.session).model);
   const rows = [
     ...subs.map((s) => ({
       key: s.id,
       title: s.title,
-      state: s.state === 'working' ? 'working' : s.state === 'failed' ? 'error' : 'done',
+      tip: s.title,
+      state: s.state === 'working' ? 'working' : s.state === 'failed' ? 'error' : 'idle',
       meta: [s.ms !== undefined ? shortDuration(s.ms) : s.startedAt !== undefined ? shortDuration(Math.max(0, now - s.startedAt)) : undefined, `${s.tools} tool call${s.tools === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
       go: () => {
         close();
@@ -381,8 +382,9 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
     })),
     ...linked.map((c) => ({
       key: c.id,
-      title: `${c.label}: ${c.title}`,
-      state: c.busy ? 'working' : 'done',
+      title: c.title,
+      tip: `${c.label}: ${c.title}`,
+      state: c.busy ? 'working' : 'idle',
       meta: [shortDuration(Math.max(0, (c.busy ? now : c.lastActivity) - c.createdAt)), c.session?.usage ? `${formatTokens(c.session.usage.used)} tokens` : c.origin?.kind === 'consult' ? 'consultation' : 'hand-off'].join(' · '),
       go: () => {
         close();
@@ -392,57 +394,53 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
   ];
   return (
     <div class="cc-overlay" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div
-        ref={dialog}
-        class="cc-map"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Agent map"
-      >
+      <div ref={dialog} class="cc-map" role="dialog" aria-modal="true" aria-label="Agent map">
         <div class="cc-map-head">
-          <div>
-            <div class="cc-map-title">Agent map</div>
-            <div class="cc-map-sub">
-              {rows.length} agent{rows.length === 1 ? '' : 's'} · click an agent for details
-            </div>
-          </div>
-          <button type="button" class="cc-map-close icon-btn" aria-label="Close" title="Close (Esc)" onClick={close}>
-            <Icon name="close" />
-          </button>
+          <div class="cc-map-title">Agent map</div>
+          <span class="cc-map-actions">
+            <button
+              type="button"
+              class="ghost icon-btn sm cc-map-manager"
+              aria-label="Open Agent Manager"
+              title="Open Agent Manager"
+              onClick={() => {
+                close();
+                send({ type: 'openTasks' });
+              }}
+            >
+              <Icon name="tasks" />
+            </button>
+            <button type="button" class="ghost icon-btn sm cc-map-close" aria-label="Close" title="Close (Esc)" onClick={close}>
+              <Icon name="close" />
+            </button>
+          </span>
+        </div>
+        <div class="cc-map-sub">
+          {rows.length} agent{rows.length === 1 ? '' : 's'} · click an agent for details
         </div>
         <div class="cc-map-body">
-          <div class="cc-map-parent">
-            <div class="cc-map-node">
-              <Dot state={chat.busy ? 'working' : 'done'} still={!chat.busy} />
-              <span class="cc-map-text">
-                <span class="cc-map-name">{chat.title}</span>
-                <span class="cc-map-meta">{[model, usage ? `${formatTokens(usage.used)} tokens in context` : undefined].filter(Boolean).join(' · ') || chat.label}</span>
+          <div class="cc-map-tree">
+            <div class="cc-map-node cc-map-main">
+              <span class="cc-map-name">
+                <Dot state={chat.busy ? 'working' : 'idle'} still={!chat.busy} />
+                {chat.title}
               </span>
+              <span class="cc-map-meta">{[model, usage ? `${formatTokens(usage.used)} tokens in context` : undefined].filter(Boolean).join(' · ') || chat.label}</span>
             </div>
+            {rows.length > 0 && (
+              <div class="cc-map-children">
+                {rows.map((r) => (
+                  <button key={r.key} type="button" class="cc-map-node" title={r.tip} onClick={r.go}>
+                    <span class="cc-map-name">
+                      <Dot state={r.state} still={r.state !== 'working'} />
+                      {r.title}
+                    </span>
+                    <span class="cc-map-meta">{r.meta}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div class="cc-map-children">
-            {rows.map((r) => (
-              <button key={r.key} type="button" class="cc-map-node" onClick={r.go}>
-                <Dot state={r.state} still={r.state !== 'working'} />
-                <span class="cc-map-text">
-                  <span class="cc-map-name">{r.title}</span>
-                  <span class="cc-map-meta">{r.meta}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div class="cc-map-foot">
-          <button
-            type="button"
-            class="cc-map-manager"
-            onClick={() => {
-              close();
-              send({ type: 'openTasks' });
-            }}
-          >
-            Open Agent Manager
-          </button>
         </div>
       </div>
     </div>
@@ -472,7 +470,7 @@ export const ComposerPills = memo(function ComposerPills({
       </button>
       {agents > 0 && (
         <button type="button" class="cc-pill cc-agents" title={`${running} running · open the agent map`} aria-label={`${agents} agent${agents === 1 ? '' : 's'}, ${running} running: open the agent map`} onClick={() => open('agents')}>
-          <Dot state={running ? 'working' : 'done'} still />
+          <Dot state={running ? 'working' : 'idle'} still />
           {agents} agent{agents === 1 ? '' : 's'}
         </button>
       )}
