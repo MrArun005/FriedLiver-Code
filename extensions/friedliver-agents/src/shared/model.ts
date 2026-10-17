@@ -4,6 +4,7 @@ import type * as acp from '@agentclientprotocol/sdk';
 import { applySessionUpdate, isSessionUpdate, type ApprovalLevel, type ChatSession } from './session';
 import type { QuestionField } from './questions';
 import { appendOutput, claudeMeta, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
+import { stepFacts, withRawOutput, type StepFacts } from './steps';
 
 export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'demo'] as const;
 export type AgentKey = (typeof AGENT_KEYS)[number];
@@ -151,8 +152,9 @@ export type Item =
   /**
    * `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short.
    * `tool` and `parent` (optional): Claude's tool name, and the subagent (Task/Agent) call this one ran inside.
+   * The StepFacts (optional): the command it runs, what for, its exit code and duration.
    */
-  | { kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[]; out?: ToolOut[]; input?: string; tool?: string; parent?: string }
+  | ({ kind: 'tool'; id: string; title: string; toolKind?: string; status?: string; locations: string[]; out?: ToolOut[]; input?: string; tool?: string; parent?: string } & StepFacts)
   | { kind: 'plan'; entries: { content: string; status: string }[] }
   /**
    * `toolKind` and `detail` (optional) say what is being approved: the diff, the command, the plan.
@@ -288,7 +290,7 @@ export function reduce(state: AppState, action: Action): AppState {
         const update = action.update;
         return editChat(state, action.chatId, (c) => ({ ...c, session: applySessionUpdate(c.session, update) }));
       }
-      return editChat(state, action.chatId, (c) => ({ ...c, items: capItems(applyUpdate(c.items, action.update)), lastActivity: action.at ?? c.lastActivity }));
+      return editChat(state, action.chatId, (c) => ({ ...c, items: capItems(applyUpdate(c.items, action.update, action.at)), lastActivity: action.at ?? c.lastActivity }));
     case 'busy':
       return editChat(state, action.chatId, (c) => ({
         ...c,
@@ -415,8 +417,8 @@ function editItems(state: AppState, fn: (i: Item) => Item): AppState {
   return chats ? { ...state, chats } : state;
 }
 
-/** Folds one ACP session update into a transcript. */
-export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
+/** Folds one ACP session update into a transcript. `at`: the host's clock for the update, for how long a tool step ran. */
+export function applyUpdate(items: Item[], update: acp.SessionUpdate, at?: number): Item[] {
   const last = items.at(-1);
   switch (update.sessionUpdate) {
     case 'agent_message_chunk':
@@ -444,8 +446,12 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
         ...(input ? { input } : {}),
         ...claudeMeta(update._meta),
       };
-      const at = items.findIndex((i) => i.kind === 'tool' && i.id === update.toolCallId);
-      return at < 0 ? [...items, tool] : items.map((i, n) => (n === at ? tool : i));
+      const raw = withRawOutput(tool.out, update.rawOutput);
+      if (raw) tool.out = raw;
+      const n = items.findIndex((i) => i.kind === 'tool' && i.id === update.toolCallId);
+      const prev = n < 0 ? undefined : (items[n] as Extract<Item, { kind: 'tool' }>);
+      Object.assign(tool, stepFacts(update, prev, at));
+      return n < 0 ? [...items, tool] : items.map((i, k) => (k === n ? tool : i));
     }
     case 'tool_call_update': {
       // Content replaces what the tool showed; output streamed in _meta adds to it.
@@ -462,9 +468,10 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate): Item[] {
           toolKind: update.kind ?? i.toolKind,
           status: update.status ?? i.status,
           locations: update.locations ? update.locations.map((l) => l.path) : i.locations,
-          out: next,
+          out: withRawOutput(next, update.rawOutput),
           input: input ?? i.input,
           ...claudeMeta(update._meta),
+          ...stepFacts(update, i, at),
         };
       });
     }

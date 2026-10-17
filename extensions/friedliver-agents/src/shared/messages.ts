@@ -3,6 +3,7 @@
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import { isRule, type CommandRule } from './rules';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
+import { typeable } from './steps';
 
 /** Choices for a new task's agents, per agent: optionKey → value (see session.ts). */
 export type TaskChoices = Partial<Record<AgentKey, Record<string, string | boolean>>>;
@@ -74,6 +75,12 @@ export type WebviewMessage =
   | { type: 'copy'; text: string }
   /** Puts code from a reply into the active editor at the cursor. */
   | { type: 'insert'; text: string }
+  /**
+   * Types a command the chat showed in full (a step's command, a shell block in a reply) into a new
+   * terminal and runs it, because the user clicked Run. The host runs only what the chat showed.
+   * `cwd` (optional): the folder the step ran in; the host uses it only inside the workspace.
+   */
+  | { type: 'runInTerminal'; chatId: string; command: string; cwd?: string }
   /** An answer to an agent's form, or declining it; the host checks it against what was asked. */
   | { type: 'answerQuestion'; requestId: string; action: 'accept' | 'decline'; values?: Record<string, string | number | boolean | string[]> }
   /** Files matching what follows "#" in the composer, for the picker. */
@@ -215,6 +222,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'copy':
     case 'insert':
       return str(m.text, LIMITS.copy) && m.text ? { type: m.type, text: m.text } : null;
+    case 'runInTerminal':
+      if (!id(m.chatId) || typeof m.command !== 'string' || !typeable(m.command)) return null;
+      if (m.cwd !== undefined && (!str(m.cwd, LIMITS.path) || !m.cwd || m.cwd.includes('\0'))) return null;
+      return { type: 'runInTerminal', chatId: m.chatId, command: m.command, ...(m.cwd !== undefined ? { cwd: m.cwd } : {}) };
     case 'findFiles':
       return id(m.chatId) && str(m.query, 200) ? { type: 'findFiles', chatId: m.chatId, query: m.query } : null;
     case 'answerQuestion': {

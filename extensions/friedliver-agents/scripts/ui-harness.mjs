@@ -9,6 +9,7 @@
 //        [--no-build] [--out dir] [--port n] [--themes black-blue,light-blue]
 //
 // Pages: /?surface=tasks|chat|images&theme=black-blue&side=1&select=<chat id>&view=board|list|map&empty=1
+//        &fixture=steps (a Claude chat with long heredoc commands and a plain-text summary, ui-fixture-steps.mjs)
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -17,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { fixture } from './ui-fixture.mjs';
+import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -70,7 +72,8 @@ function page(params) {
   const theme = readTheme(params.get('theme') ?? 'black-blue');
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
-  const data = params.get('empty') === '1' ? { state: { chats: [], images: [], links: [] } } : fixture(Date.now());
+  const data =
+    params.get('empty') === '1' ? { state: { chats: [], images: [], links: [] } } : params.get('fixture') === 'steps' ? stepsFixture(Date.now()) : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   const saved = params.get('view') ? { view: params.get('view') } : undefined;
   const stub = `
@@ -201,6 +204,20 @@ async function shoot() {
     const center = await open(`surface=chat&theme=${theme}&select=${ids.center}`, 1000, 900);
     await save(center, `chat-center-${theme}`);
     await center.close();
+    // Long shell steps and a plain-text summary: steps collapsed, two opened, and the reply.
+    const steps = await open(`surface=chat&theme=${theme}&side=1&fixture=steps`, 460, 900);
+    await steps.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
+    await save(steps, `chat-steps-${theme}`);
+    await steps.click('.steps li:has(.step-text:text("cat << EOF | python3 minidb.py")) .step-main');
+    await steps.click('.steps li:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md")) .step-main');
+    await steps.evaluate(() => document.querySelector('.steps li[data-open]')?.scrollIntoView({ block: 'start' }));
+    await save(steps, `chat-steps-open-${theme}`);
+    await steps.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      t.scrollTop = t.scrollHeight;
+    });
+    await save(steps, `chat-steps-reply-${theme}`);
+    await steps.close();
   }
 
   console.log('checks:');
@@ -385,6 +402,66 @@ async function shoot() {
     const map = await open('surface=tasks&view=map', 1440, 900);
     check(await map.locator('[data-nav="chat-c6"] .node-auto').count() === 1, 'the map marks a Full auto chat');
     await map.close();
+  }
+
+  {
+    // Steps read as one line each and open to something you can use; replies keep their shape.
+    const p = await open('surface=chat&side=1&fixture=steps', 460, 900);
+    const row = (text) => p.locator(`.steps li:has(.step-text:text("${text}"))`);
+    const rows = await p.locator('.steps .step-row').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
+    check(rows.length >= 8 && rows.every((h) => h <= 26), `every step is one line (${rows.join(', ')} px)`);
+    const tagSameRow = await p.locator('.steps .step-row').evaluateAll((els) =>
+      els.every((el) => {
+        const tag = el.querySelector('.step-end .tag');
+        const dot = el.querySelector('.dot');
+        if (!tag || !dot) return true;
+        const a = tag.getBoundingClientRect();
+        const b = dot.getBoundingClientRect();
+        return Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)) < 6;
+      }),
+    );
+    check(tagSameRow, 'the kind tag sits on the row of its dot');
+    check((await row('cat << EOF | python3 minidb.py').locator('.step-lines').innerText()) === '15 lines', 'a heredoc command shows its line count');
+    check(await p.locator('.steps li:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))').count() === 1, 'cat << EOF > README.md reads as Write README.md');
+    check((await row('python3 minidb.py test.sql 2>&1').locator('.step-main').getAttribute('title'))?.includes(`cd ${STEPS_ROOT} && python3`) ?? false, 'the tooltip has the full command');
+    check(await p.locator('.steps li[data-open]:has(.tag.bad:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
+    const answered = p.locator('.answered:has(.step-label)');
+    check((await answered.count()) === 1 && (await answered.evaluate((el) => Math.round(el.getBoundingClientRect().height))) <= 26, 'an answered request for a long command is one line');
+    await row('cat << EOF | python3 minidb.py').locator('.step-main').click();
+    const opened = p.locator('.steps li[data-open]:has(.step-text:text("cat << EOF | python3 minidb.py"))');
+    check((await opened.locator('.step-command pre.code').innerText()) === COMMANDS.users, 'the command shows in full with every line');
+    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre', 'the command never wraps');
+    check(await opened.locator('.step-output pre.code.capped').count() === 1, 'long output starts capped');
+    await opened.locator('.step-output button:has-text("Show all")').click();
+    check(await opened.locator('.step-output pre.code.capped').count() === 0, 'Show all opens the whole output');
+    await opened.locator('.step-command button[aria-label="Copy command"]').click();
+    check((await posted(p)).some((m) => m.type === 'copy' && m.text === COMMANDS.users), 'Copy copies the exact command');
+    await opened.locator('.step-command .run-btn').click();
+    check((await posted(p)).some((m) => m.type === 'runInTerminal' && m.chatId === 'chat-sql' && m.command === COMMANDS.users), 'Run in terminal sends the exact command');
+    const readme = p.locator('.steps li:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))');
+    await readme.locator('.step-main').click();
+    check((await readme.locator('.step-file .file-name').innerText()).includes('README.md'), 'a heredoc write shows the file it writes');
+    check((await readme.locator('.step-file pre.code').innerText()).startsWith('# Mini SQL Database Engine'), 'the file text shows without the command around it');
+    await readme.locator('.step-file button:has-text("Open file")').click();
+    check((await posted(p)).some((m) => m.type === 'openFile' && m.path === `${STEPS_ROOT}/README.md`), 'Open file opens the file in the workspace');
+
+    const reply = p.locator('.prose .md').last();
+    check(await reply.locator('h5.md-label:text-is("FEATURES IMPLEMENTED & VERIFIED")').count() === 1, 'a capitals label is a heading');
+    check(await reply.locator('li[data-tone="ok"] > ul > li:text("CREATE TABLE (INT, TEXT, FLOAT types)")').count() === 1, '- items nest under a ✓ item');
+    check(await reply.locator('ol > li > ul > li[data-tone="ok"]:has-text("CREATE TABLE × 2")').count() === 1, '✓ items nest under a numbered item');
+    check(await reply.locator('li[data-tone="bad"] > .li-mark:text-is("✗")').count() === 1, '✗ keeps its symbol');
+    check(await reply.locator('.md-table th:text-is("Lines")').count() === 1, 'a table renders as a table');
+    check(await reply.locator('p br').count() >= 3, 'single newlines stay line breaks');
+    await reply.locator('.path-link:text-is("' + `${STEPS_ROOT}/README.md:12` + '")').click();
+    check((await posted(p)).some((m) => m.type === 'openFile' && m.path === `${STEPS_ROOT}/README.md` && m.line === 12), 'a path with a line opens there');
+    await reply.locator('.path-link.outside:text-is("/tmp/minidb-history.txt")').click();
+    check((await posted(p)).some((m) => m.type === 'copy' && m.text === '/tmp/minidb-history.txt'), 'a path outside the workspace copies');
+    check((await reply.innerText()).includes('(561 lines)'), 'numbers stay plain');
+    const block = reply.locator('.code-block');
+    check((await block.locator('.code-lang').innerText()) === 'bash' && (await block.locator('.tk-fn').count()) > 0, 'a code block has its language and colours');
+    await block.locator('.run-btn').click();
+    check((await posted(p)).some((m) => m.type === 'runInTerminal' && m.command === `cd ${STEPS_ROOT} && python3 minidb.py test.sql`), 'a bash block runs in a terminal');
+    await p.close();
   }
 
   await browser.close();

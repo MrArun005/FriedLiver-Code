@@ -22,6 +22,8 @@ import { LIMITS, type Attachment, type HostMessage, type TaskChoices, type Webvi
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule, isRule, type CommandRule } from './shared/rules';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
+import { shownCommand } from './shared/steps';
+import { clip } from './shared/view';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** How long a code reference for a composer waits for a chat view to load. */
@@ -422,7 +424,18 @@ export class Controller {
           return;
         case 'openFile': {
           const file = insideRoots(m.path, this.core.roots());
-          if (file) await (this.editor ? this.editor.open(file, m.line, m.endLine) : vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true }));
+          if (!file) return;
+          // A path a reply names may be a folder, or not exist (yet).
+          const kind = await stat(file).then((st) => (st.isDirectory() ? 'folder' : 'file'), () => 'missing');
+          if (kind === 'folder') {
+            await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(file));
+            return;
+          }
+          if (kind === 'missing') {
+            void vscode.window.showInformationMessage(`${path.basename(file)} isn't there: ${file}`);
+            return;
+          }
+          await (this.editor ? this.editor.open(file, m.line, m.endLine) : vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true }));
           return;
         }
         case 'createTask': {
@@ -537,6 +550,9 @@ export class Controller {
           await vscode.window.showTextDocument(editor.document, editor.viewColumn);
           return;
         }
+        case 'runInTerminal':
+          this.runInTerminal(m.chatId, m.command, m.cwd);
+          return;
         case 'findFiles': {
           const files = await this.workspaceFiles();
           post(surface, { type: 'foundFiles', chatId: m.chatId, query: m.query, files: this.core.fileMatches(m.chatId, files, m.query) });
@@ -557,6 +573,24 @@ export class Controller {
     const message: HostMessage = { type: 'addRef', chatId, ref };
     for (const s of this.chatSurfaces()) if (s.visible()) post(s, message);
     this.composerRefs = [...this.composerRefs.filter((r) => r.until > Date.now()), { message, until: Date.now() + COMPOSER_WAIT_MS }];
+  }
+
+  /**
+   * Types a command into a new terminal named after the chat and presses Enter: the user clicked Run
+   * under it. Only a command the chat showed in full runs (a step's command, a shell block in a
+   * reply), in the step's folder when that is in the workspace, otherwise the chat's.
+   */
+  private runInTerminal(chatId: string, command: string, cwd?: string): void {
+    const chat = this.core.snapshot.chats.find((c) => c.id === chatId);
+    if (!chat || !shownCommand(chat.items, command)) {
+      this.log.warn(`Run in terminal: ${chat ? 'that command is not in the chat' : 'no such chat'}`);
+      return;
+    }
+    const roots = this.core.roots();
+    const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
+    const terminal = vscode.window.createTerminal({ name: `${chat.label}: ${clip(chat.title, 40)}`, cwd: folder });
+    terminal.show();
+    terminal.sendText(command, true);
   }
 
   /** Shows a chat on the surface that asked for it. */

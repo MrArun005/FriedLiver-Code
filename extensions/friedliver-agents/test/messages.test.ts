@@ -79,6 +79,32 @@ describe('code references in messages (additive fields)', () => {
   });
 });
 
+describe('Run in terminal', () => {
+  const heredoc = "cat << 'EOF' | python3 minidb.py\nSELECT 1;\n\tEOF";
+
+  it('takes a command with its lines and tabs as it is, and an optional folder', () => {
+    expect(parseWebviewMessage({ type: 'runInTerminal', chatId: 'chat-1', command: heredoc })).toEqual({ type: 'runInTerminal', chatId: 'chat-1', command: heredoc });
+    expect(parseWebviewMessage({ type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: '/work/app', extra: true })).toEqual({ type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: '/work/app' });
+  });
+
+  it('refuses control characters, empty or huge commands, and bad ids or folders', () => {
+    const bad: unknown[] = [
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'echo \u001b]0;title\u0007' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'echo a\u0000b' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'echo \u0003' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: '  \n ' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'x'.repeat(64 * 1024 + 1) },
+      { type: 'runInTerminal', chatId: 'chat-1', command: ['npm', 'test'] },
+      { type: 'runInTerminal', chatId: '../x', command: 'npm test' },
+      { type: 'runInTerminal', command: 'npm test' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: '' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: 'a\0b' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: 3 },
+    ];
+    for (const m of bad) expect(parseWebviewMessage(m), JSON.stringify(m).slice(0, 120)).toBeNull();
+  });
+});
+
 describe('workspace path check', () => {
   const roots = ['/work/app', '/work/.app-worktrees/task-1'];
 
@@ -111,7 +137,7 @@ describe('markdown', () => {
     expect(parseMarkdown('# Title\n\nSome **bold** text.\n\n- one\n- two\n\n```ts\nconst a = 1;\n```')).toEqual([
       { t: 'h', level: 1, inline: [{ t: 'text', v: 'Title' }] },
       { t: 'p', inline: [{ t: 'text', v: 'Some ' }, { t: 'strong', v: 'bold' }, { t: 'text', v: ' text.' }] },
-      { t: 'ul', items: [[{ t: 'text', v: 'one' }], [{ t: 'text', v: 'two' }]] },
+      { t: 'ul', items: [{ inline: [{ t: 'text', v: 'one' }] }, { inline: [{ t: 'text', v: 'two' }] }] },
       { t: 'pre', lang: 'ts', code: 'const a = 1;' },
     ]);
   });

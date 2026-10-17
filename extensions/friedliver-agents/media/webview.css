@@ -1085,6 +1085,108 @@ button.badge:hover:not(:disabled) {
 .md a {
   color: var(--vscode-textLink-foreground);
 }
+.md li > ul,
+.md li > ol {
+  margin: 2px 0 4px;
+}
+.md li {
+  position: relative;
+}
+/* Items that start with a symbol keep it, in the bullet's place; ✓ is green, ✗ red. */
+.md li[data-mark] {
+  list-style: none;
+}
+.md .li-mark {
+  position: absolute;
+  left: -16px;
+  width: 14px;
+  text-align: center;
+  color: var(--fg-2);
+}
+.md li[data-tone='ok'] > .li-mark {
+  color: var(--ok);
+}
+.md li[data-tone='bad'] > .li-mark {
+  color: var(--bad);
+}
+.md h5.md-label {
+  margin: var(--sp-3) 0 4px;
+  color: var(--fg-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.md > h5.md-label:first-child {
+  margin-top: 0;
+}
+.md pre.md-mono {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.md-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin-bottom: var(--sp-2);
+}
+.md-table table {
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+  line-height: 1.45;
+}
+.md-table th,
+.md-table td {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  background: var(--tone);
+  font-weight: 600;
+}
+/* File paths: open at the line inside the chat's folder, copy otherwise. Inline, so a long one wraps. */
+.path-link {
+  color: var(--vscode-textLink-foreground);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.path-link:hover {
+  text-decoration: underline;
+}
+.path-link:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+.path-link.outside {
+  color: inherit;
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 3px;
+  cursor: copy;
+}
+.path-link code {
+  color: inherit;
+}
+.md p,
+.md li {
+  overflow-wrap: anywhere;
+}
+.md td {
+  overflow-wrap: break-word;
+}
+.md.clamped {
+  max-height: calc(40 * 1.6em);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 85%, transparent);
+}
+button.md-more {
+  margin-top: 2px;
+}
 .thought summary {
   color: var(--muted);
   cursor: pointer;
@@ -1127,10 +1229,14 @@ button.badge:hover:not(:disabled) {
   background: var(--line-strong);
 }
 .steps li[data-state='next'] .step-title,
-.steps li[data-state='idle'] .step-title {
+.steps li[data-state='idle'] .step-title,
+.steps li[data-state='next'] .step-main,
+.steps li[data-state='idle'] .step-main {
   color: var(--muted);
 }
-.steps li[data-state='needs-you'] .step-title {
+.steps li[data-state='needs-you'] .step-title,
+.steps li[data-state='needs-you'] .step-main,
+.steps li[data-state='needs-you'] .step-verb {
   color: var(--decision);
   font-weight: 600;
 }
@@ -1232,12 +1338,21 @@ button.badge:hover:not(:disabled) {
   color: var(--removed);
 }
 .cmdline {
+  /* A long heredoc scrolls, so the answers under it stay in reach. */
+  max-height: 20em;
+  overflow: auto;
   padding: var(--sp-2) 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--sunken);
   color: var(--fg);
   font-size: 12.5px;
+}
+/* A multi-line command (a heredoc) keeps its lines; it scrolls instead of wrapping them. */
+.cmdline.lines {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .prompt {
   color: var(--muted);
@@ -2801,55 +2916,297 @@ button.escalate:hover:not(:disabled) {
 }
 .steps li:has(> .step-row) {
   flex-direction: column;
+  /* One flex line, so a long summary is cut instead of widening the step. */
+  flex-wrap: nowrap;
   align-items: stretch;
   gap: var(--sp-1);
+  min-width: 0;
 }
+/* One line per step: dot, verb, summary, files, then the kind at the end. Nothing wraps. */
 .step-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--sp-2);
+  min-width: 0;
+  min-height: 22px;
 }
-.step-toggle .icon {
+.step-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: auto;
+  margin: 0 0 0 -4px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+button.step-main:hover:not(:disabled) {
+  background: var(--tone-hover);
+}
+.step-verb {
+  flex: none;
+  font-weight: 600;
+  color: var(--fg);
+}
+.step-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-text.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.step-lines {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+.step-files {
+  display: flex;
+  gap: var(--sp-1);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+}
+.step-files .ref {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step-end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  margin-left: auto;
+}
+.step-chevron {
+  display: inline-flex;
+  width: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.step-chevron:empty {
+  cursor: default;
+}
+.step-chevron .icon {
+  width: 14px;
+  height: 14px;
   transform: rotate(-90deg);
   transition: transform 0.12s;
 }
-.step-toggle[aria-expanded='true'] .icon {
+.steps li[data-open] > .step-row .step-chevron .icon {
   transform: none;
 }
-.tool-out {
+.tag.bad {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+.step-details {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  margin-left: 18px;
+  gap: 6px;
+  min-width: 0;
+  margin: 2px 0 6px 18px;
 }
-.tool-text {
-  margin: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--sunken);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.step-about {
+  color: var(--muted);
+  font-size: var(--t-sm);
+}
+.step-meta.bad {
+  color: var(--bad);
+}
+.step-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-cut {
+  padding: 0 10px 6px;
+  font-size: var(--t-xs);
+}
+.step-file .file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg);
+}
+.step-file .file-name .icon {
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+.step-output > button.sm-link {
+  margin: 0 10px 6px;
 }
 button.sm-link {
   align-self: flex-start;
   font-size: var(--t-xs);
 }
 
-/* ---- Messages: copy, queued, edits waiting ---- */
+/* ---- Code: blocks in replies and in steps, with their tools in a head line ---- */
 .code-block {
-  position: relative;
+  /* Its width, not the view's, decides how much of the head fits. */
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--sunken);
 }
-.code-tools {
-  position: absolute;
-  top: 4px;
-  right: 4px;
+.md .code-block {
+  margin-bottom: var(--sp-2);
+}
+.code-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-xs);
+  line-height: 1.4;
+}
+.code-head > .hint {
+  white-space: nowrap;
+}
+.code-lang {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--fg-2);
+}
+.code-head button.sm {
+  height: 20px;
+  padding: 0 6px;
+  font-size: var(--t-xs);
+}
+.code-head button.sm .icon {
+  width: 12px;
+  height: 12px;
+}
+.code-head .copy-btn {
+  width: 22px;
+}
+pre.code,
+.md pre.code {
+  margin: 0;
+  padding: var(--sp-2) 10px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+  /* Every line as it is: heredocs and tables stay intact; long lines scroll. */
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow: auto;
+  tab-size: 4;
+}
+pre.code code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+pre.code.scroll {
+  max-height: 24em;
+}
+pre.code.scroll.short {
+  max-height: 10.5em;
+}
+pre.code.capped {
+  max-height: calc(14 * 1.5em + 2 * var(--sp-2));
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, #000 80%, transparent);
+}
+pre.step-input {
+  max-height: 16em;
+}
+.run-short {
+  display: none;
+}
+@container (max-width: 340px) {
+  .run-long {
+    display: none;
+  }
+  .run-short {
+    display: inline;
+  }
+}
+/* A tool title on one line, where a card shows it (a permission, an answered one). */
+.step-label {
   display: inline-flex;
-  gap: 2px;
-  opacity: 0;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
-.code-block:hover .code-tools,
-.code-tools:focus-within,
+.answered:has(> .step-label) {
+  flex-wrap: nowrap;
+}
+.answered > .step-label {
+  flex: 0 1 auto;
+}
+.answered:has(> .step-label) > :not(.step-label) {
+  flex: none;
+}
+.tk-kw {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+}
+.tk-fn {
+  color: var(--vscode-terminal-ansiYellow, #dcdcaa);
+}
+.tk-str {
+  color: var(--vscode-debugTokenExpression-string, #ce9178);
+}
+.tk-num {
+  color: var(--vscode-debugTokenExpression-number, #b5cea8);
+}
+.tk-lit {
+  color: var(--vscode-debugTokenExpression-boolean, #569cd6);
+}
+.tk-type {
+  color: var(--vscode-debugTokenExpression-type, #4ec9b0);
+}
+.tk-var,
+.tk-prop {
+  color: var(--vscode-terminal-ansiCyan, #9cdcfe);
+}
+.tk-com {
+  color: var(--muted);
+  font-style: italic;
+}
+.tk-op {
+  color: var(--fg-2);
+}
+
+/* ---- Messages: copy, queued, edits waiting ---- */
 .prose:hover .msg-tools .copy-btn,
 .msg-tools .copy-btn:focus-visible {
   opacity: 1;

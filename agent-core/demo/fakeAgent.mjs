@@ -18,6 +18,11 @@
 //   "wait"            keeps working until cancelled
 //   "tour"            the UI demo: a plan, a file read, an edit, a command and an image
 //   "project"         builds calc/, runs its tests, fixes the failing one, reruns, runs the app
+//   "heavy"           like Claude building a small SQL engine in agent_heavy/: shell steps with long
+//                     multi-line heredoc commands (SQL piped into a script, files written with
+//                     cat << 'EOF' > file) and their output, then a plain-text summary with labels,
+//                     ✓ lists under numbered items and file paths. Asks before each command in Ask
+//                     mode; writes the two files its heredocs write; the program output is canned
 //   "ask <agent> <q>" asks another agent through the session's FriedLiver tools (MCP) and
 //                     replies "<Agent> says: <answer>"; "ask demo hello" needs no sign-in
 //   "chats"           lists FriedLiver's chats through the same tools
@@ -119,7 +124,7 @@ const COMMANDS = [
   { name: 'review', description: 'Pretend to review a file', input: { hint: 'file to review' } },
 ];
 const HELP = [
-  '`tour`, `project`, `edit <path>`, `run`, `read-image <path>`, `wait`, `ask <agent> <question>`, `chats`,',
+  '`tour`, `project`, `heavy` (long shell steps and a plain-text summary, like Claude), `edit <path>`, `run`, `read-image <path>`, `wait`, `ask <agent> <question>`, `chats`,',
   '`native-edit <path>` and `native-run` (the agent acts itself, like Claude and Codex), `perm-edit <path>` (a Codex-style',
   'permission that names only its tool call), `plan` and `perm-plan` (a plan to approve), `/compact`.',
 ].join(' ');
@@ -296,6 +301,169 @@ async function nativeRun(client, sessionId) {
     rawOutput: { exitCode: output.code },
   });
   await say(client, sessionId, `Ran it myself: exit ${output.code}.`);
+}
+
+const HEAVY_USERS_SQL = [
+  'CREATE TABLE users (id INT, email TEXT, age INT);',
+  "INSERT INTO users VALUES (1, 'alice@example.com', 28);",
+  "INSERT INTO users VALUES (2, 'bob@example.com', 35);",
+  "INSERT INTO users VALUES (3, 'charlie@example.com', 25);",
+  'SELECT * FROM users;',
+  'SELECT email, age FROM users WHERE age > 26;',
+  'SELECT COUNT(*) FROM users;',
+  'SELECT AVG(age) FROM users;',
+  "UPDATE users SET age = 30 WHERE email = 'alice@example.com';",
+  'SELECT * FROM users ORDER BY age DESC;',
+  'DELETE FROM users WHERE age < 30;',
+  'SELECT COUNT(*) FROM users;',
+  'exit',
+].join('\n');
+const HEAVY_USERS_OUT = [
+  'OK: table users created',
+  'OK: 3 rows inserted',
+  '+----+---------------------+-----+',
+  '| id | email               | age |',
+  '+----+---------------------+-----+',
+  '| 1  | alice@example.com   | 28  |',
+  '| 2  | bob@example.com     | 35  |',
+  '| 3  | charlie@example.com | 25  |',
+  '+----+---------------------+-----+',
+  '(3 rows)',
+  '+---------------------+-----+',
+  '| email               | age |',
+  '+---------------------+-----+',
+  '| alice@example.com   | 28  |',
+  '| bob@example.com     | 35  |',
+  '+---------------------+-----+',
+  '(2 rows)',
+  'COUNT(*) = 3',
+  'AVG(age) = 29.33',
+  'OK: 1 row updated',
+  'OK: 1 row deleted',
+  'COUNT(*) = 2',
+  'Bye.',
+].join('\n');
+const HEAVY_DEMO_SQL = [
+  '-- Advanced demo: GROUP BY + HAVING, aggregates, ORDER BY with LIMIT',
+  'CREATE TABLE products (id INT, name TEXT, price INT, category TEXT);',
+  'CREATE TABLE orders (id INT, product_id INT, qty INT, amount INT);',
+  "INSERT INTO products VALUES (1, 'Laptop', 1000, 'Electronics');",
+  "INSERT INTO products VALUES (2, 'Mouse', 25, 'Electronics');",
+  "INSERT INTO products VALUES (3, 'Desk', 200, 'Furniture');",
+  'INSERT INTO orders VALUES (1, 1, 2, 2000);',
+  'INSERT INTO orders VALUES (2, 2, 5, 125);',
+  'INSERT INTO orders VALUES (3, 3, 1, 200);',
+  '-- Orders per product',
+  'SELECT product_id, COUNT(*) FROM orders GROUP BY product_id;',
+  '-- Top order by amount',
+  'SELECT * FROM orders ORDER BY amount DESC LIMIT 1;',
+  'SELECT SUM(amount) FROM orders;',
+  'DROP TABLE products;',
+  'DROP TABLE orders;',
+].join('\n');
+const HEAVY_README = [
+  '# Mini SQL Database Engine',
+  '',
+  'A lightweight, stdlib-only SQL database in Python 3, with ASCII table output and an interactive REPL.',
+  '',
+  '## Features',
+  '',
+  '### DDL',
+  '- `CREATE TABLE` with INT, TEXT and FLOAT columns',
+  '- `DROP TABLE`',
+  '',
+  '### DML',
+  '- `INSERT INTO` with type casting',
+  '- `UPDATE` and `DELETE FROM` with an optional WHERE clause',
+  '- `SELECT` with WHERE, ORDER BY, LIMIT, GROUP BY and HAVING',
+  '- Aggregates: COUNT(*), SUM(), AVG(), MIN(), MAX()',
+  '',
+  '## Usage',
+  '',
+  '```bash',
+  'python3 minidb.py test.sql   # run a script',
+  'python3 minidb.py            # interactive REPL',
+  '```',
+  '',
+].join('\n');
+
+/**
+ * "heavy": what a Claude turn building a small SQL engine looks like. Each step is Claude's Bash tool
+ * as its adapter reports it: the command as the title and in rawInput with a description, asked
+ * about in Ask mode, then its output in a ```console block. The heredoc writes write their files.
+ */
+async function heavy(client, sessionId) {
+  const state = stateOf(sessionId);
+  if (state.mode === 'plan') return say(client, sessionId, "I'm in Plan mode, so I don't run commands.");
+  const cwd = sessionCwd.get(sessionId) ?? process.cwd();
+  const dir = path.join(cwd, 'agent_heavy');
+  let n = 0;
+  /** One Bash step; `write` is [file, text] for a heredoc that writes a file. Resolves false when you said no. */
+  const bash = async (command, description, output, write) => {
+    const toolCallId = `heavy-${++n}`;
+    const call = { toolCallId, title: command, kind: 'execute', rawInput: { command, description } };
+    await tool(client, sessionId, { sessionUpdate: 'tool_call', ...call, status: 'pending', content: [{ type: 'content', content: { type: 'text', text: description } }] });
+    if (!(await allowed(client, sessionId, 'execute', call, ASK_OPTIONS))) {
+      await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'failed', content: [{ type: 'content', content: { type: 'text', text: 'The user doesn\'t want to run this command.' } }] });
+      return false;
+    }
+    await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress' });
+    await pause(250);
+    if (write) writeNative(write[0], write[1]);
+    await tool(client, sessionId, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId,
+      status: 'completed',
+      ...(output ? { content: [{ type: 'content', content: { type: 'text', text: `\`\`\`console\n${output}\n\`\`\`` } }] } : {}),
+    });
+    return true;
+  };
+  await say(client, sessionId, "I'll run the engine's test script, try more queries through stdin, add an advanced demo and write the README.\n\n");
+  const steps = [
+    [`cd ${dir} && python3 minidb.py test.sql 2>&1`, 'Run the core test script', 'OK: 22 queries, 0 failures'],
+    [`cat << 'EOF' | python3 ${dir}/minidb.py\n${HEAVY_USERS_SQL}\nEOF`, 'Try the engine with queries from stdin', HEAVY_USERS_OUT],
+    [`ls -lh ${dir}/ && wc -l ${dir}/minidb.py ${dir}/test.sql`, 'List the files and count lines', `total 28K\n-rw-r--r-- 1 dev dev 21K minidb.py\n-rw-r--r-- 1 dev dev 1.9K test.sql\n  561 ${dir}/minidb.py\n   48 ${dir}/test.sql\n  609 total`],
+    [
+      `cat << 'EOF' > ${dir}/demo_advanced.sql\n${HEAVY_DEMO_SQL}\nEOF\npython3 ${dir}/minidb.py ${dir}/demo_advanced.sql`,
+      'Write the advanced demo and run it',
+      '+------------+----------+\n| product_id | COUNT(*) |\n+------------+----------+\n| 1          | 1        |\n| 2          | 1        |\n| 3          | 1        |\n+------------+----------+\n(3 rows)\nOK: 16 queries',
+      [path.join(dir, 'demo_advanced.sql'), `${HEAVY_DEMO_SQL}\n`],
+    ],
+    [`cat << 'EOF' > ${dir}/README.md\n${HEAVY_README}EOF`, 'Write the README', '', [path.join(dir, 'README.md'), HEAVY_README]],
+  ];
+  for (const [command, description, output, write] of steps) {
+    if (!(await bash(command, description, output, write))) return say(client, sessionId, 'You said no, so I stopped there.');
+    await pause(150);
+  }
+  await say(
+    client,
+    sessionId,
+    [
+      `Done. The engine is tested and documented in ${dir}.`,
+      '',
+      'FEATURES IMPLEMENTED & VERIFIED:',
+      '✓ DDL (Data Definition Language)',
+      '  - CREATE TABLE (INT, TEXT, FLOAT types)',
+      '  - DROP TABLE',
+      '✓ DML (Data Manipulation Language)',
+      '  - INSERT INTO with type casting',
+      '  - UPDATE and DELETE with WHERE',
+      '✓ SELECT with WHERE, ORDER BY, LIMIT, GROUP BY + HAVING',
+      '✗ JOIN (simplified: shows order data only)',
+      '',
+      'TEST RESULTS:',
+      '1. test.sql - Core features (22 queries)',
+      '   ✓ CREATE TABLE × 2',
+      '   ✓ INSERT × 8, UPDATE × 2, DELETE × 1',
+      '2. demo_advanced.sql - GROUP BY, aggregates (16 queries)',
+      '   ✓ All queries return the expected rows',
+      '',
+      'FILES:',
+      `${dir}/minidb.py (561 lines) - Main implementation`,
+      `${dir}/demo_advanced.sql - Advanced demo`,
+      `${dir}/README.md:7 - Documentation, features from line 7`,
+    ].join('\n'),
+  );
 }
 
 const PLAN_TEXT = '## Plan\n\n1. Read `README.md`\n2. Add a **Usage** section\n3. Run the tests';
@@ -993,6 +1161,7 @@ acp
       }
     } else if (command === 'tour') await tour(client, sessionId);
     else if (command === 'project') await project(client, sessionId);
+    else if (command === 'heavy') await heavy(client, sessionId);
     else if (command.startsWith('edit ')) await edit(client, sessionId, command.slice(5));
     else if (command.startsWith('native-edit ')) await nativeEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(12).trim()));
     else if (command.startsWith('perm-edit ')) await permEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(10).trim()));

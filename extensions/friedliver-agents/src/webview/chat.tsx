@@ -40,7 +40,8 @@ import {
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { CopyButton, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
-import { AlwaysAllow, AutoBadge, EditsBar, ModeBadge, PermissionCard, QuestionCard, QueueList, SessionControls, ToolDetails, UsageMeter, decisionKey, hasDetails } from './controls';
+import { AlwaysAllow, AutoBadge, EditsBar, ModeBadge, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
+import { Steps } from './steps';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -439,7 +440,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     >
       {group(chat.items).map((g) =>
         g.kind === 'steps' ? (
-          <Steps key={g.at} tools={g.items} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} />
+          <Steps key={g.at} tools={g.items} waiting={waiting} waitingKey={waitingKey} busy={chat.busy} chatId={chat.id} cwd={chat.cwd} />
         ) : (
           <TranscriptItem
             key={g.at}
@@ -451,6 +452,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
             conflictKey={conflictKey}
             onSelect={onSelect}
             canUndo={g.at === lastChanges && !chat.busy}
+            live={chat.busy && g.at === chat.items.length - 1}
           />
         ),
       )}
@@ -468,53 +470,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   );
 }
 
-const TOOL_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', failed: 'error', pending: 'next' };
 const PLAN_STATE: Record<string, string> = { completed: 'done', in_progress: 'working', pending: 'next' };
-
-type ToolItem = Extract<Item, { kind: 'tool' }>;
-/** `busy`: the chat's turn is running; a step left in progress after it ends doesn't pulse. */
-type StepsProps = { tools: ToolItem[]; waiting: Set<string>; waitingKey: string; busy: boolean };
-
-/** A run of tool calls; drawn again when one of them or the questions about them change. */
-const Steps = memo(
-  StepsView,
-  (a: StepsProps, b: StepsProps) =>
-    a.waitingKey === b.waitingKey && a.busy === b.busy && a.tools.length === b.tools.length && a.tools.every((t, n) => t === b.tools[n]),
-);
-
-function StepsView({ tools, waiting, busy }: StepsProps) {
-  // Failed steps show their output; the others open on request.
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  return (
-    <ol class="steps" aria-label="Steps">
-      {tools.map((t) => {
-        const state = waiting.has(t.id) ? 'needs-you' : (TOOL_STATE[t.status ?? 'pending'] ?? 'next');
-        const more = hasDetails(t);
-        const isOpen = open[t.id] ?? (t.status === 'failed' && !!t.out?.some((o) => o.t === 'text'));
-        return (
-          <li key={t.id} id={`item-${t.id}`} data-state={state} data-open={isOpen ? '' : undefined}>
-            <div class="step-row">
-              <Dot state={state} still={!busy} />
-              <span class="step-title">{t.title}</span>
-              {t.toolKind && <span class="tag">{t.toolKind}</span>}
-              {t.locations.slice(0, 3).map((l) => (
-                <button key={l} class="ref" title={l} onClick={() => send({ type: 'openFile', path: l })}>
-                  {basename(l)}
-                </button>
-              ))}
-              {more && (
-                <button class="ghost icon-btn sm step-toggle" aria-expanded={isOpen} title={isOpen ? 'Hide what it did' : 'Show what it did'} onClick={() => setOpen({ ...open, [t.id]: !isOpen })}>
-                  <Icon name="chevron" />
-                </button>
-              )}
-            </div>
-            {more && isOpen && <ToolDetails tool={t} />}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
 
 interface ItemProps {
   item: Item;
@@ -525,6 +481,8 @@ interface ItemProps {
   conflictKey: string;
   onSelect: Select;
   canUndo: boolean;
+  /** The reply still streams in: it isn't collapsed. */
+  live?: boolean;
 }
 
 /**
@@ -537,6 +495,7 @@ const TranscriptItem = memo(
   (a: ItemProps, b: ItemProps) =>
     a.item === b.item &&
     a.canUndo === b.canUndo &&
+    a.live === b.live &&
     a.chat.id === b.chat.id &&
     a.chat.label === b.chat.label &&
     a.chat.agent === b.chat.agent &&
@@ -548,7 +507,7 @@ const TranscriptItem = memo(
     a.onSelect === b.onSelect,
 );
 
-function ItemView({ item, chat, state, conflicts, onSelect, canUndo }: ItemProps) {
+function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live }: ItemProps) {
   switch (item.kind) {
     case 'user':
       return (
@@ -568,7 +527,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo }: ItemProps
     case 'agent':
       return (
         <div class="prose">
-          <Markdown text={item.text} />
+          <Markdown key={chat.id} text={item.text} chatId={chat.id} cwd={chat.cwd} full={live} />
           <div class="msg-tools">
             <CopyButton text={item.text} label="Copy reply" />
           </div>
@@ -704,7 +663,7 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
       </div>
       {item.text && (
         <div class={`link-body ${expanded ? '' : 'clamped'}`}>
-          {LINK_PROSE.has(item.role) ? <Markdown text={item.text} /> : <div class="quote">{item.text}</div>}
+          {LINK_PROSE.has(item.role) ? <Markdown text={item.text} chatId={chat.id} cwd={chat.cwd} full /> : <div class="quote">{item.text}</div>}
         </div>
       )}
       {(long || item.role === 'reply') && (
