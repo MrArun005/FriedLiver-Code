@@ -185,3 +185,35 @@ describe("read-only chats: the agent's own mode", () => {
     expect(core.chat(normal.id)?.session?.options.find((o) => o.category === 'mode')?.current).not.toBe('plan');
   });
 });
+
+describe('read-only chats: never a loaded session', () => {
+  it('starts a fresh session with the tool limits and Plan mode when the agent comes back, where a normal chat reloads', async () => {
+    const before = process.env.FAKE_AGENT_LOAD_SESSION;
+    process.env.FAKE_AGENT_LOAD_SESSION = '1';
+    try {
+      const dir = await gitRepo();
+      const core = makeCore(dir);
+      const ro = await core.createChat('claude', { readOnly: true });
+      const normal = await core.createChat('claude');
+      const session = async (id: string) => {
+        await core.send(id, 'session');
+        return lastReply(core.chat(id)!);
+      };
+      const first = await session(ro.id);
+      expect(first).toContain('"disallowedTools"');
+      const normalFirst = await session(normal.id);
+      await core.stopAgent('claude');
+      const second = await session(ro.id);
+      expect(second).toContain('"tools":[]');
+      expect((await session(normal.id)).split(',')[0]).toBe(normalFirst.split(',')[0]);
+      // session/new, not session/load: the restarted Demo numbers sessions from 1 again, so the notice tells them apart.
+      const fresh = (id: string) => core.chat(id)!.items.some((i) => i.kind === 'notice' && /continues in a new session/.test(i.text));
+      expect(fresh(ro.id)).toBe(true);
+      expect(fresh(normal.id)).toBe(false);
+      await waitFor(() => readOnlyChoice(core.chat(ro.id)?.session?.options ?? [])?.option.current === 'plan');
+    } finally {
+      if (before === undefined) delete process.env.FAKE_AGENT_LOAD_SESSION;
+      else process.env.FAKE_AGENT_LOAD_SESSION = before;
+    }
+  });
+});

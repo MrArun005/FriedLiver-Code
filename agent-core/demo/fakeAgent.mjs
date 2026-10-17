@@ -13,6 +13,7 @@
 //   "plan"            switches to Plan mode, sends a plan, then asks as perm-plan does
 //   "question"        asks a multiple-choice question as a form (elicitation/create), like
 //                     Claude's AskUserQuestion, when the client takes forms
+//   "session"         says the session id and the _meta its session/new or session/load carried
 //   "links"           says which files the message linked (resource_link blocks)
 //   "read-image <p>"  reports a read tool call on an image file
 //   "wait"            keeps working until cancelled
@@ -90,6 +91,7 @@ let authenticated = false;
 let nextSession = 1;
 const cancels = new Map();
 const sessionCwd = new Map();
+const sessionMeta = new Map();
 const sessionMcp = new Map();
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
 const legacy = process.env.FAKE_AGENT_LEGACY === '1';
@@ -1058,6 +1060,7 @@ acp
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     sessionMcp.set(sessionId, params.mcpServers ?? []);
+    sessionMeta.set(sessionId, params._meta);
     if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string' || server.type === 'http') keepMcp(server);
     const state = { ...DEFAULTS, used: 0 };
     choices.set(sessionId, state);
@@ -1068,6 +1071,7 @@ acp
     if (!loadSession) throw acp.RequestError.methodNotFound('session/load');
     sessionCwd.set(params.sessionId, params.cwd);
     sessionMcp.set(params.sessionId, params.mcpServers ?? []);
+    sessionMeta.set(params.sessionId, params._meta);
     const state = choices.get(params.sessionId) ?? { ...DEFAULTS, used: 0 };
     choices.set(params.sessionId, state);
     announceSession(client, params.sessionId);
@@ -1186,6 +1190,8 @@ acp
         });
         await say(client, sessionId, answer.action === 'accept' ? `You picked ${answer.content?.db}${answer.content?.note ? ` (${answer.content.note})` : ''}.` : `You ${answer.action === 'decline' ? 'skipped' : 'cancelled'} the question.`);
       }
+    } else if (command === 'session') {
+      await say(client, sessionId, `Session ${sessionId}, meta ${JSON.stringify(sessionMeta.get(sessionId) ?? null)}`);
     } else if (command.startsWith('links')) {
       const links = params.prompt.filter((b) => b.type === 'resource_link').map((b) => b.name);
       await say(client, sessionId, links.length ? `Linked: ${links.join(', ')}` : 'No files linked.');

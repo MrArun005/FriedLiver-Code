@@ -68,6 +68,8 @@ export interface HubOptions {
   mcpServersFor?(chatId: string, agent: { http: boolean }): acp.McpServer[] | Promise<acp.McpServer[]>;
   /** Extra `_meta` for a chat's session/new (e.g. a read-only chat's tool limits). */
   sessionMetaFor?(chatId: string, agentId: AgentId): Record<string, unknown> | undefined;
+  /** Chats that never load or resume a session: each start is a fresh session/new (read-only chats). */
+  freshSessionFor?(chatId: string): boolean;
   log?(line: string): void;
 }
 
@@ -417,12 +419,13 @@ export class AgentHub {
     const previous = chat.sessionId;
     const { cwd } = chat;
     const mcpServers = (await this.options.mcpServersFor?.(chat.id, { http: agent.conn.supportsHttpMcp })) ?? [];
+    const meta = this.options.sessionMetaFor?.(chat.id, chat.agentId);
 
-    if (previous && agent.conn.supportsLoadSession) {
+    if (previous && agent.conn.supportsLoadSession && !this.options.freshSessionFor?.(chat.id)) {
       chat.loading = true;
       let setup: SessionSetup | undefined;
       try {
-        setup = await agent.conn.loadSession(previous, cwd, mcpServers);
+        setup = await agent.conn.loadSession(previous, cwd, mcpServers, meta);
         chat.sessionGeneration = agent.generation;
       } catch (err) {
         if (isAuthRequired(err)) throw err;
@@ -436,7 +439,7 @@ export class AgentHub {
       }
     }
 
-    const session = await agent.conn.newSession(cwd, mcpServers, this.options.sessionMetaFor?.(chat.id, chat.agentId));
+    const session = await agent.conn.newSession(cwd, mcpServers, meta);
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(

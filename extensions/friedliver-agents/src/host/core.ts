@@ -274,6 +274,7 @@ export class AgentCore {
       },
       terminalListener: (agentId) => this.commandHooks(agentId),
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
+      freshSessionFor: (chatId) => this.readOnlyChat(chatId),
       sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
     // The connections read the live state, not the one at construction.
