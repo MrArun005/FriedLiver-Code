@@ -28,7 +28,10 @@ What changes from stock VS Code:
   ([how it works](docs/CONNECTIONS.md)). Chats survive a reload.
 - **No built-in Copilot, AI features off by default.** Copilot Chat and the
   agent host don't ship, so the fork settles about 165 MB below VS Code
-  ([benchmarks](docs/benchmarks.md)).
+  ([benchmarks](docs/benchmarks.md)). The JSON language server waits for a
+  JSON file, and agents reach FriedLiver's tools without a process per chat:
+  about 50 MB less at rest and 270 MB less with 15 agents at work
+  ([measured](docs/benchmarks.md#cutting-memory-at-the-app-level)).
 - **Open VSX gallery.** Prettier, ESLint, GitLens, Python, Go, rust-analyzer and
   most others install as usual. Microsoft-only extensions (Pylance, C/C++, C#,
   Remote - SSH, Copilot) aren't there. Open replacements are listed in the

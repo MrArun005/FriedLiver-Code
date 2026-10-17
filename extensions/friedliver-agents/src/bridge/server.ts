@@ -1,7 +1,9 @@
-// The "friedliver" MCP server (dist/bridge.js). Each agent session that may
-// reach other agents starts one. It offers the tools in mcp.ts and passes every
-// call to the editor over a local socket; the editor checks the call against
-// the user's setting, asks the user when it should, and does the work.
+// The "friedliver" MCP server over stdio (dist/bridge.js). Each session of an
+// agent that takes only stdio MCP servers starts one (agents that take HTTP
+// reach the same tools in the editor, http.ts). It offers the tools in mcp.ts
+// and passes every call to the editor over a local socket; the editor checks
+// the call against the user's setting, asks the user when it should, and does
+// the work.
 import net from 'node:net';
 import { handle, progress, toolReply, type ToolResult } from './mcp';
 import { BRIDGE_ENV, BRIDGE_LIMITS, TOKEN_ENV, encodeRequest, type BridgeCall, type BridgeResponse } from './protocol';

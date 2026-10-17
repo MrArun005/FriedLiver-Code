@@ -44,6 +44,8 @@
 // FAKE_AGENT_START_MCP=1 makes it start each session's MCP servers (the FriedLiver tools)
 // when the session starts and keep them running, as real agents do, instead of only
 // for a tool call; the stress test uses it to count their memory.
+// It takes MCP servers over HTTP as well as stdio, as Claude's, Codex's and Gemini's
+// adapters do; FAKE_AGENT_MCP_HTTP=0 makes it take stdio servers only.
 // FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first;
 // that browser-style sign-in prints a sign-in link to stderr, like Gemini's.
 // --require-login makes it need a terminal login instead, like Claude's: the
@@ -78,6 +80,7 @@ const needsTerminalLogin = process.argv.includes('--require-login');
 if (process.argv.includes('--logout')) rmSync(LOGIN_MARKER, { force: true });
 const images = process.env.FAKE_AGENT_IMAGES !== '0';
 const loadSession = process.env.FAKE_AGENT_LOAD_SESSION === '1';
+const httpMcp = process.env.FAKE_AGENT_MCP_HTTP !== '0';
 let authenticated = false;
 let nextSession = 1;
 const cancels = new Map();
@@ -530,11 +533,60 @@ async function project(client, sessionId) {
 }
 
 /**
- * A minimal MCP client over stdio, enough to call one tool: initialize, the
- * initialized notification, tools/call. Hand-written so this agent needs no
- * MCP package.
+ * A minimal MCP client, enough to call one tool: initialize, the initialized
+ * notification, tools/call. Hand-written so this agent needs no MCP package.
  */
 function mcpClient(server) {
+  return server.type === 'http' ? httpMcpClient(server) : stdioMcpClient(server);
+}
+
+/* global fetch, AbortController */
+/** Over streamable HTTP: one POST per message; a reply comes back as JSON or as an event stream. */
+function httpMcpClient(server) {
+  const headers = Object.fromEntries((server.headers ?? []).map((h) => [h.name, h.value]));
+  const inFlight = new Set();
+  let nextId = 1;
+  const post = async (message) => {
+    const abort = new AbortController();
+    inFlight.add(abort);
+    try {
+      const res = await fetch(server.url, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', ...message }),
+        signal: abort.signal,
+      });
+      if (res.status === 202) return undefined;
+      if (!res.ok) throw new Error(`The FriedLiver tools answered HTTP ${res.status}.`);
+      if (!(res.headers.get('content-type') ?? '').startsWith('text/event-stream')) return await res.json();
+      // Events until the one that answers this request; progress notes are skipped.
+      const text = await res.text();
+      for (const block of text.split('\n\n')) {
+        const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n');
+        if (!data) continue;
+        const msg = JSON.parse(data);
+        if (msg.id === message.id) return msg;
+      }
+      throw new Error('The FriedLiver tools sent no answer.');
+    } finally {
+      inFlight.delete(abort);
+    }
+  };
+  return {
+    request: async (method, params) => {
+      const msg = await post({ id: nextId++, method, params });
+      if (msg?.error) throw new Error(msg.error.message);
+      return msg?.result;
+    },
+    notify: (method, params) => void post({ method, params }).catch(() => {}),
+    close: () => {
+      for (const abort of inFlight) abort.abort();
+    },
+  };
+}
+
+/** Over stdio: starts the server and speaks one JSON-RPC message per line. */
+function stdioMcpClient(server) {
   const env = { ...process.env };
   for (const v of server.env ?? []) env[v.name] = v.value;
   const child = spawn(server.command, server.args ?? [], { env, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
@@ -602,7 +654,7 @@ function keepMcp(server) {
 
 /** Calls one of the session's FriedLiver tools and returns its text; a tool error throws. */
 async function useTool(sessionId, name, args) {
-  const server = (sessionMcp.get(sessionId) ?? []).find((s) => s.name === 'friedliver' && typeof s.command === 'string');
+  const server = (sessionMcp.get(sessionId) ?? []).find((s) => s.name === 'friedliver' && (typeof s.command === 'string' || s.type === 'http'));
   if (!server) throw new Error('This session has no FriedLiver tools.');
   const mcp = mcpClient(server);
   const stop = new Promise((_, reject) => cancels.set(sessionId, () => reject(new Error('cancelled'))));
@@ -814,7 +866,7 @@ acp
     forms = params.clientCapabilities?.elicitation?.form != null;
     return {
     protocolVersion: acp.PROTOCOL_VERSION,
-    agentCapabilities: { loadSession, promptCapabilities: { image: images } },
+    agentCapabilities: { loadSession, promptCapabilities: { image: images }, mcpCapabilities: { http: httpMcp } },
     authMethods: needsTerminalLogin
       ? [{ id: 'demo-login', name: 'Log in with Demo', description: 'Run the demo login in the terminal', type: 'terminal', args: ['--cli'] }]
       : needsAuth
@@ -838,7 +890,7 @@ acp
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     sessionMcp.set(sessionId, params.mcpServers ?? []);
-    if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string') keepMcp(server);
+    if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string' || server.type === 'http') keepMcp(server);
     const state = { ...DEFAULTS, used: 0 };
     choices.set(sessionId, state);
     announceSession(client, sessionId);
