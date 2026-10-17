@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { Attachment } from '../shared/messages';
+import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
+import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
 import {
   AGENT_FACES,
   AGENT_KEYS,
@@ -58,7 +59,7 @@ import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-/** The mic button: macOS dictation, which only the FriedLiver app on a Mac can start. */
+/** The mic button: dictation through the app's macOS speech helper (host/dictation.ts). */
 const MAC = document.body.dataset.platform === 'darwin';
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
@@ -1293,6 +1294,58 @@ function Composer({
 
   const canSend = asking ? !!question : !empty;
   const [micHint, setMicHint] = useState(false);
+  // The mic: what the host's helper hears goes into the box at the caret, each partial replacing the last.
+  const [mic, setMic] = useState<DictationState>('idle');
+  const spoken = useRef<Segment | null>(null);
+  const latestInsert = useRef(insert);
+  latestInsert.current = insert;
+  const dictate = (on: boolean) => {
+    if (on) {
+      const el = area.current;
+      const start = el?.selectionStart ?? text.length;
+      spoken.current = { start, len: (el?.selectionEnd ?? start) - start };
+      setMicHint(false);
+      setMic('listening');
+      el?.focus();
+    } else {
+      setMic((m) => (m === 'idle' ? m : 'stopping'));
+    }
+    send({ type: 'dictate', chatId: chat.id, on });
+  };
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const m = e.data as HostMessage;
+      if (m?.type !== 'dictation' || m.chatId !== chat.id) return;
+      if ('text' in m) {
+        if (!spoken.current) return;
+        const next = spliceDictation(area.current?.value ?? '', spoken.current, m.text, m.final, LIMITS.text);
+        spoken.current = next.seg;
+        latestInsert.current(next);
+        return;
+      }
+      if (m.state === 'idle' || m.state === 'fallback') spoken.current = null;
+      setMic(m.state === 'fallback' ? 'idle' : m.state);
+      if (m.state === 'fallback') setMicHint(true);
+    };
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      // Another chat, or the view closed: the helper stops.
+      if (spoken.current) send({ type: 'dictate', chatId: chat.id, on: false });
+    };
+  }, [chat.id]);
+  useEffect(() => {
+    if (mic !== 'listening') return;
+    // Esc stops listening (before the box's own Esc, which would stop the agent's turn).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      dictate(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [mic]);
   const [openMenu, setMenu] = useState<ComposerMenu>(null);
   const closeMenu = useCallback(() => {
     setMenu(null);
@@ -1389,6 +1442,11 @@ function Composer({
               aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
               placeholder={chat.session?.starting && !chat.busy ? 'Starting…' : 'Message…'}
               onInput={(e) => {
+                // Typing takes the box back from the mic.
+                if (spoken.current) {
+                  spoken.current = null;
+                  dictate(false);
+                }
                 setText(e.currentTarget.value);
                 track(e.currentTarget);
                 setShut(false);
@@ -1456,13 +1514,11 @@ function Composer({
               <button
                 type="button"
                 class="cc-mic mic-btn"
-                aria-label="Dictate"
-                title="Dictate: press Fn twice in the message box"
-                onClick={() => {
-                  // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
-                  area.current?.focus();
-                  setMicHint(true);
-                }}
+                data-state={mic === 'idle' ? undefined : mic}
+                aria-pressed={mic !== 'idle'}
+                aria-label={mic === 'idle' ? 'Dictate' : 'Stop dictating'}
+                title={mic === 'listening' ? 'Listening… click to stop' : mic === 'stopping' ? 'Finishing…' : 'Dictate'}
+                onClick={() => dictate(mic === 'idle')}
               >
                 <Icon name="mic" />
               </button>

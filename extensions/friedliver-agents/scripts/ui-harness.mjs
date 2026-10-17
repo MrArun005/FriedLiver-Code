@@ -436,12 +436,73 @@ async function shoot() {
     await p.close();
   }
   {
-    // The mic, top right in the box: no programmatic start (it beeped); it focuses the box and says Fn Fn.
-    const p = await open('surface=chat&side=1&select=chat-c5', 900, 700);
+    // The mic (macOS): one click listens, the words appear at the caret as they come, a click or Esc stops. No hint.
+    // In the owner's theme (Dark 2026); Light 2026 is shot below.
+    const p = await open('surface=chat&side=1&select=chat-c5&theme=dark-2026', 900, 700);
+    const box = () => p.inputValue('.composer textarea');
+    const host = async (m) => {
+      await p.evaluate((m) => window.postMessage({ type: 'dictation', chatId: 'chat-c5', ...m }, '*'), m);
+      await p.waitForTimeout(30);
+    };
+    const dictates = async () => (await posted(p)).filter((m) => m.type === 'dictate');
+    await p.fill('.composer textarea', 'Fix the');
+    const look = () =>
+      p.evaluate(() => {
+        const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b), ring = window.getComputedStyle(b, '::after');
+        const blue = window.getComputedStyle(document.body).getPropertyValue('--vscode-button-background').trim() || '#0078d4';
+        const probe = document.createElement('i');
+        probe.style.color = blue;
+        document.body.append(probe);
+        const want = window.getComputedStyle(probe).color;
+        probe.remove();
+        const r = b.getBoundingClientRect();
+        return { blue: cs.backgroundColor === want, white: cs.color === 'rgb(255, 255, 255)', size: r.width === 26 && r.height === 26, ring: ring.content !== 'none' && ring.borderTopWidth === '2px' && ring.borderTopColor === 'rgb(255, 255, 255)', opacity: cs.opacity };
+      });
+    const idle = await look();
+    check(idle.blue && idle.white && idle.size && !idle.ring, 'the mic is a 26px blue button with a white glyph, no ring at rest');
+    await p.mouse.move(0, 0);
+    await save(p, 'composer-mic-idle', { element: '.composer' });
     await p.click('.cc-mic');
-    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'the mic no longer asks the app to start dictation (it beeped)');
+    check((await dictates()).at(-1)?.on === true && (await dictates()).at(-1)?.chatId === 'chat-c5', 'one click starts dictating into this chat');
     check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
-    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'the mic shows the Fn Fn hint');
+    check((await p.locator('.cc-mic[data-state="listening"][title="Listening… click to stop"][aria-pressed="true"]').count()) === 1, 'the mic shows it is listening');
+    check((await p.locator('.mic-hint').count()) === 0, 'no Fn Fn hint when the helper runs');
+    await host({ state: 'listening' });
+    await host({ text: 'login', final: false });
+    check((await box()) === 'Fix the login', 'a partial appears at the caret');
+    await host({ text: 'login redirect', final: false });
+    check((await box()) === 'Fix the login redirect', 'the next partial replaces it');
+    await p.mouse.move(0, 0);
+    const listening = await look();
+    check(listening.blue && listening.ring && listening.opacity === '1', 'listening: still blue, with a white 2px ring');
+    await save(p, 'composer-mic-listening', { element: '.composer' });
+    await p.click('.cc-mic');
+    check((await dictates()).at(-1)?.on === false, 'a second click stops');
+    check((await p.locator('.cc-mic[data-state="stopping"]').count()) === 1, 'the mic shows it is finishing');
+    check((await look()).opacity === '0.6', 'finishing: the mic at 60%');
+    await host({ text: 'login redirect bug.', final: true });
+    await host({ state: 'idle' });
+    check((await box()) === 'Fix the login redirect bug.', 'the final words stay');
+    check((await p.locator('.cc-mic:not([data-state])[aria-pressed="false"]').count()) === 1, 'the mic is idle again');
+    const before = (await posted(p)).length;
+    await p.click('.cc-mic');
+    await host({ state: 'listening' });
+    await p.keyboard.press('Escape');
+    const after = (await posted(p)).slice(before);
+    check(after.at(-1)?.type === 'dictate' && after.at(-1)?.on === false && !after.some((m) => m.type === 'stop'), 'Esc stops dictating, not the agent');
+    await host({ state: 'idle' });
+    await p.click('.cc-mic');
+    await host({ text: 'and', final: false });
+    await p.keyboard.type('!');
+    check((await dictates()).at(-1)?.on === false, 'typing takes the box back from the mic');
+    await host({ text: 'and more', final: true });
+    check((await box()) === 'Fix the login redirect bug. and!', 'words after typing are dropped');
+    await host({ state: 'idle' });
+    // A build without the helper (a dev build): the old hint.
+    await p.click('.cc-mic');
+    await host({ state: 'fallback' });
+    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'no helper: the mic shows the Fn Fn hint');
+    check((await p.locator('.cc-mic:not([data-state])').count()) === 1, 'no helper: the mic is idle');
     await p.click('.mic-hint a');
     check((await posted(p)).some((m) => m.type === 'dictationSettings'), 'the hint opens Dictation settings');
     const r = await p.evaluate(() => {
@@ -452,6 +513,12 @@ async function shoot() {
     await p.click('.attach-btn');
     check((await posted(p)).some((m) => m.type === 'attach'), '+ attaches images');
     await p.close();
+    const light = await open('surface=chat&side=1&select=chat-c5&theme=light-2026', 900, 700);
+    await save(light, 'composer-mic-idle-light', { element: '.composer' });
+    await light.click('.cc-mic');
+    await light.mouse.move(0, 0);
+    await save(light, 'composer-mic-listening-light', { element: '.composer' });
+    await light.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
     check((await linux.locator('.cc-mic').count()) === 0, 'no mic off macOS');
     await linux.close();

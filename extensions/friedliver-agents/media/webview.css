@@ -49,6 +49,10 @@
   --warn: var(--vscode-editorWarning-foreground, #e1c08d);
   --toggle-on: var(--button-bg);
   --effort-fill: var(--vscode-inputOption-activeBorder, #2a2b2c);
+  /* The composer's mic: the theme's button blue, a white glyph. */
+  --mic-bg: var(--vscode-button-background, #0078d4);
+  --mic-hover: var(--vscode-button-hoverBackground, #026ec1);
+  --mic-fg: #fff;
   /* The one loud colour of the Agent Manager: "you must decide". */
   --decision: var(--vscode-friedliver-decision, var(--focus-border));
   --decision-fg: var(--vscode-friedliver-decisionForeground, var(--button-fg));
@@ -2391,11 +2395,12 @@ button.cc-mic {
   height: 26px;
   margin-right: 5px;
   border-radius: var(--r-5);
-  color: var(--fg-2);
+  color: var(--mic-fg);
+  background: var(--mic-bg);
 }
 button.cc-mic:hover {
-  color: var(--fg);
-  background: var(--ghost-hover);
+  color: var(--mic-fg);
+  background: var(--mic-hover);
 }
 button.cc-mic .icon {
   width: 16px;
@@ -4580,5 +4585,31 @@ button.new-chat kbd {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+/* The mic while it listens: a pulsing white ring inside the blue; 60% while it finishes. */
+button.cc-mic[data-state]::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 2px solid var(--mic-fg);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: mic-pulse 1.2s ease infinite;
+}
+button.cc-mic[data-state='stopping'] {
+  opacity: 0.6;
+}
+button.cc-mic[data-state='stopping']::after {
+  animation: none;
+}
+@keyframes mic-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button.cc-mic[data-state]::after {
+    animation: none;
   }
 }

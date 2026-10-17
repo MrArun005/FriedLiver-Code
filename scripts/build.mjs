@@ -229,6 +229,30 @@ function seedVSCodeSysroot(arch) {
 }
 
 /**
+ * Before the app is signed: the usage descriptions macOS shows when the composer's mic first asks
+ * for the microphone and speech recognition (Electron's Info.plist has no speech one), and the
+ * dictation helper (extensions/friedliver-agents/native/build.sh, built by CI) executable and
+ * signed first, so the app's signature seals it. Without the helper the mic shows the Fn Fn hint.
+ */
+function finishMacApp(appPath) {
+	const plist = path.join(appPath, 'Contents', 'Info.plist');
+	for (const [key, text] of [
+		['NSMicrophoneUsageDescription', 'FriedLiver listens while you dictate a message with the mic button.'],
+		['NSSpeechRecognitionUsageDescription', 'FriedLiver turns what you say into text when you dictate a message.'],
+	]) {
+		run('plutil', ['-replace', key, '-string', text, plist]);
+	}
+	const helper = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-dictate');
+	if (fs.existsSync(helper)) {
+		fs.chmodSync(helper, 0o755);
+		run('codesign', ['--force', '--sign', '-', '--identifier', 'com.friedliver.dictate', helper]);
+		log('dictation helper signed');
+	} else {
+		log('no dictation helper in the app (native/build.sh not run): the mic falls back to the Fn Fn hint');
+	}
+}
+
+/**
  * The installer for this OS, into installers/: a per-user setup .exe on Windows (no admin
  * rights needed), a .dmg on macOS, a .deb on Linux. Unsigned: signing needs certificates.
  */
@@ -247,6 +271,7 @@ function buildInstaller(arch, appDir) {
 		if (!app) {
 			fail(`no .app in ${appDir}`);
 		}
+		finishMacApp(path.join(appDir, app));
 		// Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
 		run('codesign', ['--force', '--deep', '--sign', '-', path.join(appDir, app)], { cwd: appDir });
 		file = path.join(dest, `FriedLiver-darwin-${arch}-${version}.dmg`);

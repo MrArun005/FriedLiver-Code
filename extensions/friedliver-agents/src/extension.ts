@@ -16,7 +16,7 @@ import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
-import { DICTATION_SETTINGS } from './host/dictation';
+import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
 import { InlineEditor } from './host/inlineEditor';
 import { imagePreview } from './host/imageAccess';
@@ -135,6 +135,21 @@ export class Controller {
   private replay: { message: HostMessage; until: number }[] = [];
   /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
+  /** The composer's mic on macOS (host/dictation.ts). */
+  private readonly dictation = new Dictation<Surface>({
+    helper: () => helperPath(this.context.extensionUri.fsPath),
+    args: () => {
+      const voice = vscode.workspace.getConfiguration('friedliver.voice');
+      return helperArgs(voice.get('language'), voice.get('silenceSeconds'));
+    },
+    post: (surface, chatId, update) => post(surface, { type: 'dictation', chatId, ...update }),
+    denied: (code) => {
+      void vscode.window.showWarningMessage('FriedLiver needs microphone and speech permission', 'Open System Settings').then((pick) => {
+        if (pick) void vscode.env.openExternal(vscode.Uri.parse(PRIVACY_PANES[code], true));
+      });
+    },
+    failed: (message) => void vscode.window.showWarningMessage(`Dictation stopped: ${message}`),
+  });
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.browser = new BrowserPanel(context, (line) => this.log.info(line));
@@ -364,6 +379,7 @@ export class Controller {
     // restored chat should read "stopped when the window closed", not "cancelled".
     await this.stateFile?.flush();
     this.stateFile?.stop();
+    this.dictation.dispose();
     this.batcher.dispose();
     clearTimeout(this.claudeTimer);
     this.watchClaudeSessions(false);
@@ -455,6 +471,7 @@ export class Controller {
     const sub = attachSurface(surface, this.context.extensionUri, title, (s, m) => void this.handle(s, m), (line) => this.log.warn(line));
     owner.onDidDispose(() => {
       sub.dispose();
+      this.dictation.closed(surface);
       this.surfaces.delete(surface);
       if (surface.webview === this.agentsView?.webview) this.agentsView = undefined;
       if (surface.kind === 'tasks') this.refreshClaudeSessions();
@@ -560,6 +577,10 @@ export class Controller {
           return;
         case 'dictationSettings':
           await vscode.env.openExternal(vscode.Uri.parse(DICTATION_SETTINGS, true));
+          return;
+        case 'dictate':
+          if (m.on) this.dictation.start(surface, m.chatId);
+          else this.dictation.stop(m.chatId);
           return;
         case 'attach':
           post(surface, { type: 'attached', images: await this.pickImages(), ...(m.chatId ? { chatId: m.chatId } : {}) });
