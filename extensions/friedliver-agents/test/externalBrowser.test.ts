@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -66,5 +66,16 @@ describe("Claude Code's config", () => {
     expect(await readFile(file, 'utf8')).toBe('{ broken');
     await writeFile(file, '{"mcpServers": []}');
     await expect(registerClaude(file, 'http://127.0.0.1:5/mcp', T1)).rejects.toThrow(/not an object/);
+  });
+
+  it('writes through a symlinked config instead of replacing the link', async () => {
+    const dir = await tmp();
+    const real = path.join(dir, 'dotfiles.json');
+    const link = path.join(dir, '.claude.json');
+    await writeFile(real, JSON.stringify(fixture));
+    await symlink(real, link);
+    await registerClaude(link, 'http://127.0.0.1:5/mcp', T1);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await readFile(real, 'utf8')).mcpServers[SERVER_NAME].url).toBe('http://127.0.0.1:5/mcp');
   });
 });

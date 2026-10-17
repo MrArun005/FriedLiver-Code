@@ -8,7 +8,7 @@
 // that command would carry the bearer token in its argv, which any local user
 // can read with ps. The file is Claude Code's documented user-scope MCP config.
 import { randomBytes } from 'node:crypto';
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const SERVER_NAME = 'friedliver-browser';
@@ -51,7 +51,9 @@ async function readConfig(file: string): Promise<{ config: Config; exists: boole
 }
 
 /** The new file is always 0600 (it holds bearer tokens). Backup of the old file, then a write to a temp file beside it and a rename, so a crash never leaves half a config. */
-async function writeConfig(file: string, config: Config, exists: boolean): Promise<void> {
+async function writeConfig(link: string, config: Config, exists: boolean): Promise<void> {
+  // A dotfile manager's symlink stays a symlink: the file it points at is the one replaced.
+  const file = exists ? await realpath(link) : link;
   if (exists) {
     await copyFile(file, `${file}.friedliver-backup`);
     await chmod(`${file}.friedliver-backup`, 0o600);
