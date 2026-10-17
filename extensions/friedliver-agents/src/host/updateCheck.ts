@@ -197,13 +197,60 @@ export async function checkForUpdate(deps: CheckDeps): Promise<CheckResult> {
     deps.log?.(`Update check failed: ${err instanceof Error ? err.message : String(err)}`);
     return 'failed';
   }
-  if (!release) return 'failed';
+  if (!release) {
+    deps.log?.('Update check: no usable release');
+    return 'failed';
+  }
   const order = compareVersions(release.version, deps.current);
-  if (order === null || order <= 0) return 'up-to-date';
-  if (deps.offered.has(release.version)) return 'already-told';
+  const decision: CheckResult = order === null || order <= 0 ? 'up-to-date' : deps.offered.has(release.version) ? 'already-told' : 'newer';
+  deps.log?.(`Update check: current ${deps.current}, latest ${release.version}: ${decision}`);
+  if (decision !== 'newer') return decision;
   deps.offered.add(release.version);
   deps.notify(release);
   return 'newer';
+}
+
+/** What a manual "Check for Updates" says; null when the toast offering the update says it instead. */
+export function manualCheckMessage(result: CheckResult, current: string): string | null {
+  if (result === 'newer') return null;
+  if (result === 'failed') return `Couldn't check for updates (FriedLiver ${current}). See the FriedLiver Updates output.`;
+  return `You're up to date: FriedLiver ${current}.`;
+}
+
+export interface BundleProbe {
+  /** CFBundleIdentifier from <app>/Contents/Info.plist, or null when unreadable. */
+  bundleId(app: string): string | null;
+  /** Spotlight's .app paths for a bundle id. */
+  mdfind(id: string): string[];
+  home: string;
+}
+
+/**
+ * The .app to install over. macOS runs a quarantined app from a read-only randomized copy
+ * (App Translocation: /private/var/folders/…/AppTranslocation/<uuid>/d/X.app); writing there
+ * does nothing. Then the real bundle is found by bundle id in /Applications or ~/Applications,
+ * else /Applications/FriedLiver.app; it must carry the same bundle id. Null when none does.
+ */
+export function resolveRealApp(running: string, probe: BundleProbe): string | null {
+  if (!running.includes('/AppTranslocation/')) return running;
+  const id = probe.bundleId(running);
+  if (!id) return null;
+  const roots = ['/Applications/', `${probe.home.replace(/\/$/, '')}/Applications/`];
+  let found: string[] = [];
+  try {
+    found = probe.mdfind(id);
+  } catch {
+    // Spotlight off or failing: fall back to the default location.
+  }
+  const candidates = [...found.filter((p) => p.endsWith('.app') && roots.some((r) => p.startsWith(r))), '/Applications/FriedLiver.app'];
+  return candidates.find((p) => !p.includes('/AppTranslocation/') && probe.bundleId(p) === id) ?? null;
+}
+
+/** The outcome the install script left in its log: its last RESULT line, or null when there is none. */
+export function readInstallResult(log: string): { ok: boolean; detail: string } | null {
+  const lines = log.split('\n').filter((l) => l.startsWith('RESULT '));
+  const m = /^RESULT (ok|failed) ?(.*)$/.exec(lines.at(-1) ?? '');
+  return m ? { ok: m[1] === 'ok', detail: m[2] } : null;
 }
 
 const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -211,10 +258,14 @@ const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 /**
  * The detached script that installs a verified DMG after the app quits: wait for the app's
  * process, mount the image read-only, copy the new .app next to the old one, swap them
- * (putting the old one back if the swap fails), detach, reopen, and remove its own folder.
+ * (putting the old one back if the swap fails), clear quarantine on the new bundle (it's
+ * checksum-verified, and a quarantined app would launch translocated again), detach, reopen
+ * by path with `open -a`, and remove its own folder. Every step goes to LOG, which outlives
+ * the folder; its last line is `RESULT ok <version>` or `RESULT failed <reason>`.
  */
-export function installScript(p: { pid: number; app: string; dmg: string; dir: string }): string {
+export function installScript(p: { pid: number; app: string; dmg: string; dir: string; log: string; version: string }): string {
   if (!Number.isSafeInteger(p.pid) || p.pid <= 1) throw new Error('bad pid');
+  if (p.app.includes('/AppTranslocation/')) throw new Error('refusing to install into a translocated app');
   return `#!/bin/sh
 # FriedLiver update: written by the Agents extension, runs once, deletes itself.
 set -u
@@ -222,19 +273,24 @@ PID=${p.pid}
 APP=${sq(p.app)}
 DMG=${sq(p.dmg)}
 DIR=${sq(p.dir)}
+LOG=${sq(p.log)}
+VERSION=${sq(p.version)}
 MNT="$DIR/mnt"
+say() { echo "$(date '+%Y-%m-%dT%H:%M:%S') $*" >> "$LOG"; }
+fail() { say "$1"; echo "RESULT failed $1" >> "$LOG"; open "$DMG"; exit 1; }
+: > "$LOG"
+say "install script started: $VERSION into $APP (waiting for pid $PID)"
 i=0
 while kill -0 "$PID" 2>/dev/null; do
-  i=$((i + 1)); [ "$i" -gt 300 ] && exit 1
+  i=$((i + 1)); [ "$i" -gt 300 ] && fail "the app did not quit within 300 s"
   sleep 1
 done
 mkdir -p "$MNT"
-if ! hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG"; then
-  open "$DMG"; exit 1
-fi
+hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG" >> "$LOG" 2>&1 || fail "could not mount the DMG"
 SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -n 1)
+say "copying \${SRC:-<no .app in the DMG>}"
 OK=0
-if [ -n "$SRC" ] && rm -rf "$APP.new" && ditto "$SRC" "$APP.new"; then
+if [ -n "$SRC" ] && rm -rf "$APP.new" && ditto "$SRC" "$APP.new" >> "$LOG" 2>&1; then
   rm -rf "$APP.old"
   if mv "$APP" "$APP.old"; then
     if mv "$APP.new" "$APP"; then OK=1; rm -rf "$APP.old"; else mv "$APP.old" "$APP"; fi
@@ -242,11 +298,11 @@ if [ -n "$SRC" ] && rm -rf "$APP.new" && ditto "$SRC" "$APP.new"; then
 fi
 rm -rf "$APP.new"
 hdiutil detach "$MNT" -quiet || hdiutil detach "$MNT" -force -quiet
-if [ "$OK" = 1 ]; then
-  open "$APP"
-  rm -rf "$DIR"
-else
-  open "$DMG"
-fi
+[ "$OK" = 1 ] || fail "could not replace $APP"
+xattr -dr com.apple.quarantine "$APP" >> "$LOG" 2>&1 || say "could not clear quarantine (continuing)"
+say "installed; relaunching $APP"
+echo "RESULT ok $VERSION" >> "$LOG"
+open -a "$APP"
+rm -rf "$DIR"
 `;
 }

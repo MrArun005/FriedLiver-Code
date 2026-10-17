@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process';
-import { accessSync, constants, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
-import { appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, pickInstaller, sumFor, type Release } from './updateCheck';
+import { appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, resolveRealApp, sumFor, type Release } from './updateCheck';
 
 const FIRST_CHECK_DELAY_MS = 30_000;
 const RECHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -16,28 +17,89 @@ const RECHECK_EVERY_MS = 4 * 60 * 60 * 1000;
  * downloads and verifies the DMG on Apple silicon, then restarts into it; elsewhere it
  * opens the release page. `friedliver.update.mode: off` (or `update.mode: none`) turns it off.
  */
-export function startUpdateChecks(context: vscode.ExtensionContext, log: vscode.LogOutputChannel): vscode.Disposable {
-  if (!vscode.env.appName.startsWith('FriedLiver') || context.extensionMode !== vscode.ExtensionMode.Production) return new vscode.Disposable(() => {});
+export function startUpdateChecks(context: vscode.ExtensionContext): vscode.Disposable {
+  const log = vscode.window.createOutputChannel('FriedLiver Updates', { log: true });
+  const isApp = vscode.env.appName.startsWith('FriedLiver') && context.extensionMode === vscode.ExtensionMode.Production;
   const offered = new Set<string>();
-  let running = false;
-  const run = () => {
-    if (running || !enabled()) return;
-    running = true;
-    void checkForUpdate({
+  let running: Promise<unknown> | undefined;
+  const check = (seen: Set<string>) =>
+    (running ??= checkForUpdate({
       current: appVersion(),
       fetch: (input, init) => fetch(input, init),
-      offered,
-      notify: (release) => void offer(release, log).catch((err: unknown) => log.warn(`Update failed: ${String(err)}`)),
-      log: (line) => log.debug(line),
-    }).finally(() => (running = false));
-  };
-  const first = setTimeout(run, FIRST_CHECK_DELAY_MS);
-  const again = setInterval(run, RECHECK_EVERY_MS);
-  first.unref?.();
-  again.unref?.();
-  return new vscode.Disposable(() => {
-    clearTimeout(first);
-    clearInterval(again);
+      offered: seen,
+      notify: (release) => void offer(release, log).catch((err: unknown) => log.error(`Update failed: ${String(err)}`)),
+      log: (line) => log.info(line),
+    }).finally(() => (running = undefined))) as ReturnType<typeof checkForUpdate>;
+  const run = () => void (enabled() && check(offered));
+  const subs: vscode.Disposable[] = [
+    log,
+    vscode.commands.registerCommand('friedliver.showVersion', async () => {
+      const text = `FriedLiver ${appVersion()} (VS Code ${vscode.version}, ${channel()})`;
+      if ((await vscode.window.showInformationMessage(text, 'Copy')) === 'Copy') await vscode.env.clipboard.writeText(text);
+    }),
+    vscode.commands.registerCommand('friedliver.checkForUpdates', async () => {
+      if (!isApp) return void vscode.window.showInformationMessage('Updates for this editor come from the editor itself.');
+      log.info('Manual update check');
+      // A manual check offers again even a version already offered this launch.
+      const message = manualCheckMessage(await check(new Set()), appVersion());
+      if (message) void vscode.window.showInformationMessage(message);
+    }),
+  ];
+  if (isApp) {
+    void reportLastInstall(log);
+    const first = setTimeout(run, FIRST_CHECK_DELAY_MS);
+    const again = setInterval(run, RECHECK_EVERY_MS);
+    first.unref?.();
+    again.unref?.();
+    subs.push(new vscode.Disposable(() => (clearTimeout(first), clearInterval(again))));
+  }
+  return vscode.Disposable.from(...subs);
+}
+
+/** Outlives the install script's own folder, so the next launch can say how it went. */
+const INSTALL_LOG = () => path.join(tmpdir(), 'friedliver-update.log');
+
+async function reportLastInstall(log: vscode.LogOutputChannel): Promise<void> {
+  let text: string;
+  try {
+    text = readFileSync(INSTALL_LOG(), 'utf8');
+    renameSync(INSTALL_LOG(), `${INSTALL_LOG()}.last`); // Reported once.
+  } catch {
+    return;
+  }
+  log.info(`Last install log:\n${text}`);
+  const result = readInstallResult(text);
+  if (result?.ok) return void vscode.window.showInformationMessage(`Updated to FriedLiver ${result.detail}.`);
+  const why = result?.detail || 'the install script did not finish';
+  if ((await vscode.window.showErrorMessage(`Update failed: ${why}`, 'Show log')) === 'Show log') log.show();
+}
+
+function product(): { friedliverVersion?: unknown; quality?: unknown } {
+  try {
+    return JSON.parse(readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function channel(): string {
+  const q = product().quality;
+  return typeof q === 'string' ? q : 'unknown channel';
+}
+
+/** The real .app behind the running one (see resolveRealApp), via plutil and Spotlight. */
+function realApp(running: string): string | null {
+  const run = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] });
+  return resolveRealApp(running, {
+    home: homedir(),
+    bundleId: (app) => {
+      try {
+        return existsSync(app) ? run('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(app, 'Contents/Info.plist')]).trim() || null : null;
+      } catch {
+        return null;
+      }
+    },
+    mdfind: (id) => run('/usr/bin/mdfind', [`kMDItemCFBundleIdentifier == '${id.replace(/'/g, '')}'`]).split('\n').filter(Boolean),
   });
 }
 
@@ -48,13 +110,8 @@ function enabled(): boolean {
 
 /** This build's FriedLiver version, stamped into product.json by scripts/prepare.mjs; the editor's version otherwise. */
 function appVersion(): string {
-  try {
-    const product = JSON.parse(readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8')) as { friedliverVersion?: unknown };
-    if (typeof product.friedliverVersion === 'string') return product.friedliverVersion;
-  } catch {
-    // Not readable: fall back to the editor's version.
-  }
-  return vscode.version;
+  const v = product().friedliverVersion;
+  return typeof v === 'string' ? v : vscode.version;
 }
 
 const openPage = (release: Release) => vscode.env.openExternal(vscode.Uri.parse(release.url, true));
@@ -64,8 +121,13 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
   if (choice === 'Release notes') return void (await openPage(release));
   if (choice !== 'Install') return;
   const asset = pickInstaller(release, process.platform, process.arch);
-  const app = appBundleFor(vscode.env.appRoot);
-  if (!asset || !app) return void (await openPage(release));
+  const running = appBundleFor(vscode.env.appRoot);
+  const app = running && realApp(running);
+  log.info(`Install ${release.version}: asset ${asset?.name ?? 'none'}, running from ${running ?? '?'}, installing into ${app ?? 'none found'}`);
+  if (!asset || !app) {
+    if (running && !app) void vscode.window.showWarningMessage('FriedLiver could not find its app in Applications, so it opened the release page instead.');
+    return void (await openPage(release));
+  }
 
   const dir = mkdtempSync(path.join(tmpdir(), 'friedliver-update-'));
   const dmg = path.join(dir, 'FriedLiver.dmg');
@@ -75,17 +137,20 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
       async (progress) => {
         const sha256 = sumFor(await fetchSums(fetch, release), asset.name);
         if (!sha256) throw new Error(`SHA256SUMS has no entry for ${asset.name}`);
+        log.info(`Downloading ${asset.url} (${asset.size} bytes, sha256 ${sha256})`);
         let shown = 0;
         await downloadVerified(fetch, asset.url, dmg, { size: asset.size, sha256 }, (bytes) => {
           const pct = Math.floor((bytes / asset.size) * 100);
           if (pct > shown) progress.report({ increment: pct - shown, message: `${pct}%` });
+          if (pct >= shown + 25) log.info(`Downloaded ${pct}%`);
           shown = Math.max(shown, pct);
         });
+        log.info('Download verified');
       },
     );
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });
-    log.warn(`Update download failed: ${String(err)}`);
+    log.error(`Update download failed: ${String(err)}`);
     const again = await vscode.window.showErrorMessage(`FriedLiver ${release.version} could not be installed: ${err instanceof Error ? err.message : String(err)}`, 'Release notes');
     if (again) await openPage(release);
     return;
@@ -93,15 +158,17 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
 
   if (!writable(app)) {
     // Can't replace the app in place (e.g. /Applications owned by another user): hand over the verified DMG.
-    log.info(`${app} is not writable; opening the DMG instead`);
+    log.warn(`${app} is not writable; opening the DMG instead`);
     await vscode.env.openExternal(vscode.Uri.file(dmg));
+    void vscode.window.showWarningMessage(`FriedLiver can't replace ${app} (no write access). The verified ${release.version} installer is open: drag FriedLiver into Applications to update.`);
     return;
   }
   const restart = await vscode.window.showInformationMessage(`FriedLiver ${release.version} is ready.`, 'Restart to update');
   if (restart !== 'Restart to update') return; // The verified DMG stays in the temp folder; next launch offers it again.
   const script = path.join(dir, 'install.sh');
   // ponytail: the extension host's parent is the app's main process (Electron utilityProcess); unverified in a packaged build.
-  writeFileSync(script, installScript({ pid: process.ppid, app, dmg, dir }), { mode: 0o700 });
+  writeFileSync(script, installScript({ pid: process.ppid, app, dmg, dir, log: INSTALL_LOG(), version: release.version }), { mode: 0o700 });
+  log.info(`Starting ${script} (log: ${INSTALL_LOG()})`);
   spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' }).unref();
   await vscode.commands.executeCommand('workbench.action.quit');
 }
