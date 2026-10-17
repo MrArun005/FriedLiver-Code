@@ -1,11 +1,19 @@
 import { isBrowserCall, isExternal, isIndexCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
 import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
-import { BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
+import { AGENT_FACES, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
+import { siteOrigin, type Grant, type ToolGrant } from '../shared/permissions';
+import type { Permissions } from './permissions';
 import { agentList, chatList, renderChat } from './transcript';
 
 /** Whether agents may reach other agents and chats through the FriedLiver tools. */
 export type AgentToAgent = 'ask' | 'allow' | 'off';
+
+/** The user's answer: once, for this chat (or external session), always (remembered), or no. */
+export type BridgeAnswer = 'allow' | 'allowChat' | 'allowAlways' | 'deny';
+
+/** Who asked, as Manage Permissions names it. */
+export const EXTERNAL_AGENT = 'Claude Code (outside FriedLiver)';
 
 const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_READ = 10;
@@ -19,7 +27,7 @@ export interface ToolHost {
   dispatch(action: Action): void;
   id(prefix: string): string;
   /** Tells the user an agent waits for their answer, when they may not see the chat. */
-  notify(ask: { chatId: string; requestId: string; title: string; detail?: string }): void;
+  notify(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void;
   /** The consultation `chatId` already has with `agent`, if any. */
   consultation(chatId: string, agent: AgentKey): ChatView | undefined;
   /** Asks another agent and resolves with its answer; `started` gets the consulted chat. */
@@ -37,7 +45,11 @@ export interface ToolHost {
   browserPage?(selector?: string): Promise<{ origin?: string; password: boolean }>;
   /** Answers the read-only index_* tools (projectIndexHost.ts); absent when there is no project index. */
   index?(call: IndexCall): Promise<string>;
+  /** Remembered "Always allow" answers (permissions.ts); without them nothing is offered or remembered. */
+  permissions?: Pick<Permissions, 'site' | 'tool' | 'add'>;
 }
+
+type Always = { grant: Grant; agent: string };
 
 type ChatCall = Exclude<BridgeCall, BrowserCall | IndexCall | { tool: 'list_agents' | 'list_chats' | 'remember' }>;
 
@@ -51,7 +63,7 @@ type Answer = 'allowed' | 'denied' | 'timeout';
  * so they can't loop or deadlock each other.
  */
 export class BridgeRequests {
-  private readonly pending = new Map<string, { chatId: string; allowKey: string; resolve(answer: Answer): void }>();
+  private readonly pending = new Map<string, { chatId: string; allowKey: string; always?: Always; resolve(answer: Answer): void }>();
   /**
    * What "Allow for this chat" allowed for the rest of this window: `<chatId>`, `<chatId> browser`, or for an
    * external MCP session `<callerId> browser <origin>`, so a new session or another site asks again.
@@ -88,7 +100,7 @@ export class BridgeRequests {
       text: call.tool === 'ask_agent' ? call.prompt : call.tool === 'send_to_chat' ? call.message : '',
       state: 'awaiting',
     };
-    settled(await this.approve(caller, item, this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal));
+    settled(await this.approve(caller, item, this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal, this.toolGrant(call.tool)));
     // The state may have changed while the user decided.
     this.check(caller, call);
 
@@ -124,9 +136,9 @@ export class BridgeRequests {
     if (!this.host.remember) throw new Error('There is no trusted project folder open, so FriedLiver keeps no memory for it.');
     const key = `${caller.id} memory`;
     const auto = this.host.policy() === 'allow' || this.allowedChats.has(key);
-    if (!auto) this.room(caller.id);
+    if (!auto && !this.host.permissions?.tool('remember')) this.room(caller.id);
     const item: BridgeItem = { kind: 'bridge', requestId: this.host.id('bridge'), tool: 'remember', target: { memory: true }, text: fact, state: 'awaiting' };
-    settled(await this.approve(caller, item, auto, signal));
+    settled(await this.approve(caller, item, auto, signal, this.toolGrant('remember')));
     if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
     return `Remembered: ${await this.host.remember(fact)}`;
   }
@@ -140,16 +152,28 @@ export class BridgeRequests {
     if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
     if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
     if (!browserNeedsApproval(call.tool, undefined)) return this.host.browser(caller.id, call, signal);
-    const auto = !browserNeedsApproval(call.tool, caller.approval) || this.allowedChats.has(`${caller.id} browser`);
+    const allowed = !browserNeedsApproval(call.tool, caller.approval) || this.allowedChats.has(`${caller.id} browser`);
+    // The site it acts on: what "Always allow" remembers, and what browser.ts checks again just before acting.
+    const origin = allowed || !this.host.permissions ? undefined : call.tool === 'browser_open' ? siteOrigin(call.url) : siteOrigin((await this.host.browserPage?.().catch(() => undefined))?.origin ?? '');
+    const remembered = origin ? this.host.permissions?.site(origin) : undefined;
+    const auto = allowed || !!remembered;
     if (!auto) this.room(caller.id);
     const text =
       call.tool === 'browser_open' ? call.url : call.tool === 'browser_click' ? (call.selector ?? `"${call.text}"`) : call.tool === 'browser_type' ? `${call.selector} ← ${call.text}` : '';
-    const item: BridgeItem = { kind: 'bridge', requestId: this.host.id('bridge'), tool: call.tool as BridgeItem['tool'], target: { browser: true }, text, state: 'awaiting' };
-    settled(await this.approve(caller, item, auto, signal));
+    const item: BridgeItem = {
+      kind: 'bridge',
+      requestId: this.host.id('bridge'),
+      tool: call.tool as BridgeItem['tool'],
+      target: { browser: true },
+      text,
+      state: 'awaiting',
+      ...(remembered ? { auto: `Always allowed: ${origin}` } : {}),
+    };
+    settled(await this.approve(caller, item, auto, signal, origin ? { kind: 'site', origin } : undefined));
     // Either can change while the user decides.
     if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
     if (!this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
-    return this.host.browser(caller.id, call, signal);
+    return this.host.browser(caller.id, call, signal, origin && call.tool !== 'browser_open' ? origin : undefined);
   }
 
   /**
@@ -164,10 +188,13 @@ export class BridgeRequests {
       const page = (await this.host.browserPage?.(call.tool === 'browser_type' ? call.selector : undefined).catch(() => undefined)) ?? { password: true };
       const origin = call.tool === 'browser_open' ? new URL(call.url).origin : (page.origin ?? 'an unknown page');
       const allowKey = `${id} browser ${origin}`;
-      if (!this.host.externalAutoApprove?.() && !this.allowedChats.has(allowKey)) {
+      // 'an unknown page' is no origin: it never matches a rule and can't be always allowed.
+      const site = siteOrigin(origin);
+      if (!this.host.externalAutoApprove?.() && !this.allowedChats.has(allowKey) && !(site && this.host.permissions?.site(site))) {
         this.room(id);
         const title = `Claude Code wants to ${BROWSER_VERBS[call.tool as BridgeItem['tool']] ?? 'use'} in the browser`;
-        settled(await this.waitFor(id, allowKey, title, `${clean(origin)}: ${externalDetail(call, page.password)}`, signal));
+        const always = site && this.host.permissions ? { grant: { kind: 'site' as const, origin: site }, agent: EXTERNAL_AGENT } : undefined;
+        settled(await this.waitFor(id, allowKey, title, `${clean(origin)}: ${externalDetail(call, page.password)}`, signal, always));
         if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
       }
       if (!this.host.externalAutoApprove?.() && call.tool !== 'browser_open') {
@@ -181,7 +208,7 @@ export class BridgeRequests {
   }
 
   /** Waits for the user's answer to a request no chat holds. */
-  private waitFor(chatId: string, allowKey: string, title: string, detail: string, signal: AbortSignal): Promise<Answer> {
+  private waitFor(chatId: string, allowKey: string, title: string, detail: string, signal: AbortSignal, always?: Always): Promise<Answer> {
     const requestId = this.host.id('bridge');
     return new Promise((resolve) => {
       const done = (answer: Answer) => {
@@ -193,10 +220,10 @@ export class BridgeRequests {
       const onAbort = () => done('denied');
       const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
       timer.unref?.();
-      this.pending.set(requestId, { chatId, allowKey, resolve: done });
+      this.pending.set(requestId, { chatId, allowKey, always, resolve: done });
       if (signal.aborted) return done('denied');
       signal.addEventListener('abort', onAbort, { once: true });
-      this.host.notify({ chatId, requestId, title, detail });
+      this.host.notify({ chatId, requestId, title, detail, ...(always?.grant.kind === 'site' ? { always: always.grant.origin } : {}) });
     });
   }
 
@@ -214,10 +241,12 @@ export class BridgeRequests {
   }
 
   /** The user's answer from a chat view or a notification. */
-  answer(requestId: string, answer: 'allow' | 'allowChat' | 'deny'): void {
+  answer(requestId: string, answer: BridgeAnswer): void {
     const p = this.pending.get(requestId);
     if (!p) return;
     if (answer === 'allowChat') this.allowedChats.add(p.allowKey);
+    // Remembered for every chat and later session; a request that offered nothing to remember is allowed once.
+    if (answer === 'allowAlways' && p.always) this.host.permissions?.add(p.always.grant, p.always.agent);
     p.resolve(answer === 'deny' ? 'denied' : 'allowed');
   }
 
@@ -301,9 +330,22 @@ export class BridgeRequests {
     else this.waits.delete(chatId);
   }
 
-  /** Records the request in the caller's chat and, unless `auto`, waits for the user. */
-  private approve(caller: ChatView, item: BridgeItem, auto: boolean, signal: AbortSignal): Promise<Answer> {
+  /** The rule "Always allow" remembers for an agent tool, when remembering is on. */
+  private toolGrant(tool: ToolGrant): Grant | undefined {
+    return this.host.permissions ? { kind: 'tool', tool } : undefined;
+  }
+
+  /**
+   * Records the request in the caller's chat and, unless `auto` or a remembered `grant` covers it,
+   * waits for the user, who may then remember `grant`.
+   */
+  private approve(caller: ChatView, item: BridgeItem, auto: boolean, signal: AbortSignal, grant?: Grant): Promise<Answer> {
     const requestId = item.requestId;
+    if (!auto && grant?.kind === 'tool' && this.host.permissions?.tool(grant.tool)) {
+      auto = true;
+      item = { ...item, auto: 'Always allowed' };
+    }
+    if (!auto && grant) item = { ...item, always: grant.kind === 'site' ? grant.origin : 'in every chat' };
     if (auto) {
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [{ ...item, state: 'allowed' }], at: Date.now() });
       return Promise.resolve('allowed');
@@ -319,7 +361,9 @@ export class BridgeRequests {
       const onAbort = () => done('denied');
       const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
       timer.unref?.();
-      this.pending.set(requestId, { chatId: caller.id, allowKey: 'browser' in item.target ? `${caller.id} browser` : 'memory' in item.target ? `${caller.id} memory` : caller.id, resolve: done });
+      const allowKey = 'browser' in item.target ? `${caller.id} browser` : 'memory' in item.target ? `${caller.id} memory` : caller.id;
+      const always = grant ? { grant, agent: AGENT_FACES[caller.agent].name } : undefined;
+      this.pending.set(requestId, { chatId: caller.id, allowKey, always, resolve: done });
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [item], at: Date.now() });
       if (signal.aborted) return done('denied');
       signal.addEventListener('abort', onAbort, { once: true });

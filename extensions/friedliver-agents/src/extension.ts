@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs';
+import { mkdirSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,7 +12,7 @@ import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
 import { ProjectIndexHost } from './host/projectIndexHost';
-import type { AgentToAgent } from './host/bridgeRequests';
+import type { AgentToAgent, BridgeAnswer } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
@@ -29,10 +29,11 @@ import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
-import { attachSurface, post, type Script, type Surface } from './host/webviews';
-import { LIMITS, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
+import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
+import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
-import { describeRule, isRule, type CommandRule } from './shared/rules';
+import { describeRule } from './shared/rules';
+import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
@@ -44,9 +45,6 @@ const REPLAY_MS = 10_000;
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 /** Each agent's last known options and the user's choices: the user's own storage, never a workspace's. */
 const DEFAULTS_KEY = 'friedliver.agentDefaults';
-/** "Always allow" command rules: this workspace's storage in the user's profile, never the repository. */
-const RULES_KEY = 'friedliver.commandRules';
-const MAX_RULES = 100;
 
 let controller: Controller | undefined;
 
@@ -115,6 +113,9 @@ export class Controller {
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
+  /** Remembered "Always allow" answers: the user's own storage (global for websites and agent tools, this workspace's for folders and commands). */
+  readonly permissions: Permissions;
+  private permissionsPanel?: { panel: vscode.WebviewPanel; ready: boolean };
   private readonly asked = new Set<string>();
   /** Decisions with a notification of their own still open; later ones are counted in one summary. */
   private readonly toasts = new Set<string>();
@@ -165,8 +166,24 @@ export class Controller {
       () => this.folders()[0],
       (agent) => void this.core.reconfigure([agent]),
     );
+    this.permissions = new Permissions({
+      user: context.globalState,
+      workspace: context.workspaceState,
+      home: os.homedir(),
+      // The app itself and its data (settings, extensions' storage, these rules): an agent never gets to change FriedLiver without asking.
+      sensitive: [appBundle(vscode.env.appRoot), userDataDir(context.globalStorageUri.fsPath)],
+      onChange: () => this.postPermissions(),
+    });
+    const noFolderCwd = path.join(context.globalStorageUri.fsPath, 'no-folder');
+    try {
+      mkdirSync(noFolderCwd, { recursive: true });
+    } catch {
+      // Without it agents start in home, as before.
+    }
     this.core = new AgentCore({
       folders: () => this.folders(),
+      noFolderCwd,
+      permissions: this.permissions,
       clientVersion: String(context.extension.packageJSON.version ?? '0.0.0'),
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
@@ -188,13 +205,6 @@ export class Controller {
           const all = { ...this.context.globalState.get<Partial<Record<AgentKey, AgentDefaults>>>(DEFAULTS_KEY), [agent]: value };
           void this.context.globalState.update(DEFAULTS_KEY, all);
           this.postDefaults();
-        },
-      },
-      rules: {
-        get: () => this.rules(),
-        add: (rule) => {
-          const rules = [...this.rules().filter((r) => !(r.kind === rule.kind && r.command === rule.command)), rule].slice(-MAX_RULES);
-          void this.context.workspaceState.update(RULES_KEY, rules);
         },
       },
       agentCommand: (id) => this.agentConfig[id],
@@ -223,7 +233,7 @@ export class Controller {
             `Always allow ${describeRule(rule)}?`,
             {
               modal: true,
-              detail: `${rule.kind === 'exact' ? 'This exact command' : `Any command that starts with "${rule.command}"`} will run without asking, in every chat in this workspace. Lines that chain commands, redirect or set variables still ask. Remove it with "FriedLiver: Always-Allowed Commands".`,
+              detail: `${rule.kind === 'exact' ? 'This exact command' : `Any command that starts with "${rule.command}"`} will run without asking, in every chat in this workspace, for every agent. Lines that chain commands, redirect or set variables still ask. Revoke it in "FriedLiver: Manage Permissions".`,
             },
             'Always allow',
           )) === 'Always allow',
@@ -304,7 +314,7 @@ export class Controller {
     );
     command('friedliver.stopAgents', () => this.core.stopAll());
     command('friedliver.otherAgents', () => this.otherAgents());
-    command('friedliver.approvals.rules', () => this.manageRules());
+    command('friedliver.managePermissions', () => this.managePermissions());
     command('friedliver.rules.open', () => this.openRules());
     command('friedliver.rules.openMemory', () => this.openRuleFile(PROJECT_MEMORY));
     command('friedliver.rules.import', () => this.importRules());
@@ -734,7 +744,14 @@ export class Controller {
           if (!this.core.showProposal(m.requestId, m.path)) void vscode.window.showInformationMessage("FriedLiver couldn't build the whole file for this change. The card shows the agent's own diff.");
           return;
         case 'allowAlways':
-          await this.core.allowAlways(m.requestId !== undefined ? { requestId: m.requestId } : { commandId: m.commandId! }, m.rule);
+          await this.core.allowAlways(m.requestId !== undefined ? { requestId: m.requestId } : { commandId: m.commandId! }, m.grant);
+          return;
+        case 'managePermissions':
+          this.managePermissions();
+          return;
+        case 'revokePermission':
+        case 'revokeAllPermissions':
+          await this.permissionMessage(m);
           return;
         case 'reviewAll':
           this.decideAll(m.chatId, m.action);
@@ -1114,7 +1131,7 @@ export class Controller {
       this.toasts.delete(id);
       const button = buttons.find((b) => b.title === picked);
       if (!button) return;
-      if (button.title !== 'Show' && !this.core.decisions().some((d) => d.id === id)) return;
+      if (button.title !== 'Show' && button.title !== 'Manage' && !this.core.decisions().some((d) => d.id === id)) return;
       button.run();
     });
   }
@@ -1137,6 +1154,7 @@ export class Controller {
       ...(shown.runnable ? [{ title: 'Run', run: () => this.runnable.has(ask.commandId) && this.core.decideCommand(ask.commandId, true) }] : []),
       { title: 'Deny', run: () => this.core.decideCommand(ask.commandId, false) },
       ...(ask.chatId ? [{ title: 'Show', run: () => void this.showChat(ask.chatId!, ask.commandId) }] : []),
+      this.manageButton,
     ];
     const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${shown.runnable ? '' : ' (open the chat to see all of it)'}`;
     this.notifyDecision(ask.commandId, ask.chatId, text, buttons);
@@ -1157,24 +1175,39 @@ export class Controller {
       ...(allowed ? [{ title: 'Allow', run: () => this.core.answerPermission(ask.requestId, ask.allow!.optionId) }] : []),
       ...(ask.deny ? [{ title: 'Deny', run: () => this.core.answerPermission(ask.requestId, ask.deny!.optionId) }] : []),
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
+      this.manageButton,
     ]);
   }
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string }): void {
+  /** On every approval toast: the remembered "Always allow" answers, to look over or revoke. */
+  private readonly manageButton = { title: 'Manage', run: () => this.managePermissions() };
+
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void {
     if (isExternal(ask.chatId)) {
       // No chat holds this request, so it always gets its own popup, whatever else is waiting.
-      const buttons = { Allow: 'allow', 'Allow for this session': 'allowChat', Deny: 'deny' } as const;
+      const buttons: Record<string, BridgeAnswer | 'manage'> = {
+        Allow: 'allow',
+        'Allow for this session': 'allowChat',
+        ...(ask.always ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
+        Deny: 'deny',
+        Manage: 'manage',
+      };
       // Not modal; the detail (bridgeRequests.externalDetail) says exactly what and where, so consent isn't blind.
       void vscode.window.showWarningMessage(`${plainText(ask.title)}: ${plainText(ask.detail ?? '')}`, ...Object.keys(buttons)).then((picked) => {
-        if (picked) this.core.answerBridge(ask.requestId, buttons[picked as keyof typeof buttons]);
+        const answer = picked ? buttons[picked] : undefined;
+        if (answer === 'manage') this.managePermissions();
+        else if (answer) this.core.answerBridge(ask.requestId, answer);
       });
       return;
     }
+    const always = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId)?.always;
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
       { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
       { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
+      ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
+      this.manageButton,
     ]);
   }
 
@@ -1286,26 +1319,48 @@ export class Controller {
     return this.fileList.files;
   }
 
-  private rules(): CommandRule[] {
-    const saved = this.context.workspaceState.get<unknown[]>(RULES_KEY) ?? [];
-    return (Array.isArray(saved) ? saved : []).filter(isRule).slice(-MAX_RULES);
-  }
-
-  /** "Always-Allowed Commands": the rules for this workspace, to remove. */
-  private async manageRules(): Promise<void> {
-    const rules = this.rules();
-    if (!rules.length) {
-      void vscode.window.showInformationMessage('No commands are always allowed in this workspace. "Always allow" on a command adds one.');
+  /** "FriedLiver: Manage Permissions": every remembered "Always allow", to revoke. */
+  managePermissions(): void {
+    if (this.permissionsPanel) {
+      this.permissionsPanel.panel.reveal();
       return;
     }
-    const picked = await vscode.window.showQuickPick(
-      rules.map((r) => ({ label: describeRule(r), description: r.kind === 'exact' ? 'exactly this command' : 'and anything after it', rule: r })),
-      { title: 'Always-allowed commands in this workspace', placeHolder: 'Pick the ones to remove', canPickMany: true },
-    );
-    if (!picked?.length) return;
-    const gone = new Set(picked.map((p) => p.rule));
-    await this.context.workspaceState.update(RULES_KEY, rules.filter((r) => !gone.has(r)));
-    void vscode.window.showInformationMessage(`Removed ${picked.length} rule${picked.length === 1 ? '' : 's'}.`);
+    const panel = vscode.window.createWebviewPanel('friedliver.permissions', 'Permissions', vscode.ViewColumn.Active, { retainContextWhenHidden: false });
+    this.permissionsPanel = { panel, ready: false };
+    panel.webview.options = webviewOptions(this.context.extensionUri);
+    panel.webview.html = webviewHtml(panel.webview, this.context.extensionUri, 'permissions', 'Permissions');
+    const sub = panel.webview.onDidReceiveMessage((raw: unknown) => {
+      const m = parseWebviewMessage(raw);
+      if (m) void this.permissionMessage(m);
+    });
+    panel.onDidDispose(() => {
+      sub.dispose();
+      this.permissionsPanel = undefined;
+    });
+  }
+
+  private async permissionMessage(m: WebviewMessage): Promise<void> {
+    if (m.type === 'ready' && this.permissionsPanel) {
+      this.permissionsPanel.ready = true;
+      this.postPermissions();
+    } else if (m.type === 'revokePermission') {
+      this.permissions.revoke(m.id);
+    } else if (m.type === 'revokeAllPermissions') {
+      const n = this.permissions.list().length;
+      if (!n) return;
+      const ok = await vscode.window.showWarningMessage(
+        `Revoke all ${n} remembered permission${n === 1 ? '' : 's'}?`,
+        { modal: true, detail: 'Agents ask again before using these websites, folders, commands and tools.' },
+        'Revoke all',
+      );
+      if (ok === 'Revoke all') this.permissions.revokeAll();
+    }
+  }
+
+  private postPermissions(): void {
+    if (!this.permissionsPanel?.ready) return;
+    const message: HostMessage = { type: 'permissions', rules: this.permissions.list() };
+    void this.permissionsPanel.panel.webview.postMessage(message).then(undefined, () => {});
   }
 
   private postDefaults(): void {

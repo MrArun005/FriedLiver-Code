@@ -20,12 +20,12 @@ node scripts/build.mjs --package   # minified app in <VSCODE_DIR>/../VSCode-<os>
 node scripts/build.mjs --package --installer   # plus the installer in <VSCODE_DIR>/../installers
 ```
 
-Installers, all unsigned:
+Installers (none notarized; macOS signed with FriedLiver's own certificate when CI has it, see [macOS signing](#macos-signing-and-privacy-prompts)):
 
 | OS | File | Made by |
 | --- | --- | --- |
 | Windows | `FriedLiverUserSetup-<arch>-<version>.exe`, installs per user | `gulp vscode-win32-<arch>-inno-updater` and `-user-setup` (Inno Setup from upstream's `innosetup` package) |
-| macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | an ad-hoc `codesign`, then `hdiutil` |
+| macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | `codesign` (the self-signed certificate, or ad-hoc without it), then `hdiutil` |
 | Linux | `friedliver_<version>_amd64.deb` | `gulp vscode-linux-<arch>-prepare-deb` and `-build-deb` |
 
 CI (`.github/workflows/build.yml`) builds all three with the portable apps on
@@ -154,8 +154,75 @@ use LF line endings. CI does both (`.github/workflows/build.yml`).
 Install the Xcode command line tools (`xcode-select --install`) and Python 3,
 then run the same commands. `dev.mjs` runs `scripts/code.sh`. `--package` runs
 `gulp vscode-darwin-<arch>-min`. Built on CI for Apple silicon; the app is
-ad-hoc signed, not notarized, so macOS asks once under System Settings →
+signed with FriedLiver's self-signed certificate (ad-hoc on forks and local
+builds), not notarized, so macOS asks once under System Settings →
 Privacy & Security → Open Anyway.
+
+### macOS signing and privacy prompts
+
+macOS keeps privacy grants (Desktop, Documents and Downloads folders,
+Microphone, Speech Recognition, Automation) per app, keyed by the app's
+*designated requirement*. An ad-hoc signature (`codesign --sign -`) has no
+certificate, so its requirement is the build's `cdhash`, which changes with
+every build: after each update macOS treats FriedLiver as a new app and asks
+again. A signature from a certificate gives a requirement that names the
+bundle id and the certificate, the same for every build:
+
+```
+designated => identifier "com.friedliver.app" and certificate root = H"b96aa277…"
+```
+
+What CI does (`build.yml`, macOS job):
+
+1. **Signing keychain (macOS)**: when the secrets `MACOS_SIGN_P12` (base64
+   PKCS#12), `MACOS_SIGN_P12_PASSWORD` and `MACOS_SIGN_IDENTITY` are set, it
+   makes a throwaway keychain under `$RUNNER_TEMP` with a random password,
+   imports the certificate for `codesign` only (`-T /usr/bin/codesign`,
+   `set-key-partition-list`), puts it on the search list and exports
+   `MACOS_SIGN_IDENTITY` and `MACOS_SIGN_KEYCHAIN`. Without the secrets (forks)
+   it does nothing and the app stays ad-hoc signed. Secrets reach the script
+   only through `env:`; the keychain password is masked.
+2. `build.mjs` signs the dictation helper, then the app with `--deep`
+   (helpers and frameworks inside it), using that identity
+   (`codesignArgs` in `scripts/lib.mjs`: `--timestamp=none --keychain …`, no
+   hardened runtime, which Electron would need entitlements for). The bundle
+   id stays `com.friedliver.app` (`product.json`).
+3. **Check the signature (macOS)**: `codesign --verify --deep --strict`, and
+   prints `codesign -d -r-`; with a certificate the step fails unless the
+   requirement contains `certificate root = H"…"` and no `cdhash`.
+4. **Remove the signing keychain (macOS)** runs `if: always()`.
+
+`test/scripts.test.ts` checks the argument logic and the workflow's order;
+the signing itself only runs on CI's macOS runner.
+
+**After the first signed release**, macOS asks one last time (the
+requirement changed from a cdhash to the certificate); from then on updates
+keep the grants. Gatekeeper still shows "Open Anyway" on first launch: the
+certificate is not Apple-issued and the app is not notarized.
+
+**Rotating the certificate.** The owner keeps it in `~/Private/friedliver-signing`.
+To replace it, make a new self-signed code-signing certificate (Keychain
+Access → Certificate Assistant → Create a Certificate, type *Code Signing*,
+or `openssl` with `extendedKeyUsage = codeSigning`), export it with its key as
+a `.p12` (with `-legacy` for OpenSSL 3, so `security import` reads it), then
+set `MACOS_SIGN_P12` (`base64 -i cert.p12`), `MACOS_SIGN_P12_PASSWORD` and
+`MACOS_SIGN_IDENTITY` (its common name) in the repository's Actions secrets.
+A new certificate has a new root hash, so macOS asks once more after that
+release. Keep it valid for years: an expired certificate still verifies (no
+timestamp is needed for a self-signed one), but rotate before it leaks, not
+on a schedule.
+
+**Apple Developer ID instead** ($99/year): import the Developer ID
+Application certificate the same way (same three secrets), add
+`--options runtime` with an entitlements file allowing JIT and unsigned
+executable memory for Electron, then notarize the DMG (`xcrun notarytool
+submit … --wait` with an App Store Connect API key in further secrets) and
+`xcrun stapler staple` it. That also removes the Gatekeeper warning.
+
+FriedLiver itself avoids prompting where it can: with no folder open,
+agents start in an empty folder of FriedLiver's (global storage
+`no-folder/`) rather than the home folder, so an agent's start-up scan
+doesn't reach Desktop, Documents or Downloads.
 
 ### Icons and branding
 
@@ -338,9 +405,11 @@ Packaged build, `bench/fixture`, 1440×900, under xvfb with software rendering
   `extensions.verifySignature`, because the verifier (`@vscode/vsce-sign`) ships
   only with Microsoft's builds. Extensions come over HTTPS from Open VSX, whose
   list of malicious extensions still applies. See [SECURITY.md](../SECURITY.md).
-- **Unsigned builds.** Windows SmartScreen and macOS Gatekeeper warn on first
-  launch. Signing needs a Windows code-signing certificate and an Apple
-  Developer ID (for notarization), both bought in the publisher's name.
+- **No Apple- or Microsoft-issued signatures.** Windows SmartScreen and macOS
+  Gatekeeper warn on first launch. macOS builds carry a self-signed
+  certificate (stable privacy grants, see above); removing the warnings needs
+  a Windows code-signing certificate and an Apple Developer ID (for
+  notarization), both bought in the publisher's name.
 - **No Windows 11 context-menu entry.** That package is built by Microsoft's
   pipeline; the setup leaves it out (patch 0030), and the classic
   "Open with FriedLiver" entry still works.

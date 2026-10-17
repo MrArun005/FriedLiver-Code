@@ -213,8 +213,8 @@
         "category": "FriedLiver"
       },
       {
-        "command": "friedliver.approvals.rules",
-        "title": "Always-Allowed Commands",
+        "command": "friedliver.managePermissions",
+        "title": "Manage Permissions",
         "category": "FriedLiver"
       },
       {
