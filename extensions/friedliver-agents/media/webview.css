@@ -1593,8 +1593,6 @@ button.md-more {
 }
 .manager > * {
   width: 100%;
-  max-width: 1480px;
-  margin-inline: auto;
 }
 .mgr-head {
   display: flex;
@@ -3581,9 +3579,6 @@ body[data-surface='chat'] .transcript {
 .transcript-wrap[data-jump] .transcript {
   padding-right: 270px;
 }
-body[data-surface='chat'] .transcript > * {
-  max-width: 1100px;
-}
 .user-msg {
   display: flex;
   margin: 6px 0 14px;
@@ -4157,9 +4152,6 @@ button.image-thumb,
 body[data-surface='chat'] .transcript {
   padding: 16px 32px 24px;
   gap: 12px;
-}
-body[data-surface='chat'] .transcript > * {
-  max-width: 900px;
 }
 .user-msg {
   margin: 12px 0 0;
