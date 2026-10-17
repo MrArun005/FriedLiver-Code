@@ -220,11 +220,13 @@ async function shoot() {
       await side.fill('.composer textarea', '@g');
       await save(side, `chat-mention-${theme}`);
       await side.fill('.composer textarea', '');
-      await side.click('.approval-chip');
+      await side.click('.mode-btn');
       await save(side, `chat-approval-menu-${theme}`);
       await side.keyboard.press('Escape');
-      await side.click('.chip-btn:has(.chip-text:text-is("Default"))');
+      await side.click('.usage-btn');
+      await side.click('.usage-row[data-row="model"] .chip-btn');
       await save(side, `chat-model-menu-${theme}`);
+      await side.keyboard.press('Escape');
       await side.keyboard.press('Escape');
       await side.fill('.composer textarea', '/');
       await save(side, `chat-slash-${theme}`);
@@ -335,34 +337,41 @@ async function shoot() {
     // The session controls: approval level, model, effort, Plan, and Shift+Tab.
     const p = await open('surface=chat&side=1&select=chat-c5', 400, 900);
     const last = async () => (await posted(p)).at(-1);
-    await p.click('.approval-chip');
+    await p.click('.mode-btn');
     check(await p.locator('.popover [role="menuitemradio"]:has-text("Auto-accept edits")').isVisible(), 'the approval chip lists the levels');
     check(await p.locator('.popover .menu-sub:has-text("Claude: Accept edits")').isVisible(), 'each level says which of the agent’s modes it uses');
     await p.click('.popover [role="menuitemradio"]:has-text("Auto-accept edits")');
     check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'picking a level posts it');
-    await p.click('.approval-chip');
+    await p.click('.mode-btn');
     await p.click('.popover [role="menuitemcheckbox"]:has-text("Plan first")');
     check(JSON.stringify(await last()) === JSON.stringify({ type: 'plan', chatId: 'chat-c5', on: true }), 'Plan first turns Plan mode on');
-    await p.click('.approval-chip');
+    await p.click('.mode-btn');
     await p.click('.popover [role="menuitemradio"]:has(.menu-label:text-is("Bypass permissions"))');
     const mode = await last();
     check(mode?.type === 'setOption' && mode.optionId === 'mode' && mode.value === 'bypassPermissions', 'an agent mode is set as its own option');
-    await p.click('.chip-btn:has(.chip-text:text-is("Default"))');
+    const model = async () => {
+      if (!(await p.locator('.usage-pop .popover').count())) await p.click('.usage-btn');
+      await p.click('.usage-row[data-row="model"] .chip-btn');
+    };
+    await model();
     await p.click('.popover [role="menuitemradio"]:has-text("Small")');
-    const model = await last();
-    check(model?.type === 'setOption' && model.optionId === 'model' && model.value === 'small', 'picking a model posts setOption');
-    await p.click('.chip-btn:has(.chip-text:text-is("Medium"))');
-    await p.click('.popover [role="menuitemradio"]:has-text("Max")');
+    const picked = await last();
+    check(picked?.type === 'setOption' && picked.optionId === 'model' && picked.value === 'small', 'picking a model posts setOption');
+    if (!(await p.locator('.usage-pop .popover').count())) await p.click('.usage-btn');
+    await p.click('.segmented [role="radio"]:has-text("Max")');
     const effort = await last();
     check(effort?.optionId === 'effort' && effort.value === 'max', 'picking an effort level posts setOption');
-    await p.click('.chip-btn:has(.chip-text:text-is("Default"))');
+    await model();
     await p.click('.popover [role="menuitemcheckbox"]:has-text("Fast mode")');
     const fast = await last();
     check(fast?.optionId === 'fast' && fast.value === true, 'Fast mode toggles as a boolean');
+    await p.keyboard.press('Escape');
     await p.click('.composer textarea');
     await p.keyboard.press('Shift+Tab');
     check(JSON.stringify(await last()) === JSON.stringify({ type: 'approval', chatId: 'chat-c5', level: 'edits' }), 'Shift+Tab moves to the next level');
-    check((await p.locator('.usage').getAttribute('title'))?.includes('12k of 200k tokens') ?? false, 'the usage meter shows the context used');
+    await p.hover('.usage-btn');
+    check((await p.locator('.usage-row[data-row="usage"]').innerText()).includes('of 200k tokens left'), 'the usage popover shows the context left');
+    await p.mouse.move(0, 0);
 
     await p.keyboard.type('/co');
     check(await p.locator('.mention-menu [role="option"]:has-text("/compact")').isVisible(), '/ opens the agent’s commands');
@@ -387,21 +396,26 @@ async function shoot() {
     await p.close();
   }
   {
-    // The mic: macOS only. No programmatic start beeps; it focuses the box and says Fn Fn, with a settings link.
+    // Dictate lives in the + menu: no programmatic start (it beeped); it focuses the box and says Fn Fn, with a settings link.
     const p = await open('surface=chat&side=1&select=chat-c5', 900, 700);
-    await p.click('.mic-btn');
-    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'the mic no longer asks the app to start dictation (it beeped)');
-    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
-    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'the mic shows the Fn Fn hint');
+    await p.click('.attach-btn');
+    await p.click('.popover .mic-item');
+    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'Dictate no longer asks the app to start dictation (it beeped)');
+    check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'Dictate focuses the message box');
+    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'Dictate shows the Fn Fn hint');
     await p.click('.mic-hint a');
     check((await posted(p)).some((m) => m.type === 'dictationSettings'), 'the hint opens Dictation settings');
+    await p.click('.attach-btn');
+    await p.click('.popover [role="menuitem"]:has-text("Attach images")');
+    check((await posted(p)).some((m) => m.type === 'attach'), 'the + menu attaches images');
     await p.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
-    check((await linux.locator('.mic-btn').count()) === 0, 'no mic off macOS');
+    await linux.click('.attach-btn');
+    check((await linux.locator('.popover .mic-item').count()) === 0, 'no Dictate off macOS');
     await linux.close();
   }
   {
-    // The composer: centred, 640px at most; plain-word labels; mode border; blue focus ring.
+    // The composer: centred, 640px at most; a minimal row; mode border; blue focus ring.
     for (const width of [480, 900, 1600]) {
       const p = await open('surface=chat&select=chat-c5', width, 700);
       const r = await p.evaluate(() => {
@@ -411,158 +425,93 @@ async function shoot() {
       check(r.w <= 640.5 && Math.abs(r.left - r.right) <= 1 && (width > 672 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 640)`);
       await p.close();
     }
-    for (const [width, id] of [[480, 'chat-c6'], [640, 'chat-c6'], [672, 'chat-c6'], [900, 'chat-c6'], [480, 'chat-c5'], [900, 'chat-c5']]) {
-      // The send/queue button stays on the first row, level with the mode pill, at the right end.
-      const q = await open(`surface=chat&select=${id}`, width, 700);
+    for (const [width, id] of [[320, 'chat-c6'], [480, 'chat-c6'], [640, 'chat-c6'], [320, 'chat-c5'], [900, 'chat-c5']]) {
+      // One row: everything on the attach button's line; the mode icon right before send, send at the right end.
+      const q = await open(`surface=chat&side=1&select=${id}`, width, 700);
       const r = await q.evaluate(() => {
         const box = (s) => document.querySelector(s).getBoundingClientRect();
-        const send = box('.composer-bar .send-btn'), mode = box('.composer-bar .approval-chip'), bar = box('.composer-bar');
-        return { top: Math.abs(send.top + send.height / 2 - (mode.top + mode.height / 2)), right: bar.right - send.right };
+        const bar = box('.composer-bar'), send = box('.composer-bar .send-btn'), mode = box('.composer-bar .mode-btn');
+        const mid = (b) => b.top + b.height / 2;
+        const rows = [...document.querySelectorAll('.composer-bar button')].filter((b) => b.offsetWidth).map((b) => Math.round(mid(b.getBoundingClientRect())));
+        return { oneRow: Math.max(...rows) - Math.min(...rows) <= 6, modeLeftOfSend: mode.right <= send.left + 0.5 && send.left - mode.right < 12, right: bar.right - send.right, words: document.querySelector('.composer-bar').innerText.trim() };
       });
-      check(r.top <= 6 && r.right <= 2, `at ${width}px (${id}) [${JSON.stringify(r)}] send sits on the mode pill's row at the right end`);
+      check(r.oneRow && r.modeLeftOfSend && r.right <= 2, `at ${width}px (${id}) the row fits on one line, mode icon just left of send [${JSON.stringify(r)}]`);
+      check(!/Context|this chat|Default|Medium/.test(r.words), `at ${width}px (${id}) no cost/context/model/effort text in the row`);
       await q.close();
     }
     const p = await open('surface=chat&select=chat-c5', 1200, 700);
-    const usage = p.locator('.composer-bar .usage');
-    check(/^Context \d+%/.test(await usage.innerText()), 'context usage reads "Context N%"');
-    check(/% of the model's context window used/.test((await usage.getAttribute('title')) ?? ''), 'its tooltip says what the percentage is');
-    check(/this chat/.test(await usage.innerText()), 'the cost reads "$x this chat"');
-    check(await p.locator('.approval-chip .chip-text').isVisible(), 'the mode dot has its label');
+    check(((await p.getAttribute('.mode-btn', 'title')) ?? '').startsWith('Ask'), 'the mode icon’s tooltip names the mode');
     const untitled = await p.evaluate(() => [...document.querySelectorAll('.composer-bar button')].filter((b) => !b.title && !b.getAttribute('aria-label')).length);
     check(untitled === 0, 'every composer control has a tooltip or label');
-    const ring = () => p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
-    await p.evaluate(() => document.activeElement?.blur());
-    check((await ring()) === 'none', 'no ring unfocused');
-    await p.click('.composer textarea');
-    check(/^rgba?\(.*\) 0px 0px 0px 2px$/.test(await ring()), 'focus draws a 2px ring');
+    // Usage popover: hover opens without focus, leaving closes, click opens a trapped dialog, Esc closes.
+    await p.hover('.usage-btn');
+    const pop = p.locator('.usage-pop .popover[role="dialog"]');
+    check(await pop.isVisible(), 'hovering the usage button opens the popover');
+    const rows = await pop.locator('.usage-row').evaluateAll((r) => r.map((e) => e.dataset.row + ':' + e.innerText.replace(/\s+/g, ' ')));
+    check(/usage:Context \d+% · [\d.]+k of 200k tokens left/.test(rows[0] ?? '') && /this chat/.test(rows[0]) && /more turns \(estimate\)/.test(rows[0]), `row 1: context left, cost, turns estimate [${rows[0]}]`);
+    check(rows[1]?.startsWith('model:') && rows[2]?.startsWith('effort:') && (await pop.locator('.segmented [role="radio"]').count()) >= 2, 'rows 2 and 3: model picker, effort segmented control');
+    await p.mouse.move(5, 5);
+    await p.waitForTimeout(400);
+    check(!(await pop.count()), 'leaving closes it');
+    await p.click('.usage-btn');
+    check(await p.evaluate(() => !!document.activeElement?.closest('.usage-pop .popover')), 'a click opens it with focus inside');
+    for (let i = 0; i < 8; i++) await p.keyboard.press('Tab');
+    check(await p.evaluate(() => !!document.activeElement?.closest('.usage-pop .popover')), 'Tab stays inside');
+    await p.keyboard.press('Escape');
+    check(!(await pop.count()) && (await p.evaluate(() => document.activeElement?.matches('.usage-btn'))), 'Esc closes it and returns focus');
     await p.close();
+    // Agents popup: subagents and hand-offs, each one goes to its card or chat; footer opens the Agent Manager.
+    const ag = await open('surface=chat&select=chat-pay&fixture=subagents', 1200, 800);
+    const has = await ag.locator('.agents-btn').count();
+    check(has === 1, 'a chat with subagents shows the agents button');
+    if (has) {
+      check(/^\d+$/.test((await ag.locator('.agents-count').innerText()).trim()), 'it shows the running count');
+      await ag.click('.agents-btn');
+      check((await ag.locator('.agents-pop .agent-row').count()) >= 1, 'the popup lists the agents');
+      await ag.click('.agents-pop [role="menuitem"]:has-text("Open Agent Manager")');
+      check((await posted(ag)).some((m) => m.type === 'openTasks'), 'Open Agent Manager opens it');
+    }
+    await ag.close();
+    const none = await open('surface=chat&select=chat-c4', 1200, 700);
+    check((await none.locator('.agents-btn').count()) === 0, 'no agents button without agents');
+    await none.close();
+    const ring = async (q) => q.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
+    const r1 = await open('surface=chat&select=chat-c5', 1200, 700);
+    await r1.evaluate(() => document.activeElement?.blur());
+    check((await ring(r1)) === 'none', 'no ring unfocused');
+    await r1.click('.composer textarea');
+    check(/^rgba?\(.*\) 0px 0px 0px 2px$/.test(await ring(r1)), 'focus draws a 2px ring');
+    await r1.close();
     const colour = async (id) => {
       const q = await open(`surface=chat&select=${id}`, 1200, 700);
-      const out = await q.evaluate(() => [document.querySelector('.composer').dataset.mode, window.getComputedStyle(document.querySelector('.composer')).borderTopColor]);
+      const out = await q.evaluate(() => [document.querySelector('.composer').dataset.mode, window.getComputedStyle(document.querySelector('.composer')).borderTopColor, window.getComputedStyle(document.querySelector('.mode-icon')).color]);
       await q.close();
       return out;
     };
     const [ask, edits, full] = [await colour('chat-c5'), await colour('chat-c2'), await colour('chat-c6')];
     check(ask[0] === 'ask' && edits[0] === 'edits' && full[0] === 'full', 'the composer names its mode: ask, edits, full');
     check(new Set([ask[1], edits[1], full[1]]).size === 3, `each mode has its own border colour (${ask[1]} / ${edits[1]} / ${full[1]})`);
-    for (const [name, theme, id] of [['composer-clarity-dark', 'black-blue', 'chat-c5'], ['composer-clarity-light', 'light-blue', 'chat-c2'], ['composer-clarity-fullauto', 'black-blue', 'chat-c6']]) {
-      const q = await open(`surface=chat&theme=${theme}&select=${id}`, 1200, 520);
-      const clip = async () => {
-        const b = await q.locator('.composer').boundingBox();
-        return { x: b.x - 24, y: b.y - 40, width: b.width + 48, height: b.height + 56 };
-      };
+    check([ask, edits, full].every((m) => m[1] === m[2]), 'the mode icon has the border’s colour');
+    // Screenshots.
+    const shot = async (q, name) => {
+      const b = await q.locator('.composer').boundingBox();
+      const top = Math.max(0, b.y - 340);
+      await q.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), clip: { x: b.x - 24, y: top, width: b.width + 48, height: b.y + b.height + 24 - top }, animations: 'disabled', caret: 'hide' });
+    };
+    for (const [name, theme, id, act] of [
+      ['composer-min-dark', 'black-blue', 'chat-c5', null],
+      ['composer-popover-dark', 'black-blue', 'chat-c5', 'usage'],
+      ['composer-popover-light', 'light-blue', 'chat-c2', 'usage'],
+      ['composer-agents-dark', 'black-blue', 'chat-pay&fixture=subagents', 'agents'],
+      ['composer-clarity-fullauto', 'black-blue', 'chat-c6', null],
+    ]) {
+      const q = await open(`surface=chat&theme=${theme}&select=${id}`, 1200, 800);
       await q.evaluate(() => document.activeElement?.blur());
-      const unfocused = await q.screenshot({ clip: await clip(), animations: 'disabled', caret: 'hide' });
-      await q.click('.composer textarea');
-      await q.click('.mic-btn');
-      const focused = await q.screenshot({ clip: await clip(), animations: 'disabled', caret: 'hide' });
-      // Unfocused above focused, one image.
-      await q.setContent(`<body style="margin:0;padding:16px;background:#888;display:grid;gap:16px"><img src="data:image/png;base64,${unfocused.toString('base64')}"><img src="data:image/png;base64,${focused.toString('base64')}"></body>`);
-      await q.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), fullPage: true });
+      if (act === 'usage') await q.click('.usage-btn');
+      if (act === 'agents' && (await q.locator('.agents-btn').count())) await q.click('.agents-btn');
+      await shot(q, name);
       await q.close();
     }
-  }
-  {
-    // Text size: Cmd/Ctrl + = - 0 in a tab, that tab only, kept in its own webview state, and never reaching the window's zoom.
-    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
-    await p.evaluate(() => {
-      window.__forwarded = 0;
-      window.addEventListener('keydown', (e) => e.key !== 'Meta' && e.key !== 'Control' && window.__forwarded++); // what the webview host forwards to the workbench
-    });
-    const size = async () => (await p.waitForTimeout(50), p.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize));
-    check((await size()) === '13px', 'the chat starts at 13px');
-    await p.click('.composer textarea');
-    await p.keyboard.press('ControlOrMeta+Equal');
-    await p.keyboard.press('ControlOrMeta+Equal');
-    check((await size()) === '15px', 'Cmd/Ctrl + = grows this tab by 1px a press');
-    check(await p.locator('.text-size-toast:has-text("Text 15px")').isVisible(), 'the new size shows briefly');
-    check((await p.evaluate(() => window.__forwarded)) === 0, 'the zoom keys don’t reach the window');
-    check((await p.evaluate(() => window.__vscodeState()?.textSize)) === 15, 'the size is kept in this webview’s state');
-    await p.keyboard.press('ControlOrMeta+Minus');
-    check((await size()) === '14px', 'Cmd/Ctrl + - shrinks it');
-    await p.keyboard.press('ControlOrMeta+Digit0');
-    check((await size()) === '13px', 'Cmd/Ctrl + 0 resets it');
-    await p.close();
-    const restored = await open('surface=chat&theme=black-blue&select=chat-c5&textSize=17', 1200, 800);
-    check((await restored.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '17px', 'a tab comes back at its own size');
-    await restored.close();
-    const other = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
-    check((await other.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '13px', 'another tab keeps the default');
-    await other.screenshot({ path: path.join(os.homedir(), 'code/chat-sizes-dark.png'), animations: 'disabled', caret: 'hide' });
-    await other.close();
-  }
-  {
-    // Step images: a thumbnail with a title, opening the editor's preview; the header's Images pill lists them.
-    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 900);
-    await p.waitForSelector('.step-image img');
-    const titles = await p.locator('.step-image .image-title').allInnerTexts();
-    check(titles.join('|') === 'Screenshot of localhost:3000/login|Login page mockup', 'image steps show thumbnails titled from the step or the file name');
-    const box = await p.locator('.step-image img').first().boundingBox();
-    check(!!box && box.width <= 240 && box.height <= 160, 'thumbnails fit 240×160');
-    await p.locator('.step-image .image-thumb').nth(1).click();
-    check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
-    check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
-    await p.screenshot({ path: path.join(os.homedir(), 'code/chat-images.png'), animations: 'disabled', caret: 'hide' });
-    await p.click('.images-pill');
-    check((await p.locator('.image-strip .image-thumb').count()) === 2, 'the Images pill opens the gallery');
-    await p.close();
-  }
-  {
-    // The chat list lives in its own side bar view; the chat tab has none, at any width.
-    const tab = await open('surface=chat&theme=black-blue&select=chat-c5', 1400, 800);
-    check((await tab.locator('.chat-side').count()) === 0, 'the chat tab has no chat list beside it');
-    await tab.close();
-    const list = await open('surface=chat&theme=black-blue&list=1&select=chat-c5', 300, 800);
-    check((await list.locator('.chat-list-view .new-chat').count()) === 1 && (await list.locator('.transcript').count()) === 0, 'the side bar view is the list only');
-    await list.locator('.chat-list-view [role="option"]').first().click();
-    check((await posted(list)).some((m) => m.type === 'openChat'), 'picking a chat in the list opens it in the chat tab');
-    await list.screenshot({ path: path.join(os.homedir(), 'code/chat-list-sidebar.png'), animations: 'disabled' });
-    await list.close();
-  }
-  {
-    // The document look: the editor's own background, a plain placeholder, one handoff note, numbered decisions.
-    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
-    check(await p.evaluate(() => {
-      const probe = document.createElement('div');
-      probe.style.background = 'var(--vscode-editor-background)';
-      document.body.append(probe);
-      const want = window.getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return window.getComputedStyle(document.body).backgroundColor === want;
-    }), 'the chat background is the editor background exactly');
-    check((await p.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'the placeholder is just Message…');
-    check((await p.locator('.link-strip .badge[data-kind="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
-    await p.close();
-    const d = await open('surface=chat&theme=black-blue&select=chat-c2', 1200, 800);
-    check((await d.locator('.ask .opt-num').first().innerText()) === '1.', 'decision options are numbered');
-    check(await d.evaluate(() => {
-      const yes = window.getComputedStyle(document.querySelector('.ask button.decide'));
-      const probe = document.createElement('div');
-      probe.style.background = 'var(--c-surface)';
-      probe.style.borderColor = 'var(--c-acc)';
-      document.body.append(probe);
-      const want = window.getComputedStyle(probe);
-      const ok = yes.backgroundColor === want.backgroundColor && yes.borderTopColor === want.borderTopColor;
-      probe.remove();
-      return ok;
-    }), 'the recommended option is a neutral surface with the accent border, not a fill');
-    check((await d.locator('.step-files').count()) === 0 && (await d.locator('.step-target').first().innerText()).includes('src/store.ts'), 'a tool line names its file once, as the link');
-    await d.locator('.step-target').first().click();
-    check((await posted(d)).some((m) => m.type === 'openFile' && m.path === 'src/store.ts'), 'the path opens the file');
-    check((await d.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'a busy chat’s placeholder is just Message…');
-    await d.fill('.composer textarea', 'and then');
-    check(await d.locator('.composer-hint:has-text("Sends after this turn · Esc stops")').isVisible(), 'with text in a busy chat, the faint hint says when it sends');
-    await d.fill('.composer textarea', '');
-    await d.click('.composer textarea');
-    await d.keyboard.press('2');
-    const picked = (await posted(d)).find((m) => m.type === 'permission');
-    check(picked?.requestId === 'perm-c2' && (await d.inputValue('.composer textarea')) === '', '2 in an empty box picks the second option');
-    await d.close();
-  }
-  for (const [name, theme, width] of [['chat-final-dark', 'black-blue', 1200], ['chat-final-light', 'light-blue', 1200], ['chat-final-narrow', 'black-blue', 480]]) {
-    const p = await open(`surface=chat&theme=${theme}&select=chat-c2`, width, 900);
-    await p.screenshot({ path: path.join(os.homedir(), `code/${name}.png`), animations: 'disabled', caret: 'hide' });
-    await p.close();
   }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.

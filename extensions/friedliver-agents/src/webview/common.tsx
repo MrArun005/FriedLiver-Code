@@ -544,6 +544,7 @@ export function Popover({
   buttonClass,
   class: className,
   disabled,
+  hover,
   children,
 }: {
   /** The panel's accessible name. */
@@ -556,9 +557,12 @@ export function Popover({
   buttonClass?: string;
   class?: string;
   disabled?: boolean;
+  /** Also opens while the pointer rests on it (without taking focus); a click opens it with focus, trapped in a dialog. */
+  hover?: boolean;
   children: (close: (refocus?: boolean) => void) => ComponentChildren;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<false | 'hover' | 'click'>(false);
+  const leave = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [place, setPlace] = useState<{ up: boolean; dx: number }>({ up: false, dx: 0 });
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -579,7 +583,7 @@ export function Popover({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || open === 'hover') return;
     // Menus focus their first item; forms their text field first.
     const first =
       kind === 'menu'
@@ -605,6 +609,15 @@ export function Popover({
       setOpen(false);
       return;
     }
+    if (e.key === 'Tab' && kind === 'dialog' && open === 'click' && panel.current) {
+      // Opened by click: Tab stays inside until Esc.
+      const all = [...panel.current.querySelectorAll<HTMLElement>('button:not(:disabled), select, input, [tabindex="0"]')];
+      const at = all.indexOf(document.activeElement as HTMLElement);
+      const next = e.shiftKey ? (at <= 0 ? all.length - 1 : at - 1) : at === all.length - 1 ? 0 : at + 1;
+      e.preventDefault();
+      all[next]?.focus();
+      return;
+    }
     if (kind !== 'menu' || !panel.current) return;
     const items = [...panel.current.querySelectorAll<HTMLElement>(MENU_ITEMS)];
     const at = items.indexOf(document.activeElement as HTMLElement);
@@ -619,7 +632,25 @@ export function Popover({
   };
 
   return (
-    <span class={`pop ${className ?? ''}`}>
+    <span
+      class={`pop ${className ?? ''}`}
+      onMouseEnter={
+        hover
+          ? () => {
+              clearTimeout(leave.current);
+              if (!open) setOpen('hover');
+            }
+          : undefined
+      }
+      onMouseLeave={
+        hover
+          ? () => {
+              // Stays open while it holds focus; else closes a moment after the pointer leaves.
+              leave.current = setTimeout(() => setOpen((o) => (o === 'hover' && !panel.current?.contains(document.activeElement) ? false : o)), 250);
+            }
+          : undefined
+      }
+    >
       <button
         ref={button}
         type="button"
@@ -628,13 +659,13 @@ export function Popover({
         disabled={disabled}
         aria-label={title}
         aria-haspopup={kind === 'menu' ? 'menu' : 'dialog'}
-        aria-expanded={open}
+        aria-expanded={!!open}
         aria-controls={open ? id : undefined}
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen(open === 'click' ? false : 'click')}
         onKeyDown={(e) => {
           if (kind === 'menu' && !open && e.key === 'ArrowDown') {
             e.preventDefault();
-            setOpen(true);
+            setOpen('click');
           }
         }}
       >

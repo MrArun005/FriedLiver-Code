@@ -346,6 +346,12 @@ export function usagePercent(u: Usage): number {
   return Math.max(0, Math.min(100, Math.round((u.used / u.size) * 100)));
 }
 
+/** Turns left before the context fills, at this chat's average tokens per finished turn; undefined before the first turn. An estimate. */
+export function turnsLeft(u: Usage, turns: number): number | undefined {
+  if (turns < 1 || u.used <= 0) return undefined;
+  return Math.max(0, Math.floor((u.size - u.used) / (u.used / turns)));
+}
+
 export function formatTokens(n: number): string {
   if (n < 1000) return String(Math.round(n));
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
