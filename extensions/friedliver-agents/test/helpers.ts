@@ -21,10 +21,10 @@ export async function gitRepo(): Promise<string> {
 }
 
 /** The FriedLiver tools' MCP server, bundled the way esbuild.mjs does it. */
-export async function buildBridge(): Promise<string> {
+export async function buildBridge(entry = 'server.ts'): Promise<string> {
   const out = path.join(await mkdtemp(path.join(os.tmpdir(), 'fl-bridge-')), 'bridge.js');
   await build({
-    entryPoints: [path.resolve(__dirname, '../src/bridge/server.ts')],
+    entryPoints: [path.resolve(__dirname, '../src/bridge', entry)],
     bundle: true,
     platform: 'node',
     format: 'cjs',

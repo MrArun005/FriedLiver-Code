@@ -8,7 +8,7 @@ import { Accounts } from './host/accounts';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
-import { registerClaude, unregisterClaude, writeTokenFile } from './host/externalBrowser';
+import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
 import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
@@ -118,8 +118,6 @@ export class Controller {
   private warnedAgentToAgent = false;
   private warnedApprovals = false;
   /** References for a composer, sent again to a chat view that (re)loads soon after; the view drops duplicates. */
-  /** The URL of the `friedliver-browser` entry this window wrote to ~/.claude.json, removed again on close. */
-  private claudeEntryUrl?: string;
   private composerRefs: { message: HostMessage; until: number }[] = [];
   /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
@@ -302,7 +300,8 @@ export class Controller {
     this.batcher.dispose();
     clearTimeout(this.claudeTimer);
     this.watchClaudeSessions(false);
-    if (this.claudeEntryUrl) await unregisterClaude(CLAUDE_CONFIG(), this.claudeEntryUrl).catch(() => {});
+    // The entry stays (it holds no secret or port); without the token file it answers "FriedLiver isn't running".
+    await removeTokenFile(this.context.globalStorageUri.fsPath).catch(() => {});
     await this.core.dispose();
   }
 
@@ -1195,8 +1194,8 @@ export class Controller {
 
   /**
    * Lets Claude Code (the extension, or the CLI in a terminal) use the browser tools: writes this
-   * launch's token file and the `friedliver-browser` entry in ~/.claude.json. With the setting off,
-   * revokes the token and removes the entry. `show` reports the result (the Connect command).
+   * launch's token file and the secret-free `friedliver-browser` stdio entry in ~/.claude.json. With
+   * the setting off, revokes the token and removes both. `show` reports the result (the Connect command).
    */
   private async connectClaude(show: boolean): Promise<void> {
     const say = (text: string, error = false) => {
@@ -1207,15 +1206,22 @@ export class Controller {
     try {
       if (!this.browserSetting('externalClients', true)) {
         this.core.revokeExternal();
-        if (this.claudeEntryUrl) await unregisterClaude(CLAUDE_CONFIG(), this.claudeEntryUrl);
-        this.claudeEntryUrl = undefined;
+        await removeTokenFile(this.context.globalStorageUri.fsPath);
+        await unregisterClaude(CLAUDE_CONFIG());
         return say('Claude Code is not connected to the browser: friedliver.browser.externalClients is off.');
       }
+      const storage = this.context.globalStorageUri.fsPath;
+      // First, before anything can fail: an older http entry points at a port another process may hold now.
+      await unregisterClaude(CLAUDE_CONFIG(), true);
       const access = await this.core.externalAccess();
-      if (!access) return say('Claude Code is not connected to the browser: the FriedLiver tools are off or unavailable.', show);
-      await writeTokenFile(this.context.globalStorageUri.fsPath, access.url, access.token);
-      const result = await registerClaude(CLAUDE_CONFIG(), access.url, access.token);
-      this.claudeEntryUrl = access.url;
+      if (!access) {
+        await removeTokenFile(storage);
+        return say('Claude Code is not connected to the browser: the FriedLiver tools are off or unavailable.', show);
+      }
+      const tokenFile = await writeTokenFile(storage, access.url, access.token);
+      const script = this.context.asAbsolutePath(path.join('dist', 'externalStdio.js'));
+      // Replaces an older http entry (token and port in the config) with this secret-free one.
+      const result = await registerClaude(CLAUDE_CONFIG(), claudeEntry(process.execPath, script, tokenFile));
       say(`Claude Code can use FriedLiver's browser (MCP server "friedliver-browser", ${result}). Start a new Claude Code session to pick it up.`);
     } catch (err) {
       say(`Could not connect Claude Code to the browser: ${messageOf(err)}`, true);

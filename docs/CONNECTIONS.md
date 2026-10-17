@@ -164,26 +164,36 @@ terminal, reach the browser tools (and only those) through an MCP server named
 `friedliver-browser`:
 
 - On start, with `friedliver.browser.externalClients` on (default), FriedLiver
-  mints a random 256-bit token for this launch, writes `{url, token}` to a 0600
-  file in a fresh 0700 folder in its global storage (the last launch's file is
-  deleted), and adds or updates `mcpServers["friedliver-browser"]` in
-  `~/.claude.json`: `{type: "http", url: "http://127.0.0.1:<port>/mcp",
-  headers: {Authorization: "Bearer <token>"}}`. Nothing else in the file
-  changes; the old file is kept as `~/.claude.json.friedliver-backup` and the
-  new one is written to a temp file and renamed. FriedLiver edits the file
-  itself rather than running `claude mcp add`, which would put the token in a
-  command line other local users can read. Closing the window removes the entry
-  if it still points at that window.
+  mints a random 256-bit token for this launch and writes `{url, token}` to
+  `<globalStorage>/external/browser-token.json` (0600, in a fresh 0700 folder;
+  deleted again when the window closes). It then sets
+  `mcpServers["friedliver-browser"]` in `~/.claude.json` to a **stdio** entry:
+  `{type: "stdio", command: <FriedLiver's runtime>, args:
+  [<extension>/dist/externalStdio.js, <token file>], env:
+  {ELECTRON_RUN_AS_NODE: "1"}}`. The entry holds no token and no port, so it
+  stays registered; an older http-style entry (token and port inline) is
+  removed first. Nothing else in the file changes; the old file is kept as
+  `~/.claude.json.friedliver-backup`, and the new one is written to a temp file
+  and renamed (through a symlink, if it is one).
+- `externalStdio.js` reads the token file on every request. It never sends the
+  token: it signs a fresh nonce and its session id with it (HMAC-SHA256), and
+  forwards an answer only if the server signs the nonce back. A process that
+  took over a stale port learns nothing and its answers are dropped. No file, no
+  server, or a wrong proof gives "FriedLiver isn't running".
 - The server is the same 127.0.0.1-only HTTP server the chats use, with the
-  same Host/Origin checks. The token reaches `tools/list` and `tools/call` for
-  the `browser_*` tools only; anything else is "not found". A token from an
-  earlier launch is refused (401).
-- Every action (open, click, type, back, reload) asks with a popup such as
-  "Claude Code wants to click in the browser": Allow, Allow for this session,
-  Deny. Full auto in a chat does not cover Claude Code; only
+  same Host/Origin checks. The external client gets the `browser_*` tools only;
+  anything else is "not found". Its token is refused as a plain bearer, and
+  used nonces are refused.
+- Every action (open, click, type, back, reload) asks with a non-modal popup
+  that says what and where, e.g. "Claude Code wants to click in the browser:
+  http://localhost:3000: click "Sign in"" (agent text cleaned of control
+  characters and cut at ~120 characters; text typed into a password field is
+  never shown). Allow, Allow for this session, Deny. "Allow for this session"
+  covers that Claude Code session on that origin only: a new session or another
+  site asks again. Full auto in a chat does not cover Claude Code; only
   `friedliver.browser.externalAutoApprove` (default off) does. The URL rules,
   the own-tab-only rule and `agentToAgent: off` apply as for chats.
 - **FriedLiver: Connect Claude Code to the browser** does this again and says
   what happened. Start a new Claude Code session afterwards to pick up the
-  server. Turning `externalClients` off revokes the token and removes the entry.
+  server. Turning `externalClients` off revokes the token and removes the file and the entry.
 - Both settings are read from your user settings only.

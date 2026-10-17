@@ -1,38 +1,48 @@
 // Lets clients outside FriedLiver (the Claude Code extension, or the claude CLI
 // in FriedLiver's terminal) use the built-in browser tools. The editor mints one
 // token per launch for EXTERNAL_CLIENT (bridge.ts), which reaches the browser_*
-// tools only and asks the user like a chat does (bridgeRequests.ts). Here: the
-// token file, and the `friedliver-browser` entry in Claude Code's user config.
+// tools only and asks the user (bridgeRequests.ts). Here: the token file, and the
+// `friedliver-browser` stdio entry in Claude Code's user config, which runs
+// ../bridge/externalStdio.ts.
 //
-// ponytail: we edit ~/.claude.json directly instead of running `claude mcp add`;
-// that command would carry the bearer token in its argv, which any local user
-// can read with ps. The file is Claude Code's documented user-scope MCP config.
+// We edit ~/.claude.json directly instead of running `claude mcp add`: one code
+// path, tested, and the file is Claude Code's documented user-scope MCP config.
 import { randomBytes } from 'node:crypto';
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const SERVER_NAME = 'friedliver-browser';
-const DIR_PREFIX = 'external-';
+const DIR = 'external';
 
 /**
- * Writes `{ url, token }` to a fresh 0600 file in a fresh 0700 directory under `storage`, after
- * removing earlier launches' files, so only this launch's token is ever on disk. Returns its path.
+ * Writes `{ url, token }` to `<storage>/external/browser-token.json`, 0600 in a 0700 folder made fresh
+ * (earlier launches' files go first, created with wx), so only this launch's token is ever on disk.
  */
 export async function writeTokenFile(storage: string, url: string, token: string): Promise<string> {
-  await mkdir(storage, { recursive: true });
-  for (const name of await readdir(storage)) {
-    if (name.startsWith(DIR_PREFIX)) await rm(path.join(storage, name), { recursive: true, force: true });
-  }
-  const dir = await mkdtemp(path.join(storage, DIR_PREFIX));
+  await removeTokenFile(storage);
+  const dir = path.join(storage, DIR);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
   const file = path.join(dir, 'browser-token.json');
   await writeFile(file, JSON.stringify({ url, token }), { mode: 0o600, flag: 'wx' });
   return file;
 }
 
-type Config = Record<string, unknown> & { mcpServers?: Record<string, unknown> };
+/** No token on disk: the stdio server then answers "FriedLiver isn't running". Also clears older layouts' `external-*` folders. */
+export async function removeTokenFile(storage: string): Promise<void> {
+  const names = await readdir(storage).catch(() => [] as string[]);
+  for (const name of names) if (name === DIR || name.startsWith(`${DIR}-`)) await rm(path.join(storage, name), { recursive: true, force: true });
+}
 
-const entry = (url: string, token: string) => ({ type: 'http', url, headers: { Authorization: `Bearer ${token}` } });
+/**
+ * The Claude Code entry: a stdio server run with FriedLiver's own runtime as plain Node. It holds no
+ * secret and no port (externalStdio.ts reads the token file each request), so it can stay registered.
+ */
+export function claudeEntry(runtime: string, script: string, tokenFile: string) {
+  return { type: 'stdio', command: runtime, args: [script, tokenFile], env: { ELECTRON_RUN_AS_NODE: '1' } };
+}
+
+type Config = Record<string, unknown> & { mcpServers?: Record<string, unknown> };
 
 /** Claude Code's config, or {} when there is none yet; throws rather than guess at a file it can't parse. */
 async function readConfig(file: string): Promise<{ config: Config; exists: boolean }> {
@@ -68,23 +78,22 @@ async function writeConfig(link: string, config: Config, exists: boolean): Promi
   }
 }
 
-/** Adds or updates our entry, touching nothing else. 'unchanged' when it already says this. */
-export async function registerClaude(file: string, url: string, token: string): Promise<'added' | 'updated' | 'unchanged'> {
+/** Adds or updates our entry (replacing an older http one), touching nothing else. 'unchanged' when it already says this. */
+export async function registerClaude(file: string, want: ReturnType<typeof claudeEntry>): Promise<'added' | 'updated' | 'unchanged'> {
   const { config, exists } = await readConfig(file);
   const servers = config.mcpServers ?? {};
-  const want = entry(url, token);
   const had = servers[SERVER_NAME];
   if (JSON.stringify(had) === JSON.stringify(want)) return 'unchanged';
   await writeConfig(file, { ...config, mcpServers: { ...servers, [SERVER_NAME]: want } }, exists);
   return had === undefined ? 'added' : 'updated';
 }
 
-/** Removes our entry if it is still the one this launch wrote (same URL); true when removed. */
-export async function unregisterClaude(file: string, url: string): Promise<boolean> {
+/** Removes our entry (with `onlyHttp`, only an older http one, which pointed at a port that may now be anyone's); true when removed. */
+export async function unregisterClaude(file: string, onlyHttp = false): Promise<boolean> {
   const { config, exists } = await readConfig(file);
   const servers = config.mcpServers;
-  const ours = servers?.[SERVER_NAME] as { url?: unknown } | undefined;
-  if (!exists || !servers || ours?.url !== url) return false;
+  if (!exists || !servers || !(SERVER_NAME in servers)) return false;
+  if (onlyHttp && (servers[SERVER_NAME] as { type?: unknown } | null)?.type !== 'http') return false;
   const rest = { ...servers };
   delete rest[SERVER_NAME];
   await writeConfig(file, { ...config, mcpServers: rest }, exists);

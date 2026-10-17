@@ -599,7 +599,7 @@
           "scope": "machine",
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through an MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` with a token that changes every launch. Every action still asks you first. Read from your user settings only."
+          "markdownDescription": "Lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through a stdio MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` (no secret in it; it reads a token that changes every launch from FriedLiver's storage). Every action still asks you first. Read from your user settings only."
         },
         "friedliver.browser.externalAutoApprove": {
           "scope": "machine",
