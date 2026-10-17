@@ -1,10 +1,23 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { build } from 'esbuild';
 import { AgentCore, type CoreOptions } from '../src/host/core';
 import type { AgentToAgent } from '../src/host/bridgeRequests';
+import { Permissions, type Store } from '../src/host/permissions';
+
+/** A Memento in a plain object, like VS Code's globalState / workspaceState (which outlive a restart). */
+export function memoryStore(): Store & { data: Record<string, unknown> } {
+  const data: Record<string, unknown> = {};
+  return { data, get: <T>(k: string) => structuredClone(data[k]) as T | undefined, update: (k: string, v: unknown) => void (data[k] = structuredClone(v)) };
+}
+
+/** Remembered permissions over in-memory storage; `home` is a fresh folder unless given. */
+export function memoryPermissions(over: { home?: string; user?: Store; workspace?: Store } = {}): Permissions {
+  return new Permissions({ user: over.user ?? memoryStore(), workspace: over.workspace ?? memoryStore(), home: over.home ?? mkdtempSync(path.join(os.tmpdir(), 'fl-home-')) });
+}
 
 export const DEMO_AGENT = path.resolve(__dirname, '../../../agent-core/demo/fakeAgent.mjs');
 

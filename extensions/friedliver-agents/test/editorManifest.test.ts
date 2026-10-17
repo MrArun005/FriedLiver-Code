@@ -51,7 +51,7 @@ describe('approvals: contributions', () => {
 
   it('has the approval, review and other-agent commands', () => {
     const own = new Set(contributes.commands.map((c: { command: string }) => c.command));
-    for (const id of ['friedliver.approvals.rules', 'friedliver.review.acceptAll', 'friedliver.review.rejectAll', 'friedliver.otherAgents']) expect(own.has(id), id).toBe(true);
+    for (const id of ['friedliver.managePermissions', 'friedliver.review.acceptAll', 'friedliver.review.rejectAll', 'friedliver.otherAgents']) expect(own.has(id), id).toBe(true);
     expect(contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.nextDecision')).toMatchObject({ key: 'ctrl+alt+d' });
   });
 

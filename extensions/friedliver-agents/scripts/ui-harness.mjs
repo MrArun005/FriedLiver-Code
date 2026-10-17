@@ -12,6 +12,7 @@
 //        &fixture=steps (a Claude chat with long heredoc commands and a plain-text summary, ui-fixture-steps.mjs)
 //        &fixture=subagents (a Claude chat with three subagents, and outside Claude Code sessions, ui-fixture-subagents.mjs)
 //        &fixture=reference (the session in the Claude Code reference screenshots, ui-fixture-reference.mjs)
+//        &fixture=permissions (approvals offering "Always allow", and ?surface=permissions: Manage Permissions, ui-fixture-permissions.mjs)
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 
 import { spawnSync } from 'node:child_process';
@@ -25,6 +26,7 @@ import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
 import { subagentsFixture } from './ui-fixture-subagents.mjs';
 import { referenceFixture } from './ui-fixture-reference.mjs';
+import { permissionsFixture } from './ui-fixture-permissions.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -81,7 +83,7 @@ function readTheme(name) {
 }
 
 function page(params) {
-  const surface = ['tasks', 'chat', 'images'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
+  const surface = ['tasks', 'chat', 'images', 'permissions'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
   const theme = readTheme(params.get('theme') ?? 'black-blue');
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
@@ -94,7 +96,9 @@ function page(params) {
           ? subagentsFixture(Date.now())
           : params.get('fixture') === 'reference'
             ? referenceFixture(Date.now())
-            : fixture(Date.now());
+            : params.get('fixture') === 'permissions' || surface === 'permissions'
+              ? permissionsFixture(Date.now())
+              : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
@@ -105,6 +109,7 @@ function page(params) {
     let saved = ${JSON.stringify(saved ?? null)};
     const snapshot = ${JSON.stringify(snapshot).replace(/</g, '\\u003c')};
     const claude = ${JSON.stringify(data.claude ?? null).replace(/</g, '\\u003c')};
+    const rules = ${JSON.stringify(data.rules ?? null).replace(/</g, '\\u003c')};
     window.acquireVsCodeApi = () => ({
       postMessage(m) {
         window.__posted.push(m);
@@ -124,6 +129,9 @@ function page(params) {
           setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: c.toDataURL('image/png') }) }, '*'), 0);
         }
         if (m && m.type === 'ready' && claude) setTimeout(() => window.postMessage({ type: 'claudeSessions', sessions: claude }, '*'), 0);
+        // Manage Permissions: the host sends the remembered rules, and the list again after a revoke.
+        if (m && m.type === 'ready' && rules) setTimeout(() => window.postMessage({ type: 'permissions', rules }, '*'), 0);
+        if (m && m.type === 'revokePermission' && rules) setTimeout(() => window.postMessage({ type: 'permissions', rules: rules.filter((r) => r.id !== m.id) }, '*'), 0);
       },
       getState: () => saved ?? undefined,
       setState: (s) => { saved = s; },
@@ -807,7 +815,7 @@ async function shoot() {
     check(await p.locator('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")').isVisible(), 'Always allow offers the exact command');
     await p.click('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")');
     const rule = (await posted(p)).find((m) => m.type === 'allowAlways');
-    check(rule?.requestId === 'perm-c2' && rule.rule.kind === 'exact', 'Always allow posts the rule');
+    check(rule?.requestId === 'perm-c2' && rule.grant.kind === 'exact', 'Always allow posts the rule');
     check((await p.locator('.cc-mode').getAttribute('aria-label')) === 'Mode: Edit automatically' && (await p.locator('.composer').getAttribute('data-mode')) === 'edits', 'the mode button shows the mode in use');
     await p.close();
   }
@@ -1040,6 +1048,39 @@ async function shoot() {
         await q.close();
       }
     }
+  }
+  {
+    // "Always allow" on every kind of approval, and the Manage Permissions page that lists and revokes them.
+    const p = await open('surface=chat&fixture=permissions&select=chat-trip', 900, 1240);
+    const card = p.locator('#item-perm-read');
+    await card.locator('button:has-text("Always allow…")').click();
+    const menu = p.locator('[role="menuitem"]');
+    check((await menu.allInnerTexts()).some((t) => t.includes('/Users/arun/Desktop/trip') && t.includes('read files here and below')), 'a file read offers its folder, read only');
+    check((await menu.allInnerTexts()).some((t) => t.includes('Manage permissions')), 'the menu links to Manage Permissions');
+    await save(p, 'permissions-approvals');
+    await menu.filter({ hasText: '/Users/arun/Desktop' }).filter({ hasNotText: 'trip' }).click();
+    check((await posted(p)).some((m) => m.type === 'allowAlways' && m.requestId === 'perm-read' && m.grant?.kind === 'folder' && m.grant.folder === '/Users/arun/Desktop' && m.grant.access === 'read'), 'picking a folder sends that folder, read only');
+    const site = p.locator('#item-bridge-irctc');
+    check((await site.locator('button').allInnerTexts()).join(' | ').replace(/\s+/g, ' ') === 'Allow | Allow for this chat | Always allow https://www.irctc.co.in | Deny', 'a browser request offers Allow once, for this chat, always for the site, and Deny');
+    await site.locator('button:has-text("Always allow")').click();
+    check((await posted(p)).some((m) => m.type === 'bridge' && m.requestId === 'bridge-irctc' && m.answer === 'allowAlways'), 'Always allow answers allowAlways');
+    check(await p.locator('#item-bridge-codex button:has-text("Always allow")').count() === 1, 'an agent-to-agent request offers Always allow');
+    check((await p.locator('.answered:has-text("Always allowed: https://www.irctc.co.in")').count()) === 1, 'a request a rule answered says so');
+    await p.close();
+
+    const m = await open('surface=permissions', 1200, 820);
+    check((await m.locator('.perms-group h2').allInnerTexts()).map((t) => t.replace(/\s*\d+$/, '')).join(',') === 'Websites,Folders,Commands,Agent tools', 'Manage Permissions groups websites, folders, commands and agent tools');
+    check((await m.locator('.perms tbody tr').count()) === 7, 'every remembered rule is listed');
+    check((await m.locator('.perms tbody tr').first().innerText()).includes('https://www.irctc.co.in') && (await m.locator('.perms tbody tr').first().innerText()).includes('Claude'), 'a rule shows where and which agent asked');
+    const wide = await m.evaluate(() => document.querySelector('.perms table').getBoundingClientRect().width / window.innerWidth);
+    check(wide > 0.9, `the list uses the whole width (${Math.round(wide * 100)}%)`);
+    await save(m, 'permissions-manage');
+    await m.locator('.perms tbody tr').first().locator('button:has-text("Revoke")').click();
+    check((await posted(m)).some((x) => x.type === 'revokePermission' && x.id === 'site https://www.irctc.co.in'), 'Revoke sends that rule');
+    await m.waitForFunction(() => document.querySelectorAll('.perms tbody tr').length === 6);
+    await m.locator('button:has-text("Revoke all")').click();
+    check((await posted(m)).some((x) => x.type === 'revokeAllPermissions'), 'Revoke all asks the host');
+    await m.close();
   }
   {
     // Steps read as one line each and open to something you can use; replies keep their shape.

@@ -112,6 +112,10 @@ export interface BridgeItem {
   /** The question or message; empty for read_chat. For the browser: the URL, the element, or what to type. */
   text: string;
   state: 'awaiting' | 'allowed' | 'denied';
+  /** What "Always allow" would remember: the website's origin, or "in every chat" for an agent tool. Absent: not offered. */
+  always?: string;
+  /** Why it went ahead without asking: a remembered rule. */
+  auto?: string;
 }
 
 /**

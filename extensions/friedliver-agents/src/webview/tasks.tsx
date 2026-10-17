@@ -9,6 +9,7 @@ import {
   lastReply,
   type AgentKey,
   type AppState,
+  type BridgeItem,
   type ChatView,
   type ChatStatus,
 } from '../shared/model';
@@ -582,6 +583,7 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
     );
   }
   if (d.kind === 'bridge') {
+    const bridge = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === d.id);
     return (
       <div class="actions">
         <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
@@ -590,6 +592,11 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
         <button class="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowChat' })}>
           Allow for this chat
         </button>
+        {bridge?.always && (
+          <button class="sm" title={`Don't ask again for ${bridge.always}, in any chat`} onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowAlways' })}>
+            Always allow
+          </button>
+        )}
         <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'deny' })}>
           Deny
         </button>

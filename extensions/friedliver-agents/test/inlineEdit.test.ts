@@ -5,7 +5,7 @@ import { applyReplacement, INLINE_AROUND, INLINE_LIMITS, INLINE_MARK, inlineProm
 import { lastReply } from '../src/shared/model';
 import { readOnlyChoice, type SessionOption } from '../src/shared/session';
 import { waitFor } from './helpers';
-import { buildBridge, disposeCores, gitRepo, makeCore } from './helpers';
+import { buildBridge, disposeCores, gitRepo, makeCore, memoryPermissions } from './helpers';
 
 afterEach(disposeCores);
 
@@ -129,7 +129,9 @@ describe('read-only chats (enforced in the core)', () => {
   it('refuses a command an Always-allow rule and Full auto would run, without showing anything', async () => {
     const dir = await gitRepo();
     const { shown, ui } = spies();
-    const core = makeCore(dir, { ui, rules: { get: () => [{ kind: 'prefix', command: process.execPath }], add: () => {} } });
+    const permissions = memoryPermissions();
+    permissions.add({ kind: 'prefix', command: 'node -e' });
+    const core = makeCore(dir, { ui, permissions });
     const chat = await core.createChat('claude', { readOnly: true, approval: 'full' });
     await core.send(chat.id, 'run');
     expect(lastReply(core.chat(chat.id)!)).toContain('denied the command');

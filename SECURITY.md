@@ -118,9 +118,24 @@ vendors' own permission settings as part of your setup.
   backslash, a line break, a spelled-out invisible character or a leading
   `NAME=value` never matches any rule, and none is offered for it. Rules live
   in this workspace's storage in your profile, never in the repository, and
-  **FriedLiver: Always-Allowed Commands** lists and removes them. A prefix rule
+  **FriedLiver: Manage Permissions** lists and revokes them. A prefix rule
   allows any arguments after it, which can change what the program does; prefer
   exact rules for anything that writes.
+- **"Always allow" beyond commands** remembers a website (its exact origin,
+  e.g. `https://www.irctc.co.in`; never `file:`, `chrome:` or the like), a
+  folder (the chosen folder and below, reading and changing separately, matched
+  on the real path so `..` and symlinks can't leave it), or an agent-to-agent
+  tool. It holds in every chat and after restarts, for every agent (Claude,
+  Codex, Gemini, Claude Code outside FriedLiver), and answers the agent's own
+  permission prompts with its one-time allow. Websites and tools are kept in
+  your profile's global storage, folders and commands in this workspace's.
+  Never offered or applied in read-only chats or inline edits; keys,
+  credentials and system places (`~/.ssh`, `~/.aws`, `~/.gnupg`, keychains,
+  `/etc`, the FriedLiver app, and for writes any `.git` folder) are Allow once
+  only; home and anything above it can't be always allowed. A browser action
+  allowed by a website rule still checks the page's origin just before it acts.
+  **FriedLiver: Manage Permissions** (also "Manage" on approval notifications)
+  shows what, where, when and which agent asked, with Revoke and Revoke all.
 - `friedliver.approvals.default` (ask or edits) is machine-scoped and read from
   your user settings only; a workspace value is ignored and logged.
 
