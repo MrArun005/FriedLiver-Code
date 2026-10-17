@@ -16,6 +16,7 @@ import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
 import { startDictation } from './host/dictation';
 import { EditorAgent } from './host/editor';
+import { InlineEditor } from './host/inlineEditor';
 import { imagePreview } from './host/imageAccess';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
@@ -85,6 +86,8 @@ export class Controller {
   readonly core: AgentCore;
   readonly reviews: ReviewUi;
   readonly accounts: Accounts;
+  /** Chats an inline edit owns: their reviews and prompts are refused, never shown. */
+  private readonly inlineChats = new Set<string>();
   /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
   editor?: EditorAgent;
   readonly log = vscode.window.createOutputChannel('FriedLiver Agents', { log: true });
@@ -172,10 +175,10 @@ export class Controller {
       },
       log: (line) => this.log.info(line),
       ui: {
-        showReview: (review) => void this.reviews.show(review, this.editor?.reviewPlacement(review)),
+        showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review)),
         closeReview: (id) => void this.reviews.close(id),
-        askCommand: (ask) => void this.askCommand(ask),
-        askPermission: (ask) => void this.askPermission(ask),
+        askCommand: (ask) => !this.inlineChats.has(ask.chatId ?? '') && void this.askCommand(ask),
+        askPermission: (ask) => !this.inlineChats.has(ask.chatId) && void this.askPermission(ask),
         askBridge: (ask) => void this.askBridge(ask),
         askQuestion: (ask) =>
           this.notifyDecision(ask.requestId, ask.chatId, `${plainText(ask.agentLabel)} asks: ${plainText(ask.message.split('\n')[0].slice(0, 200))}`, [
@@ -292,7 +295,7 @@ export class Controller {
       addToComposer: (chatId, ref) => this.addToComposer(chatId, ref),
       error: (err) => this.error(err),
     });
-    context.subscriptions.push(this.editor);
+    context.subscriptions.push(this.editor, new InlineEditor(this.core, this.inlineChats));
     this.updateDecisions();
   }
 

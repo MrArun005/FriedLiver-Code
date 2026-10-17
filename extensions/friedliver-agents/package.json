@@ -234,6 +234,29 @@
         "title": "Switch Between Code and Agent Chat",
         "category": "FriedLiver",
         "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "friedliver.inlineEdit",
+        "title": "Inline Edit",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.inlineEdit.accept",
+        "title": "Accept Inline Edit",
+        "category": "FriedLiver",
+        "icon": "$(check)"
+      },
+      {
+        "command": "friedliver.inlineEdit.reject",
+        "title": "Reject Inline Edit",
+        "category": "FriedLiver",
+        "icon": "$(close)"
+      },
+      {
+        "command": "friedliver.inlineEdit.retry",
+        "title": "Retry Inline Edit with Follow-up",
+        "category": "FriedLiver",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -296,6 +319,21 @@
           "command": "friedliver.toggleCodeAndChat",
           "when": "browserEditorOpen && activeEditorGroupIndex == 1",
           "group": "navigation@9"
+        },
+        {
+          "command": "friedliver.inlineEdit.accept",
+          "when": "resourceScheme == friedliver-inline && friedliver.inlineEdit.pending",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friedliver.inlineEdit.retry",
+          "when": "resourceScheme == friedliver-inline && friedliver.inlineEdit.pending",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friedliver.inlineEdit.reject",
+          "when": "resourceScheme == friedliver-inline",
+          "group": "navigation@3"
         }
       ],
       "commandPalette": [
@@ -314,6 +352,18 @@
         {
           "command": "friedliver.edit.stop",
           "when": "false"
+        },
+        {
+          "command": "friedliver.inlineEdit.accept",
+          "when": "friedliver.inlineEdit.pending"
+        },
+        {
+          "command": "friedliver.inlineEdit.retry",
+          "when": "friedliver.inlineEdit.pending"
+        },
+        {
+          "command": "friedliver.inlineEdit.reject",
+          "when": "friedliver.inlineEdit.pending || friedliver.inlineEdit.running"
         }
       ],
       "editor/context": [
@@ -349,7 +399,7 @@
         "when": "focusedView == 'friedliver.agents' || activeWebviewPanelId == 'friedliver.chatPanel'"
       },
       {
-        "command": "friedliver.editSelection",
+        "command": "friedliver.inlineEdit",
         "key": "ctrl+i",
         "mac": "cmd+i",
         "when": "editorTextFocus && !editorReadonly && resourceScheme == file && !inlineChatHasProvider && !inlineChatHasEditsAgent"
@@ -395,6 +445,23 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.inlineEdit.accept",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "friedliver.inlineEdit.pending"
+      },
+      {
+        "command": "friedliver.inlineEdit.reject",
+        "key": "escape",
+        "when": "(friedliver.inlineEdit.pending || friedliver.inlineEdit.running) && !suggestWidgetVisible && !findWidgetVisible"
+      },
+      {
+        "command": "friedliver.inlineEdit.retry",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "friedliver.inlineEdit.pending"
       }
     ],
     "colors": [
@@ -644,6 +711,24 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
+        },
+        "friedliver.inlineEdit.agent": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "gemini",
+            "demo"
+          ],
+          "enumItemLabels": [
+            "Claude",
+            "Codex",
+            "Gemini",
+            "Demo"
+          ],
+          "default": "claude",
+          "scope": "machine",
+          "description": "The agent Inline Edit (Ctrl/Cmd+I) asks. It only proposes text; FriedLiver changes the file when you accept. Rebind the shortcut in Keyboard Shortcuts under FriedLiver: Inline Edit."
         }
       }
     },
@@ -718,7 +803,7 @@
           {
             "id": "editInPlace",
             "title": "Edit code where it is",
-            "description": "Select code and press **Ctrl/Cmd+I** (or right-click, **Edit with Agent**), then describe the change. The edit opens right there as a diff you accept or reject. Right-click also has **Ask About Selection**, and Source Control has **Review My Changes**.\n[Edit with Agent](command:friedliver.editSelection)",
+            "description": "Select code and press **Ctrl/Cmd+I** for an inline edit: describe the change, watch the proposal as a diff, then accept (Ctrl/Cmd+Enter) or reject (Esc). Right-click **Edit with Agent** lets the agent edit the file itself, as a diff you review. Right-click also has **Ask About Selection**, and Source Control has **Review My Changes**.\n[Edit with Agent](command:friedliver.editSelection)",
             "media": {
               "svg": "media/walkthrough/edit-in-place.svg",
               "altText": "Lines selected in format.ts, the Edit with Claude box asking for the change, and the status bar saying Claude is editing format.ts."
