@@ -3534,6 +3534,8 @@ body[data-surface='chat'] .chat-head {
   min-width: 0;
 }
 button.chat-head-title {
+  display: block;
+  text-align: left;
   height: auto;
   min-width: 0;
   padding: 2px 6px;
@@ -3791,10 +3793,12 @@ body[data-surface='chat'] .ask.question .actions button.sm:not(.danger):first-ch
 }
 
 /* The composer: one rounded bar. */
+/* Always stacked: the message box gets its own full-width row, the controls a
+   row below, so pills can never squeeze the text (they shrink instead). */
 body[data-surface='chat'] .composer {
+  container-type: inline-size;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
   margin: 0 64px 26px;
   padding: 8px 10px 8px 20px;
   border-radius: 18px;
@@ -3808,7 +3812,12 @@ body[data-surface='chat'] .composer:focus-within {
   border-color: var(--vscode-focusBorder);
 }
 body[data-surface='chat'] .composer textarea {
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  max-height: calc(8lh + 14px);
+  field-sizing: content;
+  overflow-y: auto;
   padding: 7px 0;
   color: var(--c-text);
   font-size: 15px;
@@ -3817,8 +3826,37 @@ body[data-surface='chat'] .composer textarea::placeholder {
   color: var(--c-mute);
 }
 body[data-surface='chat'] .composer-bar {
+  flex-wrap: nowrap;
+  min-width: 0;
   padding: 0;
   gap: var(--sp-2);
+}
+body[data-surface='chat'] .composer-bar > *,
+body[data-surface='chat'] .composer-bar .session-controls {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+body[data-surface='chat'] .composer-bar .session-controls {
+  flex: 0 1 auto;
+}
+body[data-surface='chat'] .composer-bar button.chip-btn {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+body[data-surface='chat'] .composer-bar .send-btn,
+body[data-surface='chat'] .composer-bar .icon-btn {
+  flex: none;
+}
+/* Narrow: usage goes first, then pill labels (icons keep their tooltips). */
+@container (max-width: 480px) {
+  body[data-surface='chat'] .composer-bar .usage {
+    display: none;
+  }
+}
+@container (max-width: 380px) {
+  body[data-surface='chat'] .composer-bar .chip-text {
+    display: none;
+  }
 }
 body[data-surface='chat'] .composer-bar button.chip-btn {
   height: 28px;
@@ -3862,7 +3900,6 @@ button.send-btn .icon {
   }
   body[data-surface='chat'] .composer {
     margin: 0 var(--sp-3) var(--sp-3);
-    grid-template-columns: minmax(0, 1fr);
   }
   .user-msg .bubble {
     max-width: 90%;

@@ -14,6 +14,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -141,7 +142,7 @@ if (opts.serve) {
 
 async function shoot() {
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}), args: ['--use-mock-keychain', '--password-store=basic'] });
   const ids = fixture().ids;
   fs.mkdirSync(opts.out, { recursive: true });
   const problems = [];
@@ -264,7 +265,7 @@ async function shoot() {
     check(await p.locator('.mention-menu [role="option"]:has-text("Gemini")').isVisible(), '@ opens the agent picker');
     await p.keyboard.press('Enter');
     await p.keyboard.type('is this safe for de-CH?');
-    check((await p.locator('.composer-bar button.primary').innerText()).includes('Ask Gemini'), 'the send button reads Ask Gemini');
+    check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Ask Gemini'), 'the send button reads Ask Gemini');
     await p.keyboard.press('Enter');
     const consult = (await posted(p)).find((m) => m.type === 'consult');
     check(consult?.agent === 'gemini' && consult.text === 'is this safe for de-CH?' && consult.chatId === ids.side, 'a mention sends a consultation');
@@ -357,6 +358,20 @@ async function shoot() {
     check((await p.inputValue('.composer textarea')) === 'How does the auth middleware decide a session is valid?', 'Up in an empty box recalls the last message');
     await p.close();
   }
+  for (const width of [320, 480, 700, 1200]) {
+    // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.
+    const p = await open('surface=chat&side=1&select=chat-c5', width, 700);
+    await p.fill('.composer textarea', 'ok ticket');
+    const r = await p.evaluate(() => {
+      const box = (s) => document.querySelector(s).getBoundingClientRect();
+      const c = box('.composer'), t = box('.composer textarea'), b = box('.composer-bar');
+      return { ratio: t.width / c.width, barInside: b.right <= c.right + 1 && b.left >= c.left - 1, page: document.documentElement.scrollWidth <= window.innerWidth };
+    });
+    check(r.ratio >= 0.7, `at ${width}px the message box is ${Math.round(r.ratio * 100)}% of the composer (>= 70%)`);
+    check(r.barInside && r.page, `at ${width}px the controls stay inside the composer and nothing scrolls sideways`);
+    if (width < 1200) await p.screenshot({ path: path.join(os.homedir(), `code/composer-${width}.png`), animations: 'disabled', caret: 'hide' });
+    await p.close();
+  }
   {
     // The permission card is the review: the diff, Open diff, the loud yes, keys, and the queue.
     const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
@@ -369,7 +384,7 @@ async function shoot() {
     await p.keyboard.press('Control+Enter');
     const answer = (await posted(p)).filter((m) => m.type === 'bridge' || m.type === 'permission').at(-1);
     check(answer?.type === 'bridge' && answer.answer === 'allow', 'Ctrl+Enter answers the first waiting decision');
-    check((await p.locator('.composer-bar button.primary').innerText()).includes('Queue'), 'a busy chat queues the message');
+    check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Queue'), 'a busy chat queues the message');
     await p.click('.bubble.queued button[aria-label="Remove from the queue"]');
     check((await posted(p)).some((m) => m.type === 'unqueue' && m.id === 'queued-c1'), 'a queued message can be removed');
     check(await p.locator('.edits-bar').isVisible(), 'edits waiting get Accept all');
