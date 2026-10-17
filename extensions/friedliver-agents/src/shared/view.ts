@@ -97,6 +97,14 @@ export function subagents(chat: ChatView): Subagent[] {
     });
 }
 
+/**
+ * What every surface lists of a chat's subagents: the running and failed ones, then the done ones, which
+ * fold into one "N done · show" row (a node on the map) until opened. A session can run dozens.
+ */
+export function foldSubs(subs: Subagent[]): { live: Subagent[]; done: Subagent[] } {
+  return { live: subs.filter((s) => s.state !== 'done'), done: subs.filter((s) => s.state === 'done') };
+}
+
 export const isSubagentCall = (t: Item): boolean => t.kind === 'tool' && !!t.tool && SUBAGENT_TOOLS.has(t.tool);
 
 /** What a subagent answered: the text of its call's result. */
@@ -736,6 +744,8 @@ export interface MapSub {
   cy: number;
   /** Of a Claude Code session from outside FriedLiver: `chatId` is `cc:<session id>`. */
   outside?: boolean;
+  /** The folded done subagents of `chatId` (`item` is "done"): how many; a click opens them. */
+  count?: number;
 }
 
 /** A Claude Code session from outside FriedLiver that has subagents, drawn so they have a parent. */
@@ -846,7 +856,8 @@ const COLUMN_TITLES_MAP = ['Started by you', '1 link away', '2 links away', '3 l
 /** Only outside sessions that launched subagents go on the map: the rest are on the board and the list. */
 const mapSessions = (outside: ClaudeSession[]) => outside.filter((s) => s.subagents.length && !s.archived);
 
-export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessions: ClaudeSession[] = [], now = 0): MapLayout {
+/** `expanded`: the chats (and `cc:<session id>`s) whose done subagents are shown one by one, not folded. */
+export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessions: ClaudeSession[] = [], now = 0, expanded: ReadonlySet<string> = new Set()): MapLayout {
   const M = MAP;
   const chats = openChats(state.chats);
   const byId = new Map(chats.map((c) => [c.id, c]));
@@ -884,7 +895,15 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     return fa - fb || collator.compare(ka, kb) || colOf(a) - colOf(b) || a.createdAt - b.createdAt || collator.compare(a.id, b.id);
   };
 
-  const subsOf = new Map(chats.map((c) => [c.id, subagents(c)]));
+  // Running and failed subagents, then the done ones: one by one when opened, else one node with their count.
+  const fold = (parent: string, list: Subagent[]): (Subagent & { count?: number })[] => {
+    const { live, done } = foldSubs(list);
+    if (!done.length) return live;
+    const open = expanded.has(parent);
+    const toggle = { id: 'done', title: `${done.length} done · ${open ? 'hide' : 'show'}`, state: 'done' as const, tools: 0, count: done.length };
+    return open ? [...live, ...done, toggle] : [...live, toggle];
+  };
+  const subsOf = new Map(chats.map((c) => [c.id, fold(c.id, subagents(c))]));
   const sessions = mapSessions(outsideSessions);
   const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), sessions.length ? 1 : 0);
   const colX = (col: number) => M.col0 + col * (M.nodeW + M.gutter);
@@ -906,7 +925,7 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
       for (const sub of subsOf.get(chat.id)!) {
         const sy = top + M.laneHead + row++ * M.row;
         const sx = colX(Math.min(colOf(chat) + 1, M.maxCol));
-        subs.push({ id: `${chat.id}:${sub.id}`, chatId: chat.id, item: sub.id, agent, state: sub.state, title: clip(sub.title, 27), x: sx, y: sy, cy: sy + M.nodeH / 2 });
+        subs.push({ id: `${chat.id}:${sub.id}`, chatId: chat.id, item: sub.id, agent, state: sub.state, title: clip(sub.title, 27), x: sx, y: sy, cy: sy + M.nodeH / 2, ...(sub.count ? { count: sub.count } : {}) });
       }
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
@@ -921,9 +940,9 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     for (const s of sessions) {
       const ny = top + M.laneHead + row++ * M.row;
       outside.push({ id: s.id, title: clip(s.title, 27), state: claudeColumn(s, now), x: colX(0), y: ny, cy: ny + M.nodeH / 2 });
-      for (const sub of claudeSubagents(s, now)) {
+      for (const sub of fold(`cc:${s.id}`, claudeSubagents(s, now))) {
         const sy = top + M.laneHead + row++ * M.row;
-        subs.push({ id: `cc:${s.id}:${sub.id}`, chatId: `cc:${s.id}`, item: sub.id, agent: 'claude', state: sub.state, title: clip(sub.title, 27), x: colX(1), y: sy, cy: sy + M.nodeH / 2, outside: true });
+        subs.push({ id: `cc:${s.id}:${sub.id}`, chatId: `cc:${s.id}`, item: sub.id, agent: 'claude', state: sub.state, title: clip(sub.title, 27), x: colX(1), y: sy, cy: sy + M.nodeH / 2, outside: true, ...(sub.count ? { count: sub.count } : {}) });
       }
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;

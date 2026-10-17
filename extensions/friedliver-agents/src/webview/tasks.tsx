@@ -24,6 +24,7 @@ import {
   defaultDir,
   excerpt,
   fanoutGroups,
+  foldSubs,
   filterChats,
   filterClaudeSessions,
   keepPlan,
@@ -79,10 +80,13 @@ function Subagents({ chat }: { chat: ChatView }) {
 
 /** `onOpen` (optional): a FriedLiver chat's subagent opens its card in the chat; an outside session's has nowhere to go but resuming that session, so it is just shown. */
 function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; onOpen?(id: string): void }) {
+  const [open, setOpen] = useState(false);
   if (!subs.length) return null;
+  // Running and failed ones show; the done ones fold into one row until opened.
+  const { live, done } = foldSubs(subs);
   return (
     <ul class="sub-cards" aria-label={label}>
-      {subs.map((s) => (
+      {(open ? [...live, ...done] : live).map((s) => (
         <li key={s.id}>
           {onOpen ? (
             <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => onOpen(s.id)}>
@@ -95,7 +99,83 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
           )}
         </li>
       ))}
+      {done.length > 0 && (
+        <li>
+          <SubFold n={done.length} open={open} onToggle={() => setOpen(!open)} />
+        </li>
+      )}
     </ul>
+  );
+}
+
+/** "34 done · show": the folded done subagents of one chat or session. */
+function SubFold({ n, open, onToggle }: { n: number; open: boolean; onToggle(): void }) {
+  return (
+    <button type="button" class="sub-card sub-fold" data-status="done" aria-expanded={open} aria-label={`${n} done subagent${n === 1 ? '' : 's'}: ${open ? 'hide' : 'show'}`} onClick={onToggle}>
+      <Dot state="done" still />
+      <span class="sub-title">
+        {n} done · {open ? 'hide' : 'show'}
+      </span>
+    </button>
+  );
+}
+
+/** A chat's or session's subagents as rows under its own in the list, the done ones folded the same way. */
+function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: string): void; parent: string }) {
+  const [open, setOpen] = useState(false);
+  const { live, done } = foldSubs(subs);
+  return (
+    <>
+      {(open ? [...live, ...done] : live).map((sub) => (
+        <tr
+          key={sub.id}
+          class={`sub-row${onOpen ? '' : ' static'}`}
+          data-status={SUB_DOT[sub.state]}
+          onClick={onOpen && ((e) => !(e.target as HTMLElement).closest('button') && onOpen(sub.id))}
+        >
+          <td class="c-status">
+            <span class="cell-status">
+              <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
+            </span>
+          </td>
+          <td class="c-agent">
+            <span class="hint">subagent</span>
+          </td>
+          <td class="c-task">
+            <div class="cell-title">
+              <span class="cell-title-text" title={[sub.title, sub.about, sub.last && `Last step: ${sub.last}`].filter(Boolean).join('\n')}>
+                ↳ {sub.title}
+              </span>
+            </div>
+          </td>
+          <td class="c-activity num" />
+          <td class="c-files num">{toolCount(sub.tools)}</td>
+          <td class="c-age num" />
+          <td class="c-act">
+            {onOpen && (
+              <button class="ghost icon-btn sm" title="Show in chat" aria-label={`Show ${sub.title} in ${parent}`} onClick={() => onOpen(sub.id)}>
+                <Icon name="open" />
+              </button>
+            )}
+          </td>
+        </tr>
+      ))}
+      {done.length > 0 && (
+        <tr class="sub-row sub-fold-row">
+          <td class="c-status" />
+          <td class="c-agent" />
+          <td class="c-task">
+            <button type="button" class="link sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
+              ↳ {done.length} done · {open ? 'hide' : 'show'}
+            </button>
+          </td>
+          <td class="c-activity num" />
+          <td class="c-files num" />
+          <td class="c-age num" />
+          <td class="c-act" />
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -185,29 +265,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
           </button>
         </td>
       </tr>
-      {claudeSubagents(s, now).map((sub) => (
-        <tr key={sub.id} class="sub-row static" data-status={SUB_DOT[sub.state]}>
-          <td class="c-status">
-            <span class="cell-status">
-              <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
-            </span>
-          </td>
-          <td class="c-agent">
-            <span class="hint">subagent</span>
-          </td>
-          <td class="c-task">
-            <div class="cell-title">
-              <span class="cell-title-text" title={sub.title}>
-                ↳ {sub.title}
-              </span>
-            </div>
-          </td>
-          <td class="c-activity num" />
-          <td class="c-files num" />
-          <td class="c-age num" />
-          <td class="c-act" />
-        </tr>
-      ))}
+      <SubRows subs={claudeSubagents(s, now)} parent={s.title} />
     </>
   );
 }
@@ -935,33 +993,7 @@ function List({
                 </tr>
               )}
               <Row chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
-              {subagents(c).map((sub) => (
-                <tr key={sub.id} class="sub-row" data-status={SUB_DOT[sub.state]} onClick={(e) => !(e.target as HTMLElement).closest('button') && openSub(c.id, sub.id)}>
-                  <td class="c-status">
-                    <span class="cell-status">
-                      <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
-                    </span>
-                  </td>
-                  <td class="c-agent">
-                    <span class="hint">subagent</span>
-                  </td>
-                  <td class="c-task">
-                    <div class="cell-title">
-                      <span class="cell-title-text" title={sub.title}>
-                        ↳ {sub.title}
-                      </span>
-                    </div>
-                  </td>
-                  <td class="c-activity num" />
-                  <td class="c-files num">{toolCount(sub.tools)}</td>
-                  <td class="c-age num" />
-                  <td class="c-act">
-                    <button class="ghost icon-btn sm" title="Show in chat" aria-label={`Show ${sub.title} in ${c.label}`} onClick={() => openSub(c.id, sub.id)}>
-                      <Icon name="open" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              <SubRows subs={subagents(c)} parent={c.label} onOpen={(id) => openSub(c.id, id)} />
             </Fragment>
           ))}
           {outside.map((s) => (

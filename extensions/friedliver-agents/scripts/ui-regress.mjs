@@ -660,6 +660,59 @@ BLOCKS.F23 = async () => {
   await p.close();
 };
 
+// ---- SUB: an outside Claude Code session's 38 agents: the 4 running/failed show, the 34 done fold into one row ----
+const bigSession = (now) => ({
+  id: 'cc-big',
+  cwd: '/home/dev/shop',
+  title: 'Audit every package',
+  lastActivity: now - 5_000,
+  messages: 40,
+  subagents: [
+    ...[1, 2, 3].map((n) => ({ id: `w${n}`, title: `Audit package ${n}`, startedAt: now - 60_000, lastActivity: now - 2_000, tools: 3 })),
+    { id: 'f1', title: 'Audit package 4', end: 'failed', startedAt: now - 90_000, lastActivity: now - 30_000, tools: 2 },
+    ...Array.from({ length: 34 }, (_, n) => ({ id: `d${n}`, title: `Audit package ${n + 5}`, end: 'done', startedAt: now - 300_000, lastActivity: now - 200_000, tools: 5 })),
+  ],
+});
+BLOCKS.SUB = async () => {
+  const sessions = (p) => p.evaluate((ss) => window.postMessage({ type: 'claudeSessions', sessions: ss }, '*'), [bigSession(Date.now())]);
+  {
+    const p = await open('surface=tasks&theme=dark-2026&view=board', 1200, 900);
+    await sessions(p);
+    const list = p.locator('.sub-cards[aria-label="Subagents of Audit every package"]');
+    await list.waitFor();
+    const cards = () => list.locator('.sub-card:not(.sub-fold)').count();
+    const fold = list.locator('.sub-fold');
+    check((await cards()) === 4 && (await fold.innerText()).includes('34 done · show'), `board: 4 running/failed cards, then "34 done · show" [${await cards()}]`);
+    await fold.click();
+    check((await cards()) === 38 && (await fold.innerText()).includes('hide') && (await fold.getAttribute('aria-expanded')) === 'true', 'board: it opens to all 38');
+    await p.close();
+  }
+  {
+    const p = await open('surface=tasks&theme=dark-2026&view=list', 1200, 900);
+    await sessions(p);
+    await p.locator('.cc-row').first().waitFor();
+    const rows = () => p.locator('.sub-row:not(.sub-fold-row)').count();
+    const fold = p.locator('.sub-fold-row .sub-fold');
+    check((await rows()) >= 4 && (await fold.innerText()).includes('34 done · show'), `list: running/failed rows, then one "34 done · show" row [${await rows()}]`);
+    const before = await rows();
+    await fold.click();
+    check((await rows()) === before + 34, 'list: it opens to every done row');
+    await p.close();
+  }
+  {
+    const p = await open('surface=tasks&theme=dark-2026&view=map', 1200, 900);
+    await sessions(p);
+    const fold = p.locator('.map-fold').last();
+    await fold.waitFor();
+    const subs = () => p.locator('.map-sub[data-status]').count();
+    const before = await subs();
+    check((await fold.textContent()).includes('34 done · show'), `map: the done ones are one node with a count [${await fold.textContent()}]`);
+    await fold.click();
+    check((await subs()) === before + 34, `map: it opens to every done node [${before} → ${await subs()}]`);
+    await p.close();
+  }
+};
+
 await run();
 await browser.close();
 server.kill();
