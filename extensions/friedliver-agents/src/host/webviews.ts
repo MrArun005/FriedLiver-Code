@@ -14,7 +14,6 @@ export interface Surface {
   selected?: string;
   ready: boolean;
   visible(): boolean;
-  reveal(): void;
 }
 
 export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {

@@ -33,3 +33,12 @@ export function actionsFor(kind: SurfaceKind, actions: Action[]): Action[] {
   });
   return out ?? actions;
 }
+
+/**
+ * Whether a webview puts this chat in front of the user: a visible chat view
+ * showing it, or the Agent Manager, which shows every chat. The side bar's
+ * chat list shows none, though it remembers which one is selected.
+ */
+export function showsChat(s: { kind: SurfaceKind; list?: boolean; selected?: string; visible(): boolean }, chatId: string, lastSelected?: string): boolean {
+  return s.visible() && (s.kind === 'tasks' || (s.kind === 'chat' && !s.list && (s.selected ?? lastSelected) === chatId));
+}

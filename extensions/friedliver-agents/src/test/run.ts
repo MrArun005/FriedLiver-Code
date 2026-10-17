@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     extensionDevelopmentPath,
     extensionTestsPath: path.resolve(__dirname, 'suite.js'),
     // Stock builds gate the secondary side bar contribution behind a proposal; the fork allows it for built-ins.
-    launchArgs: [workspace, '--enable-proposed-api=friedliver.friedliver-agents', '--no-sandbox', '--disable-gpu', '--disable-extensions', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`],
+    launchArgs: [workspace, '--enable-proposed-api=friedliver.friedliver-agents', '--no-sandbox', '--use-mock-keychain', '--password-store=basic', '--disable-gpu', '--disable-extensions', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`],
     extensionTestsEnv: {
       FRIEDLIVER_SCREENSHOTS: process.env.FRIEDLIVER_SCREENSHOTS ?? path.join(extensionDevelopmentPath, 'screenshots'),
       FRIEDLIVER_WORKSPACE: workspace,

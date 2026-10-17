@@ -471,6 +471,19 @@ async function shoot() {
     await list.close();
   }
   {
+    // Open: on a hand-off or consultation card it shows that chat; from the host it shows one even when archived.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    // The host's select arrives as a message, so the title is waited for, not read at once.
+    const shows = (text) => p.locator('.chat-head-title', { hasText: text }).waitFor({ timeout: 2000 }).then(() => true, () => false);
+    await p.locator('.link-card button:has-text("Open")').first().click();
+    check((await shows('Make the session store swappable')) && (await posted(p)).some((m) => m.type === 'select' && m.chatId === 'chat-x3'), 'Open on a hand-off card shows that chat');
+    await p.locator('.link-card[aria-label="Asked Gemini 4"] button:has-text("Open")').click();
+    check(await shows('Which session store fits serverless?'), 'Open on a consultation card shows that chat');
+    await p.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c7' }, '*'));
+    check((await shows('Rename the price helpers')) && (await p.locator('.link-strip .tag:has-text("archived")').count()) === 1, 'Open from a notification shows an archived chat');
+    await p.close();
+  }
+  {
     // The document look: the editor's own background, a plain placeholder, one handoff note, numbered decisions.
     const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
     check(await p.evaluate(() => {
