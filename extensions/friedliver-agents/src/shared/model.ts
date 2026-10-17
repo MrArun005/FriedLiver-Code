@@ -39,7 +39,9 @@ export type NoticeAction =
   | { label: string; do: 'signIn'; agent: AgentKey; methodId: string }
   | { label: string; do: 'apiKey'; agent: AgentKey }
   /** The host looks the install command up from the agent; a webview never supplies it. */
-  | { label: string; do: 'install'; agent: AgentKey };
+  | { label: string; do: 'install'; agent: AgentKey }
+  /** Opens Agents & Accounts on the agent's card. */
+  | { label: string; do: 'accounts'; agent: AgentKey };
 
 export interface PermissionOption {
   optionId: string;

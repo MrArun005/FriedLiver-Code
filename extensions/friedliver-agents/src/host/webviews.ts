@@ -26,7 +26,7 @@ export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions 
 }
 
 /** Strict CSP: nonce scripts, no remote content, images only from data: URIs and the extension. */
-export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, script: Script | 'permissions', title: string, list = false): string {
+export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, script: Script | 'permissions' | 'accounts', title: string, list = false): string {
   const nonce = randomBytes(16).toString('base64');
   const chat = vscode.workspace.getConfiguration('friedliver.chat');
   const media = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file)).toString();

@@ -68,6 +68,7 @@ import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
 import { loginExtras } from './signin';
+import { mergeOffered, type AccountRecord } from '../shared/accounts';
 import { relativeFile, rewoundHistory } from './transcript';
 import { RULES_CAP, type Rules } from './sharedRules';
 
@@ -136,6 +137,10 @@ export interface CoreOptions {
   demoAgentScript: string;
   agentCommand(id: VendorAgentId): { command: string; args: string[] };
   apiKey(id: VendorAgentId): string | undefined;
+  /** Other credentials FriedLiver keeps for the agent (Gemini's Vertex AI settings), as its environment. */
+  credentialEnv?(id: VendorAgentId): Record<string, string>;
+  /** What a session, a failure or the agent itself just said about its sign-in (accounts.ts caches it). */
+  accountSeen?(agent: AgentKey, patch: Partial<AccountRecord>): void;
   limits(): { maxRunning: number; idleStopMinutes: number };
   /** The FriedLiver tools' MCP server (dist/bridge.js). Without it, agents get no FriedLiver tools. */
   bridgeScript?: string;
@@ -180,6 +185,8 @@ export interface AccountStatus {
   /** The adapter's version, and what to do when it is too old to have model, effort or plan options. */
   version?: string;
   update?: string;
+  /** The agent signs out itself (ACP `logout`). */
+  logout?: boolean;
 }
 
 /** Extras for a message sent from the editor (src/host/editor.ts). */
@@ -275,6 +282,7 @@ export class AgentCore {
         session: (chatId, start) => this.sessionStarted(chatId, start),
         notice: (chatId, text) => this.items(chatId, [{ kind: 'notice', text, tone: 'info' }]),
         agentsChanged: () => {},
+        authStatus: (agentId, identity) => options.accountSeen?.(agentId, { identity }),
         agentStderr: (agentId, line) => {
           if (!this.signingIn.has(agentId)) return;
           for (const url of line.match(/https:\/\/[^\s"'<>)]+/g) ?? []) {
@@ -370,7 +378,7 @@ export class AgentCore {
       label: AGENT_FACES[id].name,
       command: command.trim() || base.command,
       args,
-      env: { ...base.env, ...(key ? { [KEY_ENV[id]]: key } : {}) },
+      env: { ...base.env, ...(key ? { [KEY_ENV[id]]: key } : {}), ...this.options.credentialEnv?.(id) },
     };
   }
 
@@ -732,6 +740,7 @@ export class AgentCore {
       ...(start.loaded ? (prev?.rules ? { rules: prev.rules } : {}) : start.rules ? { rules: start.rules } : {}),
     };
     this.dispatch({ t: 'session', chatId, session });
+    this.options.accountSeen?.(chat.agent, { status: 'signed-in', ...this.versionOf(chat.agent, start.agentInfo) });
     const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...this.options.defaults?.get(chat.agent)?.chosen, ...this.chosen.get(chatId) };
     // The model first: it decides which effort levels there are.
     const keys = Object.keys(wanted).sort((a, b) => (a === 'model' ? -1 : b === 'model' ? 1 : 0));
@@ -1186,21 +1195,49 @@ export class AgentCore {
     }
   }
 
-  /** Starts the agent and asks for a session (no model call). Never run this automatically. */
+  /**
+   * Starts the agent and asks for a session (no model call), which is closed
+   * at once. Its models and effort levels become the agent's defaults, as a
+   * chat's session does. Never run this automatically.
+   */
   async checkAccount(agent: AgentKey): Promise<AccountStatus> {
     try {
       const r = await this.hub.checkSignIn(agent);
-      const info = this.hub.agentInfo(agent);
-      const spec = this.spec(agent);
-      const old = info && ((spec.minVersion && olderThan(info.version, spec.minVersion)) || info.name.startsWith('@zed-industries/'));
-      const extra = { ...(info ? { version: info.version } : {}), ...(old ? { update: `Update it: ${spec.installCommand}` } : {}) };
-      return r.signedIn ? { status: 'signed-in', methods: [], ...extra } : { status: 'needs-sign-in', methods: signInMethods(r.methods), ...extra };
+      const extra = { ...this.versionOf(agent, this.hub.agentInfo(agent)), logout: await this.hub.supportsLogout(agent) };
+      if (!r.signedIn) return { status: 'needs-sign-in', methods: signInMethods(r.methods), ...extra };
+      const store = this.options.defaults;
+      if (store) store.set(agent, mergeOffered(store.get(agent), sessionOptions(r.setup)));
+      return { status: 'signed-in', methods: await this.authMethods(agent), ...extra };
     } catch (err) {
       if (err instanceof AgentStartError && err.failure === 'not_installed') {
         return { status: 'not-installed', methods: [], installCommand: err.spec.installCommand, message: err.message };
       }
       return { status: 'error', methods: [], message: messageOf(err) };
     }
+  }
+
+  /** The agent's own sign-out (ACP `logout`); FriedLiver deletes none of its files. */
+  async signOut(agent: AgentKey): Promise<void> {
+    await this.hub.logout(agent);
+    // Sessions it had were for the account it just left.
+    await this.hub.stopAgent(agent);
+  }
+
+  /** Sets the model or effort the agent's new chats start with, to a value its last session offered. */
+  setDefaultChoice(agent: AgentKey, key: string, value: string): boolean {
+    const d = this.options.defaults?.get(agent);
+    const option = d?.options.find((o) => optionKey(o) === key);
+    if (!d || !option || !offers(option, value)) return false;
+    this.saveDefaults(agent, { chosen: { ...d.chosen, [key]: value } });
+    return true;
+  }
+
+  /** The adapter's version, and what to do when it is too old to have model, effort or plan options. */
+  private versionOf(agent: AgentKey, info: { name: string; version: string } | undefined): { version?: string; update?: string } {
+    if (!info) return {};
+    const spec = this.spec(agent);
+    const old = (spec.minVersion && olderThan(info.version, spec.minVersion)) || info.name.startsWith('@zed-industries/');
+    return { version: info.version, ...(old ? { update: `Update it: ${spec.installCommand}` } : {}) };
   }
 
   /** A fresh agent process picks up credentials a CLI login just saved. */
@@ -1577,14 +1614,19 @@ export class AgentCore {
   private failureNotice(agent: AgentKey, err: unknown): Item {
     const retry: NoticeAction = { label: 'Try again', do: 'retry' };
     if (err instanceof AuthRequiredError) {
-      const actions: NoticeAction[] = signInMethods(err.methods)
-        .filter((m) => m.kind !== 'key')
-        .map((m) => ({ label: m.name, do: 'signIn', agent, methodId: m.id }));
+      this.options.accountSeen?.(agent, { status: 'needs-sign-in', methods: signInMethods(err.methods) });
+      const actions: NoticeAction[] = [
+        { label: `Sign in to ${this.label(agent)}`, do: 'accounts', agent },
+        ...signInMethods(err.methods)
+          .filter((m) => m.kind !== 'key')
+          .map((m): NoticeAction => ({ label: m.name, do: 'signIn', agent, methodId: m.id })),
+      ];
       if (agent !== 'demo') actions.push({ label: 'Use an API key', do: 'apiKey', agent });
       actions.push(retry);
       return { kind: 'notice', tone: 'error', text: err.message, detail: this.spec(agent).loginHint || undefined, actions };
     }
     if (err instanceof AgentStartError && err.failure === 'not_installed') {
+      this.options.accountSeen?.(agent, { status: 'not-installed', message: err.message });
       return {
         kind: 'notice',
         tone: 'error',

@@ -3,7 +3,7 @@
 import { useContext, useState } from 'preact/hooks';
 import { AGENT_FACES, AGENT_KEYS, type AgentKey, type ChatView } from '../shared/model';
 import { clip, openChats } from '../shared/view';
-import { Glyph, Icon, LiveState, Popover, radioKeys, send } from './common';
+import { Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
 
 /** Text beside the icon, or the icon alone where room is short. */
 function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['name']; text: string; compact?: boolean }) {
@@ -17,12 +17,13 @@ function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['na
 }
 
 export function HandoffMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
+  const agents = useRoster().agents;
   return (
     <Popover label={`Hand off ${chat.label} to`} title={compact ? 'Hand off' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="handoff" text="Hand off" compact={compact} />}>
       {(close) => (
         <>
           <div class="pop-title" aria-hidden="true">Continue with</div>
-          {AGENT_KEYS.map((agent) => (
+          {agents.map((agent) => (
             <button
               key={agent}
               role="menuitem"
@@ -34,6 +35,7 @@ export function HandoffMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat:
               <Glyph agent={agent} size="sm" />
               <span class="grow">{AGENT_FACES[agent].name}</span>
               {agent === chat.agent && <span class="hint">new chat</span>}
+              <SignInMark agent={agent} />
             </button>
           ))}
         </>
@@ -48,6 +50,7 @@ const defaultConsultant = (agent: AgentKey): AgentKey => (agent === 'claude' ? '
 export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   const [agent, setAgent] = useState<AgentKey>(defaultConsultant(chat.agent));
   const [text, setText] = useState('');
+  const agents = useRoster().agents;
   return (
     <Popover kind="dialog" label={`Ask another agent from ${chat.label}`} title={compact ? 'Ask another agent' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="ask" text="Ask" compact={compact} />}>
       {(close) => {
@@ -61,9 +64,10 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
           <div class="ask-form">
             <div class="pop-title" aria-hidden="true">Ask, reply comes back here</div>
             <div class="seg" role="radiogroup" aria-label="Agent" onKeyDown={radioKeys}>
-              {AGENT_KEYS.map((a) => (
+              {agents.map((a) => (
                 <button key={a} type="button" role="radio" aria-checked={a === agent} tabIndex={a === agent ? 0 : -1} class="seg-item" onClick={() => setAgent(a)}>
                   <Glyph agent={a} size="sm" /> {AGENT_FACES[a].name}
+                  <SignInMark agent={a} />
                 </button>
               ))}
             </div>

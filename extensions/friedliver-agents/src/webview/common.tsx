@@ -2,8 +2,9 @@ import { createContext, createElement, type ComponentChildren, type FunctionComp
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
+import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
-import { AGENT_FACES, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
+import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
 import { settleOrder, type Settled } from '../shared/view';
 
@@ -15,8 +16,36 @@ interface VsCodeApi {
 declare function acquireVsCodeApi(): VsCodeApi;
 const vscode = acquireVsCodeApi();
 
-export function send(message: WebviewMessage): void {
+export function send(message: WebviewMessage | AccountsMessage): void {
   vscode.postMessage(message);
+}
+
+/** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
+let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
+const rosterWatchers = new Set<() => void>();
+
+function setRoster(next: AgentRoster): void {
+  roster = next;
+  for (const wake of rosterWatchers) wake();
+}
+
+/** The roster, drawing the component again when it changes (friedliver.showDemoAgent, a check, a sign-in). */
+export function useRoster(): AgentRoster {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    const wake = () => setN((n) => n + 1);
+    rosterWatchers.add(wake);
+    return () => void rosterWatchers.delete(wake);
+  }, []);
+  return roster;
+}
+
+/** A small mark for an agent's last known sign-in; nothing while it was never checked. */
+export function SignInMark({ agent }: { agent: AgentKey }) {
+  const state = useRoster().signIn[agent];
+  if (!state || agent === 'demo') return null;
+  const label = `${AGENT_FACES[agent].name}: ${SIGN_IN_TEXT[state]}`;
+  return <span class="signin-mark" data-state={state} role="img" aria-label={label} title={label} />;
 }
 
 let viewState: Record<string, unknown> = {};
@@ -117,6 +146,9 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
       if (m.type === 'snapshot') {
         setState(keyItems(undefined, m.state));
         setSelected(m.selected);
+        if (m.roster) setRoster(m.roster);
+      } else if (m.type === 'roster') {
+        setRoster(m.roster);
       } else if (m.type === 'action') {
         setState((s) => keyItems(s, reduce(s, m.action)));
       } else if (m.type === 'actions') {
@@ -497,6 +529,7 @@ const ICONS = {
   branch: 'M5 2.75v10.5M11 6a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3zM11 6c0 3-6 2.25-6 5',
   diff: 'M4.5 2.5h4l3 3v8h-7zM6.5 8.25h3M8 6.75v3M6.5 11.25h3',
   open: 'M9.5 2.75h3.75V6.5M13.25 2.75 8 8M11.5 9.5v3.75h-8.75V4.5H6.5',
+  key: 'M2.5 8a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M7.5 8h6M11.5 8v2M13.5 8v1.5',
   user: 'M8 7.75a2.5 2.5 0 1 0 0-5a2.5 2.5 0 0 0 0 5zM3.25 13.25c.6-2.4 2.4-3.5 4.75-3.5s4.15 1.1 4.75 3.5',
   link: 'M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.5.5M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.5-.5',
   compare: 'M2.75 3.5h4v9h-4zM9.25 3.5h4v9h-4z',

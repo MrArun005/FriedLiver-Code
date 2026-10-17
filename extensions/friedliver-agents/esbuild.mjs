@@ -42,7 +42,7 @@ const builds = [
   { ...node, entryPoints: ['src/bridge/externalStdio.ts'], outfile: 'dist/externalStdio.js' },
   // Scales the Images view's thumbnails off the extension host's thread.
   { ...node, entryPoints: ['src/host/thumbWorker.ts'], outfile: 'dist/thumbWorker.js' },
-  { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx', permissions: 'src/webview/permissions.tsx' }, outdir: 'media/dist' },
+  { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx', permissions: 'src/webview/permissions.tsx', accounts: 'src/webview/accounts.tsx' }, outdir: 'media/dist' },
   // Integration tests that run inside the editor (see src/test).
   { ...node, entryPoints: { run: 'src/test/run.ts', suite: 'src/test/suite.ts' }, outdir: 'dist/test', external: ['vscode'] },
 ];
