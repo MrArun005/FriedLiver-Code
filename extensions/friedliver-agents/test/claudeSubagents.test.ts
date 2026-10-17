@@ -130,11 +130,21 @@ describe('Claude Code subagents', () => {
     expect(done.ms).toBe(10_000 + 10_000 + 500);
   });
 
-  it('reads them as Done once their transcripts go quiet without a step in flight, and after 30 minutes either way', async () => {
+  it('never calls a silent agent Done: after 30 minutes without completion evidence it is Quiet', async () => {
     const { home } = build();
     const [s] = await listClaudeSessions({ home, folders: [WS], now: NOW });
     expect(states(s, NOW + 2 * min)['Integrate branches, rebuild UI']).toBe('working');
-    expect(states(s, NOW + 31 * min)['Images gallery per agent tab']).toBe('done');
+    const later = claudeSubagents(s, NOW + 27 * min);
+    expect(later.find((a) => a.title === 'Images gallery per agent tab')).toMatchObject({ state: 'quiet', note: 'No activity for 32m' });
+    // Real completion evidence still reads Done, a stop still a Problem.
+    expect(later.find((a) => a.title === 'Audit leave module')?.state).toBe('done');
+    expect(later.find((a) => a.title === 'Fix updater')?.state).toBe('failed');
+  });
+
+  it('reads an unsettled agent with no transcript as Quiet once its session stops, not Done', () => {
+    const s = { id: S, cwd: WS, title: 't', lastActivity: NOW, messages: 1, subagents: [{ id: 'b', title: 'Background, old Claude Code' }] };
+    expect(claudeSubagents(s, NOW + 60_000)[0].state).toBe('working');
+    expect(claudeSubagents(s, NOW + 5 * min)[0]).toMatchObject({ state: 'quiet', note: 'No activity for 5m' });
   });
 
   it('reads only what was appended, and picks up a new agent and a finished one', async () => {
@@ -162,5 +172,96 @@ describe('Claude Code subagents', () => {
     const list = await listClaudeSessions({ home, folders: [WS], now: NOW });
     expect(list.map((s) => s.id)).toEqual([S]);
     expect(list[0].subagents.length).toBe(5);
+  });
+});
+
+describe('a window with no folder', () => {
+  const day = 86_400_000;
+  /** Sessions in two projects, as the Claude Code extension writes them; `cwd` is on every record. */
+  function projects(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-ccall-'));
+    const add = (cwd: string, id: string, age: number, body: string) => {
+      const dir = path.join(home, '.claude', 'projects', encodeCwd(cwd));
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${id}.jsonl`);
+      fs.writeFileSync(file, body.split('\n').filter(Boolean).map((l) => JSON.stringify({ ...JSON.parse(l), cwd })).join('\n') + '\n');
+      fs.utimesSync(file, new Date(NOW - age), new Date(NOW - age));
+    };
+    const work = (title: string) => j({ type: 'ai-title', aiTitle: title }) + user(NOW - day, 'Fix the payslip rounding for arrears') + assistant(NOW - day, 'm1', [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]);
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000001', 2 * min, work('Payroll rounding'));
+    add('/Users/a/code/FriedLiver-Code', '70000000-0000-4000-8000-000000000002', 1 * min, work('Map layout'));
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000003', 3 * min, work('Leave carry-over'));
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000004', 9 * day, work('Old one'));
+    add('/Users/a/HRMS', '70000000-0000-4000-8000-000000000005', 1 * min, user(NOW, 'hi'));
+    // A transcript whose recorded folder isn't the one its project folder names: it can't be resumed from here.
+    const odd = path.join(home, '.claude', 'projects', '-Users-a-Other');
+    fs.mkdirSync(odd, { recursive: true });
+    fs.writeFileSync(path.join(odd, '70000000-0000-4000-8000-000000000006.jsonl'), JSON.stringify({ type: 'ai-title', aiTitle: 'Odd', cwd: '/Users/a/HRMS' }) + '\n' + work('Odd'));
+    return home;
+  }
+
+  it('lists recent sessions from every project, grouped by project, newest project first', async () => {
+    const list = await listClaudeSessions({ home: projects(), folders: [], now: NOW });
+    expect(list.map((s) => [s.project, s.title, s.cwd])).toEqual([
+      ['FriedLiver-Code', 'Map layout', '/Users/a/code/FriedLiver-Code'],
+      ['HRMS', 'Payroll rounding', '/Users/a/HRMS'],
+      ['HRMS', 'Leave carry-over', '/Users/a/HRMS'],
+    ]);
+  });
+
+  it('keeps older and trivial ones with showAll', async () => {
+    const list = await listClaudeSessions({ home: projects(), folders: [], now: NOW, showAll: true });
+    expect(list.map((s) => s.title)).toEqual(expect.arrayContaining(['Old one', 'HRMS · 2026-10-17']));
+    expect(list).toHaveLength(5);
+  });
+
+  /** A headless run, as the security-review hook writes them: every record says entrypoint sdk-py. */
+  const headless = (home: string, cwd: string, id: string, age: number) => {
+    const dir = path.join(home, '.claude', 'projects', encodeCwd(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.jsonl`);
+    const rec = { cwd, entrypoint: 'sdk-py', userType: 'external', isSidechain: false };
+    fs.writeFileSync(
+      file,
+      [
+        { type: 'user', message: { role: 'user', content: 'Review this change for security vulnerabilities.' }, promptSource: 'sdk', timestamp: iso(NOW - age) },
+        { type: 'assistant', message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'Read', input: { file_path: 'a.ts' } }] }, timestamp: iso(NOW - age) },
+      ]
+        .map((o) => JSON.stringify({ ...o, ...rec }))
+        .join('\n') + '\n',
+    );
+    fs.utimesSync(file, new Date(NOW - age), new Date(NOW - age));
+  };
+  const hex = (n: number) => `80000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+
+  it('hides headless runs (SDK entrypoints other than FriedLiver’s own) unless showAll', async () => {
+    const home = projects();
+    headless(home, '/Users/a/code/wt-v5', hex(1), 10_000);
+    const ids = async (showAll: boolean) => (await listClaudeSessions({ home, folders: [], now: NOW, showAll })).map((s) => s.id);
+    expect(await ids(false)).not.toContain(hex(1));
+    expect(await ids(true)).toContain(hex(1));
+    // In a folder window too.
+    expect((await listClaudeSessions({ home, folders: ['/Users/a/code/wt-v5'], now: NOW })).map((s) => s.id)).toEqual([]);
+  });
+
+  it('lists up to 100 sessions, counting only the ones it shows', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-cccap-'));
+    for (let i = 0; i < 60; i++) headless(home, '/Users/a/code/wt-v5', hex(1000 + i), i * 1000);
+    const dir = path.join(home, '.claude', 'projects', encodeCwd('/Users/a/HRMS'));
+    fs.mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 110; i++) {
+      const file = path.join(dir, `${hex(i)}.jsonl`);
+      fs.writeFileSync(file, [user(NOW, 'Fix the payslip rounding for arrears'), assistant(NOW, 'm', [{ type: 'tool_use', id: 't', name: 'Bash', input: { command: 'ls' } }])].map((l) => JSON.stringify({ ...JSON.parse(l), cwd: '/Users/a/HRMS', entrypoint: 'claude-vscode' })).join('\n') + '\n');
+      fs.utimesSync(file, new Date(NOW - 60_000 - i * 1000), new Date(NOW - 60_000 - i * 1000));
+    }
+    const list = await listClaudeSessions({ home, folders: [], now: NOW });
+    expect(list).toHaveLength(100);
+    expect(list.every((s) => s.project === 'HRMS')).toBe(true);
+  });
+
+  it('names no project for a window that has folders', async () => {
+    const { home } = build();
+    const [s] = await listClaudeSessions({ home, folders: [WS], now: NOW });
+    expect(s.project).toBeUndefined();
   });
 });

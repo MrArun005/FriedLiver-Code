@@ -69,8 +69,8 @@ const COLUMNS: { id: ChatStatus; empty?: string }[] = [
 const open = (chatId: string) => send({ type: 'openChat', chatId });
 /** Opens the chat that launched a subagent, scrolled to its tool call. */
 const openSub = (chatId: string, item: string) => send({ type: 'openChat', chatId, item });
-const SUB_DOT = { working: 'working', done: 'done', failed: 'error' } as const;
-const SUB_LABEL = { working: 'Working', done: 'Done', failed: 'Failed' } as const;
+const SUB_DOT = { working: 'working', done: 'done', failed: 'error', quiet: 'idle' } as const;
+const SUB_LABEL = { working: 'Working', done: 'Done', failed: 'Failed', quiet: 'Quiet' } as const;
 const toolCount = (n: number) => (n ? `${n} tool${n === 1 ? '' : 's'}` : '');
 
 /** A chat's subagents, as small cards under its own: not chats, so no composer and nothing to save. */
@@ -93,7 +93,7 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
               <SubCardBody s={s} />
             </button>
           ) : (
-            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={[s.title, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}>
+            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={[s.title, s.note, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}>
               <SubCardBody s={s} />
             </div>
           )}
@@ -134,7 +134,7 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           onClick={onOpen && ((e) => !(e.target as HTMLElement).closest('button') && onOpen(sub.id))}
         >
           <td class="c-status">
-            <span class="cell-status">
+            <span class="cell-status" title={sub.note}>
               <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
             </span>
           </td>
@@ -204,7 +204,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
         <div class="card-top">
           <Glyph agent="claude" />
           <span class="tag" title={OUTSIDE_TIP}>
-            Claude Code
+            {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
           <span class="sep">·</span>
           <span title="Last activity">{ago(s.lastActivity, now)}</span>
@@ -246,7 +246,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         </td>
         <td class="c-agent">
           <span class="tag" title={OUTSIDE_TIP}>
-            Claude Code
+            {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
         </td>
         <td class="c-task">
