@@ -634,7 +634,7 @@ async function shoot() {
       probe.style.color = 'var(--button-fg)';
       document.body.append(probe);
       const want = window.getComputedStyle(probe);
-      const others = [...document.querySelectorAll('.ask .actions button:not(.decide)')].map((b) => window.getComputedStyle(b));
+      const others = [...document.querySelectorAll('.ask .actions button:not(.decide):not(.link)')].map((b) => window.getComputedStyle(b));
       const ok = yes.backgroundColor === want.backgroundColor && yes.color === want.color && others.length > 0 && others.every((o) => o.backgroundColor !== want.backgroundColor && o.boxShadow.includes('inset'));
       probe.remove();
       return ok;

@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { freshChat, longFixture, questionItem } from './qa/qa-fixtures.mjs';
+import { adapterQuestionItem, freshChat, longFixture, questionItem } from './qa/qa-fixtures.mjs';
 import { fixture } from './ui-fixture.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -147,8 +147,8 @@ BLOCKS.F09 = async () => {
   c5.items = [...c5.items, questionItem()];
   await snapshot(p, state, 'chat-c5');
   await p.waitForSelector('#item-q-1');
-  const opts = await p.locator('#item-q-1 .actions button').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
-  check(opts[0]?.startsWith('1. Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3. In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
+  const opts = await p.locator('#item-q-1 .q-opt').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+  check(opts[0]?.startsWith('1 Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3 In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
   check(await p.locator('#item-q-1 .hint.keys[data-on]').isVisible(), 'the question shows the key hint');
   await p.click('.composer textarea');
   await p.waitForTimeout(GRACE);
@@ -709,6 +709,183 @@ BLOCKS.SUB = async () => {
     check((await fold.textContent()).includes('34 done · show'), `map: the done ones are one node with a count [${await fold.textContent()}]`);
     await fold.click();
     check((await subs()) === before + 34, `map: it opens to every done node [${before} → ${await subs()}]`);
+    await p.close();
+  }
+};
+
+// ---- CLICK (owner bug, v1.142.0-4): a click on any decision option acts at once, on the card clicked ----
+// Claude's real questions carry an "Other" box (question_<n>_custom), so a click only selected the option
+// and nothing went to the agent. Clicks are never held by the decision keys' grace period.
+BLOCKS.CLICK = async () => {
+  const last = async (p, type) => (await posted(p)).filter((m) => m.type === type).at(-1);
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 900);
+  const state = fixture(Date.now()).state;
+  const c5 = state.chats.find((c) => c.id === 'chat-c5');
+  const one = adapterQuestionItem(1, 'q-one');
+  const other = adapterQuestionItem(1, 'q-other');
+  const form = adapterQuestionItem(2, 'q-form');
+  c5.items = [...c5.items, one, other, form];
+  c5.items.push(
+    { kind: 'command', commandId: 'cmd-1', commandLine: 'npm test', cwd: '/home/dev/inventory-app', outside: false, state: 'awaiting', output: '' },
+    { kind: 'review', reviewId: 'rev-1', path: '/home/dev/inventory-app/src/auth.ts', added: 3, removed: 1, isNew: false, state: 'pending' },
+  );
+  await snapshot(p, state, 'chat-c5');
+  await p.waitForSelector('#item-q-one');
+  // A real question: one click on an option answers it (not the oldest card, no waiting).
+  await p.locator('#item-q-one button:has-text("SQLite")').click();
+  const q1 = await last(p, 'answerQuestion');
+  check(q1?.requestId === 'q-one' && q1.action === 'accept' && q1.values?.question_0 === 'SQLite', `a click on a question option answers it [${JSON.stringify(q1)}]`);
+  // "Something else…": typed, then Enter.
+  await p.locator('#item-q-other .q-opt:has-text("Other…")').click();
+  await p.locator('#item-q-other .q-other input').fill('Postgres');
+  await p.locator('#item-q-other .q-other input').press('Enter');
+  const q2 = await last(p, 'answerQuestion');
+  check(q2?.requestId === 'q-other' && q2.values?.question_0_custom === 'Postgres' && !('question_0' in (q2.values ?? {})), `"Something else…" sends the typed answer [${JSON.stringify(q2)}]`);
+  // Several questions: one at a time, "1 of 2"; a click moves on, the last click sends them all.
+  check((await p.locator('#item-q-form .q-step').innerText()).trim() === '1 of 2', 'several questions show a stepper');
+  await p.locator('#item-q-form .q-opt:has-text("Redis")').click();
+  check((await p.locator('#item-q-form .q-step').innerText()).trim() === '2 of 2' && (await p.locator('#item-q-form .q-chip').innerText()) === 'Cache', 'a click moves to the next question');
+  await p.locator('#item-q-form .q-opt:has-text("Memory")').click();
+  const q3 = await last(p, 'answerQuestion');
+  check(q3?.requestId === 'q-form' && q3.values?.question_0 === 'Redis' && q3.values?.question_1 === 'Memory', `the last click sends every answer [${JSON.stringify(q3)}]`);
+  // Command and review cards.
+  await p.locator('#item-cmd-1 button').first().click();
+  const cmd = await last(p, 'command');
+  check(cmd?.commandId === 'cmd-1' && cmd.approve === true, `a click runs the command [${JSON.stringify(cmd)}]`);
+  await p.locator('#item-rev-1 button:has-text("Accept")').click();
+  const rev = await last(p, 'review');
+  check(rev?.reviewId === 'rev-1' && rev.action === 'accept', `a click accepts the edit [${JSON.stringify(rev)}]`);
+  // The host answers: each card resolves.
+  for (const [id, patch] of [['q-one', { state: 'answered', summary: 'SQLite' }], ['q-other', { state: 'answered', summary: 'Postgres' }], ['q-form', { state: 'answered', summary: 'Redis · Memory' }]]) Object.assign(c5.items.find((i) => i.requestId === id), patch);
+  Object.assign(c5.items.find((i) => i.commandId === 'cmd-1'), { state: 'running' });
+  Object.assign(c5.items.find((i) => i.reviewId === 'rev-1'), { state: 'accepted' });
+  await snapshot(p, state, 'chat-c5');
+  await p.waitForTimeout(150);
+  check(!(await p.locator('#item-q-one .q-opt, #item-q-other .q-opt, #item-q-form .q-opt').count()), 'answered questions resolve to a line');
+  check((await p.locator('.q-answered').first().innerText()).includes('Answered: SQLite'), 'which says the answer');
+  await p.close();
+
+  // Permission and bridge cards in a chat with two waiting: a click on the second (not the key target) acts on it.
+  const c = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
+  await c.waitForSelector('#item-perm-c1');
+  await c.locator('#item-perm-c1 .actions button').first().click();
+  const perm = await last(c, 'permission');
+  check(perm?.requestId === 'perm-c1' && !!perm.optionId, `a click on a permission option answers that card at once [${JSON.stringify(perm)}]`);
+  await c.locator('#item-bridge-c1 .actions button').first().click();
+  const bridge = await last(c, 'bridge');
+  check(bridge?.requestId === 'bridge-c1', `a click on a bridge option answers it [${JSON.stringify(bridge)}]`);
+  const st = fixture(Date.now()).state;
+  const c1 = st.chats.find((x) => x.id === 'chat-c1');
+  c1.items.find((i) => i.requestId === 'perm-c1').answer = 'Yes';
+  c1.items.find((i) => i.requestId === 'bridge-c1').state = 'allowed';
+  await snapshot(c, st, 'chat-c1');
+  await c.waitForTimeout(150);
+  check(!(await c.locator('#item-perm-c1 .actions').count()), 'the answered permission card resolves');
+  await c.close();
+};
+
+// ---- QUESTION: the question card's whole interaction: recommended first, preview, multi-select, keys, Other, the bar ----
+BLOCKS.QUESTION = async () => {
+  const last = async (p, type) => (await posted(p)).filter((m) => m.type === type).at(-1);
+  const load = async (width, items) => {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 900);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    c5.items = [...c5.items, ...items];
+    await snapshot(p, state, 'chat-c5');
+    await p.waitForSelector(`#item-${items[0].requestId}`);
+    return p;
+  };
+  const rich = () => {
+    const q = adapterQuestionItem(1, 'q-rich');
+    const [redis, sqlite, memory] = q.fields[0].options;
+    // Claude puts its pick anywhere; the card puts it first.
+    q.fields[0].options = [sqlite, memory, { ...redis, value: 'Redis (Recommended)', title: 'Redis (Recommended)', preview: 'new RedisStore(client)' }];
+    q.fields[0].options[0].preview = 'new SqliteStore(db)';
+    return q;
+  };
+  // The agent keeps writing after it asks, so the card can scroll out of view.
+  const after = { kind: 'agent', text: Array.from({ length: 40 }, (_, n) => `Meanwhile, step ${n + 1} of the plan.`).join('\n\n') };
+  for (const width of [1200, 640]) {
+    const p = await load(width, [rich(), after]);
+    const labels = await p.locator('#item-q-rich .q-opt-label').allInnerTexts();
+    check(/^Redis\s*Recommended/.test(labels[0]) && labels.at(-1).startsWith('Other'), `at ${width}px the recommended option comes first with its tag, Other… last [${labels.join(' | ')}]`);
+    const nums = await p.locator('#item-q-rich .q-num').allInnerTexts();
+    check(nums.join(',') === '1,2,3,4', `rows are numbered [${nums}]`);
+    await p.locator('#item-q-rich .q-opt').nth(1).hover();
+    const pre = (await p.locator('#item-q-rich .q-preview pre').innerText()).trim();
+    const side = await p.evaluate(() => {
+      const o = document.querySelector('#item-q-rich .q-options').getBoundingClientRect();
+      const v = document.querySelector('#item-q-rich .q-preview').getBoundingClientRect();
+      return v.left >= o.right - 1 ? 'beside' : v.top >= o.bottom - 1 ? 'under' : 'overlap';
+    });
+    check(pre === 'new SqliteStore(db)' && side === (width === 1200 ? 'beside' : 'under'), `the hovered option's preview shows ${width === 1200 ? 'beside' : 'under'} the list [${pre}; ${side}]`);
+    // The bar over the composer, only while the card is out of view.
+    const bar = p.locator('.asking-bar');
+    await p.locator('#item-q-rich').scrollIntoViewIfNeeded();
+    await p.waitForTimeout(150);
+    check(!(await bar.count()), 'no bar while the card is in view');
+    await p.evaluate(() => (document.querySelector('.transcript').scrollTop = 1e6));
+    await bar.waitFor();
+    check((await bar.innerText()).includes('Claude is asking · 1 question'), `scrolled away, the composer says a question waits [${(await bar.innerText()).replace(/\n/g, ' ')}]`);
+    await bar.locator('button').click();
+    await p.waitForTimeout(400);
+    check(await p.evaluate(() => document.activeElement?.closest('#item-q-rich') !== null), 'Show scrolls to the card and focuses its first option');
+    // Keys in the card: ↓ moves, Enter answers the focused option.
+    await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('Enter');
+    const a = await last(p, 'answerQuestion');
+    check(a?.values?.question_0 === 'SQLite', `↓ then Enter answers the second option [${JSON.stringify(a?.values)}]`);
+    await p.close();
+  }
+  {
+    // Digits on the marked card (after the grace period), and Esc in "Other…" only closes the box.
+    const p = await load(1200, [rich()]);
+    await p.click('.composer textarea');
+    await p.waitForTimeout(GRACE);
+    await p.keyboard.press('4');
+    const focus = await p.evaluate(() => document.activeElement?.matches('.q-other input'));
+    check((await p.locator('#item-q-rich .q-other input').isVisible()) && focus, 'the digit after the last option opens Other…, focused at once');
+    await p.keyboard.press('Escape');
+    const esc = { box: await p.locator('#item-q-rich .q-other').count(), sent: await last(p, 'answerQuestion') };
+    check(!esc.box && !esc.sent, `Esc in the box closes it, without skipping [${JSON.stringify(esc)}]`);
+    await p.click('.composer textarea');
+    await p.keyboard.press('2');
+    const a = await last(p, 'answerQuestion');
+    check(a?.values?.question_0 === 'SQLite', `2 picks the second row as shown [${JSON.stringify(a?.values)}]`);
+    await p.close();
+  }
+  {
+    // Multi-select: checkboxes, Space toggles, Submit sends; Esc skips.
+    const q = adapterQuestionItem(1, 'q-multi');
+    q.fields[0].type = 'multi';
+    const p = await load(1200, [q, adapterQuestionItem(1, 'q-esc')]);
+    const rows = p.locator('#item-q-multi .q-opt[role="checkbox"]');
+    check((await rows.count()) === 3, 'multi-select rows are checkboxes');
+    await rows.nth(0).click();
+    await rows.nth(2).focus();
+    await p.keyboard.press('Space');
+    check((await rows.nth(0).getAttribute('aria-checked')) === 'true' && (await rows.nth(2).getAttribute('aria-checked')) === 'true' && !(await last(p, 'answerQuestion')), 'a click and Space tick options without sending');
+    await p.locator('#item-q-multi button:has-text("Submit")').click();
+    const a = await last(p, 'answerQuestion');
+    check(a?.requestId === 'q-multi' && JSON.stringify(a.values?.question_0) === '["Redis","Memory"]', `Submit sends the picks [${JSON.stringify(a?.values)}]`);
+    await p.locator('#item-q-esc .q-opt').first().focus();
+    await p.keyboard.press('Escape');
+    const d = await last(p, 'answerQuestion');
+    check(d?.requestId === 'q-esc' && d.action === 'decline', `Esc on a card skips it [${JSON.stringify(d)}]`);
+    await p.close();
+  }
+  {
+    // Back goes to the previous question with its answer kept.
+    const p = await load(640, [adapterQuestionItem(3, 'q-steps')]);
+    await p.locator('#item-q-steps .q-opt:has-text("SQLite")').click();
+    await p.locator('#item-q-steps button:has-text("Back")').click();
+    check((await p.locator('#item-q-steps .q-step').innerText()).trim() === '1 of 3' && (await p.locator('#item-q-steps .q-opt[data-picked]').innerText()).includes('SQLite'), 'Back shows the first question with its pick');
+    await p.locator('#item-q-steps button:has-text("Next")').click();
+    await p.locator('#item-q-steps .q-opt:has-text("Redis")').click();
+    await p.locator('#item-q-steps .q-opt:has-text("Memory")').click();
+    const a = await last(p, 'answerQuestion');
+    check(a?.values?.question_0 === 'SQLite' && a.values.question_1 === 'Redis' && a.values.question_2 === 'Memory', `three steps send three answers [${JSON.stringify(a?.values)}]`);
     await p.close();
   }
 };

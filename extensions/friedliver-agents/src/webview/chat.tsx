@@ -48,8 +48,9 @@ import {
   statusOf,
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
+import { questionGroups } from '../shared/questions';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, scrollBehavior, send, useHost, usePersisted } from './common';
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
@@ -585,6 +586,39 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
         </div>
       )}
     </>
+  );
+}
+
+/** "Claude is asking — 2 questions" over the composer while a question waits; Show scrolls to it and focuses its first option. */
+function AskingBar({ chat }: { chat: ChatView }) {
+  const waiting = chat.items.filter((i): i is Extract<Item, { kind: 'question' }> => i.kind === 'question' && i.state === 'awaiting');
+  const first = waiting[0]?.requestId;
+  // Only while the card is out of view: over the composer it would cover the card's own last rows.
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const card = first && document.getElementById(`item-${first}`);
+    if (!card) return setSeen(false);
+    const io = new IntersectionObserver(([e]) => setSeen(e.isIntersecting), { threshold: 0.2 });
+    io.observe(card);
+    return () => io.disconnect();
+  }, [first]);
+  if (!waiting.length || seen) return null;
+  const n = waiting.reduce((sum, q) => sum + questionGroups(q.fields).length, 0);
+  const show = () => {
+    const card = document.getElementById(`item-${waiting[0].requestId}`);
+    card?.scrollIntoView({ block: 'center', behavior: scrollBehavior() });
+    card?.querySelector<HTMLElement>('.q-opt, input, button')?.focus({ preventScroll: true });
+  };
+  return (
+    <div class="banner asking-bar" role="status">
+      <Dot state="needs-you" still />
+      <span class="banner-text">
+        {AGENT_FACES[chat.agent].name} is asking · {n} question{n === 1 ? '' : 's'}
+      </span>
+      <button class="sm" onClick={show}>
+        Show
+      </button>
+    </div>
   );
 }
 
@@ -1530,6 +1564,7 @@ function Composer({
           </div>
         )}
         <div class="banners">
+          <AskingBar chat={chat} />
           {removed && (
             <div class="banner" role="status">
               <span class="banner-text">Removed {removed.a.name}</span>

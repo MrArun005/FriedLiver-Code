@@ -9,7 +9,8 @@ export interface QuestionField {
   description?: string;
   /** choice: one of `options`; multi: any of them; text, number, boolean: a value. */
   type: 'choice' | 'multi' | 'text' | 'number' | 'boolean';
-  options?: { value: string; title: string; description?: string }[];
+  /** `preview`: code or a mockup to show beside the option (claude-agent-acp's `_meta["_claude/askUserQuestionOption"].preview`). */
+  options?: { value: string; title: string; description?: string; preview?: string }[];
   required?: boolean;
 }
 
@@ -18,6 +19,7 @@ export type QuestionValue = string | number | boolean | string[];
 const MAX_FIELDS = 12;
 const MAX_OPTIONS = 50;
 const MAX_TEXT = 500;
+const MAX_PREVIEW = 4000;
 /** Characters one typed answer may have. */
 export const MAX_ANSWER = 10_000;
 
@@ -29,7 +31,10 @@ function enumOptions(prop: Record<string, unknown>): QuestionField['options'] | 
     const out = list
       .filter((o): o is Record<string, unknown> => !!o && typeof o === 'object' && typeof (o as Record<string, unknown>).const === 'string')
       .slice(0, MAX_OPTIONS)
-      .map((o) => ({ value: o.const as string, title: text(o.title) ?? (o.const as string), description: text(o.description) }));
+      .map((o) => {
+        const preview = text((o._meta as Record<string, { preview?: unknown }> | undefined)?.['_claude/askUserQuestionOption']?.preview, MAX_PREVIEW);
+        return { value: o.const as string, title: text(o.title) ?? (o.const as string), description: text(o.description), ...(preview ? { preview } : {}) };
+      });
     return out.length ? out : undefined;
   }
   if (Array.isArray(prop.enum)) {
@@ -72,6 +77,37 @@ export function questionFields(req: acp.CreateElicitationRequest): QuestionField
     }
   }
   return fields;
+}
+
+/** A question as the card shows it: its field, and the free-text "Other" box that goes with a choice. */
+export interface QuestionGroup {
+  field: QuestionField;
+  other?: QuestionField;
+}
+
+/**
+ * The fields as questions. claude-agent-acp follows each AskUserQuestion choice (`question_<n>`) with an
+ * optional free-text field (`question_<n>_custom`, "Other"): that box belongs to its choice, not beside it.
+ */
+export function questionGroups(fields: QuestionField[]): QuestionGroup[] {
+  const byKey = new Map(fields.map((f) => [f.key, f]));
+  const isOther = (f: QuestionField) => f.type === 'text' && f.key.endsWith('_custom') && /^(choice|multi)$/.test(byKey.get(f.key.slice(0, -'_custom'.length))?.type ?? '');
+  return fields.filter((f) => !isOther(f)).map((f) => {
+    const other = byKey.get(`${f.key}_custom`);
+    return other && isOther(other) ? { field: f, other } : { field: f };
+  });
+}
+
+/** "Redis (Recommended)": Claude marks its pick in the label. The label without it, and whether it was there. */
+export function recommended(title: string): { label: string; recommended: boolean } {
+  const label = title.replace(/\s*\(recommended\)\s*$/i, '');
+  return { label: label || title, recommended: label !== title };
+}
+
+/** The one choice a click answers: a form that is a single choice question (with or without its "Other" box). */
+export function oneClickQuestion(fields: QuestionField[]): QuestionField | undefined {
+  const groups = questionGroups(fields);
+  return groups.length === 1 && groups[0].field.type === 'choice' ? groups[0].field : undefined;
 }
 
 /** The answer, if it fits the fields: known keys, values of the right kind, offered options only, required ones there. */

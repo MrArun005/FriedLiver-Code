@@ -1,7 +1,7 @@
 // The chat's session controls (approval level, model, effort, the agent's own
 // modes), the usage meter, and the cards that show what an agent asks to do
 // and what its tools did. Shared by the chat view and the Agent Manager.
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { DiffLine } from '../shared/diff';
 import { AGENT_FACES, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { describeRule, ruleCandidates } from '../shared/rules';
@@ -12,6 +12,7 @@ import {
   type ChatSession,
 } from '../shared/session';
 import { DecisionTargets } from '../shared/decisionTarget';
+import { questionGroups, recommended, type QuestionField } from '../shared/questions';
 import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
 import { ClampedText, Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 
@@ -346,12 +347,12 @@ export function useDecisionTarget(chat: ChatView): string | undefined {
 const MAC = /Mac/.test(navigator.platform);
 
 /** Where the keys act: the hint shows on that card only. `n` options are numbered 1–n. */
-export function KeyHint({ chat, id, n, yes = true }: { chat: ChatView; id: string; n: number; yes?: boolean }) {
+export function KeyHint({ chat, id, n, yes = true, no = 'no' }: { chat: ChatView; id: string; n: number; yes?: boolean; no?: string }) {
   // Always laid out, shown only on the marked card: marking another card never moves anything under the pointer.
   const on = useDecisionTarget(chat) === id;
   return (
     <div class="hint keys" data-on={on ? '' : undefined} aria-hidden="true">
-      Press 1–{Math.min(9, n)} to choose{yes ? ` · ${MAC ? '⌘↩' : 'Ctrl+Enter'} yes` : ''} · {MAC ? '⌘⇧⌫' : 'Ctrl+Shift+Backspace'} no
+      Press 1–{Math.min(9, n)} to choose{yes ? ` · ${MAC ? '⌘↩' : 'Ctrl+Enter'} yes` : ''} · {MAC ? '⌘⇧⌫' : 'Ctrl+Shift+Backspace'} {no}
     </div>
   );
 }
@@ -379,16 +380,12 @@ export function waitingActions(chat: ChatView): { approve(): void; deny(): void;
       return { approve: () => run(true), deny: () => run(false), pick: (n) => (n === 0 ? (run(true), true) : n === 1 ? (run(false), true) : false) };
     }
     if (i.kind === 'question' && i.state === 'awaiting') {
-      const only = i.fields.length === 1 && i.fields[0].type === 'choice' ? i.fields[0] : undefined;
+      // The card on screen knows its step: 1–9 pick there, Ctrl/Cmd+Enter confirms it.
+      const card = () => questionKeys.get(i.requestId);
       return {
-        approve: () => {},
+        approve: () => card()?.confirm(),
         deny: () => send({ type: 'answerQuestion', requestId: i.requestId, action: 'decline' }),
-        pick: (n) => {
-          const choice = only?.options?.[n];
-          if (!only || !choice) return false;
-          send({ type: 'answerQuestion', requestId: i.requestId, action: 'accept', values: { [only.key]: choice.value } });
-          return true;
-        },
+        pick: (n) => card()?.pick(n) ?? false,
       };
     }
     if (i.kind === 'bridge' && i.state === 'awaiting') {
@@ -495,103 +492,219 @@ export function TaskOptions({
 type Question = Extract<Item, { kind: 'question' }>;
 type Values = Record<string, string | number | boolean | string[]>;
 
-/** A question as a small form: choices as buttons, a box for anything typed. */
+/** What the decision keys do to the question card on screen: set while it is shown, by its request id. */
+const questionKeys = new Map<string, { pick(n: number): boolean; confirm(): void }>();
+
+/**
+ * An agent's question, Claude Code style: one question at a time ("1 of 3", Back/Next), each a header chip,
+ * the question, and its options as full-width numbered rows with their descriptions. One choice answers on
+ * click; several picks submit; "Other…" opens a box (Enter sends, Esc closes); an option's preview shows
+ * beside the list (under it when narrow). Answered, it folds to one muted line.
+ */
 export function QuestionCard({ item, chat }: { item: Question; chat: ChatView }) {
+  const groups = useMemo(() => questionGroups(item.fields), [item.fields]);
   const [values, setValues] = useState<Values>({});
+  const [step, setStep] = useState(0);
+  const [other, setOther] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const list = useRef<HTMLDivElement>(null);
+  const otherBox = useRef<HTMLInputElement>(null);
+  // "Other…" opens its box focused.
+  const otherOpen = other !== null;
+  useLayoutEffect(() => {
+    if (otherOpen) otherBox.current?.focus();
+  }, [otherOpen]);
+  const g = groups[Math.min(step, groups.length - 1)];
+  const choice = g?.field.type === 'choice' || g?.field.type === 'multi';
+  // Claude's pick first, its "(Recommended)" shown as a tag.
+  const options = useMemo(
+    () => (g?.field.options ?? []).map((o) => ({ o, ...recommended(o.title) })).sort((a, b) => Number(b.recommended) - Number(a.recommended)),
+    [g],
+  );
+  const last = step >= groups.length - 1;
+  const submit = (v: Values) => send({ type: 'answerQuestion', requestId: item.requestId, action: 'accept', values: v });
+  const skip = () => send({ type: 'answerQuestion', requestId: item.requestId, action: 'decline' });
+  const next = (v: Values) => {
+    if (last) return submit(v);
+    setValues(v);
+    setStep(step + 1);
+    setOther(null);
+    setActive(0);
+  };
+  const without = (v: Values, ...keys: (string | undefined)[]) => Object.fromEntries(Object.entries(v).filter(([k]) => !keys.includes(k))) as Values;
+  const picked = (value: string) => (g.field.type === 'multi' ? Array.isArray(values[g.field.key]) && (values[g.field.key] as string[]).includes(value) : values[g.field.key] === value);
+  // One choice answers (or moves on) at once; a multi-select toggles.
+  const pick = (value: string) => {
+    if (g.field.type === 'multi') {
+      const now = (Array.isArray(values[g.field.key]) ? (values[g.field.key] as string[]) : []).filter((x) => x !== value);
+      setValues({ ...without(values, g.field.key), ...(picked(value) ? (now.length ? { [g.field.key]: now } : {}) : { [g.field.key]: [...now, value] }) });
+      return;
+    }
+    next({ ...without(values, g.other?.key), [g.field.key]: value });
+  };
+  const sendOther = (typed: string) => {
+    if (!typed.trim() || !g.other) return;
+    next({ ...(g.field.type === 'multi' ? values : without(values, g.field.key)), [g.other.key]: typed.trim() });
+  };
+  useEffect(() => {
+    if (item.state !== 'awaiting' || !g) return;
+    questionKeys.set(item.requestId, {
+      pick: (n) => {
+        const o = options[n];
+        if (o) pick(o.o.value);
+        else if (n === options.length && g.other) setOther('');
+        return !!o || (n === options.length && !!g.other);
+      },
+      confirm: () => next(values),
+    });
+    return () => void questionKeys.delete(item.requestId);
+  });
   if (item.state !== 'awaiting') {
     return (
-      <div class="answered">
-        <Icon name={item.state === 'answered' ? 'check' : 'close'} /> {item.message.split('\n')[0]}{' '}
-        <span class="hint">· {item.state === 'answered' ? (item.summary ?? 'answered') : 'declined'}</span>
+      <div class="answered q-answered">
+        <Icon name={item.state === 'answered' ? 'check' : 'close'} /> {item.state === 'answered' ? `Answered: ${item.summary ?? 'sent'}` : 'Skipped'}
       </div>
     );
   }
-  const set = (key: string, v: Values[string] | undefined) => setValues((all) => {
-    const next = { ...all };
-    if (v === undefined || v === '') delete next[key];
-    else next[key] = v;
-    return next;
-  });
-  const missing = item.fields.some((f) => f.required && values[f.key] === undefined);
-  const answer = (v: Values) => send({ type: 'answerQuestion', requestId: item.requestId, action: 'accept', values: v });
-  // One question with one set of choices answers with a click.
-  const only = item.fields.length === 1 && item.fields[0].type === 'choice' ? item.fields[0] : undefined;
+  if (!g) return null;
+  const preview = options[active]?.o.preview ?? options.find((x) => picked(x.o.value))?.o.preview;
+  const hasPreview = options.some((x) => x.o.preview);
+  const question = groups.length > 1 ? (g.field.description ?? item.message) : item.message;
+  const rows = () => [...(list.current?.querySelectorAll<HTMLElement>('.q-opt') ?? [])];
+  const onListKey = (e: KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const all = rows();
+    const at = all.indexOf(document.activeElement as HTMLElement);
+    all[(at + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]?.focus();
+  };
+  const onCardKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || isTypingIn(e.target)) return;
+    e.preventDefault();
+    skip();
+  };
   return (
-    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(chat, item.requestId)}>
-      <div class="ask-head">
-        <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" /> {AGENT_FACES[chat.agent].name} asks you
+    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
+      <div class="q-head">
+        <span class="chip q-chip">{g.field.title}</span>
+        {groups.length > 1 && (
+          <span class="q-step" aria-live="polite">
+            {step + 1} of {groups.length}
+          </span>
+        )}
       </div>
-      <div class="ask-body">
-        <Markdown text={item.message} />
+      <div class="q-question">
+        <Markdown text={question} />
       </div>
-      {item.fields.map((f) => (
-        <div key={f.key} class="q-field" role="group" aria-label={f.title}>
-          {(item.fields.length > 1 || f.type !== 'choice') && (
-            <div class="q-title">
-              {f.title}
-              {f.required && <span class="hint"> · needed</span>}
-            </div>
-          )}
-          {f.description && <div class="hint">{f.description}</div>}
-          {f.type === 'choice' && (
-            <div class="actions">
-              {f.options!.map((o, n) => (
-                <button
-                  key={o.value}
-                  class={`sm opt ${values[f.key] === o.value ? 'decide' : ''}`}
-                  aria-pressed={values[f.key] === o.value}
-                  onClick={() => (only ? answer({ [f.key]: o.value }) : set(f.key, values[f.key] === o.value ? undefined : o.value))}
-                >
-                  {only && n < 9 && <span class="opt-num">{n + 1}.</span>}
-                  <span class="opt-text">
-                    <span class="opt-title">{o.title}</span>
-                    {o.description && <span class="opt-desc">{o.description}</span>}
+      <div class={`q-body${hasPreview ? ' with-preview' : ''}`}>
+        {choice ? (
+          <div class="q-options" ref={list} role={g.field.type === 'multi' ? 'group' : 'listbox'} aria-label={g.field.title} onKeyDown={onListKey}>
+            {options.map(({ o, label, recommended: rec }, n) => (
+              <button
+                key={o.value}
+                type="button"
+                class="q-opt"
+                role={g.field.type === 'multi' ? 'checkbox' : 'option'}
+                aria-checked={g.field.type === 'multi' ? picked(o.value) : undefined}
+                aria-selected={g.field.type === 'multi' ? undefined : picked(o.value)}
+                data-picked={picked(o.value) ? '' : undefined}
+                onMouseEnter={() => setActive(n)}
+                onFocus={() => setActive(n)}
+                onClick={() => pick(o.value)}
+              >
+                {g.field.type === 'multi' ? <span class="q-check">{picked(o.value) && <Icon name="check" />}</span> : <span class="q-num">{n < 9 ? n + 1 : ''}</span>}
+                <span class="q-opt-text">
+                  <span class="q-opt-label">
+                    {label}
+                    {rec && <span class="tag q-rec">Recommended</span>}
+                  </span>
+                  {o.description && <span class="q-opt-desc">{o.description}</span>}
+                </span>
+              </button>
+            ))}
+            {g.other &&
+              (other === null ? (
+                <button type="button" class="q-opt q-opt-other" role={g.field.type === 'multi' ? 'button' : 'option'} onClick={() => setOther('')}>
+                  <span class="q-num">{options.length < 9 ? options.length + 1 : ''}</span>
+                  <span class="q-opt-text">
+                    <span class="q-opt-label">Other…</span>
                   </span>
                 </button>
+              ) : (
+                <div class="q-other">
+                  <input
+                    type="text"
+                    value={other}
+                    placeholder="Type your answer, then Enter"
+                    aria-label={`Other answer to ${g.field.title}`}
+                    maxLength={10_000}
+                    ref={otherBox}
+                    onInput={(e) => setOther(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        sendOther(other);
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setOther(null);
+                      }
+                    }}
+                  />
+                </div>
               ))}
-            </div>
-          )}
-          {f.type === 'multi' && (
-            <div class="actions">
-              {f.options!.map((o) => {
-                const picked = Array.isArray(values[f.key]) && (values[f.key] as string[]).includes(o.value);
-                return (
-                  <label key={o.value} class="check" title={o.description}>
-                    <input
-                      type="checkbox"
-                      checked={picked}
-                      onChange={() => {
-                        const list = (Array.isArray(values[f.key]) ? (values[f.key] as string[]) : []).filter((x) => x !== o.value);
-                        set(f.key, picked ? list : [...list, o.value]);
-                      }}
-                    />{' '}
-                    {o.title}
-                  </label>
-                );
-              })}
-            </div>
-          )}
-          {f.type === 'text' && <input class="q-input" type="text" value={String(values[f.key] ?? '')} maxLength={10_000} onInput={(e) => set(f.key, e.currentTarget.value)} />}
-          {f.type === 'number' && <input class="q-input" type="number" value={String(values[f.key] ?? '')} onInput={(e) => set(f.key, e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))} />}
-          {f.type === 'boolean' && (
-            <label class="check">
-              <input type="checkbox" checked={values[f.key] === true} onChange={(e) => set(f.key, e.currentTarget.checked)} /> Yes
-            </label>
-          )}
-        </div>
-      ))}
-      <div class="actions">
-        {(!only || item.fields.length > 1 || Object.keys(values).length > 0) && (
-          <button class="decide sm" disabled={missing} onClick={() => answer(values)}>
-            Answer
+          </div>
+        ) : (
+          <FieldInput field={g.field} value={values[g.field.key]} onChange={(v) => setValues(v === undefined || v === '' ? without(values, g.field.key) : { ...values, [g.field.key]: v })} />
+        )}
+        {hasPreview && (
+          <div class="q-preview" aria-label="Preview">
+            {preview ? <pre class="code">{preview}</pre> : <span class="hint">No preview for this option</span>}
+          </div>
+        )}
+      </div>
+      <div class="q-foot">
+        {step > 0 && (
+          <button type="button" class="ghost sm" onClick={() => (setStep(step - 1), setOther(null), setActive(0))}>
+            Back
           </button>
         )}
-        <button class="ghost danger sm" onClick={() => send({ type: 'answerQuestion', requestId: item.requestId, action: 'decline' })}>
+        <span class="spacer" />
+        <button type="button" class="ghost sm" onClick={skip} title="Esc">
           Skip
         </button>
+        {(!last || g.field.type !== 'choice') && (
+          <button type="button" class="primary sm" onClick={() => next(values)}>
+            {last ? 'Submit' : 'Next'}
+          </button>
+        )}
       </div>
-      {only && <KeyHint chat={chat} id={item.requestId} n={only.options?.length ?? 0} yes={false} />}
+      <KeyHint chat={chat} id={item.requestId} n={options.length + (g.other ? 1 : 0)} yes={false} no="skip" />
     </section>
+  );
+}
+
+const isTypingIn = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+/** A question that isn't a choice: a text, number or yes/no field. */
+function FieldInput({ field, value, onChange }: { field: QuestionField; value: Values[string] | undefined; onChange(v: Values[string] | undefined): void }) {
+  if (field.type === 'boolean')
+    return (
+      <label class="check">
+        <input type="checkbox" checked={value === true} onChange={(e) => onChange(e.currentTarget.checked)} /> Yes
+      </label>
+    );
+  if (field.type === 'number')
+    return (
+      <input
+        class="q-input"
+        type="number"
+        aria-label={field.title}
+        value={String(value ?? '')}
+        onInput={(e) => onChange(e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))}
+      />
+    );
+  return (
+    <input class="q-input" type="text" aria-label={field.title} value={String(value ?? '')} maxLength={10_000} onInput={(e) => onChange(e.currentTarget.value)} />
   );
 }

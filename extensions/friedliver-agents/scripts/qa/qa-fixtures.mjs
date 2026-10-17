@@ -47,6 +47,30 @@ export function questionItem() {
   };
 }
 
+/**
+ * Claude's AskUserQuestion as claude-agent-acp really sends it: each question a choice field
+ * (`question_<n>`) followed by its optional free-text companion (`question_<n>_custom`, "Other").
+ * `questions` > 1: the multi-question form.
+ */
+export function adapterQuestionItem(questions = 1, requestId = 'q-real') {
+  const fields = [];
+  for (let n = 0; n < questions; n++) {
+    fields.push({
+      key: `question_${n}`,
+      title: n ? 'Cache' : 'Store',
+      ...(questions > 1 ? { description: n ? 'Which cache?' : 'Which store?' } : {}),
+      type: 'choice',
+      options: [
+        { value: 'Redis', title: 'Redis', description: 'Shared across instances' },
+        { value: 'SQLite', title: 'SQLite', description: 'One file' },
+        { value: 'Memory', title: 'Memory', description: 'Tests only' },
+      ],
+    });
+    fields.push({ key: `question_${n}_custom`, title: 'Other', description: 'Type your own answer, or add a note to the option you chose above (optional).', type: 'text' });
+  }
+  return { kind: 'question', requestId, message: questions > 1 ? 'Please answer the following questions.' : 'Which store should the sessions use?', state: 'awaiting', fields };
+}
+
 /** One chat of `turns` turns (user, two steps, a reply with a list and a code block): 4 items a turn, MAX_ITEMS at 500. */
 export function longFixture(turns) {
   const now = Date.now();

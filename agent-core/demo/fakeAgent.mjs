@@ -13,6 +13,9 @@
 //   "plan"            switches to Plan mode, sends a plan, then asks as perm-plan does
 //   "question"        asks a multiple-choice question as a form (elicitation/create), like
 //                     Claude's AskUserQuestion, when the client takes forms
+//   "ask-user [n]"    asks n questions (default 1) exactly as claude-agent-acp sends Claude's
+//                     AskUserQuestion: question_<k> (oneOf, the pick marked "(Recommended)") and its
+//                     free-text question_<k>_custom ("Other"), nothing required; says what came back
 //   "session"         says the session id and the _meta its session/new or session/load carried
 //   "links"           says which files the message linked (resource_link blocks)
 //   "read-image <p>"  reports a read tool call on an image file
@@ -1193,6 +1196,30 @@ acp
           },
         });
         await say(client, sessionId, answer.action === 'accept' ? `You picked ${answer.content?.db}${answer.content?.note ? ` (${answer.content.note})` : ''}.` : `You ${answer.action === 'decline' ? 'skipped' : 'cancelled'} the question.`);
+      }
+    } else if (command === 'ask-user' || command.startsWith('ask-user ')) {
+      if (!forms) await say(client, sessionId, "This client can't show questions as forms, so I'd ask in a message.");
+      else {
+        const n = Math.max(1, Math.min(4, Number(command.slice(9)) || 1));
+        const asks = [
+          ['Store', 'Which store should the sessions use?', ['Redis (Recommended)', 'SQLite', 'Memory']],
+          ['Cache', 'Which cache in front of it?', ['None', 'LRU']],
+          ['Auth', 'Which auth method?', ['Cookies', 'Tokens']],
+          ['Logs', 'Where do logs go?', ['stdout', 'File']],
+        ].slice(0, n);
+        const properties = {};
+        asks.forEach(([header, question, options], k) => {
+          properties[`question_${k}`] = { type: 'string', title: header, ...(n > 1 ? { description: question } : {}), oneOf: options.map((o) => ({ const: o, title: o, description: `${o.replace(/ \(Recommended\)$/, '')} because it fits` })) };
+          properties[`question_${k}_custom`] = { type: 'string', title: 'Other', description: 'Type your own answer, or add a note to the option you chose above (optional).' };
+        });
+        const answer = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'form',
+          sessionId,
+          message: n > 1 ? 'Please answer the following questions.' : asks[0][1],
+          requestedSchema: { type: 'object', properties },
+        });
+        const got = asks.map((_, k) => answer.content?.[`question_${k}_custom`] || answer.content?.[`question_${k}`] || '-');
+        await say(client, sessionId, answer.action === 'accept' ? `You answered: ${got.join(', ')}.` : `You ${answer.action === 'decline' ? 'skipped' : 'cancelled'} the question.`);
       }
     } else if (command === 'session') {
       await say(client, sessionId, `Session ${sessionId}, meta ${JSON.stringify(sessionMeta.get(sessionId) ?? null)}`);

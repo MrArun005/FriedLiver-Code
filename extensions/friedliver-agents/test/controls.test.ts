@@ -429,6 +429,29 @@ describe('questions and file references', () => {
     expect(c.chat(chat.id)!.items.find((i) => i.kind === 'question')).toMatchObject({ state: 'answered', summary: 'Database: SQLite · Other: keep it simple' });
   });
 
+  it("gets Claude's real AskUserQuestion answer back to the agent: a click's option, or the typed Other (owner bug)", async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir);
+    const chat = await c.createChat('demo');
+    for (const [values, said] of [
+      [{ question_0: 'SQLite' }, 'You answered: SQLite.'],
+      [{ question_0_custom: 'Postgres' }, 'You answered: Postgres.'],
+    ] as const) {
+      const turn = c.send(chat.id, 'ask-user');
+      await waitFor(() => c.decisions()[0]?.kind === 'question');
+      const q = c.chat(chat.id)!.items.findLast((i) => i.kind === 'question');
+      expect(q?.kind === 'question' && q.fields.map((f) => f.key)).toEqual(['question_0', 'question_0_custom']);
+      c.answerQuestion(c.decisions()[0].id, 'accept', values);
+      await turn;
+      expect(lastReply(c.chat(chat.id)!)).toBe(said);
+    }
+    const turn = c.send(chat.id, 'ask-user 2');
+    await waitFor(() => c.decisions()[0]?.kind === 'question');
+    c.answerQuestion(c.decisions()[0].id, 'accept', { question_0: 'Memory', question_1: 'LRU' });
+    await turn;
+    expect(lastReply(c.chat(chat.id)!)).toBe('You answered: Memory, LRU.');
+  });
+
   it('declines a question when the turn is stopped', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);
