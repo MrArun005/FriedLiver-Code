@@ -34,9 +34,33 @@ version, then FriedLiver's own build number) it also publishes a GitHub
 release with every installer, the portable apps and `SHA256SUMS.txt`. Only that
 release job gets a token that can write (`contents: write`).
 
-To release: `git tag v1.142.0-1 && git push origin v1.142.0-1`. The tag is
-stamped into the app's `product.json` as `friedliverVersion`, which the Agents
-extension's weekly update check compares with the latest release.
+### Releasing an update
+
+1. Pick the version: the pinned upstream version, then FriedLiver's own build
+   number, e.g. `1.142.0-2`. It must be newer than the last release, or apps
+   won't see it.
+2. Tag and push: `git tag v1.142.0-2 && git push origin v1.142.0-2`.
+3. `build.yml` builds all three OSes with `FRIEDLIVER_VERSION` set from the tag
+   (stamped into `product.json` as `friedliverVersion`), then the release job
+   writes `SHA256SUMS.txt` over every asset (it fails if the macOS arm64 DMG is
+   missing) and publishes the GitHub release.
+4. Running apps see it: the Agents extension asks
+   `api.github.com/repos/MrArun005/FriedLiver-Code/releases/latest` 30 s after
+   start and every 4 h. When the release is newer than `friedliverVersion`, a
+   bottom-right toast says "FriedLiver X.Y.Z is available" with **Install**,
+   **Release notes** and **Later** (each version once per launch).
+   - **Install** on macOS arm64 downloads `FriedLiver-darwin-arm64-*.dmg`
+     (https, only from this repo's release downloads and GitHub's asset hosts,
+     every redirect checked), checks its size and its SHA-256 against
+     `SHA256SUMS.txt` (missing or different: it refuses), then offers
+     **Restart to update**. A detached script in a private temp folder waits
+     for the app to exit, mounts the DMG, swaps the running `.app` (wherever it
+     is), and reopens it. If the `.app` or its folder isn't writable, the
+     verified DMG is opened instead.
+   - On Windows and Linux, Install opens the release page.
+   - `friedliver.update.mode: "off"` (or `update.mode: "none"`) turns this off.
+
+Drafts and pre-releases are ignored.
 
 `.github/workflows/upstream.yml` runs every Monday. When
 `update.code.visualstudio.com/api/releases/stable` lists a newer stable VS Code
