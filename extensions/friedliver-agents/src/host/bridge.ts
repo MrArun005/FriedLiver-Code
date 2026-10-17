@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { HttpTools } from '../bridge/http';
 import { toolError } from '../bridge/mcp';
-import { BRIDGE_LIMITS, parseRequest, type BridgeCall, type BridgeResponse } from '../bridge/protocol';
+import { BRIDGE_LIMITS, EXTERNAL_CLIENT, isExternal, parseRequest, type BridgeCall, type BridgeResponse } from '../bridge/protocol';
 
 /** Does what a chat's agent asked; throwing sends the message back to the agent as the tool's error. */
 export type BridgeHandler = (chatId: string, call: BridgeCall, signal: AbortSignal) => Promise<string>;
@@ -89,6 +89,7 @@ export class BridgeServer {
     if (this.disposed) throw new Error('FriedLiver closed its tools.');
     this.http ??= HttpTools.start({
       chatFor: (token) => this.tokens.get(hash(token)),
+      externalKey: () => this.chats.get(EXTERNAL_CLIENT),
       call: (chatId, call, signal) =>
         this.handler(chatId, call, signal).then(
           (text) => ({ content: [{ type: 'text' as const, text: fit(text) }] }),
@@ -144,7 +145,7 @@ export class BridgeServer {
         const req = parseRequest(line.toString('utf8'));
         if (!req) return close('malformed request');
         const chatId = this.tokens.get(hash(req.token));
-        if (!chatId) return close('unknown token');
+        if (!chatId || isExternal(chatId)) return close('unknown token');
         this.handler(chatId, req.call, gone.signal).then(
           (text) => reply({ id: req.id, ok: true, text: fit(text) }),
           (err: unknown) => reply({ id: req.id, ok: false, error: fit(err instanceof Error ? err.message : String(err)) }),
