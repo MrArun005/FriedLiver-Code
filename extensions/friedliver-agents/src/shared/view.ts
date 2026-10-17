@@ -645,9 +645,10 @@ export function mentionQuery(text: string, caret: number): string | null {
   return caret >= start && caret <= m[0].length ? m[2].toLowerCase() : null;
 }
 
-export function mentionOptions(query: string): MentionOption[] {
+/** `shown`: the agents pickers offer (Demo only when turned on); typing @demo still works without the picker. */
+export function mentionOptions(query: string, shown?: readonly AgentKey[]): MentionOption[] {
   const q = query.toLowerCase();
-  return MENTION_OPTIONS.filter((o) => o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q));
+  return MENTION_OPTIONS.filter((o) => (!shown || shown.includes(o.agent)) && (o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q)));
 }
 
 /** Replaces the leading @word with the option's, followed by one space. */

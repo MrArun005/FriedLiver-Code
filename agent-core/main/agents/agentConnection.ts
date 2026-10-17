@@ -3,6 +3,7 @@ import { Readable, Writable } from 'node:stream';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentSpec } from './registry';
 import { killProcessTree, launchFor } from './processes';
+import { authStatusOf, type AuthStatus } from './signIn';
 import { TerminalManager, type TerminalListener } from './terminals';
 
 /** What the editor provides to a running agent. */
@@ -13,6 +14,8 @@ export interface ClientHost {
   writeTextFile(req: acp.WriteTextFileRequest): Promise<void>;
   /** A question for the user as a small form (ACP form elicitation). Without it, every one is declined. */
   createElicitation?(req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse>;
+  /** The identity the agent says it runs as (`_auth/status_update`), already checked. */
+  authStatus?(status: AuthStatus): void;
   terminalListener?: TerminalListener;
 }
 
@@ -146,6 +149,11 @@ export class AgentConnection {
     const connection = lib
       .client({ name: 'friedliver' })
       .onNotification(lib.methods.client.session.update, ({ params }) => host.sessionUpdate(params))
+      // Claude's and Codex's adapters say which account they run as; an agent that doesn't stays silent.
+      .onNotification('_auth/status_update', (raw) => raw, ({ params }) => {
+        const status = authStatusOf(params);
+        if (status) host.authStatus?.(status);
+      })
       .onRequest(lib.methods.client.session.requestPermission, ({ params, signal }) => host.requestPermission(params, signal))
       .onRequest(lib.methods.client.fs.readTextFile, ({ params }) => host.readTextFile(params))
       .onRequest(lib.methods.client.elicitation.create, ({ params, signal }) => host.createElicitation?.(params, signal) ?? Promise.resolve({ action: 'decline' as const }))
@@ -226,6 +234,11 @@ export class AgentConnection {
     return meta?.steering?.supported === true;
   }
 
+  /** The agent can sign out itself (ACP `logout`), so FriedLiver never deletes its files. */
+  get supportsLogout(): boolean {
+    return (this.info.agentCapabilities as { auth?: { logout?: unknown } } | undefined)?.auth?.logout != null;
+  }
+
   get supportsCloseSession(): boolean {
     return this.info.agentCapabilities?.sessionCapabilities?.close != null;
   }
@@ -283,6 +296,10 @@ export class AgentConnection {
 
   async authenticate(methodId: string): Promise<void> {
     await this.connection.agent.request(sdk!.methods.agent.authenticate, { methodId });
+  }
+
+  async logout(): Promise<void> {
+    await this.connection.agent.request(sdk!.methods.agent.logout, {});
   }
 
   async stop(): Promise<void> {

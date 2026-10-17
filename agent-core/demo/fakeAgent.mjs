@@ -61,7 +61,8 @@
 // It takes MCP servers over HTTP as well as stdio, as Claude's, Codex's and Gemini's
 // adapters do; FAKE_AGENT_MCP_HTTP=0 makes it take stdio servers only.
 // FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first;
-// that browser-style sign-in prints a sign-in link to stderr, like Gemini's.
+// that browser-style sign-in prints a sign-in link to stderr, like Gemini's. It
+// then also offers `logout` and sends `_auth/status_update`, like Claude's and Codex's.
 // --require-login makes it need a terminal login instead, like Claude's: the
 // client runs this script with --cli, which asks for Enter and saves a marker.
 import { spawn } from 'node:child_process';
@@ -1074,7 +1075,13 @@ acp
     forms = params.clientCapabilities?.elicitation?.form != null;
     return {
     protocolVersion: acp.PROTOCOL_VERSION,
-    agentCapabilities: { loadSession, promptCapabilities: { image: images }, mcpCapabilities: { http: httpMcp } },
+    agentCapabilities: {
+      loadSession,
+      promptCapabilities: { image: images },
+      mcpCapabilities: { http: httpMcp },
+      // Like Claude's and Codex's adapters: it signs out itself, and says which account it runs as.
+      ...(needsAuth ? { auth: { logout: {} }, _meta: { authStatus: {} } } : {}),
+    },
     authMethods: needsTerminalLogin
       ? [{ id: 'demo-login', name: 'Log in with Demo', description: 'Run the demo login in the terminal', type: 'terminal', args: ['--cli'] }]
       : needsAuth
@@ -1085,11 +1092,17 @@ acp
     _meta: { steering: { supported: true } },
     };
   })
-  .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
+  .onRequest(acp.methods.agent.authenticate, async ({ params, client }) => {
     if (params.methodId !== 'fake-login') throw acp.RequestError.invalidParams();
     process.stderr.write('Open https://accounts.google.com/o/oauth2/v2/auth?client_id=demo to sign in\n');
     await new Promise((r) => setTimeout(r, 300));
     authenticated = true;
+    void client.notify('_auth/status_update', { authStatus: { kind: 'account', label: 'Demo account', account: { email: 'you@example.com', plan: 'demo' } } }).catch(() => {});
+    return {};
+  })
+  .onRequest(acp.methods.agent.logout, ({ client }) => {
+    authenticated = false;
+    void client.notify('_auth/status_update', { authStatus: { kind: 'none', label: 'Not logged in' } }).catch(() => {});
     return {};
   })
   .onRequest(acp.methods.agent.session.new, ({ params, client }) => {

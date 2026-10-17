@@ -5,6 +5,7 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { Accounts } from './host/accounts';
+import { ACCOUNTS_PANEL, AccountsPage } from './host/accountsPage';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { runRewind } from './host/rewindFlow';
@@ -30,8 +31,9 @@ import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
+import { isVendor, rosterOf, shownAgents } from './shared/accounts';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
-import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
+import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
 import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
@@ -88,6 +90,8 @@ export class Controller {
   readonly core: AgentCore;
   readonly reviews: ReviewUi;
   readonly accounts: Accounts;
+  /** Agents & Accounts (host/accountsPage.ts). */
+  readonly accountsPage: AccountsPage;
   /** Chats an inline edit owns: their reviews and prompts are refused, never shown. */
   private readonly inlineChats = new Set<string>();
   /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
@@ -169,9 +173,11 @@ export class Controller {
     );
     this.accounts = new Accounts(
       context.secrets,
+      context.globalState,
       () => this.core,
       () => this.folders()[0],
       (agent) => void this.core.reconfigure([agent]),
+      () => this.showDemo(),
     );
     this.permissions = new Permissions({
       user: context.globalState,
@@ -187,6 +193,7 @@ export class Controller {
     } catch {
       // Without it agents start in home, as before.
     }
+    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => this.showDemo(), (line) => this.log.warn(line));
     this.core = new AgentCore({
       folders: () => this.folders(),
       noFolderCwd,
@@ -212,10 +219,13 @@ export class Controller {
           const all = { ...this.context.globalState.get<Partial<Record<AgentKey, AgentDefaults>>>(DEFAULTS_KEY), [agent]: value };
           void this.context.globalState.update(DEFAULTS_KEY, all);
           this.postDefaults();
+          this.accountsPage.refresh();
         },
       },
       agentCommand: (id) => this.agentConfig[id],
       apiKey: (id) => this.accounts.apiKey(id),
+      credentialEnv: (id) => this.accounts.credentialEnv(id),
+      accountSeen: (agent, patch) => this.accounts.note(agent, patch),
       limits: () => {
         const c = vscode.workspace.getConfiguration('friedliver');
         return { maxRunning: clamp(c.get<number>('maxRunningAgents', 3), 1, 6), idleStopMinutes: clamp(c.get<number>('idleStopMinutes', 10), 0, 240) };
@@ -273,7 +283,11 @@ export class Controller {
       (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m))),
       this.reviews,
       this.accounts,
+      this.accountsPage,
       vscode.window.registerTreeDataProvider('friedliver.accounts', this.accounts),
+      vscode.window.registerWebviewPanelSerializer(ACCOUNTS_PANEL, { deserializeWebviewPanel: async (panel) => this.accountsPage.adopt(panel) }),
+      // Pickers show each agent's last known sign-in.
+      this.accounts.onDidUpdate(() => this.postRoster()),
       vscode.window.registerWebviewViewProvider(
         'friedliver.agents',
         { resolveWebviewView: (view) => this.resolveView(view, 'chat', 'Agents') },
@@ -309,17 +323,15 @@ export class Controller {
     command('friedliver.review.reject', (reviewId?: unknown) => {
       if (!this.reviews.reject(typeof reviewId === 'string' ? reviewId : undefined)) void vscode.window.showInformationMessage('No agent edit is waiting here.');
     });
-    command('friedliver.accounts', () => this.accounts.pickAndCheck());
+    command('friedliver.accounts', (agent?: unknown) => this.accountsPage.show(isAgentKey(agent) ? agent : undefined));
     command('friedliver.accounts.check', (node?: { agent?: unknown }) => {
       if (isAgentKey(node?.agent)) void this.accounts.check(node.agent);
-      else void this.accounts.pickAndCheck();
+      else this.accountsPage.show();
     });
     command('friedliver.signIn', (agent: unknown, methodId: unknown) => {
       if (isAgentKey(agent) && typeof methodId === 'string') void this.accounts.signIn(agent, methodId);
     });
-    command('friedliver.setApiKey', (node?: { agent?: unknown }) =>
-      this.accounts.setApiKey(VENDOR_AGENTS.find((a) => a === node?.agent)),
-    );
+    command('friedliver.setApiKey', (node?: { agent?: unknown }) => this.accounts.setKey(VENDOR_AGENTS.find((a) => a === node?.agent)));
     command('friedliver.stopAgents', () => this.core.stopAll());
     command('friedliver.otherAgents', () => this.otherAgents());
     command('friedliver.managePermissions', () => this.managePermissions());
@@ -347,6 +359,7 @@ export class Controller {
       showChat: (chatId, revealItem) => this.showChat(chatId, revealItem),
       currentChat: () => this.lastSelected,
       addToComposer: (chatId, ref) => this.addToComposer(chatId, ref),
+      shownAgents: () => shownAgents(this.showDemo()),
       error: (err) => this.error(err),
     });
     context.subscriptions.push(this.editor, new InlineEditor(this.core, this.inlineChats));
@@ -566,7 +579,14 @@ export class Controller {
           // Queued actions are already in the snapshot: send them first, while this surface isn't ready, so it never gets them twice.
           this.batcher.flush();
           surface.ready = true;
-          post(surface, { type: 'snapshot', state: stateFor(surface.kind, this.core.snapshot), selected: surface.selected ?? this.lastSelected, now: Date.now(), defaults: this.core.agentDefaults() });
+          post(surface, {
+            type: 'snapshot',
+            state: stateFor(surface.kind, this.core.snapshot),
+            selected: surface.selected ?? this.lastSelected,
+            now: Date.now(),
+            defaults: this.core.agentDefaults(),
+            roster: this.roster(),
+          });
           if (surface.kind !== 'chat') {
             if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
             this.refreshClaudeSessions();
@@ -790,6 +810,9 @@ export class Controller {
         case 'otherAgents':
           await this.otherAgents();
           return;
+        case 'openAccounts':
+          this.accountsPage.show(m.agent);
+          return;
         case 'answerQuestion':
           this.core.answerQuestion(m.requestId, m.action, m.values);
           return;
@@ -863,7 +886,10 @@ export class Controller {
         await this.accounts.signIn(action.agent, action.methodId, retry);
         return;
       case 'apiKey':
-        if (action.agent !== 'demo') await this.accounts.setApiKey(action.agent);
+        if (isVendor(action.agent)) await this.accounts.setKey(action.agent);
+        return;
+      case 'accounts':
+        this.accountsPage.show(action.agent);
         return;
       case 'install': {
         // FriedLiver's own install line for that agent, typed but not run: the user reads it and
@@ -885,7 +911,7 @@ export class Controller {
       agent ??
       (
         await vscode.window.showQuickPick(
-          AGENT_KEYS.map((a) => ({ label: AGENT_FACES[a].name, description: a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
+          shownAgents(this.showDemo()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
           { title: 'New chat with…' },
         )
       )?.agent;
@@ -977,7 +1003,7 @@ export class Controller {
   /** "Run a Task on Several Agents": one prompt, a chat per agent, to compare. */
   async fanoutCommand(): Promise<void> {
     const picked = await vscode.window.showQuickPick(
-      AGENT_KEYS.map((a) => ({ label: AGENT_FACES[a].name, description: a === 'demo' ? 'offline, no sign-in' : undefined, agent: a, picked: a !== 'demo' })),
+      shownAgents(this.showDemo()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: a !== 'demo' })),
       { title: 'Run a task on which agents?', canPickMany: true },
     );
     if (!picked?.length) return;
@@ -1059,7 +1085,8 @@ export class Controller {
 
   /** Another agent first: these commands are for reaching a different one. */
   private async pickAgent(title: string, current: AgentKey): Promise<AgentKey | undefined> {
-    const order = [...AGENT_KEYS.filter((a) => a !== current && a !== 'demo'), ...AGENT_KEYS.filter((a) => a === current || a === 'demo')];
+    const shown = shownAgents(this.showDemo());
+    const order = [...shown.filter((a) => a !== current && a !== 'demo'), ...shown.filter((a) => a === current || a === 'demo')];
     return (
       await vscode.window.showQuickPick(
         order.map((a) => ({ label: AGENT_FACES[a].name, description: a === current ? 'same agent' : a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
@@ -1385,6 +1412,27 @@ export class Controller {
     void this.permissionsPanel.panel.webview.postMessage(message).then(undefined, () => {});
   }
 
+  /** Demo is a fake local agent for trying the UI; pickers offer it only when the user turned it on. */
+  private showDemo(): boolean {
+    return userSetting(vscode.workspace.getConfiguration('friedliver').inspect<unknown>('showDemoAgent')).value === true;
+  }
+
+  private roster() {
+    return rosterOf(this.showDemo(), this.accounts.records());
+  }
+
+  private postRoster(): void {
+    const message: HostMessage = { type: 'roster', roster: this.roster() };
+    for (const s of this.surfaces) post(s, message);
+  }
+
+  /** A quick pick's note for an agent: Demo's nature, or a sign-in it was last known to need. */
+  private pickHint(agent: AgentKey): string | undefined {
+    if (agent === 'demo') return 'fake local agent, no account';
+    const status = this.accounts.record(agent)?.status;
+    return status === 'needs-sign-in' ? 'needs sign-in' : status === 'not-installed' ? 'not installed' : undefined;
+  }
+
   private postDefaults(): void {
     const message: HostMessage = { type: 'defaults', defaults: this.core.agentDefaults() };
     for (const s of this.surfaces) post(s, message);
@@ -1561,6 +1609,10 @@ export class Controller {
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
     if (e.affectsConfiguration('friedliver.browser.externalClients')) void this.connectClaude(false);
+    if (e.affectsConfiguration('friedliver.showDemoAgent')) {
+      this.accounts.refresh();
+      this.postRoster();
+    }
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
         if (!this.stateFile) void this.openStateFile(false).then(() => this.stateFile?.schedule());

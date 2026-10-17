@@ -901,6 +901,39 @@ BLOCKS.HANDOFF = async () => {
   await p.close();
 };
 
+// ---- ACCOUNTS: Agents & Accounts (from main's 150040f) on the design tokens, in both 2026 themes ----
+BLOCKS.ACCOUNTS = async () => {
+  const review = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  for (const theme of ['dark', 'light']) {
+    for (const width of [1200, 640]) {
+      const p = await open(`surface=accounts&theme=${theme}-2026`, width, 1000);
+      await p.waitForSelector('.acct-card');
+      const m = await p.evaluate(() => {
+        const page = document.querySelector('.acct-page');
+        const card = document.querySelector('.acct-card');
+        const cs = (e) => window.getComputedStyle(e);
+        const root = cs(document.documentElement);
+        const h3 = document.querySelector('.acct-block h3');
+        return {
+          gutter: parseFloat(cs(page).paddingLeft),
+          want: parseFloat(root.getPropertyValue('--gutter')),
+          fullWidth: Math.round(card.getBoundingClientRect().width) === Math.round(page.clientWidth - 2 * parseFloat(cs(page).paddingLeft)),
+          radius: cs(card).borderTopLeftRadius,
+          letterSpacing: h3 ? cs(h3).letterSpacing : 'normal',
+          upper: h3 ? cs(h3).textTransform : 'none',
+          selects: document.querySelectorAll('select').length,
+        };
+      });
+      check(m.gutter === m.want && m.fullWidth, `${theme} ${width}px: the page uses the whole width with the chat's gutter [${JSON.stringify(m)}]`);
+      check(m.radius === '8px' && m.letterSpacing === 'normal' && m.upper === 'none' && !m.selects, `${theme} ${width}px: cards r8, headings without letter-spacing or capitals, no native selects`);
+      const v = await axe(p, '.acct-page');
+      if (v) check(!v.some((x) => /serious|critical/.test(x)), `${theme} ${width}px: axe finds nothing serious [${v.join(', ')}]`);
+      if (width === 1200) await p.screenshot({ path: path.join(review, `accounts-${theme}.png`), fullPage: false });
+      await p.close();
+    }
+  }
+};
+
 await run();
 await browser.close();
 server.kill();

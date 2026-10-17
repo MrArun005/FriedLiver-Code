@@ -30,6 +30,8 @@ export interface EditorHost {
   currentChat(): string | undefined;
   /** Puts a code reference into a chat's composer without sending it. */
   addToComposer(chatId: string, ref: CodeRef): void;
+  /** The agents pickers offer (Demo only when turned on); every agent when absent. */
+  shownAgents?(): AgentKey[];
   error(err: unknown): void;
 }
 
@@ -464,10 +466,10 @@ export class EditorAgent implements vscode.Disposable {
   }
 
   private async pickAgent(title: string, current?: AgentKey): Promise<AgentKey | undefined> {
-    const order = [...AGENT_KEYS].sort((a, b) => Number(b === current) - Number(a === current));
+    const order = [...(this.host.shownAgents?.() ?? AGENT_KEYS)].sort((a, b) => Number(b === current) - Number(a === current));
     const items = order.map((a) => ({
       label: AGENT_FACES[a].name,
-      description: [a === 'codex' ? 'GPT' : '', a === current ? 'last used' : '', a === 'demo' ? 'offline, no sign-in' : ''].filter(Boolean).join(' · ') || undefined,
+      description: [a === 'codex' ? 'GPT' : '', a === current ? 'last used' : '', a === 'demo' ? 'fake local agent, no account' : ''].filter(Boolean).join(' · ') || undefined,
       agent: a,
     }));
     return (await vscode.window.showQuickPick(items, { title }))?.agent;
@@ -491,7 +493,7 @@ export class EditorAgent implements vscode.Disposable {
     const items: Pick[] = [
       ...open.map((c) => ({ label: c.title, description: [c.label, c.busy ? 'working' : ''].filter(Boolean).join(' · '), chat: c })),
       { label: 'New chat', kind: vscode.QuickPickItemKind.Separator },
-      ...AGENT_KEYS.map((a) => ({ label: `$(add) New Chat with ${AGENT_FACES[a].name}`, description: a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
+      ...(this.host.shownAgents?.() ?? AGENT_KEYS).map((a) => ({ label: `$(add) New Chat with ${AGENT_FACES[a].name}`, description: a === 'demo' ? 'fake local agent, no account' : undefined, agent: a })),
     ];
     const picked = await vscode.window.showQuickPick(items, { title, matchOnDescription: true });
     if (picked?.chat) {

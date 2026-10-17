@@ -198,7 +198,16 @@ arguments are checked, and its images and output are bounded.
   `password-store` option). A key is given only to its own vendor's agent
   process, as an environment variable, which other processes running as you
   can read. Keys are never logged, persisted elsewhere, or sent to a webview.
+- **Gemini's Vertex AI settings** (project, location and an optional express
+  key) are kept the same way, as one SecretStorage entry, and given only to
+  Gemini. One key setup is kept per agent.
 - **Vendor logins** are stored by each vendor's CLI in its own config folder.
+  Sign-out goes through the agent's own ACP `logout` or its CLI, run in a
+  terminal you see; FriedLiver never deletes those files.
+- **Agents & Accounts** keeps, per agent in globalState, the last known
+  sign-in: status, adapter version, the sign-in methods it offered, the name
+  of the method last used, and the identity the agent reported (a plan label,
+  an email address, an organization or a key source; never a key).
 - **Chats** are saved per folder in VS Code's workspace storage
   (`chats.json`) while `friedliver.restoreChats` is on (the default): the last
   400 items of each chat, messages cut to 32 KB, command output to 8 KB, no
@@ -365,3 +374,4 @@ for a typical single-user desktop.
 | FL-25 | Medium | Auto-approve | New approval levels and "Always allow" rules let agents act without asking. A repository could try to turn them on, a rule could be stretched with chained commands, and an auto-answer could pick an option that changes the agent's mode for good. | Contained. The default level is machine-scoped, user settings only, and can't be Full auto. Full auto is per chat, confirmed once, shown in red everywhere, and never restored after a reload; FriedLiver still asks for outside-workspace commands and plans that reach it. Rules match only plain lines (no chaining, redirection, substitution, variables or invisible characters), live in your profile's workspace storage, and can be listed and removed. Auto-answers use only one-time allow options that don't escalate. Auto-accepted edits stay undoable. |
 | FL-26 | Low | Notifications | Command approvals were progress notifications whose only button, Cancel, denied the command, and that showed even with the card on screen; questions from a chat in another view got none. | Fixed. Real buttons (Run only for a command shown in full, Deny, Show), only when that chat isn't on screen or the window isn't focused; dismissing decides nothing; a late button press after the decision was made elsewhere does nothing; several waiting decisions collapse into one "N decisions waiting". |
 | FL-27 | Low | Setup | The install lines pointed at the deprecated `@zed-industries/*` adapters, frozen at old versions (Claude's lists "Yes, and bypass permissions" first after a plan). | Fixed. `@agentclientprotocol/claude-agent-acp` and `@agentclientprotocol/codex-acp`; Accounts shows the adapter version and says when to update. |
+| FL-28 | Low | Agents & Accounts | The new accounts page takes messages from a webview that can sign in, sign out, save keys, type lines into terminals and change defaults. A page could have been made to name another agent's method, run its own command line, read a stored key, or set a mode as a default. | Contained. Every message is checked (`parseAccountsMessage`): an agent from the fixed list (Demo only when shown), a method id the agent itself offered at its last check, a key setup that agent has, a terminal line by name only (FriedLiver's own install, sign-in and sign-out constants, plain characters only, run when you press Run in terminal), and only a model or effort its last session offered. Keys are asked for in the editor's own password boxes and stored in SecretStorage; the page gets only "set"/"not set". An agent's `_auth/status_update` is reduced to a known kind and short one-line texts and only shown. `friedliver.showDemoAgent` and the agent commands stay `machine` scope, read from user settings only. |

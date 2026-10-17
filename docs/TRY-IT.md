@@ -21,6 +21,10 @@ Report: anything other than the Agents panel on the right with "Start a chat".
 
 ## 2. Warm up with the Demo agent (1 minute)
 
+The Demo agent is a fake local agent, hidden from the pickers until you turn
+on **Settings → `friedliver.showDemoAgent`** (Help → Welcome's "Start a Demo
+Chat" works without it).
+
 1. Click **Demo**. The chips under the message box fill in at once: **Ask**,
    the model (**Smart**) and the effort (**Medium**).
 2. Type `tour` and press Enter. When "New file to review" appears, press
@@ -47,13 +51,17 @@ If you installed `@zed-industries/claude-agent-acp` or `@zed-industries/codex-ac
 before, install the new package instead: the old ones are deprecated and
 Claude's has no effort option.
 
-Then in FriedLiver: **Accounts** (bottom of the Agents panel) → **Check** next to
-the agent → its sign-in button. Claude opens a terminal: type `/login`,
-approve on claude.ai, then `/exit`. Codex and Gemini open your browser.
-Accounts shows the adapter version next to "Signed in".
+Then in FriedLiver: **FriedLiver: Agents & Accounts** (command palette, the
+Accounts view's title, or **Agents & Accounts…** in the New chat menu) →
+**Check** on the agent's card → one of its sign-in buttons, or **Set…** for an
+API key (Gemini also has Vertex AI). Claude's subscription login opens a
+terminal: approve on claude.ai and it closes. Codex (ChatGPT) and Gemini (Log in
+with Google) open your browser. The card shows "Signed in", the adapter version,
+the account when the agent reports it, and the models for new chats.
 
 Report: the exact message if Check says "not installed" after installing, if
-sign-in doesn't finish, or if Accounts says to update right after installing.
+sign-in doesn't finish, if the card shows the wrong account, or if it says to
+update right after installing.
 
 ## 4. Use it (3 minutes)
 
