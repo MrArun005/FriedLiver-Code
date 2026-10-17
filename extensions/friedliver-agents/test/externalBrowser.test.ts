@@ -16,7 +16,7 @@ describe('the external token file', () => {
     const first = await writeTokenFile(storage, 'http://127.0.0.1:1/mcp', T1);
     expect((await stat(first)).mode & 0o777).toBe(0o600);
     expect((await stat(path.dirname(first))).mode & 0o777).toBe(0o700);
-    expect(JSON.parse(await readFile(first, 'utf8'))).toEqual({ url: 'http://127.0.0.1:1/mcp', token: T1 });
+    expect(JSON.parse(await readFile(first, 'utf8'))).toEqual({ url: 'http://127.0.0.1:1/mcp', token: T1, pid: process.pid });
     const second = await writeTokenFile(storage, 'http://127.0.0.1:2/mcp', T2);
     expect(second).toBe(first);
     expect(JSON.parse(await readFile(second, 'utf8')).token).toBe(T2);

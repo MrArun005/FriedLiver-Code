@@ -15,16 +15,16 @@ export const SERVER_NAME = 'friedliver-browser';
 const DIR = 'external';
 
 /**
- * Writes `{ url, token }` to `<storage>/external/browser-token.json`, 0600 in a 0700 folder made fresh
+ * Writes `{ url, token, pid }` (pid: the process serving url) to `<storage>/external/browser-token.json`, 0600 in a 0700 folder made fresh
  * (earlier launches' files go first, created with wx), so only this launch's token is ever on disk.
  */
-export async function writeTokenFile(storage: string, url: string, token: string): Promise<string> {
+export async function writeTokenFile(storage: string, url: string, token: string, pid = process.pid): Promise<string> {
   await removeTokenFile(storage);
   const dir = path.join(storage, DIR);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
   const file = path.join(dir, 'browser-token.json');
-  await writeFile(file, JSON.stringify({ url, token }), { mode: 0o600, flag: 'wx' });
+  await writeFile(file, JSON.stringify({ url, token, pid }), { mode: 0o600, flag: 'wx' });
   return file;
 }
 

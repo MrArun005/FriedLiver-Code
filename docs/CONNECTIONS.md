@@ -175,8 +175,10 @@ terminal, reach the browser tools (and only those) through an MCP server named
   removed first. Nothing else in the file changes; the old file is kept as
   `~/.claude.json.friedliver-backup`, and the new one is written to a temp file
   and renamed (through a symlink, if it is one).
-- `externalStdio.js` reads the token file on every request. It never sends the
-  token: it signs a fresh nonce and its session id with it (HMAC-SHA256), and
+- `externalStdio.js` reads the token file (which also holds FriedLiver's pid)
+  on every request; a dead pid means no network call at all. Before the first
+  message to a url+pid it does a body-less handshake: the server must sign the
+  client's nonce with the token, or nothing is sent. It never sends the token: it signs a fresh nonce and its session id with it (HMAC-SHA256), and
   forwards an answer only if the server signs the nonce back. A process that
   took over a stale port learns nothing and its answers are dropped. No file, no
   server, or a wrong proof gives "FriedLiver isn't running".
