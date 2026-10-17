@@ -3,7 +3,7 @@ import { parentPort } from 'node:worker_threads';
 import { downscalePng } from './png';
 
 parentPort?.on('message', (m: { id: number; png: Uint8Array; max: number }) => {
-  let out: Buffer | null = null;
+  let out: Buffer | null;
   try {
     out = downscalePng(Buffer.from(m.png.buffer, m.png.byteOffset, m.png.byteLength), m.max);
   } catch {

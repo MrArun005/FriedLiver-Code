@@ -6,6 +6,10 @@ import { crc32, deflateSync, inflateSync } from 'node:zlib';
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /** Bigger than this (8K × 8K) is not decoded: its pixels alone would be a quarter of a gigabyte. */
 export const MAX_PIXELS = 64 * 1024 * 1024;
+/** Nor a side longer than this, whatever the other side. */
+export const MAX_SIDE = 16384;
+/** Nor rows that inflate to more than this (16-bit RGBA is 8 bytes a pixel): checked before inflating. */
+export const MAX_DECODED = 64 * 1024 * 1024;
 
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 
@@ -20,22 +24,48 @@ export function pngSize(bytes: Buffer): PngSize | null {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
+/** The bit depths each colour type has (PNG spec, table 11.1). */
+const DEPTHS: Record<number, number[]> = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
+
+export interface PngLimits extends PngSize {
+  depth: number;
+  color: number;
+  /** Bytes of one row, without its filter byte. */
+  stride: number;
+  /** Bytes the image data inflates to: (stride + 1) × height. */
+  decoded: number;
+}
+
 /**
- * The image scaled to fit `max` × `max` (box average, alpha-weighted), as a new
- * 8-bit RGBA PNG; null when it already fits, or can't be read here (interlaced,
- * damaged, a bit depth PNG doesn't have, or more than MAX_PIXELS).
+ * The header's numbers when this decoder takes the image: a colour type and
+ * bit depth PNG has, not interlaced, each side at most MAX_SIDE, at most
+ * MAX_PIXELS pixels and MAX_DECODED inflated bytes. Otherwise null: nothing
+ * past the header is read.
  */
-export function downscalePng(bytes: Buffer, max: number): Buffer | null {
+export function pngLimits(bytes: Buffer): PngLimits | null {
   const size = pngSize(bytes);
-  if (!size) return null;
-  const { width: w, height: h } = size;
-  if (!w || !h || w * h > MAX_PIXELS || (w <= max && h <= max)) return null;
+  if (!size || bytes.length < 29) return null;
+  const { width, height } = size;
   const depth = bytes[24];
   const color = bytes[25];
+  if (!DEPTHS[color]?.includes(depth) || bytes[26] !== 0 || bytes[27] !== 0 || bytes[28] !== 0) return null;
+  if (!width || !height || width > MAX_SIDE || height > MAX_SIDE || width * height > MAX_PIXELS) return null;
+  const stride = Math.ceil((width * CHANNELS[color] * depth) / 8);
+  const decoded = (stride + 1) * height;
+  return decoded > MAX_DECODED ? null : { width, height, depth, color, stride, decoded };
+}
+
+/**
+ * The image scaled to fit `max` × `max` (box average, alpha-weighted), as a new
+ * 8-bit RGBA PNG; null when it already fits, or can't be read here (see
+ * pngLimits; or damaged, or its data is cut short).
+ */
+export function downscalePng(bytes: Buffer, max: number): Buffer | null {
+  const limits = pngLimits(bytes);
+  if (!limits) return null;
+  const { width: w, height: h, depth, color, stride } = limits;
+  if (w <= max && h <= max) return null;
   const channels = CHANNELS[color];
-  if (!channels || bytes[28] !== 0 || ![1, 2, 4, 8, 16].includes(depth)) return null;
-  if ((color === 2 || color === 4 || color === 6) && depth < 8) return null;
-  if (color === 3 && depth === 16) return null;
 
   let palette: Buffer | undefined;
   let alphas: Buffer | undefined;
@@ -53,17 +83,15 @@ export function downscalePng(bytes: Buffer, max: number): Buffer | null {
   }
   if (color === 3 && !palette) return null;
 
-  const bitsPerPixel = channels * depth;
-  const stride = Math.ceil((w * bitsPerPixel) / 8);
-  const bpp = Math.max(1, bitsPerPixel >> 3);
+  const bpp = Math.max(1, (channels * depth) >> 3);
   let raw: Buffer;
   try {
-    // The cap stops a small file that inflates to gigabytes.
-    raw = inflateSync(Buffer.concat(idat), { maxOutputLength: (stride + 1) * h });
+    // At most what the header promised (itself at most MAX_DECODED): a small file can't inflate to gigabytes.
+    raw = inflateSync(Buffer.concat(idat), { maxOutputLength: limits.decoded });
   } catch {
     return null;
   }
-  if (raw.length < (stride + 1) * h) return null;
+  if (raw.length < limits.decoded) return null;
 
   const scale = max / Math.max(w, h);
   const tw = Math.max(1, Math.round(w * scale));

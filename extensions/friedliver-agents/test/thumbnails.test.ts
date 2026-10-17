@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { crc32, deflateSync, inflateSync } from 'node:zlib';
 import { afterAll, describe, expect, it } from 'vitest';
-import { MAX_IMAGE_FILE_BYTES, MAX_PREVIEW_BYTES, THUMB_PX, imageThumb, thumbKey, workerScaler } from '../src/host/imageAccess';
-import { MAX_PIXELS, downscalePng, encodeRgba, pngSize } from '../src/host/png';
+import { MAX_IMAGE_FILE_BYTES, MAX_PREVIEW_BYTES, THUMB_CACHE_BYTES, THUMB_PX, imageThumb, pruneThumbs, thumbKey, workerScaler } from '../src/host/imageAccess';
+import { MAX_DECODED, MAX_PIXELS, MAX_SIDE, downscalePng, encodeRgba, pngLimits, pngSize } from '../src/host/png';
 
 /** Filters a row the way an encoder would, so the decoder's unfiltering is exercised for every type. */
 function filterRow(type: number, row: Buffer, prev: Buffer, bpp: number): Buffer {
@@ -20,6 +20,7 @@ function filterRow(type: number, row: Buffer, prev: Buffer, bpp: number): Buffer
   return out;
 }
 
+const crc = (type: string, data: Buffer) => crcChunk(type, data);
 function crcChunk(type: string, data: Buffer): Buffer {
   const head = Buffer.alloc(8);
   head.writeUInt32BE(data.length, 0);
@@ -234,5 +235,106 @@ describe('scaling off the extension host thread', () => {
       scale.dispose();
       fs.rmSync(path.dirname(out), { recursive: true, force: true });
     }
+  });
+});
+
+describe('a crafted PNG cannot exhaust the extension host', () => {
+  it('refuses a side over 16384 even when the pixel count is small', () => {
+    expect(pngLimits(png(400, 1, 2, 8, [Buffer.alloc(1200)]))).not.toBeNull();
+    const wide = png(400, 1, 2, 8, [Buffer.alloc(1200)]);
+    wide.writeUInt32BE(MAX_SIDE + 1, 16);
+    expect(pngLimits(wide)).toBeNull();
+    expect(downscalePng(wide, THUMB_PX)).toBeNull();
+    const tall = png(400, 1, 2, 8, [Buffer.alloc(1200)]);
+    tall.writeUInt32BE(1, 16);
+    tall.writeUInt32BE(MAX_SIDE + 1, 20);
+    expect(pngLimits(tall)).toBeNull();
+  });
+
+  it('refuses a 16-bit RGBA header whose rows would inflate past 64 MB, before inflating', () => {
+    // 4096 × 4096 is under the pixel cap, but 8 bytes a pixel is 128 MB of rows.
+    const bomb = png(400, 1, 2, 8, [Buffer.alloc(1200)]);
+    bomb.writeUInt32BE(4096, 16);
+    bomb.writeUInt32BE(4096, 20);
+    bomb[24] = 16;
+    bomb[25] = 6;
+    expect(pngLimits(bomb)).toBeNull();
+    const t = performance.now();
+    expect(downscalePng(bomb, THUMB_PX)).toBeNull();
+    expect(performance.now() - t).toBeLessThan(50);
+    // The same size at 8-bit grey (16 MB of rows) is fine.
+    bomb[24] = 8;
+    bomb[25] = 0;
+    expect(pngLimits(bomb)?.decoded).toBe((4096 + 1) * 4096);
+    expect(MAX_DECODED).toBe(64 * 1024 * 1024);
+  });
+
+  it('refuses bit depths and colour types PNG does not have', () => {
+    for (const [depth, color] of [[3, 0], [8, 5], [4, 2], [16, 3], [32, 6]]) {
+      const bad = png(400, 1, 2, 8, [Buffer.alloc(1200)]);
+      bad[24] = depth;
+      bad[25] = color;
+      expect(pngLimits(bad), `${depth}/${color}`).toBeNull();
+    }
+  });
+
+  it('a truncated IDAT is no thumbnail, and the card shows the name only', async () => {
+    const w = 400, h = 400;
+    const full = png(w, h, 2, 8, Array.from({ length: h }, (_, y) => Buffer.from(Array.from({ length: w * 3 }, (_, i) => (i * y) & 255))));
+    // Cut the compressed data in half and fix up the chunk length, so the chunk walk is happy and inflate is not.
+    const idatAt = full.indexOf('IDAT') - 4;
+    const len = full.readUInt32BE(idatAt);
+    const cut = Buffer.concat([full.subarray(0, idatAt), crc(`IDAT`, full.subarray(idatAt + 8, idatAt + 8 + (len >> 1))), crc('IEND', Buffer.alloc(0))]);
+    expect(downscalePng(cut, THUMB_PX)).toBeNull();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-trunc-'));
+    fs.writeFileSync(path.join(dir, 'cut.png'), cut);
+    expect(await imageThumb(path.join(dir, 'cut.png'), [dir], path.join(dir, '.c'))).toBeNull();
+  });
+
+  it('a worker that runs too long or out of memory is stopped; the next one works', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-slow-'));
+    const spin = path.join(dir, 'spin.js');
+    fs.writeFileSync(spin, "require('node:worker_threads').parentPort.on('message', () => { for (;;) {} });");
+    const slow = workerScaler(spin, { timeoutMs: 200 });
+    const t = performance.now();
+    expect(await slow(Buffer.from('x'), THUMB_PX)).toBeNull();
+    expect(performance.now() - t).toBeLessThan(2000);
+    slow.dispose();
+
+    const hog = path.join(dir, 'hog.js');
+    fs.writeFileSync(hog, "require('node:worker_threads').parentPort.on('message', () => { const a = []; for (;;) a.push(new Array(1e6).fill(1)); });");
+    const greedy = workerScaler(hog, { timeoutMs: 20_000, maxOldMb: 32, maxYoungMb: 8 });
+    expect(await greedy(Buffer.from('x'), THUMB_PX)).toBeNull();
+    greedy.dispose();
+  }, 30_000);
+});
+
+describe('the thumbnail cache stays under its cap', () => {
+  it('drops the least recently used thumbnails first', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-prune-'));
+    for (const [name, age] of [['old', 300], ['used', 100], ['mid', 200], ['new', 10]] as const) {
+      const f = path.join(dir, `${name}.png`);
+      fs.writeFileSync(f, Buffer.alloc(1000));
+      const when = new Date(Date.now() - age * 1000);
+      fs.utimesSync(f, when, when);
+    }
+    fs.writeFileSync(path.join(dir, 'not-a-thumb.txt'), Buffer.alloc(5000));
+    await pruneThumbs(dir, 2500);
+    expect(fs.readdirSync(dir).sort()).toEqual(['new.png', 'not-a-thumb.txt', 'used.png']);
+    expect(THUMB_CACHE_BYTES).toBe(200 * 1024 * 1024);
+  });
+
+  it('a cache hit counts as a use', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-hit-'));
+    const f = path.join(dir, 'a.png');
+    const rows = Array.from({ length: 400 }, () => Buffer.alloc(1200, 9));
+    fs.writeFileSync(f, png(400, 400, 2, 8, rows));
+    const cache = path.join(dir, '.c');
+    await imageThumb(f, [dir], cache);
+    const [thumb] = fs.readdirSync(cache);
+    const past = new Date(Date.now() - 3600_000);
+    fs.utimesSync(path.join(cache, thumb), past, past);
+    await imageThumb(f, [dir], cache);
+    expect(fs.statSync(path.join(cache, thumb)).mtimeMs).toBeGreaterThan(Date.now() - 60_000);
   });
 });
