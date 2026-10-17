@@ -823,7 +823,8 @@ async function shoot() {
     const p = await open('surface=tasks&view=board', 1440, 900);
     check(await p.locator('[data-nav="chat-c6"] .auto-badge').isVisible(), 'a Full auto task shows its badge');
     await p.click('.approval-seg [data-level="edits"]');
-    await p.selectOption('.task-options select[aria-label="Claude Model"]', 'small');
+    await p.click('.task-options button[aria-label^="Claude Model"]');
+    await p.click('.popover [role="menuitemradio"][data-value="small"]');
     await p.fill('.new-task textarea', 'Tidy the README');
     await p.press('.new-task textarea', 'Enter');
     const task = (await posted(p)).find((m) => m.type === 'createTask');

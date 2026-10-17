@@ -478,6 +478,33 @@ BLOCKS.F15 = async () => {
   await p.close();
 };
 
+// ---- F16: the Manager's model/effort pickers are our menus; the Light search box is visible ----
+BLOCKS.F16 = async () => {
+  const p = await open('surface=tasks&theme=dark-2026&view=board', 1200, 900);
+  check(!(await p.locator('select').count()), 'no native <select> on the Manager');
+  const pick = p.locator('.task-options button[aria-haspopup="menu"]').first();
+  check((await pick.count()) === 1, 'the model picker is a menu button');
+  if (await pick.count()) {
+    await pick.click();
+    const items = p.locator('.popover [role="menuitemradio"]');
+    check((await items.count()) > 1 && (await p.locator('.popover [role="menuitemradio"][aria-checked="true"]').count()) === 1, 'it lists the choices with the current one checked');
+    const want = (await items.nth(1).locator('.grow').innerText()).trim();
+    await items.nth(1).click();
+    const label = (await pick.innerText()).trim();
+    check(label === want && !(await items.count()), `the button shows the new choice [${label}]`);
+  }
+  await p.close();
+  const l = await open('surface=tasks&theme=light-2026&view=board', 1200, 900);
+  const look = await l.locator('.mgr-head .search').evaluate((s) => {
+    const cs = window.getComputedStyle(s);
+    const page = window.getComputedStyle(document.body).backgroundColor;
+    return { bg: cs.backgroundColor, page, border: cs.borderTopWidth + ' ' + cs.borderTopColor };
+  });
+  check(look.bg !== look.page || !look.border.startsWith('0px'), `Light 2026 search box stands out from the page [${JSON.stringify(look)}]`);
+  check(!look.border.startsWith('0px'), 'and has a border');
+  await l.close();
+};
+
 await run();
 await browser.close();
 server.kill();

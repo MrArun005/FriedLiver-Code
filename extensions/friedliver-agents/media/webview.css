@@ -10,6 +10,7 @@
   /* Surfaces */
   --bg: var(--vscode-editor-background, #121314);
   --input-bg: var(--vscode-input-background, #191a1b);
+  --field-border: transparent;
   --menu-bg: var(--vscode-menu-background, #202122);
   --dialog-bg: var(--vscode-sideBar-background, #191a1b);
   --code-bg: var(--vscode-textCodeBlock-background, #242526);
@@ -135,6 +136,7 @@ body.vscode-high-contrast-light {
   --option-ring: #0000001a;
   --decision-soft: color-mix(in srgb, var(--decision) 9%, transparent);
   --decision-line: color-mix(in srgb, var(--decision) 50%, transparent);
+  --field-border: color-mix(in srgb, var(--fg-2) 40%, transparent);
 }
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
@@ -975,6 +977,10 @@ button.count-item .icon {
 }
 .mgr-head .search {
   width: min(320px, 100%);
+}
+/* A field on the page in every theme: Light themes' input fill is the page's own white, so it gets an outline. */
+.search {
+  border: 1px solid var(--field-border);
 }
 
 .new-task {
@@ -2169,10 +2175,13 @@ svg[data-lit] .map-file-line:not(.lit) {
   align-items: center;
   gap: var(--sp-1);
 }
-.mini-select {
+button.mini-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   height: 24px;
   max-width: 130px;
-  padding: 0 var(--sp-1);
+  padding: 0 var(--sp-1) 0 var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--r-4);
   color: var(--fg-2);
