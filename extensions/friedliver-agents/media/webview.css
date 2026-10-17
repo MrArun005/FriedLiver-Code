@@ -3937,6 +3937,8 @@ body[data-surface='chat'] .md > :first-child {
   background: var(--c-surface2);
   box-shadow: 0 0 0 1px var(--c-line);
   pointer-events: none;
+}
+
 /* A subagent inside the chat that launched it: one line until opened, then its steps and answer. */
 .sa-card {
   align-self: stretch;
