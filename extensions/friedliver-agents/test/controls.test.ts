@@ -148,6 +148,27 @@ describe('what the agent advertises', () => {
     expect(c.chat(second.id)!.session?.commands.map((x) => x.name)).toEqual(['help', 'compact', 'review']);
   });
 
+  it('says the agent is starting until its session is live', async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir);
+    const chat = await c.createChat('demo');
+    expect(c.chat(chat.id)!.session).toMatchObject({ live: false, starting: true });
+    await waitFor(() => live(c, chat.id));
+    expect(c.chat(chat.id)!.session!.starting).toBeFalsy();
+  });
+
+  it('shows a failed start with Try again, every time, and Try again starts it again', async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir, { agentCommand: () => ({ command: path.join(dir, 'no-such-agent'), args: [] }) });
+    const chat = await c.createChat('claude');
+    const notices = () => c.chat(chat.id)!.items.filter((i) => i.kind === 'notice' && i.tone === 'error');
+    await waitFor(() => notices().length === 1);
+    expect(c.chat(chat.id)!.session?.starting).toBeFalsy();
+    expect(notices()[0]).toMatchObject({ actions: expect.arrayContaining([{ label: 'Try again', do: 'retry' }]) });
+    await c.retry(chat.id);
+    await waitFor(() => notices().length === 2);
+  });
+
   it('applies a new task’s choices when its session starts', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);

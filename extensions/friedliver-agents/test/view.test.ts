@@ -409,3 +409,12 @@ describe('"/" commands', () => {
     expect(slashAction('hello', me, all, [])).toBeNull();
   });
 });
+
+describe('a starting agent', () => {
+  it('says so on the card until the session is live', () => {
+    const starting = chat('a', { agent: 'codex', session: { options: [], commands: [], live: false, starting: true } });
+    expect(cardLine(state([starting]), starting).text).toBe('Starting Codex…');
+    const started = { ...starting, session: { ...starting.session!, live: true, starting: false } };
+    expect(cardLine(state([started]), started).text).not.toContain('Starting');
+  });
+});

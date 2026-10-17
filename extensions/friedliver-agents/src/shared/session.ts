@@ -65,6 +65,8 @@ export interface ChatSession {
   steering?: boolean;
   /** False for a session from an earlier window: its agent starts again with the next message. */
   live: boolean;
+  /** The agent is starting this session now, before the chat's first message. */
+  starting?: boolean;
   /** The adapter's name and version, from `initialize`. */
   agent?: { name: string; version: string };
 }
