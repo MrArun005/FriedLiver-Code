@@ -3378,11 +3378,6 @@ body[data-surface='chat'] {
   --c-ok: var(--vscode-charts-green);
   --c-warn: var(--vscode-charts-yellow);
   --c-bad: var(--vscode-errorForeground);
-  /* The composer's border names the approval mode; blue ring on focus. */
-  --c-mode-ask: var(--c-mute);
-  --c-mode-edits: var(--vscode-charts-yellow);
-  --c-mode-full: var(--vscode-charts-purple, #b180d7);
-  --c-focus: var(--vscode-focusBorder, #3794ff);
   /* palette:end */
   --t-xs: calc(var(--fl-font-size) - 2px);
   --t-sm: calc(var(--fl-font-size) - 1px);
@@ -3398,8 +3393,6 @@ body.vscode-light[data-surface='chat'],
 body.vscode-high-contrast-light[data-surface='chat'] {
   /* palette-light:start */
   --c-acc: color-mix(in srgb, var(--fl-accent, var(--vscode-button-background)) 75%, black);
-  --c-mode-edits: color-mix(in srgb, var(--vscode-charts-yellow) 75%, black);
-  --c-mode-full: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 75%, black);
   /* palette-light:end */
 }
 body.vscode-high-contrast[data-surface='chat'],
@@ -4373,191 +4366,527 @@ body[data-surface='chat'] .ask .actions button.sm.danger {
   text-decoration: underline;
 }
 
-/* The composer: a centred box of a fixed comfortable width (the transcript stays full width).
-   Its 1px border names the approval mode; focus adds a 2px blue ring outside it. */
+
+/* ---- The composer, laid out like Claude Code's: chips on top, the message, then one row of controls.
+   A rounded box, 640px at most and centred (the transcript stays full width); orange border on focus. ---- */
 body[data-surface='chat'] .composer {
+  position: relative;
   width: min(640px, calc(100% - 32px));
-  margin: 0 auto 24px;
-  border-color: var(--c-mode-ask);
+  margin: 0 auto 16px;
+  padding: 0;
+  gap: 0;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-surface);
 }
-body[data-surface='chat'] .composer[data-mode='edits'] {
-  border-color: var(--c-mode-edits);
+body[data-surface='chat'] .composer:focus-within,
+body[data-surface='chat'] .composer[data-menu] {
+  border-color: var(--c-acc);
 }
-body[data-surface='chat'] .composer[data-mode='full'] {
-  border-color: var(--c-mode-full);
+body[data-surface='chat'] .composer > .refs,
+body[data-surface='chat'] .composer > .cc-chips {
+  padding: 6px 6px 0;
 }
-body[data-surface='chat'] .composer:focus-within {
-  border-color: var(--c-mode-ask);
-  box-shadow: 0 0 0 2px var(--c-focus);
-}
-body[data-surface='chat'] .composer[data-mode='edits']:focus-within {
-  border-color: var(--c-mode-edits);
-}
-body[data-surface='chat'] .composer[data-mode='full']:focus-within {
-  border-color: var(--c-mode-full);
-}
-@media (max-width: 640px) {
-  body[data-surface='chat'] .composer {
-    margin: 0 auto 16px;
-  }
-}
-body[data-surface='chat'] .chip-tone[data-tone='edits'],
-body[data-surface='chat'] .chip-tone[data-tone='auto'] {
-  background: var(--c-mode-edits);
-}
-body[data-surface='chat'] .chip-tone[data-tone='full'] {
-  background: var(--c-mode-full);
-}
-body[data-surface='chat'] .chip-tone[data-tone='quiet'] {
-  background: var(--c-mode-ask);
-}
-body[data-surface='chat'] .composer-bar .usage {
-  color: var(--c-mute);
-}
-.mic-hint a {
-  color: var(--c-link);
-}
-/* Full auto is purple, not red: red stays for errors and Stop. */
-body[data-surface='chat'] .approval-chip:has(.chip-tone[data-tone='full']),
-body[data-surface='chat'] .popover .menu-full .menu-label {
-  color: var(--c-mode-full);
-  border-color: color-mix(in srgb, var(--c-mode-full) 45%, transparent);
-}
-/* The control row: a left group (attach, mode, model, effort) that shrinks and wraps among itself,
-   and a right group (usage, Stop, mic, send) pinned to the right end of the first row. */
-body[data-surface='chat'] .composer-bar {
-  flex-wrap: nowrap;
-  align-items: flex-start;
-}
-body[data-surface='chat'] .composer-bar .bar-left {
-  flex: 1 1 0;
-  min-width: 0;
+.cc-chips {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 6px !important;
+  border-bottom: 1px solid var(--c-line);
+}
+body[data-surface='chat'] .cc-chips .thumb.cc-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 4px var(--sp-2);
+  gap: 6px;
+  width: auto;
+  height: 26px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  font-size: var(--t-sm);
+  font-weight: 500;
 }
-body[data-surface='chat'] .composer-bar .bar-left .session-controls {
-  display: contents;
+body[data-surface='chat'] .cc-chips .thumb.cc-chip img {
+  width: 16px;
+  height: 12px;
+  object-fit: cover;
+  border-radius: 2px;
 }
-body[data-surface='chat'] .composer-bar .bar-left button.chip-btn {
-  max-width: 100%;
-  overflow: hidden;
+.cc-mute {
+  color: var(--c-mute);
+  font-weight: 400;
 }
-body[data-surface='chat'] .composer-bar .bar-left .chip-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.cc-input {
+  position: relative;
+  display: flex;
 }
-body[data-surface='chat'] .composer-bar .bar-right {
-  flex: none;
+body[data-surface='chat'] .composer .cc-input textarea {
+  flex: 1;
+  padding: 10px 40px 10px 12px;
+  font-size: calc(var(--fl-font-size) + 2px);
+  line-height: 1.5;
+}
+button.cc-mic {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-mute);
+}
+button.cc-mic:hover {
+  color: var(--c-text);
+  background: var(--c-surface2);
+}
+body[data-surface='chat'] .composer .mic-hint,
+body[data-surface='chat'] .composer .composer-queued {
+  padding: 0 12px 6px;
+}
+body[data-surface='chat'] .composer-bar {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 8px;
+  padding: 6px 6px 6px 8px;
+  border-top: 1px solid var(--c-line);
 }
-body[data-surface='chat'] .composer-bar .bar-left .composer-hint {
+body[data-surface='chat'] .composer-bar .bar-left {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+body[data-surface='chat'] .composer-bar .bar-right {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+body[data-surface='chat'] .composer-bar .composer-hint {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The row is minimal: attach left; Stop, agents, usage/settings, mode icon and send right. */
-body[data-surface='chat'] .composer-bar .bar-right {
-  gap: 2px;
-}
-.mode-icon {
+button.cc-icon-btn {
+  flex: none;
   display: inline-flex;
-}
-.mode-icon[data-mode='ask'] {
-  color: var(--c-mode-ask);
-}
-.mode-icon[data-mode='edits'] {
-  color: var(--c-mode-edits);
-}
-.mode-icon[data-mode='full'] {
-  color: var(--c-mode-full);
-}
-body[data-surface='chat'] .composer-bar button.chip-btn.stop-btn {
-  color: var(--c-bad);
-}
-body[data-surface='chat'] .composer-bar .agents-btn {
-  gap: 4px;
-  padding: 0 8px;
-  font-variant-numeric: tabular-nums;
-}
-.usage-pop .popover {
-  width: 300px;
-  padding: 4px 0;
-}
-.usage-rows {
-  display: grid;
-}
-.usage-row {
-  display: grid;
-  gap: 4px;
-  padding: 8px 12px;
-  color: var(--c-text);
-  font-size: var(--t-sm);
-}
-.usage-row + .usage-row {
-  border-top: 1px solid var(--c-line);
-}
-.usage-row .hint {
-  color: var(--c-mute);
-}
-.usage-label {
-  color: var(--c-mute);
-  font-size: var(--t-xs);
-}
-.usage-row .pop {
-  justify-self: start;
-}
-.segmented {
-  display: flex;
-  border: 1px solid var(--c-line);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.segmented button {
-  flex: 1;
-  padding: 3px 6px;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   background: none;
   color: var(--c-soft);
-  font-size: var(--t-xs);
 }
-.segmented button + button {
-  border-left: 1px solid var(--c-line);
+button.cc-icon-btn:hover:not(:disabled) {
+  color: var(--c-text);
+  background: var(--c-surface2);
 }
-.segmented button[aria-checked='true'] {
+button.cc-icon-btn .icon {
+  width: 17px;
+  height: 17px;
+}
+button.cc-icon-btn.stop-btn {
+  color: var(--c-bad);
+}
+button.cc-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
   background: var(--c-surface2);
   color: var(--c-text);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.cc-pill:hover {
+  background: color-mix(in srgb, var(--c-text) 14%, var(--c-bg));
+}
+button.cc-agents {
+  flex: none;
+}
+button.cc-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+button.cc-mode:hover,
+.composer[data-menu='modes'] button.cc-mode {
+  background: var(--c-surface2);
+}
+.composer[data-menu='modes'] button.cc-mode {
+  border-color: var(--c-acc);
+}
+body[data-surface='chat'] .composer-bar button.send-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--fl-accent, #d97757);
+}
+body[data-surface='chat'] .composer-bar button.send-btn:disabled {
+  opacity: 0.55;
+}
+body[data-surface='chat'] .composer-bar button.send-btn .icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+@container (max-width: 420px) {
+  body[data-surface='chat'] .composer-bar button.cc-mode {
+    font-size: 0;
+    gap: 0;
+  }
+}
+
+/* The menus open above the composer, as wide as it (Modes is narrower, at the right). */
+.cc-menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  max-height: min(70vh, 520px);
+  padding: 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  color: var(--c-text);
+  font-size: calc(var(--fl-font-size) + 1px);
+}
+.cc-modes-menu {
+  left: auto;
+  width: min(420px, 100%);
+}
+.cc-menu-scroll {
+  min-height: 0;
+  overflow-y: auto;
+}
+.cc-menu-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 8px;
+  color: var(--c-mute);
+}
+.cc-keys {
+  font-size: var(--t-sm);
+}
+.cc-keys kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-surface2);
+  color: var(--c-soft);
+  font-family: inherit;
+  font-size: var(--t-xs);
+}
+.cc-menu-sub {
+  padding: 8px 10px 4px;
+  color: var(--c-mute);
+  font-size: var(--t-sm);
+}
+.cc-menu-section + .cc-menu-section,
+.cc-menu-foot,
+.cc-modes-menu .cc-menu-section {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--c-line);
+}
+button.cc-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  text-align: left;
+  font-size: inherit;
+}
+button.cc-item:hover,
+button.cc-item:focus-visible,
+button.cc-item[aria-checked='true'] {
+  background: var(--c-surface2);
+  outline: none;
+}
+button.cc-item > .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--c-soft);
+}
+button.cc-item > .icon:last-child {
+  margin-left: auto;
+  color: var(--c-text);
+}
+button.cc-item-line {
+  justify-content: space-between;
+}
+button.cc-item-small {
+  padding: 5px 10px 5px 40px;
+  font-size: var(--t-sm);
+}
+.cc-item-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.cc-item-desc {
+  color: var(--c-mute);
+  font-size: var(--t-sm);
+}
+.cc-pad {
+  padding: 8px 10px;
+}
+.cc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+}
+.cc-row > .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--c-soft);
+}
+.cc-row-name {
+  flex: 1;
+}
+.cc-dots {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 136px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 11px;
+  background: var(--c-surface2);
+  cursor: pointer;
+}
+.cc-dots:focus-visible {
+  outline: 1px solid var(--c-acc);
+}
+.cc-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--c-mute);
+}
+.cc-dot[data-on] {
+  width: 16px;
+  height: 16px;
+  background: var(--c-text);
+}
+button.cc-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-surface2);
+}
+button.cc-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--c-soft);
+  transition: left 0.12s;
+}
+button.cc-switch[aria-checked='true'] {
+  background: var(--fl-accent, #d97757);
+}
+button.cc-switch[aria-checked='true']::after {
+  left: 16px;
+  background: #fff;
+}
+.cc-search {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  font: inherit;
+  outline: none;
+}
+
+/* Agent map: a modal, this chat on the left and its agents on the right. */
+.cc-overlay {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+.cc-map {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 100%);
+  max-height: min(80vh, 760px);
+  padding: 20px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+.cc-map-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.cc-map-title {
+  font-size: calc(var(--fl-font-size) + 4px);
   font-weight: 600;
 }
-.agents-pop .popover {
-  min-width: 280px;
-  max-width: 360px;
+.cc-map-sub {
+  margin-top: 6px;
+  color: var(--c-soft);
 }
-.agent-row {
-  display: grid !important;
-  grid-template-columns: auto 1fr auto;
-  column-gap: 8px;
-  row-gap: 2px;
+button.cc-map-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-soft);
+}
+.cc-map-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 36px;
+  min-height: 0;
+  margin-top: 16px;
+  overflow-y: auto;
+}
+.cc-map-parent {
+  display: flex;
   align-items: center;
-  height: auto !important;
-  padding-top: 6px !important;
-  padding-bottom: 6px !important;
 }
-.agent-row .menu-label {
+.cc-map-parent .cc-map-node {
+  width: 100%;
+}
+.cc-map-children {
+  display: grid;
+  gap: 10px;
+  padding-left: 18px;
+  border-left: 1px solid var(--c-line);
+}
+.cc-map-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  text-align: left;
+  font: inherit;
+}
+button.cc-map-node:hover {
+  border-color: var(--c-soft);
+}
+.cc-map-node .dot {
+  margin-top: 6px;
+}
+.cc-map-text {
+  display: grid;
+  min-width: 0;
+}
+.cc-map-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-row .menu-sub {
-  grid-column: 2 / -1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.cc-map-meta {
+  color: var(--c-mute);
+  font-size: var(--t-xs);
+}
+.cc-map-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+button.cc-map-manager {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+}
+button.cc-map-manager:hover {
+  background: var(--c-surface2);
+}
+@media (max-width: 560px) {
+  .cc-map-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+/* Menu rows and map nodes are blocks of text, not the default centred one-line button. */
+button.cc-item,
+button.cc-map-node {
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
+  font-weight: 400;
+}
+button.cc-item-line {
+  justify-content: space-between;
+}
+button.cc-item .cc-item-name,
+.cc-map-name {
+  font-weight: 400;
+}
+button.cc-map-node {
+  align-items: flex-start;
+}
+body[data-surface='chat'] .composer-bar .composer-hint {
+  font-family: inherit;
+  color: var(--c-mute);
 }
