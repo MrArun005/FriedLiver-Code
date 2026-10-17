@@ -118,6 +118,8 @@ export interface ClaudeSession {
   messages: number;
   /** Its Task/Agent calls; `done` once a result came back. */
   subagents: { id: string; title: string; done: boolean }[];
+  /** Idle for over a week: counted under Archived, not on the board. */
+  archived?: boolean;
 }
 
 export const LIMITS = {

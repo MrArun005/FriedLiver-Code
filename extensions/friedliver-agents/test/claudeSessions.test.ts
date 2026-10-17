@@ -85,4 +85,39 @@ describe('Claude Code sessions', () => {
     expect(filterClaudeSessions([s], 'payroll claude')).toEqual([s]);
     expect(filterClaudeSessions([s], 'codex')).toEqual([]);
   });
+
+  const parse = (f: string) => parseSession(fs.readFileSync(path.join(FIX, f), 'utf8'));
+
+  it('marks greeting-only sessions without tool use as trivial, never ones with tools', () => {
+    expect(parse('greeting.jsonl').trivial).toBe(true);
+    expect(parse('short-with-tools.jsonl').trivial).toBe(false);
+    expect(parse('titled.jsonl').trivial).toBe(false);
+    expect(parse('untitled.jsonl').trivial).toBe(false);
+  });
+
+  it('titles from the first real prompt, skipping greetings, slash and shell commands', () => {
+    expect(parse('shell-first.jsonl').title).toBe('Why does the payslip PDF cut off the last row?');
+    expect(parse('only-commands.jsonl').title).toBe('');
+  });
+
+  it('hides trivial sessions, archives ones idle for a week, and shows all on request', async () => {
+    const ws = '/work/my app';
+    const h = home(ws);
+    const proj = path.join(h, '.claude', 'projects', encodeCwd(ws));
+    const G = '44444444-4444-4444-8444-444444444444';
+    const C = '55555555-5555-4555-8555-555555555555';
+    fs.copyFileSync(path.join(FIX, 'greeting.jsonl'), path.join(proj, `${G}.jsonl`));
+    fs.copyFileSync(path.join(FIX, 'only-commands.jsonl'), path.join(proj, `${C}.jsonl`));
+    const day = 86_400_000;
+    const now = Date.UTC(2026, 9, 17);
+    fs.utimesSync(path.join(proj, `${A}.jsonl`), new Date(now - day), new Date(now - day));
+    fs.utimesSync(path.join(proj, `${B}.jsonl`), new Date(now - 8 * day), new Date(now - 8 * day));
+    fs.utimesSync(path.join(proj, `${C}.jsonl`), new Date(now - 2 * day), new Date(now - 2 * day));
+    const list = await listClaudeSessions({ home: h, folders: [ws], now });
+    expect(list.map((s) => [s.id, !!s.archived])).toEqual([[A, false], [C, false], [B, true]]);
+    expect(list.find((s) => s.id === C)?.title).toBe('my app · 2026-10-15');
+    const all = await listClaudeSessions({ home: h, folders: [ws], now, showAll: true });
+    expect(all.map((s) => s.id)).toContain(G);
+    expect(all.some((s) => s.archived)).toBe(false);
+  });
 });

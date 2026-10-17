@@ -16,6 +16,13 @@ export function encodeCwd(folder: string): string {
   return folder.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+const GREETING = /^(hi|hii+|hey|hello|yo|sup|thanks|thank you|ok|okay|test|ping)\b[\s!.?]*$/i;
+const SHELL = /^(\$ |(npm|npx|pnpm|yarn|bun|git|cd|ls|brew|pip3?|curl|wget|sudo|node|python3?|docker|rm|mkdir|cat|claude|code|make|go|cargo|chmod|export)\s)/;
+const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
+/** A prompt worth naming a session after: not a greeting, a slash command or a pasted shell command. */
+const titleWorthy = (t: string) => !GREETING.test(t.trim()) && !t.trim().startsWith('/') && !SHELL.test(t.trim());
+const WEEK_MS = 7 * 86_400_000;
+
 const clipTitle = (t: string) => {
   const one = t.replace(/\s+/g, ' ').trim();
   return one.length > TITLE_MAX ? `${one.slice(0, TITLE_MAX - 1)}…` : one;
@@ -24,12 +31,14 @@ const clipTitle = (t: string) => {
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: { description?: unknown }; tool_use_id?: string };
 
 /** What the Manager shows of one transcript. Lines that aren't JSON (a cut-off first line of a tail) are skipped. */
-export function parseSession(text: string): Pick<ClaudeSession, 'title' | 'messages' | 'subagents'> {
+export function parseSession(text: string): Pick<ClaudeSession, 'title' | 'messages' | 'subagents'> & { trivial: boolean } {
   let custom = '';
   let auto = '';
   let anon = 0;
   let prompt = '';
   let messages = 0;
+  let tools = false;
+  let short = true;
   const assistantIds = new Set<string>();
   const subs: ClaudeSession['subagents'] = [];
   const results = new Set<string>();
@@ -53,12 +62,14 @@ export function parseSession(text: string): Pick<ClaudeSession, 'title' | 'messa
       const said = blocks.find((b) => b.type === 'text' && b.text && !b.text.startsWith('<'))?.text;
       if (said) {
         messages++;
-        prompt ||= said;
+        if (!prompt && titleWorthy(said)) prompt = said;
+        if (words(said) > 4 && !GREETING.test(said.trim())) short = false;
       }
     } else if (o.type === 'assistant') {
       // One message streams as several lines with the same id.
       assistantIds.add(o.message.id ?? `anon-${anon++}`);
       for (const b of blocks) {
+        if (b.type === 'tool_use') tools = true;
         if (b.type === 'tool_use' && b.id && b.name && SUBAGENT_TOOLS.has(b.name)) {
           subs.push({ id: b.id, title: typeof b.input?.description === 'string' ? clipTitle(b.input.description) : 'Subagent', done: false });
         }
@@ -66,7 +77,10 @@ export function parseSession(text: string): Pick<ClaudeSession, 'title' | 'messa
     }
   }
   return {
-    title: clipTitle(custom || auto || prompt) || 'Claude Code session',
+    // Empty when nothing names it; the lister falls back to the folder and date.
+    title: clipTitle(custom || auto || prompt),
+    // ponytail: word-count heuristic; "hi" + "which IDE is this" style chats with no tool use.
+    trivial: !tools && messages <= 2 && short,
     messages: messages + assistantIds.size,
     subagents: subs.map((s) => ({ ...s, done: results.has(s.id) })),
   };
@@ -93,10 +107,13 @@ export interface ListOptions {
   /** Session ids FriedLiver's own chats already have. */
   skip?: ReadonlySet<string>;
   limit?: number;
+  /** Keep trivial sessions and don't archive idle ones (`friedliver.claudeSessions.showAll`). */
+  showAll?: boolean;
+  now?: number;
 }
 
 /** The workspace folders' Claude Code sessions, most recent first. Missing folders and unreadable files are left out. */
-export async function listClaudeSessions({ home, folders, skip, limit = 50 }: ListOptions): Promise<ClaudeSession[]> {
+export async function listClaudeSessions({ home, folders, skip, limit = 50, showAll = false, now = Date.now() }: ListOptions): Promise<ClaudeSession[]> {
   const base = path.join(home, '.claude', 'projects');
   const realBase = await realpath(base).catch(() => null);
   if (!realBase) return [];
@@ -125,7 +142,17 @@ export async function listClaudeSessions({ home, folders, skip, limit = 50 }: Li
       hit = { key, parsed: parseSession(text) };
       cache.set(f.file, hit);
     }
-    out.push({ id: f.id, cwd: f.cwd, lastActivity: f.mtime, ...hit.parsed });
+    const { trivial, title, ...rest } = hit.parsed;
+    if (trivial && !showAll) continue;
+    out.push({
+      id: f.id,
+      cwd: f.cwd,
+      lastActivity: f.mtime,
+      ...rest,
+      title: title || `${path.basename(f.cwd) || f.cwd} · ${new Date(f.mtime).toISOString().slice(0, 10)}`,
+      ...(!showAll && now - f.mtime > WEEK_MS ? { archived: true } : {}),
+    });
   }
-  return out;
+  // Archived ones last, so the board's newest-first order is unchanged.
+  return [...out.filter((s) => !s.archived), ...out.filter((s) => s.archived)];
 }

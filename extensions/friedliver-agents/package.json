@@ -541,6 +541,11 @@
           "default": true,
           "description": "Show a notification when an agent finishes a task and its chat isn't on screen or the window isn't focused."
         },
+        "friedliver.claudeSessions.showAll": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show every outside Claude Code session: keep greeting-only ones and don't move sessions idle for over a week to Archived."
+        },
         "friedliver.showClaudeCodeSessions": {
           "type": "boolean",
           "default": true,

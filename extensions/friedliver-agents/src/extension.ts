@@ -1178,7 +1178,12 @@ export class Controller {
     const on = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true) && [...this.surfaces].some((s) => s.kind === 'tasks');
     this.watchClaudeSessions(on);
     const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
-    this.claudeSessions = on ? await listClaudeSessions({ home: os.homedir(), folders: this.folders(), skip: owned }) : [];
+    this.claudeSessions = on ? await listClaudeSessions({
+          home: os.homedir(),
+          folders: this.folders(),
+          skip: owned,
+          showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
+        }) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
   }
 
@@ -1200,7 +1205,7 @@ export class Controller {
 
   private onConfig(e: vscode.ConfigurationChangeEvent): void {
     if (!e.affectsConfiguration('friedliver')) return;
-    if (e.affectsConfiguration('friedliver.showClaudeCodeSessions')) this.refreshClaudeSessions();
+    if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {

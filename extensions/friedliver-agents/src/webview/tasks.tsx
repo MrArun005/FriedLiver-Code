@@ -249,10 +249,12 @@ function Manager() {
   const lastJump = useRef<string | undefined>(undefined);
 
   const shown = useMemo(() => filterChats(openChats(state.chats), query), [state, query]);
-  const outside = useMemo(() => filterClaudeSessions(claude, query), [claude, query]);
+  const outside = useMemo(() => filterClaudeSessions(claude.filter((s) => !s.archived), query), [claude, query]);
+  const oldOutside = useMemo(() => claude.filter((s) => s.archived), [claude]);
   const shownState = useMemo<AppState>(() => ({ ...state, chats: state.chats.filter((c) => c.archived || shown.includes(c)) }), [state, shown]);
   const waiting = useMemo(() => decisions({ chats: openChats(state.chats) }), [state]);
-  const tally = counts(state);
+  const tally = { ...counts(state) };
+  tally.archived += oldOutside.length;
 
   const jump = () => {
     const d = nextDecision(waiting, lastJump.current);
@@ -412,7 +414,7 @@ function Manager() {
           {view === 'map' && <ClaudeLane sessions={outside} now={now} />}
         </div>
 
-        <History chats={state.chats.filter((c) => c.archived)} now={now} open={historyOpen} setOpen={setHistoryOpen} />
+        <History chats={state.chats.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />
       </div>
     </LiveState.Provider>
   );
@@ -1078,8 +1080,8 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
 }
 
 /** Archived chats: kept for their history, out of the way. */
-function History({ chats, now, open: isOpen, setOpen }: { chats: ChatView[]; now: number; open: boolean; setOpen(v: boolean): void }) {
-  if (!chats.length) return null;
+function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatView[]; outside: ClaudeSession[]; now: number; open: boolean; setOpen(v: boolean): void }) {
+  if (!chats.length && !outside.length) return null;
   const sorted = sortChats(chats, { key: 'activity', dir: 'asc' });
   return (
     <section class="history" id="history" aria-label="History">
@@ -1088,7 +1090,7 @@ function History({ chats, now, open: isOpen, setOpen }: { chats: ChatView[]; now
           <Icon name="chevron" />
         </span>
         History
-        <span class="col-count">{chats.length} archived</span>
+        <span class="col-count">{chats.length + outside.length} archived</span>
       </button>
       {isOpen && (
         <ul class="history-list" id="history-list">
@@ -1106,6 +1108,18 @@ function History({ chats, now, open: isOpen, setOpen }: { chats: ChatView[]; now
               <button class="ghost danger sm" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
                 <Icon name="trash" /> Remove
               </button>
+            </li>
+          ))}
+          {outside.map((s) => (
+            <li key={s.id} class="history-row">
+              <Glyph agent="claude" size="sm" />
+              <span class="tag history-label" title={OUTSIDE_TIP}>
+                Claude Code
+              </span>
+              <button class="title-btn history-title" title={s.title} onClick={() => openClaude(s.id)}>
+                {s.title}
+              </button>
+              <span class="hint num">{ago(s.lastActivity, now)}</span>
             </li>
           ))}
         </ul>
