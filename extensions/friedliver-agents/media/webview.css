@@ -4423,14 +4423,64 @@ body[data-surface='chat'] .popover .menu-full .menu-label {
   color: var(--c-mode-full);
   border-color: color-mix(in srgb, var(--c-mode-full) 45%, transparent);
 }
-/* At 640px the controls wrap to a second row rather than truncate, so every label stays readable. */
+/* The control row: a left group (attach, mode, model, effort) that shrinks and wraps among itself,
+   and a right group (usage, Stop, mic, send) pinned to the right end of the first row. */
 body[data-surface='chat'] .composer-bar {
-  flex-wrap: wrap;
-  row-gap: 4px;
+  flex-wrap: nowrap;
+  align-items: flex-start;
 }
-body[data-surface='chat'] .composer-bar > *,
-body[data-surface='chat'] .composer-bar .session-controls,
-body[data-surface='chat'] .composer-bar button.chip-btn,
-body[data-surface='chat'] .composer-bar .usage {
+body[data-surface='chat'] .composer-bar .bar-left {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-2);
+}
+body[data-surface='chat'] .composer-bar .bar-left .session-controls {
+  display: contents;
+}
+body[data-surface='chat'] .composer-bar .bar-left button.chip-btn {
+  max-width: 100%;
+  overflow: hidden;
+}
+body[data-surface='chat'] .composer-bar .bar-left .chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body[data-surface='chat'] .composer-bar .bar-right {
   flex: none;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* Too narrow: drop the cost, then the word Context, then the model and effort labels. */
+@container (max-width: 600px) {
+  body[data-surface='chat'] .composer-bar .usage-cost {
+    display: none;
+  }
+}
+@container (max-width: 560px) {
+  body[data-surface='chat'] .composer-bar .usage-word {
+    display: none;
+  }
+}
+@container (max-width: 520px) {
+  body[data-surface='chat'] .composer-bar .opt-model .chip-text {
+    display: none;
+  }
+}
+@container (max-width: 480px) {
+  body[data-surface='chat'] .composer-bar .opt-gauge .chip-text {
+    display: none;
+  }
+}
+/* The mode label and the context % stay; the older narrow rules hid them. */
+body[data-surface='chat'] .composer-bar .approval-chip .chip-text {
+  display: inline;
+}
+body[data-surface='chat'] .composer-bar .usage {
+  display: inline-flex;
 }
