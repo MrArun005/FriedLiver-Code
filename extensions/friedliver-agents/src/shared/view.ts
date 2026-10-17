@@ -1065,3 +1065,29 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     conflicts,
   };
 }
+
+// ---- The composer's controls redraw only when what they show changes, not per streamed chunk. ----
+
+type Controls = { chat: ChatView; samples?: number[]; bare?: boolean; compact?: boolean };
+
+/** Mode icon and usage/settings button: the session, level, name and usage samples. */
+export function sameControls<T extends Controls>(a: T, b: T): boolean {
+  return (
+    a.chat.id === b.chat.id &&
+    a.chat.session === b.chat.session &&
+    a.chat.approval === b.chat.approval &&
+    a.chat.label === b.chat.label &&
+    a.chat.agent === b.chat.agent &&
+    a.samples === b.samples &&
+    a.bare === b.bare &&
+    a.compact === b.compact
+  );
+}
+
+const agentsKey = (chat: ChatView, linked: ChatView[]) =>
+  JSON.stringify([chat.id, chat.busy, subagents(chat).map((s) => [s.id, s.state, s.title, s.last, s.startedAt, s.ms]), linked.map((c) => [c.id, c.busy, c.label, c.title, c.createdAt, c.origin?.kind])]);
+
+/** Agents button: its subagents' and linked chats' state, not the transcript text. */
+export function sameAgents<T extends { chat: ChatView; linked: ChatView[] }>(a: T, b: T): boolean {
+  return agentsKey(a.chat, a.linked) === agentsKey(b.chat, b.linked);
+}

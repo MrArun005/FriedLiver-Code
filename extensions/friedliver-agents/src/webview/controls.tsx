@@ -28,8 +28,9 @@ import {
   type ChatSession,
   type SessionOption,
 } from '../shared/session';
+import { sameControls } from '../shared/view';
 import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
-import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
+import { Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, memo, send } from './common';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -52,7 +53,7 @@ export function composerMode(tone: string): 'ask' | 'edits' | 'full' {
  * agent's own modes. The chip reads the level; its color, the mode the agent
  * reports, so a mode FriedLiver didn't choose can't go unseen.
  */
-export function ApprovalMenu({ chat, compact, bare }: { chat: ChatView; compact?: boolean; bare?: boolean }) {
+export const ApprovalMenu = memo(function ApprovalMenu({ chat, compact, bare }: { chat: ChatView; compact?: boolean; bare?: boolean }) {
   const level = chat.approval ?? 'ask';
   const mode = modeOption(chat.session);
   const reported = reportedMode(chat.session);
@@ -160,7 +161,7 @@ export function ApprovalMenu({ chat, compact, bare }: { chat: ChatView; compact?
       )}
     </Popover>
   );
-}
+}, sameControls);
 
 /** One setting as a chip (Model, Effort), with related ones (Fast mode) in the same menu. */
 function OptionMenu({ chat, option, extra, icon, later }: { chat: ChatView; option: SessionOption; extra: SessionOption[]; icon: 'model' | 'gauge'; later: string }) {
@@ -263,7 +264,7 @@ export function usageSamples(chat: Pick<ChatView, 'id' | 'turns' | 'session'>): 
  * One button for usage, model and effort: hovering or clicking opens a small
  * dialog with the context and cost, the model, and the effort (or speed).
  */
-export function UsageSettings({ chat, samples }: { chat: ChatView; samples: number[] }) {
+export const UsageSettings = memo(function UsageSettings({ chat, samples }: { chat: ChatView; samples: number[] }) {
   const usage = chat.session?.usage;
   const { model, effort, modelConfig, other } = optionGroups(chat.session);
   const pick = model ?? [...modelConfig, ...other][0];
@@ -318,7 +319,7 @@ export function UsageSettings({ chat, samples }: { chat: ChatView; samples: numb
       )}
     </Popover>
   );
-}
+}, sameControls);
 
 /** The mode the agent says it is in, loud when it runs without asking. */
 export function ModeBadge({ session, agent }: { session?: ChatSession; agent: AgentKey }) {
