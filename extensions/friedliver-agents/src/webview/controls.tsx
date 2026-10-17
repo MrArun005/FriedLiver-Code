@@ -475,7 +475,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
   // One question with one set of choices answers with a click.
   const only = item.fields.length === 1 && item.fields[0].type === 'choice' ? item.fields[0] : undefined;
   return (
-    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`}>
+    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(item.requestId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         <Glyph agent={chat.agent} size="sm" /> {AGENT_FACES[chat.agent].name} asks you
@@ -497,12 +497,15 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
               {f.options!.map((o, n) => (
                 <button
                   key={o.value}
-                  class={`sm ${values[f.key] === o.value ? 'decide' : ''}`}
+                  class={`sm opt ${values[f.key] === o.value ? 'decide' : ''}`}
                   aria-pressed={values[f.key] === o.value}
-                  title={o.description ?? (only && n < 9 ? `Alt+${n + 1}` : undefined)}
                   onClick={() => (only ? answer({ [f.key]: o.value }) : set(f.key, values[f.key] === o.value ? undefined : o.value))}
                 >
-                  {o.title}
+                  {only && n < 9 && <span class="opt-num">{n + 1}.</span>}
+                  <span class="opt-text">
+                    <span class="opt-title">{o.title}</span>
+                    {o.description && <span class="opt-desc">{o.description}</span>}
+                  </span>
                 </button>
               ))}
             </div>
@@ -546,6 +549,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
           Skip
         </button>
       </div>
+      {only && <KeyHint chat={chat} id={item.requestId} n={only.options?.length ?? 0} yes={false} />}
     </section>
   );
 }

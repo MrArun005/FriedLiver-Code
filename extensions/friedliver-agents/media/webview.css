@@ -3911,6 +3911,20 @@ button.cc-map-node:hover {
   padding-right: var(--sp-1);
   opacity: 0.6;
 }
+/* An option with a description: the title, then the description on its own line, muted. */
+.opt-text {
+  display: flex;
+  flex-direction: column;
+}
+.opt-desc {
+  font-size: var(--t-85);
+  font-weight: 400;
+  color: var(--fg-2);
+}
+button.decide .opt-desc {
+  color: inherit;
+  opacity: 0.8;
+}
 button.escalate {
   color: var(--fg-2);
 }
