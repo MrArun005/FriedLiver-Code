@@ -3170,10 +3170,10 @@ button.sm-link {
 .path-link code {
   color: inherit;
 }
+/* Floated so the reply's first line wraps around it instead of running under it. */
 .msg-tools {
-  position: absolute;
-  top: var(--sp-2);
-  right: 0;
+  float: right;
+  margin-left: var(--sp-2);
 }
 .msg-tools .copy-btn {
   opacity: 0;
