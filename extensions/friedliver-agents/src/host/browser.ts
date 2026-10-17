@@ -6,13 +6,11 @@
 // integrated browser's own persistent session (workbench.browser.dataStorage),
 // never the user's system browser. It opens only when the user asks
 // (FriedLiver: Open Browser) or allows an agent's browser_open.
-import { mkdir, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
-import { clampBrowserWidth, ownTab, relaxLocalhostCors, type PausedResponse } from './browserRules';
+import { clampBrowserWidth, ownTab, saveScreenshot, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
 const URL_KEY = 'friedliver.browser.lastUrl';
@@ -198,7 +196,6 @@ export class BrowserPanel implements vscode.Disposable {
   private tab?: vscode.BrowserTab;
   private cdp?: Promise<Cdp>;
   private readonly subscriptions: vscode.Disposable[] = [];
-  private shots = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -279,10 +276,9 @@ export class BrowserPanel implements vscode.Disposable {
       case 'browser_screenshot': {
         const cdp = await this.page();
         const { data } = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
-        const dir = path.join(os.tmpdir(), 'friedliver-browser');
-        await mkdir(dir, { recursive: true, mode: 0o700 });
-        const file = path.join(dir, `screenshot-${process.pid}-${++this.shots}.png`);
-        await writeFile(file, Buffer.from(data, 'base64'), { mode: 0o600 });
+        const base = this.context.globalStorageUri.fsPath;
+        await mkdir(base, { recursive: true, mode: 0o700 });
+        const file = await saveScreenshot(base, Buffer.from(data, 'base64'));
         return `${await this.where(cdp, 'Screenshot of')}\nSaved to ${file}. Read that file to see it.`;
       }
       case 'browser_console': {

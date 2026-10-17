@@ -147,4 +147,20 @@ describe('security: only FriedLiver-opened tabs, local-only CORS, private screen
     expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/', method: 'GET', headers: { Origin: 'http://[::1]:3000' } } })).not.toBeNull();
   });
 
+  it('saves screenshots in a private per-session folder, never overwriting', async () => {
+    const { saveScreenshot } = await import('../src/host/browserRules');
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'fl-test-'));
+    const a = await saveScreenshot(base, Buffer.from('a'));
+    const b = await saveScreenshot(base, Buffer.from('b'));
+    expect(a).not.toBe(b);
+    expect(path.dirname(a)).toBe(path.dirname(b));
+    expect(path.dirname(path.dirname(a))).toBe(base);
+    expect(path.basename(path.dirname(a))).not.toBe('friedliver-browser');
+    if (process.platform !== 'win32') expect((await fs.stat(path.dirname(a))).mode & 0o777).toBe(0o700);
+    expect(await fs.readFile(a, 'utf8')).toBe('a');
+    await fs.rm(base, { recursive: true });
+  });
 });

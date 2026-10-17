@@ -1,6 +1,8 @@
 // Pure rules for the built-in browser (browser.ts): which URLs agents may open,
 // how wide the browser may be, which tools need the user's OK, and the
 // optional CORS relaxation for localhost. No vscode here, so all of it is tested.
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { ApprovalLevel } from '../shared/session';
 
 /** The browser's share of the window: the user drags it, FriedLiver keeps it within these. */
@@ -93,4 +95,23 @@ export function relaxLocalhostCors(paused: PausedResponse): { fulfill: boolean; 
 
 function lower(headers: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+}
+
+const shotDirs = new Map<string, Promise<string>>();
+let shots = 0;
+
+/**
+ * Writes a screenshot into a folder only this user can open, made fresh (mkdtemp, 0700) under
+ * `base` once per session, with 'wx' so an existing file is never overwritten or followed.
+ */
+export async function saveScreenshot(base: string, png: Buffer): Promise<string> {
+  let dir = shotDirs.get(base);
+  if (!dir) {
+    dir = mkdtemp(path.join(base, 'shots-'));
+    shotDirs.set(base, dir);
+    dir.catch(() => shotDirs.delete(base));
+  }
+  const file = path.join(await dir, `screenshot-${++shots}.png`);
+  await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+  return file;
 }

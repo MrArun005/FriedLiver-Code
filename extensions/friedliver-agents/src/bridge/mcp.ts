@@ -115,7 +115,7 @@ function browserTools() {
       selector: SELECTOR,
       text: { type: 'string', maxLength: BRIDGE_LIMITS.text, description: 'What to type.' },
     }, ['selector', 'text']),
-    tool('browser_screenshot', 'Screenshot', 'Saves a PNG of the visible page to a temporary file and returns its path; read that file to see it.', {}, [], true),
+    tool('browser_screenshot', 'Screenshot', 'Saves a PNG of the visible page to a private file in FriedLiver\'s storage and returns its path; read that file to see it.', {}, [], true),
     tool('browser_console', 'Console', 'The open page\'s latest console messages and uncaught errors (up to 100).', {}, [], true),
     tool('browser_back', 'Go back', 'Goes back one page in the browser\'s history.' + ASKS),
     tool('browser_reload', 'Reload', 'Reloads the open page.' + ASKS),
