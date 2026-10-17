@@ -86,7 +86,9 @@ export type WebviewMessage =
   /** Files matching what follows "#" in the composer, for the picker. */
   | { type: 'findFiles'; chatId: string; query: string }
   /** Claude Code, Cline, Roo Code, Kilo Code or Continue, from the extension gallery. */
-  | { type: 'otherAgents' };
+  | { type: 'otherAgents' }
+  /** Continue a Claude Code session started outside FriedLiver in a new chat. */
+  | { type: 'openClaudeSession'; sessionId: string };
 
 export type HostMessage =
   /** `defaults` (optional): each agent's last known options and the user's last choices. */
@@ -101,7 +103,22 @@ export type HostMessage =
   | { type: 'foundFiles'; chatId: string; query: string; files: string[] }
   | { type: 'reveal'; chatId: string; id: string }
   /** Put a code reference into that chat's composer, to go with the next message. */
-  | { type: 'addRef'; chatId: string; ref: CodeRef };
+  | { type: 'addRef'; chatId: string; ref: CodeRef }
+  /** The workspace's Claude Code sessions FriedLiver didn't start, for the Manager. */
+  | { type: 'claudeSessions'; sessions: ClaudeSession[] };
+
+/** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
+export interface ClaudeSession {
+  id: string;
+  /** The workspace folder it ran in. */
+  cwd: string;
+  title: string;
+  /** When its transcript last changed, ms since the epoch. */
+  lastActivity: number;
+  messages: number;
+  /** Its Task/Agent calls; `done` once a result came back. */
+  subagents: { id: string; title: string; done: boolean }[];
+}
 
 export const LIMITS = {
   text: 100_000,
@@ -241,6 +258,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     }
     case 'newChat':
       return isAgentKey(m.agent) ? { type: 'newChat', agent: m.agent } : null;
+    case 'openClaudeSession':
+      return id(m.sessionId) ? { type: 'openClaudeSession', sessionId: m.sessionId } : null;
     case 'openChat':
       return id(m.chatId) ? { type: 'openChat', chatId: m.chatId, ...(id(m.item) ? { item: m.item } : {}) } : null;
     case 'select':
