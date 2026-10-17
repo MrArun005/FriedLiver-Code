@@ -21,7 +21,10 @@ import {
   type FileConflict,
   type LinkKind,
   type StateLine,
+  MENTIONS,
 } from './model';
+import type { WebviewMessage } from './messages';
+import type { SlashCommand } from './session';
 
 export const agentName = (agent: AgentKey) => AGENT_FACES[agent].name;
 
@@ -433,6 +436,49 @@ export function applyMention(text: string, option: MentionOption): { text: strin
   const rest = text.replace(/^\s*@[a-z]*[\s,:]*/i, '');
   const head = `@${option.insert} `;
   return { text: head + rest, caret: head.length };
+}
+
+// ---- FriedLiver's own "/" commands ----
+
+/** What every chat offers after "/", whatever its agent says. */
+export const FRIEDLIVER_COMMANDS: SlashCommand[] = [
+  { name: 'handoff', description: 'Continue this chat with another agent', hint: 'agent' },
+  { name: 'ask', description: 'Ask another agent; the reply comes back here', hint: 'agent and question' },
+  { name: 'pipe', description: "Send each finished turn to that agent's latest chat", hint: 'agent' },
+  { name: 'review', description: "Review this chat's changes" },
+  { name: 'new', description: 'Start a new chat', hint: 'agent (optional)' },
+];
+
+/** The agent's commands, then FriedLiver's; the agent's win a name both have. */
+export function slashMenu(agentCommands: SlashCommand[]): SlashCommand[] {
+  return [...agentCommands, ...FRIEDLIVER_COMMANDS.filter((f) => !agentCommands.some((c) => c.name === f.name))];
+}
+
+/**
+ * The action a FriedLiver command typed in `chat` asks for, "incomplete" when it
+ * still needs an agent or text, null when it isn't one (the agent gets it as typed).
+ */
+export function slashAction(text: string, chat: ChatView, chats: ChatView[], agentCommands: SlashCommand[]): WebviewMessage | 'incomplete' | null {
+  const m = /^\/([a-z]+)(?:\s+([a-z]+))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
+  if (!m || !FRIEDLIVER_COMMANDS.some((c) => c.name === m[1]) || agentCommands.some((c) => c.name === m[1])) return null;
+  const agent: AgentKey | undefined = m[2] ? MENTIONS[m[2].toLowerCase()] : undefined;
+  const rest = m[3].trim();
+  switch (m[1]) {
+    case 'handoff':
+      return agent ? { type: 'handoff', chatId: chat.id, agent } : 'incomplete';
+    case 'ask':
+      return agent && rest ? { type: 'consult', chatId: chat.id, agent, text: rest } : 'incomplete';
+    case 'pipe': {
+      const to = openChats(chats)
+        .filter((c) => c.agent === agent && c.id !== chat.id)
+        .sort((a, b) => b.lastActivity - a.lastActivity)[0];
+      return to ? { type: 'pipe', from: chat.id, to: to.id } : 'incomplete';
+    }
+    case 'review':
+      return { type: 'viewChanges', chatId: chat.id };
+    default:
+      return { type: 'newChat', agent: agent ?? chat.agent };
+  }
 }
 
 /** The agent a leading @word names, even before the question is typed. */

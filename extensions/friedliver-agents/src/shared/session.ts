@@ -322,6 +322,8 @@ export function reportedMode(session: ChatSession | undefined): { name: string; 
 export interface AgentDefaults {
   /** The options the agent's last session offered, so pickers show before a session starts. */
   options: SessionOption[];
+  /** The commands the agent's last session offered, so "/" works before a session starts. */
+  commands?: SlashCommand[];
   /** The user's last choice per optionKey. */
   chosen: Record<string, string | boolean>;
   /** Last level chosen for this agent; never Full auto. */
