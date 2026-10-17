@@ -183,6 +183,8 @@ export interface QuestionItem {
 
 export interface ChatView {
   id: string;
+  /** A read-only chat (inline edit): no tools, no file access, every request refused up front. */
+  readOnly?: true;
   agent: AgentKey;
   /** Agent name, numbered when several chats use the same agent. */
   label: string;

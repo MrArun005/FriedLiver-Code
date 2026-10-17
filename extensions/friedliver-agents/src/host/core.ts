@@ -66,7 +66,10 @@ import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposal
 import { loginExtras } from './signin';
 import { relativeFile } from './transcript';
 
+const READ_ONLY = 'This chat only proposes text: FriedLiver refuses file access, commands and tools in it.';
+
 /** Each vendor's key goes only to that vendor's agent process. */
+
 export const KEY_ENV: Record<VendorAgentId, string> = {
   claude: 'ANTHROPIC_API_KEY',
   codex: 'OPENAI_API_KEY',
@@ -264,7 +267,7 @@ export class AgentCore {
         elicit: (chatId, req, signal) => this.askQuestion(chatId, req, signal),
       },
       files: {
-        read: (req) => this.readForAgent(req),
+        read: (req, chatId) => this.readForAgent(req, chatId),
         write: (chatId, req) => this.reviewWrite(chatId, req),
       },
       terminalListener: (agentId) => this.commandHooks(agentId),
@@ -385,6 +388,7 @@ export class AgentCore {
         : [],
       origin: options.origin,
       group: options.group,
+      ...(options.readOnly ? { readOnly: true as const } : {}),
       depth: options.depth ?? 0,
       files: [],
       lastActivity: Date.now(),
@@ -1121,7 +1125,13 @@ export class AgentCore {
    * The FriedLiver tools for a new session: none when they are off or unavailable. An agent that takes
    * MCP over HTTP reaches them in this process; any other starts a tools server for the session.
    */
+  /** Whether the chat may only answer (inline edit); checked before any rule, level or policy. */
+  private readOnlyChat(chatId: string | undefined): boolean {
+    return !!chatId && this.chat(chatId)?.readOnly === true;
+  }
+
   private async mcpServersFor(chatId: string, http: boolean): Promise<acp.McpServer[]> {
+    if (this.readOnlyChat(chatId)) return [];
     const script = this.options.bridgeScript;
     if (!script || !this.bridge || this.policy() === 'off') return [];
     const token = this.bridge.token(chatId);
@@ -1423,7 +1433,8 @@ export class AgentCore {
     return resolved;
   }
 
-  private async readForAgent(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
+  private async readForAgent(req: acp.ReadTextFileRequest, chatId?: string): Promise<acp.ReadTextFileResponse> {
+    if (this.readOnlyChat(chatId)) throw new Error(READ_ONLY);
     const file = this.checkPath(req.path);
     const unsaved = this.options.ui.unsavedText?.(file);
     if (unsaved === undefined) {
@@ -1445,6 +1456,11 @@ export class AgentCore {
    * or the plan, filled in from the tool call it refers to.
    */
   private async askPermission(chatId: string, req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse> {
+    if (this.readOnlyChat(chatId)) {
+      // Before Always-allow rules and approval levels, and without a card: the chat may only answer.
+      const reject = req.options.find((o) => o.kind === 'reject_once') ?? req.options.find((o) => o.kind.startsWith('reject'));
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } };
+    }
     const requestId = this.id('perm');
     const tool = this.mergedTool(chatId, req.toolCall);
     const proposals = await this.proposalsFor(tool).catch(() => [] as Proposal[]);
@@ -1503,6 +1519,7 @@ export class AgentCore {
 
   /** A question as a small form in the chat. One FriedLiver can't show is declined, so the agent asks another way. */
   private askQuestion(chatId: string, req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse> {
+    if (this.readOnlyChat(chatId)) return Promise.resolve({ action: 'decline' });
     const fields = questionFields(req);
     if (!fields || signal.aborted) return Promise.resolve({ action: 'decline' });
     const requestId = this.id('question');
@@ -1588,6 +1605,7 @@ export class AgentCore {
    * card. Either way it is recorded, so the turn can be undone.
    */
   private async reviewWrite(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void> {
+    if (this.readOnlyChat(chatId)) throw new Error(READ_ONLY);
     const file = this.checkWrite(req.path);
     const before = await readIfExists(file);
     const reviewId = this.id('review');
@@ -1647,6 +1665,7 @@ export class AgentCore {
       approve: (info) => {
         const commandId = this.id('cmd');
         const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
+        if (this.readOnlyChat(chatId)) return Promise.resolve(false);
         known.set(info.terminalId, { commandId });
         const outside = insideRoots(info.cwd, this.roots()) === null;
         // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.

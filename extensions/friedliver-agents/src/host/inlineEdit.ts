@@ -122,8 +122,8 @@ export function runInline(core: AgentCore, agent: AgentKey, context: string, ins
   };
   const done = (async () => {
     try {
-      // Ask level: no write can go through without a review, and refuse() rejects every review.
-      const chat = await core.createChat(agent, { title: 'Inline edit', approval: 'ask' });
+      // readOnly: the core refuses tools, reads, writes, commands and permissions up front; refuse() is a second line.
+      const chat = await core.createChat(agent, { title: 'Inline edit', approval: 'ask', readOnly: true });
       chatId = chat.id;
       owned?.add(chat.id);
       unsubscribe = core.onAction((action) => {

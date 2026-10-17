@@ -46,7 +46,7 @@ export interface HubEvents {
 }
 
 export interface FileHost {
-  read(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse>;
+  read(req: acp.ReadTextFileRequest, chatId?: string): Promise<acp.ReadTextFileResponse>;
   write(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void>;
 }
 
@@ -491,7 +491,7 @@ export class AgentHub {
         if (!chat || !events.elicit || req.mode !== 'form') return { action: 'decline' };
         return events.elicit(chat.id, req, signal);
       },
-      readTextFile: (req) => files.read(req),
+      readTextFile: (req) => files.read(req, chatFor(req.sessionId)?.id),
       writeTextFile: (req) => files.write(chatFor(req.sessionId)?.id, req),
       terminalListener: this.options.terminalListener?.(agentId),
     };

@@ -25,6 +25,8 @@ export interface NewChat {
   approval?: ApprovalLevel;
   /** Continue this agent session (one started outside FriedLiver) in one of the workspace folders. */
   resume?: { sessionId: string; cwd: string };
+  /** Answers only: no FriedLiver tools, and every write, read, command, permission and question is refused up front. */
+  readOnly?: boolean;
 }
 
 /** How a turn ended, and what the agent said in it. */
