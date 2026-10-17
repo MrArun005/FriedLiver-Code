@@ -579,6 +579,23 @@ BLOCKS.F19 = async () => {
   await p.close();
 };
 
+// ---- F20: dragging the effort thumb previews and posts once, on release ----
+BLOCKS.F20 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  await p.click('.cc-model');
+  const box = await p.locator('.cc-slider').boundingBox();
+  await p.mouse.move(box.x + 2, box.y + box.height / 2);
+  await p.mouse.down();
+  for (let x = 0; x <= box.width; x += 6) await p.mouse.move(box.x + x, box.y + box.height / 2);
+  const during = (await posted(p)).filter((m) => m.type === 'setOption').length;
+  const label = await p.locator('.cc-slider').getAttribute('aria-valuetext');
+  await p.mouse.up();
+  const sent = (await posted(p)).filter((m) => m.type === 'setOption');
+  check(during === 0 && sent.length === 1, `one setOption for a whole drag [${during} during, ${sent.length} after: ${sent.map((m) => m.value).join(',')}]`);
+  check(sent[0]?.value && label && label.length > 0, `the thumb previews where it is while dragging [${label}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();

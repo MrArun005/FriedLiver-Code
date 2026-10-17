@@ -49,23 +49,28 @@ export function usageTitle(chat: ChatView, samples: number[]): string {
 
 /** Effort as a slider: a thumb on a 76px track with a notch per level; arrows, Home/End, a click or a drag set it. */
 export function EffortRow({ chat, icon }: { chat: ChatView; icon?: boolean }) {
+  const [drag, setDrag] = useState<number | null>(null);
   const { effort } = optionGroups(chat.session);
   if (!effort || effort.type !== 'select' || !effort.choices.length) return null;
   const n = effort.choices.length;
-  const at = Math.max(0, effort.choices.findIndex((c) => c.value === effort.current));
+  const clamp = (i: number) => Math.max(0, Math.min(n - 1, i));
+  const current = Math.max(0, effort.choices.findIndex((c) => c.value === effort.current));
+  // While dragging, the thumb shows where it is; the agent hears once, on release.
+  const at = drag ?? current;
   const set = (i: number) => {
-    const c = effort.choices[Math.max(0, Math.min(n - 1, i))];
+    const c = effort.choices[clamp(i)];
     if (c.value !== effort.current) send({ type: 'setOption', chatId: chat.id, optionId: effort.id, value: c.value });
   };
   const fromPointer = (e: PointerEvent) => {
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    set(Math.round(((e.clientX - box.left - 9) / Math.max(1, box.width - 18)) * (n - 1)));
+    return clamp(Math.round(((e.clientX - box.left - 9) / Math.max(1, box.width - 18)) * (n - 1)));
   };
+  const name = choiceName(effort, effort.choices[at].value);
   return (
     <div class="cc-item cc-effort">
       {icon && <Icon name="gauge" size={20} />}
       <span class="cc-item-name">
-        Effort <span class="cc-item-value">({choiceName(effort)})</span>
+        Effort <span class="cc-item-value">({name})</span>
       </span>
       <span
         class="cc-slider"
@@ -75,13 +80,18 @@ export function EffortRow({ chat, icon }: { chat: ChatView; icon?: boolean }) {
         aria-valuemin={0}
         aria-valuemax={n - 1}
         aria-valuenow={at}
-        aria-valuetext={choiceName(effort)}
+        aria-valuetext={name}
         style={{ '--at': n > 1 ? at / (n - 1) : 0 }}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
-          fromPointer(e);
+          setDrag(fromPointer(e));
         }}
-        onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && fromPointer(e)}
+        onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && setDrag(fromPointer(e))}
+        onPointerUp={(e) => {
+          set(fromPointer(e));
+          setDrag(null);
+        }}
+        onPointerCancel={() => setDrag(null)}
         onKeyDown={(e) => {
           const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
           if (step !== undefined) set(at + step);
