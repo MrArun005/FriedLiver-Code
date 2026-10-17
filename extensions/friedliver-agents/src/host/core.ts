@@ -30,6 +30,8 @@ import {
   type ApprovalLevel,
   type ChatSession,
   type SessionOption,
+  readOnlyChoice,
+  CLAUDE_READ_ONLY_META,
 } from '../shared/session';
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
 import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
@@ -66,6 +68,8 @@ import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposal
 import { loginExtras } from './signin';
 import { relativeFile, rewoundHistory } from './transcript';
 import { RULES_CAP, type Rules } from './sharedRules';
+
+const READ_ONLY = 'This chat only proposes text: FriedLiver refuses file access, commands and tools in it.';
 
 /** Each vendor's key goes only to that vendor's agent process. */
 export const KEY_ENV: Record<VendorAgentId, string> = {
@@ -284,12 +288,14 @@ export class AgentCore {
         elicit: (chatId, req, signal) => this.askQuestion(chatId, req, signal),
       },
       files: {
-        read: (req) => this.readForAgent(req),
+        read: (req, chatId) => this.readForAgent(req, chatId),
         write: (chatId, req) => this.reviewWrite(chatId, req),
       },
       terminalListener: (agentId) => this.commandHooks(agentId),
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
       rulesFor: (chatId) => this.rulesFor(chatId),
+      freshSessionFor: (chatId) => this.readOnlyChat(chatId),
+      sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
     // The connections read the live state, not the one at construction.
     const live = () => this.state;
@@ -409,6 +415,7 @@ export class AgentCore {
         : [],
       origin: options.origin,
       group: options.group,
+      ...(options.readOnly ? { readOnly: true as const } : {}),
       depth: options.depth ?? 0,
       files: [],
       lastActivity: Date.now(),
@@ -734,8 +741,19 @@ export class AgentCore {
       const value = wanted[key];
       if (option && option.category !== 'mode' && offers(option, value) && option.current !== value) await this.applyOption(chatId, option, value);
     }
-    await this.applyLevel(chatId, false);
+    if (chat.readOnly) await this.restrictMode(chatId);
+    else await this.applyLevel(chatId, false);
     this.updateKnown(chatId);
+  }
+
+  /** A read-only chat: the agent's own most restrictive mode too, so its built-in tools can't act either. */
+  private async restrictMode(chatId: string): Promise<void> {
+    const pick = readOnlyChoice(this.chat(chatId)?.session?.options ?? []);
+    if (!pick) {
+      this.options.log?.(`Read-only chat ${chatId}: the agent offers no plan or read-only mode; FriedLiver's refusals still apply.`);
+      return;
+    }
+    if (pick.option.current !== pick.value) await this.applyOption(chatId, pick.option, pick.value);
   }
 
   /** Runs the last message again, or, when the chat has none yet, starts its agent again. */
@@ -1242,7 +1260,13 @@ export class AgentCore {
    * The FriedLiver tools for a new session: none when they are off or unavailable. An agent that takes
    * MCP over HTTP reaches them in this process; any other starts a tools server for the session.
    */
+  /** Whether the chat may only answer (inline edit); checked before any rule, level or policy. */
+  private readOnlyChat(chatId: string | undefined): boolean {
+    return !!chatId && this.chat(chatId)?.readOnly === true;
+  }
+
   private async mcpServersFor(chatId: string, http: boolean): Promise<acp.McpServer[]> {
+    if (this.readOnlyChat(chatId)) return [];
     const script = this.options.bridgeScript;
     if (!script || !this.bridge || this.policy() === 'off') return [];
     const token = this.bridge.token(chatId);
@@ -1544,7 +1568,8 @@ export class AgentCore {
     return resolved;
   }
 
-  private async readForAgent(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
+  private async readForAgent(req: acp.ReadTextFileRequest, chatId?: string): Promise<acp.ReadTextFileResponse> {
+    if (this.readOnlyChat(chatId)) throw new Error(READ_ONLY);
     const file = this.checkPath(req.path);
     const unsaved = this.options.ui.unsavedText?.(file);
     if (unsaved === undefined) {
@@ -1566,6 +1591,11 @@ export class AgentCore {
    * or the plan, filled in from the tool call it refers to.
    */
   private async askPermission(chatId: string, req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse> {
+    if (this.readOnlyChat(chatId)) {
+      // Before Always-allow rules and approval levels, and without a card: the chat may only answer.
+      const reject = req.options.find((o) => o.kind === 'reject_once') ?? req.options.find((o) => o.kind.startsWith('reject'));
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } };
+    }
     const requestId = this.id('perm');
     const tool = this.mergedTool(chatId, req.toolCall);
     const proposals = await this.proposalsFor(tool).catch(() => [] as Proposal[]);
@@ -1624,6 +1654,7 @@ export class AgentCore {
 
   /** A question as a small form in the chat. One FriedLiver can't show is declined, so the agent asks another way. */
   private askQuestion(chatId: string, req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse> {
+    if (this.readOnlyChat(chatId)) return Promise.resolve({ action: 'decline' });
     const fields = questionFields(req);
     if (!fields || signal.aborted) return Promise.resolve({ action: 'decline' });
     const requestId = this.id('question');
@@ -1709,6 +1740,7 @@ export class AgentCore {
    * card. Either way it is recorded, so the turn can be undone.
    */
   private async reviewWrite(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void> {
+    if (this.readOnlyChat(chatId)) throw new Error(READ_ONLY);
     const file = this.checkWrite(req.path);
     const before = await readIfExists(file);
     const reviewId = this.id('review');
@@ -1768,6 +1800,7 @@ export class AgentCore {
       approve: (info) => {
         const commandId = this.id('cmd');
         const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
+        if (this.readOnlyChat(chatId)) return Promise.resolve(false);
         known.set(info.terminalId, { commandId });
         const outside = insideRoots(info.cwd, this.roots()) === null;
         // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.

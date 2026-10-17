@@ -48,7 +48,7 @@ export interface HubEvents {
 }
 
 export interface FileHost {
-  read(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse>;
+  read(req: acp.ReadTextFileRequest, chatId?: string): Promise<acp.ReadTextFileResponse>;
   write(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void>;
 }
 
@@ -74,6 +74,10 @@ export interface HubOptions {
    * front of the session's first message. `files` names what it came from.
    */
   rulesFor?(chatId: string, agentId: AgentId): Promise<{ text: string; files: string[] } | undefined>;
+  /** Extra `_meta` for a chat's session/new (e.g. a read-only chat's tool limits). */
+  sessionMetaFor?(chatId: string, agentId: AgentId): Record<string, unknown> | undefined;
+  /** Chats that never load or resume a session: each start is a fresh session/new (read-only chats). */
+  freshSessionFor?(chatId: string): boolean;
   log?(line: string): void;
 }
 
@@ -442,12 +446,13 @@ export class AgentHub {
     const previous = chat.sessionId;
     const { cwd } = chat;
     const mcpServers = (await this.options.mcpServersFor?.(chat.id, { http: agent.conn.supportsHttpMcp })) ?? [];
+    const meta = this.options.sessionMetaFor?.(chat.id, chat.agentId);
 
-    if (previous && agent.conn.supportsLoadSession) {
+    if (previous && agent.conn.supportsLoadSession && !this.options.freshSessionFor?.(chat.id)) {
       chat.loading = true;
       let setup: SessionSetup | undefined;
       try {
-        setup = await agent.conn.loadSession(previous, cwd, mcpServers);
+        setup = await agent.conn.loadSession(previous, cwd, mcpServers, meta);
         chat.sessionGeneration = agent.generation;
       } catch (err) {
         if (isAuthRequired(err)) throw err;
@@ -463,7 +468,9 @@ export class AgentHub {
 
     const rules = await this.options.rulesFor?.(chat.id, chat.agentId).catch((err: unknown) => void this.options.log?.(`Couldn't read the shared rules: ${String(err)}`));
     const system = rules && chat.agentId === 'claude';
-    const session = await agent.conn.newSession(cwd, mcpServers, system ? { systemPrompt: { append: rules.text } } : undefined);
+    // Both kinds of _meta coexist: a read-only chat's tool limits and the shared rules' system prompt.
+    const newMeta = system ? { ...meta, systemPrompt: { append: rules.text } } : meta;
+    const session = await agent.conn.newSession(cwd, mcpServers, newMeta);
     chat.pendingRules = rules && !system ? rules.text : undefined;
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
@@ -521,7 +528,7 @@ export class AgentHub {
         if (!chat || !events.elicit || req.mode !== 'form') return { action: 'decline' };
         return events.elicit(chat.id, req, signal);
       },
-      readTextFile: (req) => files.read(req),
+      readTextFile: (req) => files.read(req, chatFor(req.sessionId)?.id),
       writeTextFile: (req) => files.write(chatFor(req.sessionId)?.id, req),
       terminalListener: this.options.terminalListener?.(agentId),
     };

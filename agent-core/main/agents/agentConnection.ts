@@ -230,14 +230,16 @@ export class AgentConnection {
     return this.info.agentCapabilities?.sessionCapabilities?.close != null;
   }
 
-  /** `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own. */
-  /** `meta` is the request's `_meta`, e.g. claude-agent-acp's `systemPrompt`. */
+  /**
+   * `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own.
+   * `meta` is the request's `_meta`, e.g. claude-agent-acp's `systemPrompt` and `claudeCode.options`.
+   */
   newSession(cwd: string, mcpServers: acp.McpServer[] = [], meta?: Record<string, unknown>): Promise<SessionSetup & { sessionId: string }> {
     return this.connection.agent.request(sdk!.methods.agent.session.new, { cwd, mcpServers, ...(meta ? { _meta: meta } : {}) });
   }
 
-  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = []): Promise<SessionSetup> {
-    return ((await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers })) as SessionSetup | undefined) ?? {};
+  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = [], meta?: Record<string, unknown>): Promise<SessionSetup> {
+    return ((await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers, ...(meta ? { _meta: meta } : {}) })) as SessionSetup | undefined) ?? {};
   }
 
   /** Returns the agent's whole list of options afterwards: changing the model can change the effort levels. */
