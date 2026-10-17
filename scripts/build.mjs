@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CACHE_DIR, VSCODE_DIR, checkSha256, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
+import { CACHE_DIR, VSCODE_DIR, checkSha256, codesignArgs, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
 
 const args = new Set(process.argv.slice(2));
 const wantPackage = args.has('--package');
@@ -234,7 +234,7 @@ function seedVSCodeSysroot(arch) {
  * dictation helper (extensions/friedliver-agents/native/build.sh, built by CI) executable and
  * signed first, so the app's signature seals it. Without the helper the mic shows the Fn Fn hint.
  */
-function finishMacApp(appPath) {
+function finishMacApp(appPath, signing) {
 	const plist = path.join(appPath, 'Contents', 'Info.plist');
 	for (const [key, text] of [
 		['NSMicrophoneUsageDescription', 'FriedLiver listens while you dictate a message with the mic button.'],
@@ -245,7 +245,7 @@ function finishMacApp(appPath) {
 	const helper = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-dictate');
 	if (fs.existsSync(helper)) {
 		fs.chmodSync(helper, 0o755);
-		run('codesign', ['--force', '--sign', '-', '--identifier', 'com.friedliver.dictate', helper]);
+		run('codesign', codesignArgs(helper, { ...signing, identifier: 'com.friedliver.dictate' }));
 		log('dictation helper signed');
 	} else {
 		log('no dictation helper in the app (native/build.sh not run): the mic falls back to the Fn Fn hint');
@@ -271,9 +271,12 @@ function buildInstaller(arch, appDir) {
 		if (!app) {
 			fail(`no .app in ${appDir}`);
 		}
-		finishMacApp(path.join(appDir, app));
-		// Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
-		run('codesign', ['--force', '--deep', '--sign', '-', path.join(appDir, app)], { cwd: appDir });
+		// MACOS_SIGN_IDENTITY / MACOS_SIGN_KEYCHAIN come from build.yml's signing keychain; without them
+		// (forks, local builds) ad-hoc, the minimum Apple silicon runs. Not notarized either way.
+		const signing = { identity: process.env.MACOS_SIGN_IDENTITY ?? '', keychain: process.env.MACOS_SIGN_KEYCHAIN ?? '' };
+		log(signing.identity ? 'signing with the certificate from the signing keychain' : 'no signing identity: ad-hoc signature');
+		finishMacApp(path.join(appDir, app), signing);
+		run('codesign', codesignArgs(path.join(appDir, app), { ...signing, deep: true }), { cwd: appDir });
 		file = path.join(dest, `FriedLiver-darwin-${arch}-${version}.dmg`);
 		run('hdiutil', ['create', '-volname', 'FriedLiver', '-srcfolder', path.join(appDir, app), '-ov', '-format', 'UDZO', file], { cwd: appDir });
 	} else if (process.platform === 'linux') {

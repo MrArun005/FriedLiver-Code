@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
-import { friedliverVersion, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
+import { codesignArgs, friedliverVersion, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
 
@@ -98,12 +98,46 @@ describe('download integrity helpers', () => {
     const build = fs.readFileSync(path.join(root, 'scripts', 'build.mjs'), 'utf8');
     expect(build).toContain("'NSMicrophoneUsageDescription'");
     expect(build).toContain("'NSSpeechRecognitionUsageDescription'");
-    const finish = build.indexOf('finishMacApp(path.join(appDir, app));');
+    const finish = build.indexOf('finishMacApp(path.join(appDir, app), signing);');
     expect(finish).toBeGreaterThan(-1);
-    expect(finish).toBeLessThan(build.indexOf("run('codesign', ['--force', '--deep'"));
+    expect(finish).toBeLessThan(build.indexOf("run('codesign', codesignArgs(path.join(appDir, app), { ...signing, deep: true })"));
     const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'build.yml'), 'utf8');
     expect(workflow.indexOf('extensions/friedliver-agents/native/build.sh')).toBeGreaterThan(-1);
     expect(workflow.indexOf('extensions/friedliver-agents/native/build.sh')).toBeLessThan(workflow.indexOf('node scripts/prepare.mjs'));
+  });
+
+  it('signs with the certificate when there is one, ad-hoc otherwise, and never with the hardened runtime', () => {
+    expect(codesignArgs('/x/FriedLiver.app', { deep: true })).toEqual(['--force', '--deep', '--sign', '-', '/x/FriedLiver.app']);
+    expect(codesignArgs('/x/FriedLiver.app', { identity: '  ', keychain: '/k', deep: true })).toEqual(['--force', '--deep', '--sign', '-', '/x/FriedLiver.app']);
+    expect(codesignArgs('/x/FriedLiver.app', { identity: 'FriedLiver Self-Signed Code Signing', keychain: '/tmp/k.keychain-db', deep: true })).toEqual([
+      '--force', '--deep', '--sign', 'FriedLiver Self-Signed Code Signing', '--timestamp=none', '--keychain', '/tmp/k.keychain-db', '/x/FriedLiver.app',
+    ]);
+    const helper = codesignArgs('/x/friedliver-dictate', { identity: 'FriedLiver Self-Signed Code Signing', identifier: 'com.friedliver.dictate' });
+    expect(helper).toEqual(['--force', '--sign', 'FriedLiver Self-Signed Code Signing', '--timestamp=none', '--identifier', 'com.friedliver.dictate', '/x/friedliver-dictate']);
+    for (const a of [helper, codesignArgs('/a', { identity: 'x', deep: true })]) expect(a.join(' ')).not.toMatch(/runtime/);
+  });
+
+  it('build.yml signs macOS from a throwaway keychain, checks the requirement, and always removes the keychain', () => {
+    const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'build.yml'), 'utf8').replace(/\r\n/g, '\n');
+    const setup = workflow.indexOf('- name: Signing keychain (macOS)');
+    const build = workflow.indexOf('- run: node scripts/build.mjs --package --installer');
+    const check = workflow.indexOf('- name: Check the signature (macOS)');
+    const cleanup = workflow.indexOf('- name: Remove the signing keychain (macOS)');
+    expect(setup).toBeGreaterThan(-1);
+    expect(setup).toBeLessThan(build);
+    expect(build).toBeLessThan(check);
+    expect(check).toBeLessThan(cleanup);
+    const step = workflow.slice(setup, build);
+    // Forks without the secrets fall back to ad-hoc; secrets reach the script only through env.
+    expect(step).toContain('if [ -z "$MACOS_SIGN_P12" ] || [ -z "$MACOS_SIGN_IDENTITY" ]; then');
+    expect(step).toContain('MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}');
+    expect(step).toContain('-T /usr/bin/codesign');
+    expect(step).toContain('set-key-partition-list');
+    expect(step).toContain('::add-mask::');
+    expect(step).not.toMatch(/echo "?\$MACOS_SIGN_P12(_PASSWORD)?"?\s*$/m);
+    expect(workflow.slice(check, cleanup)).toContain("grep -q 'certificate root = H\"'");
+    expect(workflow.slice(check, cleanup)).toContain('codesign --verify --deep --strict');
+    expect(workflow.slice(cleanup, cleanup + 200)).toContain("if: always() && runner.os == 'macOS'");
   });
 
   it('stamps a release version only in the release tag form', () => {
