@@ -371,7 +371,7 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
       key: s.id,
       title: s.title,
       tip: s.title,
-      state: s.state === 'working' ? 'working' : s.state === 'failed' ? 'error' : 'idle',
+      state: s.state === 'working' ? 'working' : s.state === 'failed' ? 'error' : 'done',
       meta: [s.ms !== undefined ? shortDuration(s.ms) : s.startedAt !== undefined ? shortDuration(Math.max(0, now - s.startedAt)) : undefined, `${s.tools} tool call${s.tools === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
       go: () => {
         close();
@@ -384,7 +384,7 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
       key: c.id,
       title: c.title,
       tip: `${c.label}: ${c.title}`,
-      state: c.busy ? 'working' : 'idle',
+      state: c.busy ? 'working' : 'done',
       meta: [shortDuration(Math.max(0, (c.busy ? now : c.lastActivity) - c.createdAt)), c.session?.usage ? `${formatTokens(c.session.usage.used)} tokens` : c.origin?.kind === 'consult' ? 'consultation' : 'hand-off'].join(' · '),
       go: () => {
         close();

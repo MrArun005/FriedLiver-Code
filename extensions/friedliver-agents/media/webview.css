@@ -62,14 +62,13 @@
   --focus: rgb(from var(--focus-border) r g b / 1);
 
   /* Status */
-  --dot-running: #89d185;
-  --dot-waiting: #3b82f6;
-  --dot-unread: #d97757;
-  --dot-failed: var(--error);
+  /* One status palette on every surface (QA F06): working blue, done green, problem red, needs you the accent. */
+  --status-working: var(--vscode-charts-blue, #57a3f8);
+  --status-done: var(--tl-success);
+  --status-failed: var(--error);
+  --status-waiting: var(--decision);
   --dot-idle: color-mix(in srgb, var(--fg-2) 40%, transparent);
   --tl-success: #74c991;
-  --tl-failure: #c74e39;
-  --tl-warning: #e1c08d;
   --tl-default: var(--fg-2);
   --added: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
   --removed: var(--vscode-gitDecoration-deletedResourceForeground, #f48771);
@@ -420,8 +419,8 @@ button.icon-btn.sm .icon {
   background: var(--decision);
 }
 .tag.on {
-  color: var(--dot-running);
-  background: color-mix(in srgb, var(--dot-running) 14%, transparent);
+  color: var(--status-working);
+  background: color-mix(in srgb, var(--status-working) 14%, transparent);
 }
 .tag.ok {
   color: var(--tl-success);
@@ -541,7 +540,7 @@ button.ref:hover:not(:disabled) {
   text-overflow: ellipsis;
 }
 .badge[data-kind='pipe'] .icon {
-  color: var(--dot-running);
+  color: var(--status-working);
 }
 .badge.conflict {
   color: var(--decision);
@@ -704,17 +703,17 @@ button.seg-item[aria-checked='true'] {
   background: var(--dot-idle);
 }
 .dot[data-state='working'] {
-  background: var(--dot-running);
+  background: var(--status-working);
   animation: blink 1s linear infinite;
 }
 .dot[data-state='needs-you'] {
-  background: var(--dot-waiting);
+  background: var(--status-waiting);
 }
 .dot[data-state='done'] {
-  background: var(--tl-success);
+  background: var(--status-done);
 }
 .dot[data-state='error'] {
-  background: var(--dot-failed);
+  background: var(--status-failed);
 }
 .dot[data-still] {
   animation: none;
@@ -1845,7 +1844,7 @@ svg.map {
   stroke-width: 2;
 }
 .edge .flow {
-  stroke: var(--dot-running);
+  stroke: var(--status-working);
   stroke-width: 2;
   stroke-dasharray: 2 9;
   animation: map-flow 0.9s linear infinite;
@@ -1942,7 +1941,7 @@ svg[data-lit] .map-file-line:not(.lit) {
   stroke-width: 1.5;
 }
 .map-node[data-status='working'] .ring {
-  stroke: var(--dot-running);
+  stroke: var(--status-working);
   opacity: 0.55;
   animation: ring-pulse 1.6s ease-in-out infinite;
 }
@@ -1977,19 +1976,19 @@ svg[data-lit] .map-file-line:not(.lit) {
   stroke-width: 1.5;
 }
 .node-dot[data-state='working'] {
-  fill: var(--dot-running);
+  fill: var(--status-working);
   stroke: none;
 }
 .node-dot[data-state='needs-you'] {
-  fill: var(--decision);
+  fill: var(--status-waiting);
   stroke: none;
 }
 .node-dot[data-state='done'] {
-  fill: var(--tl-success);
+  fill: var(--status-done);
   stroke: none;
 }
 .node-dot[data-state='error'] {
-  fill: var(--error);
+  fill: var(--status-failed);
   stroke: none;
 }
 .map-file {
@@ -2238,10 +2237,10 @@ svg[data-lit] .map-file-line:not(.lit) {
   background: var(--border);
 }
 .seg-bar i[data-step='done'] {
-  background: var(--tl-success);
+  background: var(--status-done);
 }
 .seg-bar i[data-step='working'] {
-  background: var(--dot-running);
+  background: var(--status-working);
 }
 
 /* ---- Composer (§2.1, §2.2): one box, one tone; chips, the message, one row of controls ---- */
@@ -3270,16 +3269,17 @@ pre.code code {
   bottom: calc(100% - 18px);
 }
 .tl[data-state='done']::before {
-  background: var(--tl-success);
+  background: var(--status-done);
 }
 .tl[data-state='error']::before,
 .tl[data-state='denied']::before {
-  background: var(--tl-failure);
+  background: var(--status-failed);
 }
 .tl[data-state='needs-you']::before {
-  background: var(--tl-warning);
+  background: var(--status-waiting);
 }
 .tl[data-state='working']::before {
+  background: var(--status-working);
   animation: blink 1s linear infinite;
 }
 /* A tool line: the tool in bold, its target in the editor's font; one line. */
@@ -4149,7 +4149,7 @@ input.q-input {
   height: 14px;
 }
 .link-card[data-role^='piped'] .link-head > .icon {
-  color: var(--dot-running);
+  color: var(--status-working);
 }
 .link-title {
   min-width: 0;
@@ -4383,8 +4383,8 @@ button.chat-head-title:hover {
   line-height: 18px;
 }
 .status-pill[data-state='needs-you'] {
-  color: var(--dot-waiting);
-  background: color-mix(in srgb, var(--dot-waiting) 14%, transparent);
+  color: var(--status-waiting);
+  background: color-mix(in srgb, var(--status-waiting) 14%, transparent);
 }
 .chat-head-actions {
   flex: none;
