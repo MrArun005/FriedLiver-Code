@@ -24,9 +24,24 @@ type Saved = Grant & { at?: number; agent?: string };
  * Places never always allowed, to read or write (Allow once still works there): system folders,
  * FriedLiver itself and its data (`extra`), and in home every dot file and folder (keys, credentials,
  * shell and tool config: .ssh, .aws, .claude, .codex, .gemini, .config, .npmrc, .netrc, .zshrc…)
- * and ~/Library (keychains, LaunchAgents, other apps' data). For writes also git internals.
+ * and ~/Library (keychains, LaunchAgents, other apps' data). For writes also writeSensitive below.
  */
 const SENSITIVE = ['/etc', '/private/etc', '/Library', '/System', '/usr', '/bin', '/sbin'];
+
+/**
+ * Writes no rule covers, anywhere: config that runs code (git hooks, editor tasks and settings,
+ * husky, CI workflows) or steers agents (their settings, rules and memory files). Compared
+ * ignoring case, as on macOS and Windows file systems.
+ */
+const WRITE_SENSITIVE_FOLDERS = new Set(['.git', '.vscode', '.claude', '.codex', '.gemini', '.cursor', '.idea', '.husky', '.friedliver']);
+const WRITE_SENSITIVE_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'gemini.md']);
+
+function writeSensitive(real: string): boolean {
+  const parts = real.toLowerCase().split(/[\\/]/);
+  return (
+    parts.some((p, i) => WRITE_SENSITIVE_FOLDERS.has(p) || (p === '.github' && parts[i + 1] === 'workflows')) || WRITE_SENSITIVE_FILES.has(parts[parts.length - 1])
+  );
+}
 
 function homeSensitive(real: string, home: string): boolean {
   if (real === home || !within(home, real)) return false;
@@ -45,7 +60,7 @@ export function userDataDir(globalStorage: string): string {
 }
 
 export function isSensitive(real: string, home: string, extra: readonly string[], access: Access = 'write'): boolean {
-  if (access === 'write' && real.split(/[\\/]/).includes('.git')) return true;
+  if (access === 'write' && writeSensitive(real)) return true;
   if ([home, realPath(home) ?? home].some((h) => homeSensitive(real, h))) return true;
   return [...SENSITIVE, ...extra].some((b) => [b, realPath(b) ?? b].some((base) => within(base, real)));
 }

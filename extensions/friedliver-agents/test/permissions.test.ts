@@ -188,6 +188,35 @@ describe('folder rules', () => {
     expect(p.folderCandidates([path.join(h, 'Desktop/trip/plan.txt')], 'write', []).map((g) => g.kind === 'folder' && g.folder)).toContain(path.join(h, 'Desktop'));
   });
 
+  it('let no write rule change config that runs code or steers agents; reading it is fine', () => {
+    const { h, p } = store();
+    p.add({ kind: 'folder', folder: path.join(h, 'proj'), access: 'write' });
+    for (const f of [
+      '.vscode/settings.json',
+      '.VSCode/tasks.json',
+      '.claude/settings.json',
+      '.codex/config.toml',
+      '.gemini/settings.json',
+      '.cursor/rules',
+      '.idea/workspace.xml',
+      '.husky/pre-commit',
+      '.github/workflows/ci.yml',
+      '.GitHub/Workflows/release.yml',
+      '.git/hooks/pre-commit',
+      '.friedliver/rules.md',
+      'CLAUDE.md',
+      'src/claude.md',
+      'AGENTS.md',
+      'GEMINI.md',
+    ]) {
+      const file = path.join(h, 'proj', f);
+      expect(p.folder(file, 'write'), f).toBeUndefined();
+      expect(p.folder(file, 'read'), f).toBeDefined();
+      expect(p.folderCandidates([file], 'write', [path.join(h, 'proj')]), f).toEqual([]);
+    }
+    for (const f of ['src/a.ts', '.github/ISSUE_TEMPLATE/bug.md', 'package.json', 'Makefile', 'build.sh', 'docs/claude-notes.md']) expect(p.folder(path.join(h, 'proj', f), 'write'), f).toBeDefined();
+  });
+
   it('offer the file’s folder, the project and the top folder in home, most specific first', () => {
     const { h, p } = store();
     const roots = [path.join(h, 'proj')];

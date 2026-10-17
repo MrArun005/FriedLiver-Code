@@ -116,6 +116,24 @@ describe('remembered folders', () => {
   });
 });
 
+describe('config that runs code or steers agents', () => {
+  it('a write to .vscode/settings.json or CLAUDE.md under an always-allowed folder still asks, and offers Allow once only', async () => {
+    const dir = realpathSync(await gitRepo());
+    const { c, permissions } = setup(dir);
+    permissions.add({ kind: 'folder', folder: dir, access: 'write' });
+    const chat = await c.createChat('demo');
+    for (const target of ['.vscode/settings.json', 'CLAUDE.md']) {
+      const { card, turn } = await ask(c, chat.id, `native-edit ${target}`);
+      expect(card.answer, target).toBeUndefined();
+      expect(card.detail?.always, target).toBeUndefined();
+      c.answerPermission(card.requestId, null);
+      await turn;
+    }
+    await c.send(chat.id, 'native-edit src/ok.txt');
+    expect(last(c, chat.id)).toMatchObject({ answer: 'Yes', auto: `Always allowed: ${dir}` });
+  });
+});
+
 describe('remembered websites', () => {
   it('answer the agent’s next fetch on that exact origin, and no other', async () => {
     const dir = await gitRepo();
