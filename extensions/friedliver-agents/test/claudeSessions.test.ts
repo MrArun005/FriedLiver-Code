@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { encodeCwd, listClaudeSessions, parseSession } from '../src/host/claudeSessions';
+import { ImageScan, encodeCwd, listClaudeImages, listClaudeSessions, parseSession } from '../src/host/claudeSessions';
 import type { ClaudeSession } from '../src/shared/messages';
 import { claudeColumn, claudeSubagents, filterClaudeSessions } from '../src/shared/view';
 
@@ -119,5 +119,90 @@ describe('Claude Code sessions', () => {
     const all = await listClaudeSessions({ home: h, folders: [ws], now, showAll: true });
     expect(all.map((s) => s.id)).toContain(G);
     expect(all.some((s) => s.archived)).toBe(false);
+  });
+});
+
+describe('images in Claude Code sessions', () => {
+  const t = (s: number) => new Date(Date.UTC(2026, 9, 17, 10, 0, s)).toISOString();
+  const use = (s: number, id: string, name: string, input: object) => JSON.stringify({ type: 'assistant', timestamp: t(s), message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (s: number, id: string, content: unknown) => JSON.stringify({ type: 'user', timestamp: t(s), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] } });
+  const lines = (...l: string[]) => `${l.join('\n')}\n`;
+
+  it('finds Reads of image files and the files screenshot tools saved, each once, relative paths in the session folder', () => {
+    const scan = new ImageScan('/work/app');
+    scan.feed(
+      lines(
+        use(1, 't1', 'Read', { file_path: '/work/app/docs/login-page.png' }),
+        use(2, 't2', 'Read', { file_path: '/work/app/src/index.ts' }),
+        use(3, 't3', 'mcp__friedliver__browser_screenshot', {}),
+        result(4, 't3', [{ type: 'text', text: 'Screenshot of https://example.com/ (“Example”)\nSaved to /store/shots-x/screenshot-1.png. Read that file to see it.' }]),
+        use(5, 't4', 'mcp__plugin_playwright_playwright__browser_take_screenshot', { fullPage: true }),
+        result(6, 't4', [{ type: 'text', text: '### Result\n- [Screenshot of full page](.playwright-mcp/page-1.png)\n' }, { type: 'image', source: { data: 'AAAA' } }]),
+        use(7, 't5', 'mcp__plugin_playwright_playwright__browser_take_screenshot', { filename: 'shots/hero.png' }),
+        use(8, 't6', 'Read', { file_path: '/store/shots-x/screenshot-1.png' }),
+        'not json {',
+        result(9, 'unknown', 'Saved to /nowhere/x.png. ok'),
+      ),
+    );
+    expect(scan.images).toEqual([
+      { path: '/work/app/docs/login-page.png', title: 'Login page', source: 'read', at: Date.parse(t(1)) },
+      { path: '/store/shots-x/screenshot-1.png', title: 'Screenshot of https://example.com/ (“Example”)', source: 'screenshot', at: Date.parse(t(3)) },
+      { path: '/work/app/.playwright-mcp/page-1.png', title: 'Screenshot of full page', source: 'screenshot', at: Date.parse(t(5)) },
+      { path: '/work/app/shots/hero.png', title: 'Hero', source: 'screenshot', at: Date.parse(t(7)) },
+    ]);
+  });
+
+  it('a screenshot result split across two reads is still matched', () => {
+    const scan = new ImageScan('/w');
+    scan.feed(lines(use(1, 'a', 'browser_screenshot', {})));
+    scan.feed(lines(result(2, 'a', 'Saved to /w/s.png. Read it.')));
+    expect(scan.images.map((i) => i.path)).toEqual(['/w/s.png']);
+  });
+
+  /** A fake home with one session for `ws`, written from lines. */
+  function sessionHome(ws: string, main: string, subs: Record<string, string> = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-cci-'));
+    const proj = path.join(dir, '.claude', 'projects', encodeCwd(ws));
+    fs.mkdirSync(path.join(proj, A, 'subagents'), { recursive: true });
+    fs.writeFileSync(path.join(proj, `${A}.jsonl`), main);
+    for (const [name, text] of Object.entries(subs)) fs.writeFileSync(path.join(proj, A, 'subagents', name), text);
+    return { home: dir, proj };
+  }
+
+  it('lists a session’s images with its subagents’, skipping sessions FriedLiver owns', async () => {
+    const ws = '/work/app';
+    const { home: h } = sessionHome(
+      ws,
+      lines(JSON.stringify({ type: 'custom-title', customTitle: 'Polish the board' }), use(1, 'r1', 'Read', { file_path: '/work/app/a.png' })),
+      { 'agent-abc.jsonl': lines(use(2, 'r2', 'Read', { file_path: '/work/app/b.png' }), use(3, 'r3', 'Read', { file_path: '/work/app/a.png' })), 'notes.txt': use(4, 'r4', 'Read', { file_path: '/work/app/c.png' }) },
+    );
+    const [s] = await listClaudeImages({ home: h, folders: [ws] });
+    expect(s).toMatchObject({ id: A, cwd: ws, title: 'Polish the board' });
+    expect(s.images.map((i) => i.path)).toEqual(['/work/app/a.png', '/work/app/b.png']);
+    expect(await listClaudeImages({ home: h, folders: [ws], skip: new Set([A]) })).toEqual([]);
+  });
+
+  it('reads only what a growing transcript gained, and all of one that was rewritten', async () => {
+    const ws = '/work/grow';
+    const { home: h, proj } = sessionHome(ws, lines(use(1, 'r1', 'Read', { file_path: 'one.png' })));
+    const file = path.join(proj, `${A}.jsonl`);
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/grow/one.png']);
+    // A line half written: not read until it ends.
+    fs.appendFileSync(file, use(2, 'r2', 'Read', { file_path: 'two.png' }).slice(0, 40));
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images).toHaveLength(1);
+    fs.appendFileSync(file, `${use(2, 'r2', 'Read', { file_path: 'two.png' }).slice(40)}\n`);
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/grow/one.png', '/work/grow/two.png']);
+    fs.writeFileSync(file, lines(use(3, 'r3', 'Read', { file_path: 'three.png' })));
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/grow/three.png']);
+  });
+
+  it('does not follow a subagents folder that links elsewhere', async () => {
+    const ws = '/work/link';
+    const { home: h, proj } = sessionHome(ws, lines(use(1, 'r1', 'Read', { file_path: 'a.png' })));
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-else-'));
+    fs.writeFileSync(path.join(elsewhere, 'agent-x.jsonl'), lines(use(2, 'r2', 'Read', { file_path: 'secret.png' })));
+    fs.rmSync(path.join(proj, A, 'subagents'), { recursive: true });
+    fs.symlinkSync(elsewhere, path.join(proj, A, 'subagents'));
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/link/a.png']);
   });
 });
