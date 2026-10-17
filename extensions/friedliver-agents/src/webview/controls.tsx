@@ -11,6 +11,7 @@ import {
   type AgentDefaults,
   type ChatSession,
 } from '../shared/session';
+import { DecisionTargets } from '../shared/decisionTarget';
 import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
 import { ClampedText, Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 
@@ -221,7 +222,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
   const command = item.detail?.command?.line;
   const deny = denyOption(item.options);
   return (
-    <section class="ask" id={`item-${item.requestId}`} aria-label={`${chat.label} asks`} {...chooseOn(item.requestId)}>
+    <section class="ask" id={`item-${item.requestId}`} aria-label={`${chat.label} asks`} {...chooseOn(chat, item.requestId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         Needs your OK
@@ -301,28 +302,39 @@ export function decisionId(i: Item): string | undefined {
   return undefined;
 }
 
-let chosen: string | undefined;
-const chosenWatchers = new Set<() => void>();
+/** Per chat, the card the keys act on (shared/decisionTarget.ts: marked card only, never retargeted by an arrival). */
+const targets = new DecisionTargets();
+const targetWatchers = new Set<() => void>();
+const lastShown = new Map<string, string | undefined>();
 
-/** The card you clicked or focused: the keys act on it while it waits. */
-export function chooseDecision(id: string): void {
-  if (chosen === id) return;
-  chosen = id;
-  for (const w of chosenWatchers) w();
+const waitingIds = (chat: ChatView): string[] => waitingItems(chat.items).flatMap((i) => decisionId(i) ?? []);
+
+/** The card the keys act on: the one marked on screen (oldest waiting until you pick another). */
+export function decisionTarget(chat: ChatView): Item | undefined {
+  const id = targets.target(chat.id, waitingIds(chat), Date.now())?.id;
+  return id === undefined ? undefined : waitingItems(chat.items).find((i) => decisionId(i) === id);
 }
 
-/** The card the keys act on: the one you chose, else the newest waiting one (nearest the composer). */
-export function decisionTarget(chat: ChatView): Item | undefined {
-  const waiting = waitingItems(chat.items).filter((i) => decisionId(i) !== undefined);
-  return waiting.find((i) => decisionId(i) === chosen) ?? waiting.at(-1);
+/** Redraws the cards when the marked card changed (it was answered, or another was chosen). */
+export function syncDecisionTarget(chat: ChatView): void {
+  const id = targets.target(chat.id, waitingIds(chat), Date.now())?.id;
+  if (lastShown.get(chat.id) === id) return;
+  lastShown.set(chat.id, id);
+  for (const w of targetWatchers) w();
+}
+
+/** You clicked or focused a card: the keys act on it (after the grace period) while it waits. */
+export function chooseDecision(chat: ChatView, id: string): void {
+  targets.choose(chat.id, id, waitingIds(chat), Date.now());
+  syncDecisionTarget(chat);
 }
 
 export function useDecisionTarget(chat: ChatView): string | undefined {
   const [, bump] = useState(0);
   useEffect(() => {
     const w = () => bump((n) => n + 1);
-    chosenWatchers.add(w);
-    return () => void chosenWatchers.delete(w);
+    targetWatchers.add(w);
+    return () => void targetWatchers.delete(w);
   }, []);
   const target = decisionTarget(chat);
   return target && decisionId(target);
@@ -341,8 +353,8 @@ export function KeyHint({ chat, id, n, yes = true }: { chat: ChatView; id: strin
 }
 
 /** A decision card's frame: clicking or focusing in it makes it the one the keys act on. */
-export function chooseOn(id: string) {
-  return { onMouseDown: () => chooseDecision(id), onFocusIn: () => chooseDecision(id) };
+export function chooseOn(chat: ChatView, id: string) {
+  return { onMouseDown: () => chooseDecision(chat, id), onFocusIn: () => chooseDecision(chat, id) };
 }
 
 /** The card the keys act on, as the actions a shortcut takes. */
@@ -394,14 +406,14 @@ export function decisionKey(e: KeyboardEvent, chat: ChatView, composerEmpty: boo
   const actions = waitingActions(chat);
   if (!actions) return false;
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && !e.shiftKey && e.key === 'Enter') actions.approve();
-  else if (mod && e.shiftKey && e.key === 'Backspace') actions.deny();
-  else if (!mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-    // While a decision waits, a digit in the empty box is for it: picked when in range, never typed.
-    actions.pick(Number(e.code.slice(5)) - 1);
-  }
-  else return false;
+  const kind = mod && !e.shiftKey && e.key === 'Enter' ? 'approve' : mod && e.shiftKey && e.key === 'Backspace' ? 'deny' : !mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code) ? 'pick' : null;
+  if (!kind) return false;
+  // While a decision waits, the key is for it, never typed. Just after the marked card changed, it does nothing.
   e.preventDefault();
+  if (!targets.armed(chat.id, waitingIds(chat), Date.now())) return true;
+  if (kind === 'approve') actions.approve();
+  else if (kind === 'deny') actions.deny();
+  else actions.pick(Number(e.code.slice(5)) - 1);
   return true;
 }
 
@@ -475,7 +487,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
   // One question with one set of choices answers with a click.
   const only = item.fields.length === 1 && item.fields[0].type === 'choice' ? item.fields[0] : undefined;
   return (
-    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(item.requestId)}>
+    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(chat, item.requestId)}>
       <div class="ask-head">
         <Dot state="needs-you" />
         <Glyph agent={chat.agent} size="sm" /> {AGENT_FACES[chat.agent].name} asks you

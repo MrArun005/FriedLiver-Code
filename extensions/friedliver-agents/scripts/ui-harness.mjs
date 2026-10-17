@@ -647,6 +647,8 @@ async function shoot() {
     check(await d.locator('.composer-hint:has-text("Sends after this turn · Esc stops")').isVisible(), 'with text in a busy chat, the faint hint says when it sends');
     await d.fill('.composer textarea', '');
     await d.click('.composer textarea');
+    // The decision keys wait out a short grace period once a card is marked (security: no retargeting).
+    await d.waitForTimeout(650);
     await d.keyboard.press('2');
     const picked = (await posted(d)).find((m) => m.type === 'permission');
     check(picked?.requestId === 'perm-c2' && (await d.inputValue('.composer textarea')) === '', '2 in an empty box picks the second option');
@@ -788,10 +790,11 @@ async function shoot() {
     await card.locator('button:has-text("Open diff")').click();
     check((await posted(p)).some((m) => m.type === 'permissionDiff' && m.requestId === 'perm-c1'), 'Open diff asks for the whole file');
     await p.click('.composer textarea');
+    await p.waitForTimeout(650);
     await p.keyboard.press('Control+Enter');
     const answer = (await posted(p)).filter((m) => m.type === 'bridge' || m.type === 'permission').at(-1);
-    // The keys act on the card that shows the hint: the newest waiting one, nearest the composer (QA F02).
-    check(answer?.type === 'permission' && answer.requestId === 'perm-c1', 'Ctrl+Enter answers the waiting decision the hint is on');
+    // The keys act on the marked card: the one you last clicked (Open diff, in this card), QA F02.
+    check(answer?.type === 'permission' && answer.requestId === 'perm-c1', 'Ctrl+Enter answers the card you were working in');
     check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '') === 'Stop', 'with nothing typed, a busy chat’s send button stops the turn');
     await p.fill('.composer textarea', 'and the tests');
     check(((await p.locator('.composer-bar button.primary').getAttribute('aria-label')) ?? '').includes('Queue'), 'a busy chat queues the message');
