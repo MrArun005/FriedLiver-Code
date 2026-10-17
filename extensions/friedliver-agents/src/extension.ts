@@ -1,9 +1,12 @@
+import { watch, type FSWatcher } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { Accounts } from './host/accounts';
 import { ActionBatcher } from './host/batch';
+import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
 import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
@@ -18,7 +21,7 @@ import { installCommandFor } from './host/signin';
 import { actionsFor, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, type Script, type Surface } from './host/webviews';
-import { LIMITS, type Attachment, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
+import { LIMITS, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule, isRule, type CommandRule } from './shared/rules';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
@@ -85,6 +88,10 @@ export class Controller {
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
+  /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
+  private claudeSessions: ClaudeSession[] = [];
+  private claudeWatchers: FSWatcher[] = [];
+  private claudeTimer?: ReturnType<typeof setTimeout>;
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
@@ -266,6 +273,8 @@ export class Controller {
     await this.stateFile?.flush();
     this.stateFile?.stop();
     this.batcher.dispose();
+    clearTimeout(this.claudeTimer);
+    this.watchClaudeSessions(false);
     await this.core.dispose();
   }
 
@@ -350,6 +359,7 @@ export class Controller {
       sub.dispose();
       this.surfaces.delete(surface);
       if (surface.webview === this.agentsView?.webview) this.agentsView = undefined;
+      if (surface.kind === 'tasks') this.refreshClaudeSessions();
     });
   }
 
@@ -380,6 +390,7 @@ export class Controller {
           this.batcher.flush();
           surface.ready = true;
           post(surface, { type: 'snapshot', state: stateFor(surface.kind, this.core.snapshot), selected: surface.selected ?? this.lastSelected, now: Date.now(), defaults: this.core.agentDefaults() });
+          if (surface.kind === 'tasks') this.refreshClaudeSessions();
           if (surface.kind === 'chat') {
             this.composerRefs = this.composerRefs.filter((r) => r.until > Date.now());
             for (const r of this.composerRefs) post(surface, r.message);
@@ -448,6 +459,15 @@ export class Controller {
         case 'openChat':
           await this.showChat(m.chatId, m.item);
           return;
+        case 'openClaudeSession': {
+          // Only a session this window listed, so a webview can't name some other folder's.
+          const found = this.claudeSessions.find((s) => s.id === m.sessionId);
+          if (!found) return;
+          const chat = await this.core.createChat('claude', { title: found.title, resume: { sessionId: found.id, cwd: found.cwd } });
+          this.refreshClaudeSessions();
+          await this.showChat(chat.id);
+          return;
+        }
         case 'merge':
           await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Merging the task into the main checkout…' }, () =>
             this.core.merge(m.chatId),
@@ -1115,8 +1135,42 @@ export class Controller {
     return value === 'allow' || value === 'off' ? value : 'ask';
   }
 
+  /** Reads the Claude Code sessions again soon, at most every half second while a session streams, and sends them to the Manager. */
+  private refreshClaudeSessions(): void {
+    if (this.claudeTimer) return;
+    this.claudeTimer = setTimeout(() => {
+      this.claudeTimer = undefined;
+      void this.readClaudeSessions().catch((err: unknown) => this.log.warn(`Claude Code sessions: ${messageOf(err)}`));
+    }, 500);
+  }
+
+  private async readClaudeSessions(): Promise<void> {
+    const on = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true) && [...this.surfaces].some((s) => s.kind === 'tasks');
+    this.watchClaudeSessions(on);
+    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    this.claudeSessions = on ? await listClaudeSessions({ home: os.homedir(), folders: this.folders(), skip: owned }) : [];
+    for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
+  }
+
+  /** Watches the folders' Claude Code project folders while the Manager is open; a folder made later is picked up on the next read. */
+  private watchClaudeSessions(on: boolean): void {
+    for (const w of this.claudeWatchers) w.close();
+    this.claudeWatchers = [];
+    if (!on) return;
+    for (const folder of this.folders()) {
+      try {
+        const w = watch(path.join(os.homedir(), '.claude', 'projects', encodeCwd(folder)), () => this.refreshClaudeSessions());
+        w.on('error', () => w.close());
+        this.claudeWatchers.push(w);
+      } catch {
+        // No sessions for this folder yet.
+      }
+    }
+  }
+
   private onConfig(e: vscode.ConfigurationChangeEvent): void {
     if (!e.affectsConfiguration('friedliver')) return;
+    if (e.affectsConfiguration('friedliver.showClaudeCodeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
         if (!this.stateFile) void this.openStateFile(false).then(() => this.stateFile?.schedule());

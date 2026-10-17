@@ -508,6 +508,11 @@
           "default": true,
           "description": "Show a notification when an agent finishes a task and its chat isn't on screen or the window isn't focused."
         },
+        "friedliver.showClaudeCodeSessions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show this folder's Claude Code sessions started outside FriedLiver (the claude CLI, the Claude Code extension) in the Agent Manager, read from ~/.claude/projects. FriedLiver only reads them."
+        },
         "friedliver.restoreChats": {
           "type": "boolean",
           "default": true,
