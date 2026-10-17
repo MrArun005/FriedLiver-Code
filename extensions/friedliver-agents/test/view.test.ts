@@ -163,9 +163,9 @@ describe('cards', () => {
   });
 
   it('lists the other chats that changed the same file, and matches review paths to them', () => {
-    const s = state([chat('a', { label: 'Claude 1', files: ['src/format.ts', 'a.ts'] }), chat('b', { label: 'Codex 2', files: ['src/format.ts'] }), chat('c', { files: ['a.ts'], merged: true })]);
+    const s = state([chat('a', { label: 'Claude 1', files: ['src/format.ts', 'a.ts'] }), chat('b', { label: 'Codex 2', title: 'Add tests for formatCents', files: ['src/format.ts'] }), chat('c', { files: ['a.ts'], merged: true })]);
     const mine = conflictsOf(s, 'a');
-    expect(mine.map(conflictText)).toEqual(['also in Codex 2: src/format.ts']);
+    expect(mine.map(conflictText)).toEqual(['also in Add tests for formatCents: src/format.ts']);
     expect(conflictsOf(s, 'c')).toEqual([]);
     expect(relativePath('/w/', '/w/src/format.ts')).toBe('src/format.ts');
     expect(relativePath('C:\\w', 'c:\\w\\src\\x.ts')).toBe('src/x.ts');

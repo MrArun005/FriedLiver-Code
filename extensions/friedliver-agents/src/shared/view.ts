@@ -335,9 +335,9 @@ export function conflictsOf(state: Pick<AppState, 'chats'>, chatId: string, all:
     .map((f) => ({ file: f.file, others: f.chats.filter((id) => id !== chatId).flatMap((id) => byId.get(id) ?? []) }));
 }
 
-/** "also in Codex 2: src/format.ts". */
+/** "also in Add tests for formatCents: src/format.ts": the other chats by their topic. */
 export function conflictText(c: ChatConflict): string {
-  return `also in ${c.others.map((o) => o.label).join(', ')}: ${c.file}`;
+  return `also in ${c.others.map((o) => o.title).join(', ')}: ${c.file}`;
 }
 
 /** A path relative to the chat's folder, with forward slashes, as `files` keeps them. */
