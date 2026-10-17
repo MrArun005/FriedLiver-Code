@@ -1095,7 +1095,7 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint;
+  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
 
   const reset = () => {
     setText('');
@@ -1228,13 +1228,7 @@ function Composer({
           aria-autocomplete="list"
           aria-controls={picking ? listId : undefined}
           aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
-          placeholder={
-            chat.busy
-              ? 'Message… sends when this turn ends · Esc stops'
-              : chat.session?.starting
-                ? 'Starting…'
-                : 'Message…'
-          }
+          placeholder={chat.session?.starting && !chat.busy ? 'Starting…' : 'Message…'}
           onInput={(e) => {
             setText(e.currentTarget.value);
             track(e.currentTarget);
