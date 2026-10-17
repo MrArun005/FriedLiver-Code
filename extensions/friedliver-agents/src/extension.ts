@@ -27,7 +27,7 @@ import { StateFile } from './host/persist';
 import { ReviewUi } from './host/review';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
-import { actionsFor, stateFor } from './host/surfaceState';
+import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, type Script, type Surface } from './host/webviews';
 import { LIMITS, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
@@ -39,8 +39,8 @@ import { isImagePath } from './shared/stepImages';
 import { clip } from './shared/view';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-/** How long a code reference for a composer waits for a chat view to load. */
-const COMPOSER_WAIT_MS = 10_000;
+/** How long a message for a chat view (a composer's code reference, an item to reveal) waits for one to load. */
+const REPLAY_MS = 10_000;
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 /** Each agent's last known options and the user's choices: the user's own storage, never a workspace's. */
 const DEFAULTS_KEY = 'friedliver.agentDefaults';
@@ -127,8 +127,12 @@ export class Controller {
   private stateFile?: StateFile;
   private warnedAgentToAgent = false;
   private warnedApprovals = false;
-  /** References for a composer, sent again to a chat view that (re)loads soon after; the view drops duplicates. */
-  private composerRefs: { message: HostMessage; until: number }[] = [];
+  /**
+   * Messages sent again to a chat view that (re)loads soon after: a composer's code references and the
+   * item Open scrolls to. A hidden view loses its content and a new one isn't ready yet, so what was
+   * posted to it then never arrived. The view drops duplicate references; a repeated scroll is harmless.
+   */
+  private replay: { message: HostMessage; until: number }[] = [];
   /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
 
@@ -417,7 +421,6 @@ export class Controller {
       selected: kind === 'chat' ? this.lastSelected : undefined,
       ready: false,
       visible: () => view.visible,
-      reveal: () => view.show(true),
     };
     if (kind === 'chat' && !list) this.agentsView = view;
     this.addSurface(surface, title, view);
@@ -431,7 +434,6 @@ export class Controller {
       selected: kind === 'chat' ? this.lastSelected : undefined,
       ready: false,
       visible: () => panel.visible,
-      reveal: () => panel.reveal(),
     };
     if (kind === 'chat') this.chatPanel = panel;
     else this.tasksPanel = panel;
@@ -463,17 +465,35 @@ export class Controller {
     return [...this.surfaces].filter((s) => s.kind === 'chat');
   }
 
-  /** Shows a chat where the user is looking: the center panel if open, else the side view. */
+  /**
+   * Open on a notification, a card or the Agent Manager: the chat in the chat tab, opening one when
+   * there is none (or in the side Agents view when that is on screen instead). Selected before any
+   * view opens, so a view that loads gets it in its snapshot, and the item to reveal is sent again
+   * once it's ready. Never throws: its callers are notification buttons that can't show an error.
+   */
   private async showChat(chatId: string, revealItem?: string): Promise<void> {
+    if (!this.core.chat(chatId)) {
+      void vscode.window.showInformationMessage('That chat is closed.');
+      return;
+    }
     this.lastSelected = chatId;
-    const center = this.chatSurfaces().find((s) => s.webview === this.chatPanel?.webview);
-    if (center) center.reveal();
-    else await vscode.commands.executeCommand('friedliver.agents.focus');
+    const reveal: HostMessage | undefined = revealItem ? { type: 'reveal', chatId, id: revealItem } : undefined;
+    if (reveal) this.remember(reveal);
     for (const s of this.chatSurfaces()) {
       s.selected = chatId;
       post(s, { type: 'select', chatId });
-      if (revealItem) post(s, { type: 'reveal', chatId, id: revealItem });
+      if (reveal) post(s, reveal);
     }
+    try {
+      if (this.chatPanel || !this.agentsView?.visible) this.revealChatPanel();
+    } catch (err) {
+      this.error(err);
+    }
+  }
+
+  /** Keeps a message for chat views that (re)load in the next seconds (see `replay`). */
+  private remember(message: HostMessage): void {
+    this.replay = [...this.replay.filter((r) => r.until > Date.now()), { message, until: Date.now() + REPLAY_MS }];
   }
 
   // ---- Messages from webviews (already validated) ----
@@ -488,8 +508,8 @@ export class Controller {
           post(surface, { type: 'snapshot', state: stateFor(surface.kind, this.core.snapshot), selected: surface.selected ?? this.lastSelected, now: Date.now(), defaults: this.core.agentDefaults() });
           if (surface.kind === 'tasks') this.refreshClaudeSessions();
           if (surface.kind === 'chat') {
-            this.composerRefs = this.composerRefs.filter((r) => r.until > Date.now());
-            for (const r of this.composerRefs) post(surface, r.message);
+            this.replay = this.replay.filter((r) => r.until > Date.now());
+            for (const r of this.replay) post(surface, r.message);
           }
           return;
         case 'newChat':
@@ -723,7 +743,7 @@ export class Controller {
   private addToComposer(chatId: string, ref: CodeRef): void {
     const message: HostMessage = { type: 'addRef', chatId, ref };
     for (const s of this.chatSurfaces()) if (s.visible()) post(s, message);
-    this.composerRefs = [...this.composerRefs.filter((r) => r.until > Date.now()), { message, until: Date.now() + COMPOSER_WAIT_MS }];
+    this.remember(message);
   }
 
   /**
@@ -800,13 +820,18 @@ export class Controller {
   }
 
   async moveToCenter(column?: vscode.ViewColumn): Promise<void> {
+    this.revealChatPanel(column);
+    await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+  }
+
+  /** The chat tab, opened when there is none. */
+  private revealChatPanel(column?: vscode.ViewColumn): void {
     if (this.chatPanel) {
       this.chatPanel.reveal(column);
     } else {
       const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', column ?? vscode.ViewColumn.Active, { retainContextWhenHidden: false });
       this.adoptPanel(panel, 'chat');
     }
-    await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   }
 
   /**
@@ -1026,7 +1051,7 @@ export class Controller {
    */
   private onScreen(chatId?: string): boolean {
     if (!vscode.window.state.focused || !chatId) return false;
-    return [...this.surfaces].some((s) => s.visible() && (s.kind === 'tasks' || (s.kind === 'chat' && (s.selected ?? this.lastSelected) === chatId)));
+    return [...this.surfaces].some((s) => showsChat(s, chatId, this.lastSelected));
   }
 
   /**
