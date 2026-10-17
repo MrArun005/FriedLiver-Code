@@ -146,7 +146,8 @@ export interface CodeRef {
 
 export type Item =
   /** `refs` (optional, added with the editor commands) is the code the message points at. */
-  | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[]; at?: number }
+  /** `checkpoint` (optional): the turn this message started, when its files were snapshotted ("Rewind to here"). */
+  | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[]; at?: number; checkpoint?: string }
   /** `at` (optional, on user and agent messages): when it was sent or began, by the host's clock. */
   | { kind: 'agent'; text: string; at?: number }
   | { kind: 'thought'; text: string }
@@ -252,6 +253,12 @@ export type Action =
   | { t: 'commandOutput'; commandId: string; data: string }
   | { t: 'changes'; chatId: string; turnId: string; files: string[] }
   | { t: 'undone'; chatId: string; turnId: string }
+  /** The latest message without one started turn `turnId`, which has a checkpoint. */
+  | { t: 'checkpoint'; chatId: string; turnId: string }
+  /** Checkpoints gone (pruned, or the chat put away): their messages lose "Rewind to here". */
+  | { t: 'checkpointsGone'; chatId: string; turnIds?: string[] }
+  /** Conversation rewound: the message that started `turnId` and everything after it go. */
+  | { t: 'rewound'; chatId: string; turnId: string }
   | { t: 'worktree'; chatId: string; branch?: string; merged?: boolean }
   | { t: 'image'; image: ImageItem }
   | { t: 'link'; link: ChatLink }
@@ -344,6 +351,27 @@ export function reduce(state: AppState, action: Action): AppState {
           changedFiles: Math.max(0, c.changedFiles - undone),
           items: c.items.map((i) => (i.kind === 'changes' && i.turnId === action.turnId ? { ...i, undone: true } : i)),
         };
+      });
+    case 'checkpoint':
+      return editChat(state, action.chatId, (c) => {
+        const at = c.items.findLastIndex((i) => i.kind === 'user');
+        const msg = c.items[at];
+        // Only a message the agent hasn't answered yet: a consultation's turn has none of its own.
+        if (msg?.kind !== 'user' || msg.checkpoint || c.items.slice(at).some((i) => i.kind === 'agent' || i.kind === 'changes')) return c;
+        return { ...c, items: c.items.map((i, n) => (n === at ? { ...msg, checkpoint: action.turnId } : i)) };
+      });
+    case 'checkpointsGone':
+      return editChat(state, action.chatId, (c) => ({
+        ...c,
+        items: c.items.map((i) => (i.kind === 'user' && i.checkpoint && (!action.turnIds || action.turnIds.includes(i.checkpoint)) ? { ...i, checkpoint: undefined } : i)),
+      }));
+    case 'rewound':
+      return editChat(state, action.chatId, (c) => {
+        const at = c.items.findIndex((i) => i.kind === 'user' && i.checkpoint === action.turnId);
+        if (at < 0) return c;
+        const items = c.items.slice(0, at);
+        const gone = c.items.slice(at).reduce((n, i) => n + (i.kind === 'changes' && !i.undone ? i.files.length : 0), 0);
+        return { ...c, items, changedFiles: Math.max(0, c.changedFiles - gone), turns: Math.max(0, c.turns - c.items.slice(at).filter((i) => i.kind === 'user').length) };
       });
     case 'worktree':
       return editChat(state, action.chatId, (c) => ({ ...c, branch: action.branch, merged: action.merged ?? c.merged }));

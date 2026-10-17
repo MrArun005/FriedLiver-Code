@@ -102,6 +102,22 @@ export function handoffContext(chat: ChatView): string {
   return parts.filter(Boolean).join('\n\n');
 }
 
+/**
+ * The conversation up to a rewind, for the new session that continues it:
+ * the agent's own session can't be cut back to a message. Empty when nothing
+ * is left to carry.
+ */
+export function rewoundHistory(chat: ChatView, items: Item[]): string {
+  let lines = messages({ ...chat, items }, MAX_MESSAGE);
+  if (!lines.length) return '';
+  while (lines.length > 1 && lines.join('\n\n').length > MAX_HANDOFF) lines = [lines[0], ...lines.slice(2)];
+  return [
+    '[FriedLiver] The user rewound this conversation, so you are in a new session. This is the conversation so far, oldest first; anything after it was undone. The files on disk are as the user left them.',
+    lines.join('\n\n'),
+    "The user's message follows.",
+  ].join('\n\n');
+}
+
 function commandOutcome(i: Extract<Item, { kind: 'command' }>): string {
   if (i.state === 'denied') return 'the user denied it';
   if (i.state === 'exited') return i.exitCode == null ? 'stopped' : `exit ${i.exitCode}`;

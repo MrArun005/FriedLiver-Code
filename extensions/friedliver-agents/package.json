@@ -171,6 +171,11 @@
         "category": "FriedLiver"
       },
       {
+        "command": "friedliver.rewind",
+        "title": "Rewind Chat…",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.editSelection",
         "title": "Edit with Agent",
         "category": "FriedLiver"

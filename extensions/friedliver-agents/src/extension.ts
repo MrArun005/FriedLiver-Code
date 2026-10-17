@@ -7,6 +7,7 @@ import type { VendorAgentId } from '@friedliver/main/agents/registry';
 import { Accounts } from './host/accounts';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
+import { runRewind } from './host/rewindFlow';
 import { encodeCwd, listClaudeSessions } from './host/claudeSessions';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
@@ -171,6 +172,7 @@ export class Controller {
         return { maxRunning: clamp(c.get<number>('maxRunningAgents', 3), 1, 6), idleStopMinutes: clamp(c.get<number>('idleStopMinutes', 10), 0, 240) };
       },
       log: (line) => this.log.info(line),
+      checkpointDir: path.join(context.globalStorageUri.fsPath, 'checkpoints'),
       ui: {
         showReview: (review) => void this.reviews.show(review, this.editor?.reviewPlacement(review)),
         closeReview: (id) => void this.reviews.close(id),
@@ -284,6 +286,7 @@ export class Controller {
     command('friedliver.handoff', (chatId?: unknown) => this.handoffCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.consult', (chatId?: unknown) => this.consultCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.fanout', () => this.fanoutCommand());
+    command('friedliver.rewind', (chatId?: unknown) => this.rewindCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.pipe', (chatId?: unknown) => this.pipeCommand(typeof chatId === 'string' ? chatId : undefined));
     this.editor = new EditorAgent(context, {
       core: this.core,
@@ -459,6 +462,9 @@ export class Controller {
           return;
         case 'command':
           this.core.decideCommand(m.commandId, m.approve);
+          return;
+        case 'rewind':
+          await this.rewindCommand(m.chatId, m.turnId);
           return;
         case 'undo':
           // The turn's card says "Turn undone"; a file left alone gets a notice in the chat.
@@ -846,6 +852,25 @@ export class Controller {
     try {
       this.core.pipe(from.id, to.id);
       void vscode.window.showInformationMessage(`Each reply from ${from.label} now goes to ${to.label}.`);
+    } catch (err) {
+      this.error(err);
+    }
+  }
+
+  /** "Rewind to here" from a message, or the chat's checkpoint list (the command, the ⋯ menu). */
+  private async rewindCommand(chatId?: string, turnId?: string): Promise<void> {
+    const chat = await this.pickChat('Rewind which chat?', chatId);
+    if (!chat) return;
+    if (chat.busy) {
+      void vscode.window.showInformationMessage('Wait for the agent to finish, or stop it, before rewinding.');
+      return;
+    }
+    try {
+      await runRewind(this.core, {
+        pick: async (title, items) => (await vscode.window.showQuickPick(items, { title, matchOnDetail: true }))?.value,
+        confirm: async (message, detail, button) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, button)) === button,
+        info: (message) => void vscode.window.showInformationMessage(message),
+      }, chat.id, turnId);
     } catch (err) {
       this.error(err);
     }

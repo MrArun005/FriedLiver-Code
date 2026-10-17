@@ -443,6 +443,22 @@ async function shoot() {
     await p.close();
   }
   {
+    // Rewind: a message with a checkpoint shows "Rewind to here" on hover; the ⋯ menu lists the checkpoints.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    const msg = p.locator('.user-msg').first();
+    await msg.hover();
+    const btn = msg.locator('.rewind-btn');
+    check((await btn.count()) === 1 && (await btn.evaluate((b) => getComputedStyle(b).opacity)) === '1', 'hovering a message shows Rewind to here');
+    await p.screenshot({ path: path.join(os.homedir(), 'code/rewind.png'), animations: 'disabled', caret: 'hide' });
+    await btn.click();
+    check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && /^turn-/.test(m.turnId)), 'Rewind to here asks the host for that message');
+    await p.click('.chat-head-actions button[aria-label="More"]');
+    await p.screenshot({ path: path.join(os.homedir(), 'code/rewind-menu.png'), animations: 'disabled', caret: 'hide' });
+    await p.getByRole('menuitem', { name: 'Checkpoints…' }).click();
+    check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && m.turnId === undefined), 'the ⋯ menu opens the checkpoint list');
+    await p.close();
+  }
+  {
     // The chat list lives in its own side bar view; the chat tab has none, at any width.
     const tab = await open('surface=chat&theme=black-blue&select=chat-c5', 1400, 800);
     check((await tab.locator('.chat-side').count()) === 0, 'the chat tab has no chat list beside it');

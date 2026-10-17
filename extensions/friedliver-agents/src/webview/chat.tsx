@@ -412,6 +412,16 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                 <div class="pop-sep" role="separator" />
                 <button
                   role="menuitem"
+                  disabled={chat.busy}
+                  onClick={() => {
+                    close();
+                    send({ type: 'rewind', chatId: chat.id });
+                  }}
+                >
+                  <Icon name="history" /> Checkpoints…
+                </button>
+                <button
+                  role="menuitem"
                   onClick={() => {
                     close();
                     send({ type: 'archive', chatId: chat.id, archived: !chat.archived });
@@ -684,6 +694,17 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, at }:
               </div>
             )}
           </div>
+          {item.checkpoint && !chat.busy && (
+            <button
+              type="button"
+              class="ghost icon-btn sm rewind-btn"
+              title="Rewind to here"
+              aria-label="Rewind to here"
+              onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })}
+            >
+              <Icon name="history" />
+            </button>
+          )}
         </div>
       );
     case 'agent':

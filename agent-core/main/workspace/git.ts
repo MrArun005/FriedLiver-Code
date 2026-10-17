@@ -252,3 +252,38 @@ export async function blobAt(root: string, tree: string, relPath: string): Promi
     return null;
   }
 }
+
+/** Checkpoint commits need an identity and must never ask for a signature. */
+const KEEP_ENV = {
+  GIT_AUTHOR_NAME: 'FriedLiver',
+  GIT_AUTHOR_EMAIL: 'checkpoints@friedliver.invalid',
+  GIT_COMMITTER_NAME: 'FriedLiver',
+  GIT_COMMITTER_EMAIL: 'checkpoints@friedliver.invalid',
+};
+
+/** Private namespace for checkpoint refs: never a branch, tag, HEAD, index or stash. */
+export const CHECKPOINT_REFS = 'refs/friedliver/checkpoints/';
+
+/**
+ * Keeps a snapshot tree reachable under `ref` (inside CHECKPOINT_REFS) as a
+ * commit, with `parent` (a commit) before it, so `git gc` doesn't prune it.
+ * Only the ref moves: HEAD, the index, branches and the stash stay as they are.
+ */
+export async function keepSnapshot(root: string, ref: string, tree: string, parent?: string): Promise<string> {
+  if (!ref.startsWith(CHECKPOINT_REFS)) throw new Error(`Not a checkpoint ref: ${ref}`);
+  const args = ['-c', 'commit.gpgSign=false', 'commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', 'FriedLiver checkpoint'];
+  const commit = (await git(root, args, KEEP_ENV)).trim();
+  await git(root, ['update-ref', '--no-deref', ref, commit]);
+  return commit;
+}
+
+/** Checkpoint refs under `prefix` (inside CHECKPOINT_REFS). */
+export async function checkpointRefs(root: string, prefix = CHECKPOINT_REFS): Promise<string[]> {
+  if (!prefix.startsWith(CHECKPOINT_REFS)) return [];
+  return (await git(root, ['for-each-ref', '--format=%(refname)', prefix])).split('\n').filter(Boolean);
+}
+
+export async function dropCheckpointRef(root: string, ref: string): Promise<void> {
+  if (!ref.startsWith(CHECKPOINT_REFS)) throw new Error(`Not a checkpoint ref: ${ref}`);
+  await git(root, ['update-ref', '-d', ref]).catch(() => '');
+}

@@ -450,3 +450,59 @@ describe('questions and file references', () => {
   });
 });
 
+
+describe('rewind', () => {
+  const userTurns = (c: ReturnType<typeof core>['core'], chatId: string) =>
+    c.chat(chatId)!.items.flatMap((i) => (i.kind === 'user' && i.checkpoint ? [i.checkpoint] : []));
+
+  it('restores code and conversation to before a message, and says the agent starts a new session', async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir, { approvalDefault: () => 'edits' });
+    const chat = await c.createChat('demo');
+    const file = path.join(dir, 'README.md');
+    await c.send(chat.id, 'native-edit README.md');
+    await c.send(chat.id, 'native-edit README.md');
+    expect(await readFile(file, 'utf8')).toBe('# test\nedited by the demo agent itself\nedited by the demo agent itself\n');
+    const [first] = userTurns(c, chat.id);
+    expect(c.checkpointList(chat.id)).toHaveLength(2);
+    const plan = await c.rewindPlan(chat.id, first);
+    expect(plan.files).toEqual([{ file: 'README.md', added: 0, removed: 2, conflict: false }]);
+
+    await c.rewind(chat.id, first, 'both');
+    expect(await readFile(file, 'utf8')).toBe('# test\n');
+    const items = c.chat(chat.id)!.items;
+    expect(items.some((i) => i.kind === 'user')).toBe(false);
+    expect(items.at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('new session') });
+    expect(c.checkpointList(chat.id)).toEqual([]);
+  });
+
+  it('restores code only and keeps a file you changed unless you pick the checkpoint', async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir, { approvalDefault: () => 'edits' });
+    const chat = await c.createChat('demo');
+    await c.send(chat.id, 'native-edit README.md');
+    const file = path.join(dir, 'README.md');
+    await writeFile(file, 'mine now\n');
+    const [first] = userTurns(c, chat.id);
+    expect((await c.rewindPlan(chat.id, first)).files[0]).toMatchObject({ file: 'README.md', conflict: true });
+    const kept = await c.rewind(chat.id, first, 'code');
+    expect(kept.kept).toEqual([file]);
+    expect(await readFile(file, 'utf8')).toBe('mine now\n');
+    // The conversation stays; the turn's card says it was undone.
+    expect(c.chat(chat.id)!.items.some((i) => i.kind === 'user')).toBe(true);
+    expect(c.chat(chat.id)!.items.find((i) => i.kind === 'changes')).toMatchObject({ undone: true });
+  });
+
+  it('rewinds a folder outside git from snapshots in the checkpoint folder', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'fl-nogit-'));
+    const file = path.join(dir, 'a.txt');
+    await writeFile(file, 'one\n');
+    const { core: c } = core(dir, { approvalDefault: () => 'edits', checkpointDir: await mkdtemp(path.join(os.tmpdir(), 'fl-cpdir-')) });
+    const chat = await c.createChat('demo');
+    await c.send(chat.id, 'native-edit a.txt');
+    const [first] = userTurns(c, chat.id);
+    expect(first).toBeTruthy();
+    await c.rewind(chat.id, first, 'code', []);
+    expect(await readFile(file, 'utf8')).toBe('one\n');
+  });
+});

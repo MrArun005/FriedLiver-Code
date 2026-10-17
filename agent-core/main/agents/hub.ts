@@ -161,6 +161,21 @@ export class AgentHub {
     if (chat.sessionId) this.sessionToChat.delete(sessionKey(chat.agentId, chat.sessionId));
   }
 
+  /**
+   * Forgets the chat's session (closing it when the agent can), so the next
+   * prompt starts a new one. ACP has no way to cut a session back to an
+   * earlier turn, so a rewound conversation continues this way.
+   */
+  resetSession(chatId: string): void {
+    const chat = this.chats.get(chatId);
+    if (!chat?.sessionId) return;
+    const live = this.live(chat);
+    if (live?.agent.conn.supportsCloseSession) void live.agent.conn.closeSession(live.sessionId).catch(() => {});
+    this.sessionToChat.delete(sessionKey(chat.agentId, chat.sessionId));
+    chat.sessionId = undefined;
+    chat.sessionGeneration = undefined;
+  }
+
   getChat(chatId: string): Chat | undefined {
     return this.chats.get(chatId);
   }

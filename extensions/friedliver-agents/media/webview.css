@@ -3603,6 +3603,15 @@ body[data-surface='chat'] .transcript > * {
 .user-msg .bubble:hover {
   background: var(--c-line);
 }
+.user-msg .rewind-btn {
+  align-self: center;
+  margin-left: 4px;
+  opacity: 0;
+}
+.user-msg:hover .rewind-btn,
+.user-msg .rewind-btn:focus-visible {
+  opacity: 1;
+}
 body[data-surface='chat'] .prose {
   color: var(--c-text);
   line-height: 1.55;

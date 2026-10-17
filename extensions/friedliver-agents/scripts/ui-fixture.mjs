@@ -7,7 +7,8 @@
 const ROOT = '/home/dev/inventory-app';
 const tree = (branch) => `${ROOT}/.worktrees/${branch.replace('/', '-')}`;
 
-const user = (text) => ({ kind: 'user', text, images: [] });
+let turnN = 0;
+const user = (text) => ({ kind: 'user', text, images: [], checkpoint: `turn-${++turnN}` });
 const agent = (text) => ({ kind: 'agent', text });
 const plan = (entries, at) => ({
   kind: 'plan',
