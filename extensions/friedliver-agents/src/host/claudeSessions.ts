@@ -11,14 +11,9 @@ const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
 const TITLE_MAX = 80;
 /** Bytes read from one transcript: its tail, where a long session's title and latest subagents are. */
 const MAX_READ = 8 * 1024 * 1024;
-const WORKING_MS = 2 * 60_000;
 
 export function encodeCwd(folder: string): string {
   return folder.replace(/[^a-zA-Z0-9]/g, '-');
-}
-
-export function sessionWorking(lastActivity: number, now: number): boolean {
-  return now - lastActivity < WORKING_MS;
 }
 
 const clipTitle = (t: string) => {

@@ -17,12 +17,15 @@ import {
   COLUMN_TITLES,
   ago,
   cardModel,
+  claudeColumn,
+  claudeSubagents,
   conflictText,
   counts,
   defaultDir,
   excerpt,
   fanoutGroups,
   filterChats,
+  filterClaudeSessions,
   keepPlan,
   matchesQuery,
   nextDecision,
@@ -37,8 +40,9 @@ import {
   type Progress,
   type Sort,
   type SortKey,
+  type Subagent,
 } from '../shared/view';
-import type { TaskChoices } from '../shared/messages';
+import type { ClaudeSession, TaskChoices } from '../shared/messages';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu } from './connect';
@@ -67,13 +71,16 @@ const toolCount = (n: number) => (n ? `${n} tool${n === 1 ? '' : 's'}` : '');
 
 /** A chat's subagents, as small cards under its own: not chats, so no composer and nothing to save. */
 function Subagents({ chat }: { chat: ChatView }) {
-  const subs = subagents(chat);
+  return <SubCards label={`Subagents of ${chat.label}`} subs={subagents(chat)} onOpen={(id) => openSub(chat.id, id)} />;
+}
+
+function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; onOpen(id: string): void }) {
   if (!subs.length) return null;
   return (
-    <ul class="sub-cards" aria-label={`Subagents of ${chat.label}`}>
+    <ul class="sub-cards" aria-label={label}>
       {subs.map((s) => (
         <li key={s.id}>
-          <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => openSub(chat.id, s.id)}>
+          <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => onOpen(s.id)}>
             <Dot state={SUB_DOT[s.state]} />
             <span class="sub-title">{s.title}</span>
             <span class="hint">{[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}</span>
@@ -81,6 +88,133 @@ function Subagents({ chat }: { chat: ChatView }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+const openClaude = (sessionId: string) => send({ type: 'openClaudeSession', sessionId });
+const OUTSIDE_TIP = 'Started outside FriedLiver (the claude CLI or the Claude Code extension). FriedLiver only reads it until you open it here.';
+const openTip = (col: 'working' | 'done') =>
+  col === 'working' ? 'Continue it in a FriedLiver chat. It is still running elsewhere: stop it there first, or the two will interleave.' : 'Continue it in a FriedLiver chat';
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** A Claude Code session from outside FriedLiver: read-only, with its subagents under it. */
+function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }) {
+  const col = claudeColumn(s, now);
+  return (
+    <>
+      <article class="task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
+        <div class="card-top">
+          <Glyph agent="claude" />
+          <span class="tag" title={OUTSIDE_TIP}>
+            Claude Code
+          </span>
+          <span class="sep">·</span>
+          <span title="Last activity">{ago(s.lastActivity, now)}</span>
+        </div>
+        <h3 class="card-title">
+          <button class="title-btn" title={s.title} onClick={() => openClaude(s.id)}>
+            {s.title}
+          </button>
+        </h3>
+        <div class="card-state">
+          <Dot state={col} />
+          <span class="card-state-text">{col === 'working' ? 'Working outside FriedLiver' : 'Started outside FriedLiver'}</span>
+        </div>
+        <div class="card-meta">
+          <span class="meta-item">{plural(s.messages, 'message')}</span>
+        </div>
+        <div class="card-actions">
+          <span class="spacer" />
+          <button class="sm" title={openTip(col)} onClick={() => openClaude(s.id)}>
+            <Icon name="open" /> Open in FriedLiver
+          </button>
+        </div>
+      </article>
+      <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} onOpen={() => openClaude(s.id)} />
+    </>
+  );
+}
+
+/** The same sessions as a row and its subagents' rows, for the List. */
+function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }) {
+  const col = claudeColumn(s, now);
+  return (
+    <>
+      <tr data-status={col} class="cc-row" onClick={(e) => !(e.target as HTMLElement).closest('button') && openClaude(s.id)}>
+        <td class="c-status">
+          <span class="cell-status">
+            <Dot state={col} /> {DOT_LABEL[col]}
+          </span>
+        </td>
+        <td class="c-agent">
+          <span class="tag" title={OUTSIDE_TIP}>
+            Claude Code
+          </span>
+        </td>
+        <td class="c-task">
+          <div class="cell-title">
+            <span class="cell-title-text" title={s.title}>
+              {s.title}
+            </span>
+          </div>
+        </td>
+        <td class="c-activity num">{ago(s.lastActivity, now)}</td>
+        <td class="c-files num">{plural(s.messages, 'message')}</td>
+        <td class="c-age num" />
+        <td class="c-act">
+          <button class="ghost icon-btn sm" title={openTip(col)} aria-label={`Open ${s.title} in FriedLiver`} onClick={() => openClaude(s.id)}>
+            <Icon name="open" />
+          </button>
+        </td>
+      </tr>
+      {claudeSubagents(s, now).map((sub) => (
+        <tr key={sub.id} class="sub-row" data-status={SUB_DOT[sub.state]}>
+          <td class="c-status">
+            <span class="cell-status">
+              <Dot state={SUB_DOT[sub.state]} /> {SUB_LABEL[sub.state]}
+            </span>
+          </td>
+          <td class="c-agent">
+            <span class="hint">subagent</span>
+          </td>
+          <td class="c-task">
+            <div class="cell-title">
+              <span class="cell-title-text" title={sub.title}>
+                ↳ {sub.title}
+              </span>
+            </div>
+          </td>
+          <td class="c-activity num" />
+          <td class="c-files num" />
+          <td class="c-age num" />
+          <td class="c-act" />
+        </tr>
+      ))}
+    </>
+  );
+}
+
+/** For the Map: the sessions as nodes in a lane of their own, under the chats' lanes. */
+function ClaudeLane({ sessions, now }: { sessions: ClaudeSession[]; now: number }) {
+  if (!sessions.length) return null;
+  return (
+    <section class="cc-lane" aria-label="Claude Code sessions from outside FriedLiver">
+      <h2 class="col-head" title={OUTSIDE_TIP}>
+        <Glyph agent="claude" /> Claude Code <span class="col-count">{sessions.length}</span>
+      </h2>
+      <div class="cc-lane-nodes">
+        {sessions.map((s) => (
+          <div key={s.id} class="cc-lane-item">
+            <button class="sub-card cc-node" data-status={claudeColumn(s, now)} title={openTip(claudeColumn(s, now))} onClick={() => openClaude(s.id)}>
+              <Dot state={claudeColumn(s, now)} />
+              <span class="sub-title">{s.title}</span>
+              <span class="hint">{ago(s.lastActivity, now)}</span>
+            </button>
+            <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} onOpen={() => openClaude(s.id)} />
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -99,9 +233,11 @@ function reveal(chatId: string) {
 /** The Agent Manager: every chat as a task, by where it stands, in a list, or on a map of how they connect. */
 function Manager() {
   const [defaults, setDefaults] = useState<Partial<Record<AgentKey, AgentDefaults>>>({});
+  const [claude, setClaude] = useState<ClaudeSession[]>([]);
   const { state } = useHost((m) => {
     if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
     if (m.type === 'defaults') setDefaults(m.defaults);
+    if (m.type === 'claudeSessions') setClaude(m.sessions);
   });
   const now = useNow(15_000);
   const [view, setView] = usePersisted<View>('view', 'board');
@@ -113,6 +249,7 @@ function Manager() {
   const lastJump = useRef<string | undefined>(undefined);
 
   const shown = useMemo(() => filterChats(openChats(state.chats), query), [state, query]);
+  const outside = useMemo(() => filterClaudeSessions(claude, query), [claude, query]);
   const shownState = useMemo<AppState>(() => ({ ...state, chats: state.chats.filter((c) => c.archived || shown.includes(c)) }), [state, shown]);
   const waiting = useMemo(() => decisions({ chats: openChats(state.chats) }), [state]);
   const tally = counts(state);
@@ -262,16 +399,17 @@ function Manager() {
         <NewTask defaults={defaults} />
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
-          {query && shown.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
-          {!query && shown.length === 0 && (
+          {query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
+          {!query && shown.length === 0 && outside.length === 0 && (
             <div class="empty-view">
               <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
               <p class="hint">Several agents on one task compare side by side.</p>
             </div>
           )}
-          {view === 'board' && <Board state={state} chats={shown} now={now} {...nav} />}
-          {view === 'list' && <List state={state} chats={shown} now={now} sort={sort} setSort={setSort} {...nav} />}
+          {view === 'board' && <Board state={state} chats={shown} outside={outside} now={now} {...nav} />}
+          {view === 'list' && <List state={state} chats={shown} outside={outside} now={now} sort={sort} setSort={setSort} {...nav} />}
           {view === 'map' && <AgentMap state={shownState} now={now} {...nav} />}
+          {view === 'map' && <ClaudeLane sessions={outside} now={now} />}
         </div>
 
         <History chats={state.chats.filter((c) => c.archived)} now={now} open={historyOpen} setOpen={setHistoryOpen} />
@@ -366,13 +504,17 @@ interface NavProps {
 }
 
 /** `chats` are the ones the search shows; `state` is everything, for links and shared files. */
-function Board({ state, chats, now, focusId, onFocus }: { state: AppState; chats: ChatView[]; now: number } & NavProps) {
+function Board({ state, chats, outside, now, focusId, onFocus }: { state: AppState; chats: ChatView[]; outside: ClaudeSession[]; now: number } & NavProps) {
   const sorted = useSettledOrder(sortChats(chats, { key: 'activity', dir: 'asc' }), 'activity');
-  if (!chats.length) return null;
+  if (!chats.length && !outside.length) return null;
   const groups = fanoutGroups(state).filter((g) => g.chats.some((c) => chats.includes(c)));
   const conflicts = fileConflicts(state);
   const models = new Map(chats.map((c) => [c.id, cardModel(state, c, now, conflicts)]));
-  const columns = COLUMNS.map((col) => ({ ...col, cards: sorted.filter((c) => boardColumn(models.get(c.id)!.status) === col.id) }));
+  const columns = COLUMNS.map((col) => ({
+    ...col,
+    cards: sorted.filter((c) => boardColumn(models.get(c.id)!.status) === col.id),
+    outside: outside.filter((s) => claudeColumn(s, now) === col.id),
+  }));
   const first = chats.some((c) => c.id === focusId) ? focusId : columns.find((c) => c.cards.length)?.cards[0].id;
   return (
     <>
@@ -385,14 +527,17 @@ function Board({ state, chats, now, focusId, onFocus }: { state: AppState; chats
             <h2 class="col-head">
               <Dot state={col.id} still={col.cards.length === 0} />
               {COLUMN_TITLES[col.id]}
-              <span class="col-count">{col.cards.length}</span>
+              <span class="col-count">{col.cards.length + col.outside.length}</span>
             </h2>
-            {col.cards.length === 0 && <div class="column-empty">{col.empty}</div>}
+            {col.cards.length + col.outside.length === 0 && <div class="column-empty">{col.empty}</div>}
             {col.cards.map((c) => (
               <Fragment key={c.id}>
                 <Card chat={c} model={models.get(c.id)!} tabbable={c.id === first} onFocus={onFocus} />
                 <Subagents chat={c} />
               </Fragment>
+            ))}
+            {col.outside.map((s) => (
+              <ClaudeCard key={s.id} session={s} now={now} />
             ))}
           </section>
         ))}
@@ -742,10 +887,19 @@ const SORT_COLUMNS: { key: SortKey; title: string }[] = [
 ];
 
 /** Every chat as a dense, sortable row: for fifteen agents and more. */
-function List({ state, chats, now, sort, setSort, focusId, onFocus }: { state: AppState; chats: ChatView[]; now: number; sort: Sort; setSort(s: Sort): void } & NavProps) {
+function List({
+  state,
+  chats,
+  outside,
+  now,
+  sort,
+  setSort,
+  focusId,
+  onFocus,
+}: { state: AppState; chats: ChatView[]; outside: ClaudeSession[]; now: number; sort: Sort; setSort(s: Sort): void } & NavProps) {
   const rows = useSettledOrder(sortChats(chats, sort), `${sort.key}:${sort.dir}`);
   const roving = rows.some((c) => c.id === focusId) ? focusId : rows[0]?.id;
-  if (!rows.length) return null;
+  if (!rows.length && !outside.length) return null;
   const conflicts = fileConflicts(state);
   return (
     <div class="table-wrap">
@@ -802,6 +956,9 @@ function List({ state, chats, now, sort, setSort, focusId, onFocus }: { state: A
                 </tr>
               ))}
             </Fragment>
+          ))}
+          {outside.map((s) => (
+            <ClaudeRows key={s.id} session={s} now={now} />
           ))}
         </tbody>
       </table>

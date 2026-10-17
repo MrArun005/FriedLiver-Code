@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { encodeCwd, listClaudeSessions, parseSession, sessionWorking } from '../src/host/claudeSessions';
+import { encodeCwd, listClaudeSessions, parseSession } from '../src/host/claudeSessions';
+import type { ClaudeSession } from '../src/shared/messages';
+import { claudeColumn, claudeSubagents, filterClaudeSessions } from '../src/shared/view';
 
 const FIX = path.join(__dirname, 'fixtures/claude-sessions');
 const A = '11111111-1111-4111-8111-111111111111';
@@ -74,8 +76,13 @@ describe('Claude Code sessions', () => {
     expect((await listClaudeSessions({ home: h, folders: [ws] })).map((s) => s.id)).not.toContain(C);
   });
 
-  it('counts a session as working when it changed in the last two minutes', () => {
-    expect(sessionWorking(1_000_000, 1_000_000 + 119_000)).toBe(true);
-    expect(sessionWorking(1_000_000, 1_000_000 + 121_000)).toBe(false);
+  it('puts a session in Working while it changed in the last two minutes, its open subagents with it', () => {
+    const s: ClaudeSession = { id: A, cwd: '/w', title: 'Payroll export', lastActivity: 1_000_000, messages: 3, subagents: [{ id: 't1', title: 'x', done: false }, { id: 't2', title: 'y', done: true }] };
+    expect(claudeColumn(s, 1_000_000 + 119_000)).toBe('working');
+    expect(claudeSubagents(s, 1_000_000 + 119_000).map((a) => a.state)).toEqual(['working', 'done']);
+    expect(claudeColumn(s, 1_000_000 + 121_000)).toBe('done');
+    expect(claudeSubagents(s, 1_000_000 + 121_000).map((a) => a.state)).toEqual(['done', 'done']);
+    expect(filterClaudeSessions([s], 'payroll claude')).toEqual([s]);
+    expect(filterClaudeSessions([s], 'codex')).toEqual([]);
   });
 });

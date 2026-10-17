@@ -23,7 +23,7 @@ import {
   type StateLine,
   MENTIONS,
 } from './model';
-import type { WebviewMessage } from './messages';
+import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
 
 export const agentName = (agent: AgentKey) => AGENT_FACES[agent].name;
@@ -81,6 +81,27 @@ export function subagents(chat: ChatView): Subagent[] {
       state: t.status === 'failed' ? 'failed' : chat.busy && (t.status === 'pending' || t.status === 'in_progress' || !t.status) ? 'working' : 'done',
       tools: tools.filter((i) => i.parent === t.id).length,
     }));
+}
+
+// ---- Claude Code sessions from outside FriedLiver ----
+
+const CLAUDE_WORKING_MS = 2 * 60_000;
+
+/** Working while its transcript changed in the last two minutes; Done otherwise. */
+export function claudeColumn(s: ClaudeSession, now: number): 'working' | 'done' {
+  return now - s.lastActivity < CLAUDE_WORKING_MS ? 'working' : 'done';
+}
+
+/** Its subagents as the Manager draws a chat's: one with no result yet works only while the session does. */
+export function claudeSubagents(s: ClaudeSession, now: number): Subagent[] {
+  const working = claudeColumn(s, now) === 'working';
+  return s.subagents.map((a) => ({ id: a.id, title: a.title, state: a.done || !working ? 'done' : 'working', tools: 0 }));
+}
+
+/** Every word of the query must appear in the title or "claude code". */
+export function filterClaudeSessions(list: ClaudeSession[], query: string): ClaudeSession[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return list.filter((s) => words.every((w) => `${s.title} claude code`.toLowerCase().includes(w)));
 }
 
 /** Chats on the board and in the tab strip: archived ones live in History. */
