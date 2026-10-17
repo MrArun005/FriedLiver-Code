@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -19,7 +19,7 @@ import { EditorAgent } from './host/editor';
 import { imagePreview } from './host/imageAccess';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
-import { importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
+import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
 import { ReviewUi } from './host/review';
 import { userSetting } from './host/settings';
@@ -150,7 +150,7 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
       approvalDefault: () => this.approvalDefault(),
-      sharedRules: () => loadRules({ personalFile: this.personalRulesFile(), folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
+      sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {
         const folder = this.folders()[0];
         if (!folder || !vscode.workspace.isTrusted) return Promise.reject(new Error('This workspace is not trusted (or no folder is open), so FriedLiver keeps no project memory here.'));
@@ -306,17 +306,14 @@ export class Controller {
     this.updateDecisions();
   }
 
-  private personalRulesFile(): string {
-    return path.join(this.context.globalStorageUri.fsPath, 'rules.md');
-  }
-
   /** Opens a shared rules file (sharedRules.ts), creating it empty first. `rel` is in the folder; none means the personal one. */
   private async openRuleFile(rel?: string): Promise<void> {
     const folder = this.folders()[0];
     if (rel && !folder) return void vscode.window.showInformationMessage('Open a folder to keep project rules and memory.');
-    const file = rel ? path.join(folder!, rel) : this.personalRulesFile();
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, '', { flag: 'a' });
+    const storage = this.context.globalStorageUri.fsPath;
+    if (!rel) await mkdir(storage, { recursive: true });
+    const file = await ensureFile(rel ? folder! : storage, rel ?? 'rules.md').catch((err: unknown) => void this.error(err));
+    if (!file) return;
     await vscode.window.showTextDocument(vscode.Uri.file(file));
   }
 
