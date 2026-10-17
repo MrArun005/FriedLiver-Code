@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { freshChat, longFixture, questionItem } from './qa/qa-fixtures.mjs';
+import { fixture } from './ui-fixture.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { values: opts } = parseArgs({
@@ -111,6 +112,24 @@ BLOCKS.F02 = async () => {
   last = (await posted(p)).at(-1);
   check(last?.type === 'bridge' && last.requestId === 'bridge-c1' && last.answer === 'allow', `Ctrl/Cmd+Enter answers the chosen card [${JSON.stringify(last)}]`);
   check((await p.locator('#item-bridge-c1 .opt-num').count()) === 3, 'the request card numbers its options too');
+  await p.close();
+};
+
+// ---- F09: a question's options are numbered, with their descriptions and the key hint ----
+BLOCKS.F09 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 900);
+  const state = fixture(Date.now()).state;
+  const c5 = state.chats.find((c) => c.id === 'chat-c5');
+  c5.items = [...c5.items, questionItem()];
+  await snapshot(p, state, 'chat-c5');
+  await p.waitForSelector('#item-q-1');
+  const opts = await p.locator('#item-q-1 .actions button').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+  check(opts[0]?.startsWith('1. Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3. In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
+  check(await p.locator('#item-q-1 .hint.keys').isVisible(), 'the question shows the key hint');
+  await p.click('.composer textarea');
+  await p.keyboard.press('2');
+  const last = (await posted(p)).at(-1);
+  check(last?.type === 'answerQuestion' && last.values?.store === 'sqlite', `2 answers with the second option [${JSON.stringify(last)}]`);
   await p.close();
 };
 
