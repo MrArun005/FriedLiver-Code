@@ -46,6 +46,7 @@ import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, LiveState, Markdown, P
 import { AskMenu, PipeTargets } from './connect';
 import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
 import { Steps } from './steps';
+import { TextSize } from './textSize';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -92,6 +93,7 @@ function App() {
   return (
     <LiveState.Provider value={state}>
       <div class="chat-app" data-wide={wide ? '' : undefined}>
+        <TextSize />
         {wide ? (
           <aside class="chat-side" aria-label="Chats">
             <AllChats state={state} active={chat?.id} onPick={select} newAgent={chat?.agent} />
