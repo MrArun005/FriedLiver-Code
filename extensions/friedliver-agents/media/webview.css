@@ -2917,6 +2917,10 @@ body[data-surface='chat'] {
   padding: var(--sp-5) var(--sp-5) 40px;
   line-height: 1.5;
 }
+/* The edge of the window: reaching it brings earlier items in. */
+.transcript-more {
+  height: 1px;
+}
 .transcript > :first-child {
   margin-top: 0;
   padding-top: 0;
@@ -3926,7 +3930,10 @@ button.decide .opt-desc {
   opacity: 0.8;
 }
 /* The card the decision keys act on: outlined, and the only one with the key hint. */
-.ask:has(> .hint.keys) {
+.hint.keys:not([data-on]) {
+  visibility: hidden;
+}
+.ask:has(> .hint.keys[data-on]) {
   outline: 1px solid var(--focus);
   outline-offset: -1px;
 }

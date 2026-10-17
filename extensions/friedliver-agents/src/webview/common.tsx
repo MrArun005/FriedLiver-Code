@@ -84,6 +84,28 @@ export function isTyping(target: EventTarget | null): boolean {
 }
 
 /** The host's state, kept in step by folding the same actions with the same reducer. */
+let nextKey = 0;
+
+/**
+ * Gives every transcript item a key that stays with it (`_k`): items the reducer updates are spread
+ * from the old one, so they keep it; new items get the next one. Lists key by it, never by position,
+ * so dropping the oldest items at the cap moves nothing on screen.
+ */
+function keyItems(prev: AppState | undefined, next: AppState): AppState {
+  for (const chat of next.chats) {
+    const before = prev?.chats.find((c) => c.id === chat.id);
+    if (before?.items === chat.items) continue;
+    for (const item of chat.items) {
+      const keyed = item as { _k?: number };
+      if (keyed._k === undefined) keyed._k = ++nextKey;
+    }
+  }
+  return next;
+}
+
+/** An item's stable key (keyItems). */
+export const itemKey = (item: object): number => (item as { _k?: number })._k ?? 0;
+
 export function useHost(onMessage?: (m: HostMessage) => void) {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [selected, setSelected] = useState<string | undefined>();
@@ -93,12 +115,12 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
     const listener = (e: MessageEvent) => {
       const m = e.data as HostMessage;
       if (m.type === 'snapshot') {
-        setState(m.state);
+        setState(keyItems(undefined, m.state));
         setSelected(m.selected);
       } else if (m.type === 'action') {
-        setState((s) => reduce(s, m.action));
+        setState((s) => keyItems(s, reduce(s, m.action)));
       } else if (m.type === 'actions') {
-        setState((s) => m.actions.reduce(reduce, s));
+        setState((s) => keyItems(s, m.actions.reduce(reduce, s)));
       } else if (m.type === 'select') {
         setSelected(m.chatId);
       }

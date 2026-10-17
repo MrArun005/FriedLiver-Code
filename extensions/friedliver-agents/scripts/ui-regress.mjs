@@ -96,7 +96,7 @@ const GRACE = 650;
 BLOCKS.F02 = async () => {
   // chat-c1 waits on two things: an agent's request to message another chat (older), then an edit permission.
   const p = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
-  const hinted = () => p.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id));
+  const hinted = () => p.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id));
   check(JSON.stringify(await hinted()) === JSON.stringify(['item-bridge-c1']), `only the oldest waiting card is marked [${await hinted()}]`);
   const outline = await p.locator('#item-bridge-c1').evaluate((c) => window.getComputedStyle(c).outlineStyle);
   check(outline === 'solid', 'the marked card has a visible outline');
@@ -128,14 +128,14 @@ BLOCKS.F02 = async () => {
   await q.keyboard.press('1');
   last = (await posted(q)).at(-1);
   check(last?.type === 'permission' && last.requestId === 'perm-c2', `1 pressed as a new request arrives applies to the card already marked [${JSON.stringify(last)}]`);
-  check(JSON.stringify(await q.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
+  check(JSON.stringify(await q.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
   await q.close();
   // Each chat keeps its own mark.
   const r = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
   await r.click('#item-perm-c1 .ask-head');
   await r.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c2' }, '*'));
   await r.waitForTimeout(200);
-  check(JSON.stringify(await r.locator('.ask:has(.hint.keys)').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
+  check(JSON.stringify(await r.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
   await r.close();
 };
 
@@ -149,7 +149,7 @@ BLOCKS.F09 = async () => {
   await p.waitForSelector('#item-q-1');
   const opts = await p.locator('#item-q-1 .actions button').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
   check(opts[0]?.startsWith('1. Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3. In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
-  check(await p.locator('#item-q-1 .hint.keys').isVisible(), 'the question shows the key hint');
+  check(await p.locator('#item-q-1 .hint.keys[data-on]').isVisible(), 'the question shows the key hint');
   await p.click('.composer textarea');
   await p.waitForTimeout(GRACE);
   await p.keyboard.press('2');
@@ -196,6 +196,93 @@ BLOCKS.F05 = async () => {
   const v = await axe(p, '.switcher');
   check(v === null || !v.length, `axe finds nothing in the tab strip [${v ?? 'axe-core not found'}]`);
   await p.close();
+};
+
+// ---- F03: a long chat stays instant: stable keys, a window of the transcript, no remount at the cap ----
+const PERF = {};
+BLOCKS.F03 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 900);
+  const long = longFixture(500); // 2,000 items: the cap
+  // Open: from the snapshot to the transcript laid out.
+  PERF.openMs = await p.evaluate(async (state) => {
+    const t0 = performance.now();
+    window.postMessage({ type: 'snapshot', state, selected: 'chat-long', now: Date.now() }, '*');
+    await new Promise((res) => {
+      const mo = new MutationObserver(() => document.querySelector('.user-msg') && (mo.disconnect(), res()));
+      mo.observe(document.body, { childList: true, subtree: true });
+    });
+    void document.querySelector('.transcript').scrollHeight;
+    return +(performance.now() - t0).toFixed(1);
+  }, long);
+  await p.waitForTimeout(300);
+  /** One appended item at the cap, as the host sends it: from the message to the transcript laid out again. */
+  const append = (n) =>
+    p.evaluate(async (n) => {
+      const t = document.querySelector('.transcript');
+      const kept = t.querySelector('.user-msg:last-of-type') ?? t.lastElementChild;
+      kept.__mark = true;
+      const t0 = performance.now();
+      window.postMessage({ type: 'action', action: { t: 'items', chatId: 'chat-long', items: [{ kind: 'agent', text: `More ${n}.` }], at: Date.now() } }, '*');
+      await new Promise((res) => {
+        const mo = new MutationObserver(() => (mo.disconnect(), res()));
+        mo.observe(t, { childList: true, subtree: true, characterData: true });
+      });
+      void t.scrollHeight;
+      return { ms: performance.now() - t0, kept: kept.isConnected && kept.__mark === true };
+    }, n);
+  const runs = [];
+  for (let n = 0; n < 7; n++) runs.push(await append(n));
+  const ms = runs.map((r) => r.ms).sort((a, b) => a - b);
+  PERF.appendMedianMs = +ms[3].toFixed(1);
+  PERF.appendMaxMs = +ms.at(-1).toFixed(1);
+  PERF.domNodes = await p.evaluate(() => document.querySelectorAll('*').length);
+  check(runs.every((r) => r.kept), 'items already on screen are kept, not remounted, when an item arrives at the cap');
+  check(PERF.appendMedianMs < 16, `an appended item at 2,000 items costs < 16 ms (median ${PERF.appendMedianMs} ms, max ${PERF.appendMaxMs} ms)`);
+  check(PERF.openMs < 150, `a 2,000-item chat opens in < 150 ms (${PERF.openMs} ms)`);
+  check(PERF.domNodes < 8000, `the transcript keeps a window, not every item, in the page (${PERF.domNodes} nodes)`);
+  // Scrolled to the top, earlier items come in.
+  const before = await p.locator('.user-msg').count();
+  for (let n = 0; n < 6; n++) {
+    await p.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
+    await p.waitForTimeout(150);
+  }
+  check((await p.locator('.user-msg').count()) > before, 'scrolling up brings earlier items in');
+  console.log(`  perf ${JSON.stringify(PERF)}`);
+  await p.close();
+};
+
+// ---- F06: one status palette everywhere: working blue, done green, problem red, needs you the accent ----
+BLOCKS.F06 = async () => {
+  const tone = (p, v) => p.evaluate((v) => {
+    const d = document.createElement('div');
+    d.style.color = `var(${v})`;
+    document.body.append(d);
+    const c = window.getComputedStyle(d).color;
+    d.remove();
+    return c;
+  }, v);
+  const bg = (p, sel, pseudo) => p.locator(sel).first().evaluate((el, ps) => window.getComputedStyle(el, ps).backgroundColor, pseudo);
+  // Chat: a running subagent's timeline dot, a finished one's, and the agents pill; the agent map's rows.
+  const c = await open('surface=chat&theme=dark-2026&select=chat-pay&fixture=subagents', 1200, 900);
+  const W = await tone(c, '--status-working'), D = await tone(c, '--status-done'), N = await tone(c, '--status-waiting'), E = await tone(c, '--status-failed');
+  check(new Set([W, D, N, E]).size === 4, `four distinct status colours [${W} ${D} ${N} ${E}]`);
+  check((await bg(c, '.tl.sa-card[data-state="working"]', '::before')) === W, 'a running subagent in the transcript is the working colour');
+  check((await bg(c, '.tl.sa-card[data-state="done"]', '::before')) === D, 'a finished subagent in the transcript is the done colour');
+  check((await bg(c, '.cc-agents .dot')) === W, 'the agents pill (agents running) is the working colour');
+  await c.click('.cc-agents');
+  check((await bg(c, '.cc-map-children .dot[data-state="working"]')) === W, 'a running agent in the agent map is the working colour');
+  check((await c.locator('.cc-map-children .dot[data-state="done"]').count()) > 0 && (await bg(c, '.cc-map-children .dot[data-state="done"]')) === D, 'a finished agent in the agent map is the done colour');
+  await c.close();
+  // Agent Manager: header counts and columns.
+  const m = await open('surface=tasks&theme=dark-2026&view=board', 1440, 900);
+  const W2 = await tone(m, '--status-working'), D2 = await tone(m, '--status-done'), N2 = await tone(m, '--status-waiting');
+  check((await bg(m, '.mgr-counts .dot[data-state="working"]')) === W2 && (await bg(m, '.mgr-counts .dot[data-state="done"]')) === D2 && (await bg(m, '.mgr-counts .dot[data-state="needs-you"]')) === N2, 'the Manager counts use the same palette (working ≠ done)');
+  check((await bg(m, '.seg-bar i[data-step="working"]')) !== (await bg(m, '.seg-bar i[data-step="done"]')), 'a plan’s step in progress differs from its done steps');
+  await m.close();
+  const map = await open('surface=tasks&theme=dark-2026&view=map', 1440, 900);
+  const fill = await map.locator('.node-dot[data-state="working"]').first().evaluate((el) => window.getComputedStyle(el).fill);
+  check(fill === (await tone(map, '--status-working')), 'a working chat on the map is the working colour');
+  await map.close();
 };
 
 await run();
