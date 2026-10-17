@@ -281,12 +281,21 @@ export function stepSummary(step: { title: string; toolKind?: string; cmd?: Step
   }
   const title = plainTitle(step.title).replace(/\s+/g, ' ');
   const full = cut(title, MAX_TOOLTIP);
+  const mcp = title.match(/^(?:Tool\s+)?mcp__(.+?)__(\w+)$/);
+  if (mcp) {
+    const browser = mcp[1] === 'friedliver' && mcp[2].match(/^browser_(.+)$/);
+    return browser
+      ? { verb: 'Browser', text: browser[1].replace(/_/g, ' '), mono: false, full }
+      : { verb: mcp[1] === 'friedliver' ? 'FriedLiver' : mcp[1], text: mcp[2].replace(/_/g, ' '), mono: false, full };
+  }
   const word = title.match(/^([A-Za-z]+)\s+(\S.*)$/);
   const allowed = TITLE_VERBS[kind];
   if (word && (allowed ? allowed.includes(word[1].toLowerCase()) : !kind && ANY_VERBS.has(word[1].toLowerCase()))) {
     const verb = word[1].toLowerCase() === 'grep' ? KIND_VERB.search : capital(word[1]);
     const mono = word[1] === 'grep' || word[1] === 'rg';
-    return { verb, text: cut(mono ? title : word[2], max), mono, full };
+    // A whole path reads by its last part; the tooltip keeps it all.
+    const target = !mono && /^(~|[A-Za-z]:)?[\\/]/.test(word[2]) ? basename(word[2]) : word[2];
+    return { verb, text: cut(mono ? title : target, max), mono, full };
   }
   return { verb: KIND_VERB[kind] ?? 'Tool', text: cut(title, max), mono: false, full };
 }
@@ -396,4 +405,33 @@ export function inFolder(folder: string, file: string): string | undefined {
   const same = (a: string, b: string) => (win ? a.toLowerCase() === b.toLowerCase() : a === b);
   if (parts.length <= root.length || !root.every((r, n) => same(r, parts[n]))) return undefined;
   return win ? parts.join(sep) : `/${parts.join('/')}`;
+}
+
+// ---- Approvals ----
+
+export type Approval = { text: string; ok: boolean };
+
+/**
+ * Answered approvals folded into the tool rows they approved, so each action shows once:
+ * a permission by its tool call id, a FriedLiver tool request by the nearest earlier unclaimed row of that tool.
+ * Pending approvals and ones that match no row stay in the transcript.
+ */
+export function foldApprovals(items: Item[]): { items: Item[]; approvals: Record<string, Approval> } {
+  const approvals: Record<string, Approval> = {};
+  const out: Item[] = [];
+  for (const i of items) {
+    if (i.kind === 'permission' && i.answer && i.toolCallId && !i.detail && items.some((t) => t.kind === 'tool' && t.id === i.toolCallId) && !approvals[i.toolCallId]) {
+      approvals[i.toolCallId] = { text: i.answer, ok: !/^(no|reject|deny|cancel|stopped)/i.test(i.answer) };
+      continue;
+    }
+    if (i.kind === 'bridge' && i.state !== 'awaiting') {
+      const row = out.findLast((t) => t.kind === 'tool' && !approvals[t.id] && (t.tool ?? t.title).endsWith(`__${i.tool}`));
+      if (row?.kind === 'tool') {
+        approvals[row.id] = { text: i.state, ok: i.state === 'allowed' };
+        continue;
+      }
+    }
+    out.push(i);
+  }
+  return { items: out, approvals };
 }
