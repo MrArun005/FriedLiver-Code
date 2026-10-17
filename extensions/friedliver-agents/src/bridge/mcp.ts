@@ -89,6 +89,20 @@ export const TOOLS = [
     },
     annotations: { readOnlyHint: true },
   },
+  {
+    name: 'remember',
+    title: 'Remember',
+    description:
+      'Saves one short fact about this project (a convention, a command, a decision) to .friedliver/memory.md, ' +
+      'which every agent in FriedLiver gets at the start of its next sessions. Only durable facts, not progress notes. ' +
+      'The user is asked to allow it first unless they already did.',
+    inputSchema: {
+      $schema: DRAFT_07,
+      type: 'object',
+      properties: { fact: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.text, description: 'The fact, in one sentence.' } },
+      required: ['fact'],
+    },
+  },
   ...browserTools(),
 ].map((t) => ({ ...t, execution: { taskSupport: 'forbidden' } }));
 
