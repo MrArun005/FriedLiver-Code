@@ -4512,3 +4512,35 @@ button.new-chat kbd {
     scroll-behavior: auto !important;
   }
 }
+/* The mic while it listens: red, with a pulsing dot; dimmer while it finishes. */
+button.cc-mic[data-state] {
+  color: var(--vscode-errorForeground, #e5484d);
+}
+button.cc-mic[data-state]::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+button.cc-mic[data-state='stopping'] {
+  opacity: 0.6;
+}
+button.cc-mic[data-state='stopping']::after {
+  animation: none;
+}
+@keyframes mic-pulse {
+  50% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button.cc-mic[data-state]::after {
+    animation: none;
+  }
+}

@@ -94,6 +94,18 @@ describe('download integrity helpers', () => {
     expect(seed).toBeLessThan(build.indexOf('-build-deb`], { env: debEnv }'));
   });
 
+  it('the macOS app asks for the mic and speech with FriedLiver\'s words, and its dictation helper is signed before the app', () => {
+    const build = fs.readFileSync(path.join(root, 'scripts', 'build.mjs'), 'utf8');
+    expect(build).toContain("'NSMicrophoneUsageDescription'");
+    expect(build).toContain("'NSSpeechRecognitionUsageDescription'");
+    const finish = build.indexOf('finishMacApp(path.join(appDir, app));');
+    expect(finish).toBeGreaterThan(-1);
+    expect(finish).toBeLessThan(build.indexOf("run('codesign', ['--force', '--deep'"));
+    const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'build.yml'), 'utf8');
+    expect(workflow.indexOf('extensions/friedliver-agents/native/build.sh')).toBeGreaterThan(-1);
+    expect(workflow.indexOf('extensions/friedliver-agents/native/build.sh')).toBeLessThan(workflow.indexOf('node scripts/prepare.mjs'));
+  });
+
   it('stamps a release version only in the release tag form', () => {
     expect(friedliverVersion({ FRIEDLIVER_VERSION: 'v1.142.0-2' })).toBe('1.142.0-2');
     expect(friedliverVersion({ FRIEDLIVER_VERSION: '1.142.1' })).toBe('1.142.1');

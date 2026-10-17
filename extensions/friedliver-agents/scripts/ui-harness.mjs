@@ -436,12 +436,52 @@ async function shoot() {
     await p.close();
   }
   {
-    // The mic, top right in the box: no programmatic start (it beeped); it focuses the box and says Fn Fn.
+    // The mic (macOS): one click listens, the words appear at the caret as they come, a click or Esc stops. No hint.
     const p = await open('surface=chat&side=1&select=chat-c5', 900, 700);
+    const box = () => p.inputValue('.composer textarea');
+    const host = async (m) => {
+      await p.evaluate((m) => window.postMessage({ type: 'dictation', chatId: 'chat-c5', ...m }, '*'), m);
+      await p.waitForTimeout(30);
+    };
+    const dictates = async () => (await posted(p)).filter((m) => m.type === 'dictate');
+    await p.fill('.composer textarea', 'Fix the');
     await p.click('.cc-mic');
-    check(!(await posted(p)).some((m) => m.type === 'dictate'), 'the mic no longer asks the app to start dictation (it beeped)');
+    check((await dictates()).at(-1)?.on === true && (await dictates()).at(-1)?.chatId === 'chat-c5', 'one click starts dictating into this chat');
     check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
-    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'the mic shows the Fn Fn hint');
+    check((await p.locator('.cc-mic[data-state="listening"][title="Listening… click to stop"][aria-pressed="true"]').count()) === 1, 'the mic shows it is listening');
+    check((await p.locator('.mic-hint').count()) === 0, 'no Fn Fn hint when the helper runs');
+    await host({ state: 'listening' });
+    await host({ text: 'login', final: false });
+    check((await box()) === 'Fix the login', 'a partial appears at the caret');
+    await host({ text: 'login redirect', final: false });
+    check((await box()) === 'Fix the login redirect', 'the next partial replaces it');
+    await save(p, 'composer-mic-listening', { element: '.composer' });
+    await p.click('.cc-mic');
+    check((await dictates()).at(-1)?.on === false, 'a second click stops');
+    check((await p.locator('.cc-mic[data-state="stopping"]').count()) === 1, 'the mic shows it is finishing');
+    await host({ text: 'login redirect bug.', final: true });
+    await host({ state: 'idle' });
+    check((await box()) === 'Fix the login redirect bug.', 'the final words stay');
+    check((await p.locator('.cc-mic:not([data-state])[aria-pressed="false"]').count()) === 1, 'the mic is idle again');
+    const before = (await posted(p)).length;
+    await p.click('.cc-mic');
+    await host({ state: 'listening' });
+    await p.keyboard.press('Escape');
+    const after = (await posted(p)).slice(before);
+    check(after.at(-1)?.type === 'dictate' && after.at(-1)?.on === false && !after.some((m) => m.type === 'stop'), 'Esc stops dictating, not the agent');
+    await host({ state: 'idle' });
+    await p.click('.cc-mic');
+    await host({ text: 'and', final: false });
+    await p.keyboard.type('!');
+    check((await dictates()).at(-1)?.on === false, 'typing takes the box back from the mic');
+    await host({ text: 'and more', final: true });
+    check((await box()) === 'Fix the login redirect bug. and!', 'words after typing are dropped');
+    await host({ state: 'idle' });
+    // A build without the helper (a dev build): the old hint.
+    await p.click('.cc-mic');
+    await host({ state: 'fallback' });
+    check(await p.locator('.mic-hint:has-text("Press Fn twice to dictate")').isVisible(), 'no helper: the mic shows the Fn Fn hint');
+    check((await p.locator('.cc-mic:not([data-state])').count()) === 1, 'no helper: the mic is idle');
     await p.click('.mic-hint a');
     check((await posted(p)).some((m) => m.type === 'dictationSettings'), 'the hint opens Dictation settings');
     const r = await p.evaluate(() => {

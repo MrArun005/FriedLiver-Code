@@ -6,4 +6,5 @@
 !dist/bridge.js
 !dist/externalStdio.js
 !media/**
+!bin/friedliver-dictate
 media/dist/*.map
