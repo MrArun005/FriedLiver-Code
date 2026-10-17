@@ -2938,22 +2938,12 @@ body[data-surface='chat'] {
   -webkit-line-clamp: 3;
   overflow: hidden;
 }
-/* Show more: over the end of the third line, at the box's bottom right; Show less under the text. */
+/* Show more / Show less: a row of its own under the text, at the box's bottom right; it never covers a glyph. */
 button.msg-more {
-  position: absolute;
-  right: 6px;
-  bottom: var(--sp-1);
-  padding-left: var(--sp-5);
-  background: linear-gradient(to right, transparent, var(--input-bg) var(--sp-4));
-  font-size: var(--t-85);
-  line-height: 1.5;
-}
-button.msg-more[aria-expanded='true'] {
-  position: static;
   display: block;
   margin-left: auto;
-  padding-left: 0;
-  background: none;
+  font-size: var(--t-85);
+  line-height: 1.5;
 }
 /* The current turn's message, once scrolled away: a copy at the top, full width, never past three lines. */
 .sticky-prompt {
