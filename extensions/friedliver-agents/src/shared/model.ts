@@ -185,8 +185,10 @@ export interface ChatView {
   agent: AgentKey;
   /** Agent name, numbered when several chats use the same agent. */
   label: string;
-  /** What the task is about: the first message, shortened. */
+  /** What the chat is about: the agent's session title, or your latest real request, shortened. */
   title: string;
+  /** You renamed it: the title no longer follows the conversation. */
+  titlePinned?: boolean;
   cwd: string;
   /** Set while the task has its own git worktree. */
   branch?: string;
@@ -239,7 +241,8 @@ export type Action =
   | { t: 'items'; chatId: string; items: Item[]; at?: number }
   | { t: 'update'; chatId: string; update: acp.SessionUpdate; at?: number }
   | { t: 'busy'; chatId: string; busy: boolean; at?: number }
-  | { t: 'title'; chatId: string; title: string }
+  /** `pinned`: the user named it, and automatic titles stop. */
+  | { t: 'title'; chatId: string; title: string; pinned?: boolean }
   | { t: 'permissionAnswered'; requestId: string; answer: string; auto?: string }
   | { t: 'review'; reviewId: string; state: ReviewItem['state']; auto?: string }
   | { t: 'command'; commandId: string; patch: Partial<Omit<CommandItem, 'kind' | 'commandId' | 'output'>> }
@@ -286,6 +289,10 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'items':
       return editChat(state, action.chatId, (c) => ({ ...c, items: capItems([...c.items, ...action.items]), lastActivity: action.at ?? c.lastActivity }));
     case 'update':
+      if (action.update.sessionUpdate === 'session_info_update') {
+        const title = action.update.title?.trim();
+        return title ? reduce(state, { t: 'title', chatId: action.chatId, title: titleFrom(title) }) : state;
+      }
       if (isSessionUpdate(action.update)) {
         const update = action.update;
         return editChat(state, action.chatId, (c) => ({ ...c, session: applySessionUpdate(c.session, update) }));
@@ -299,7 +306,7 @@ export function reduce(state: AppState, action: Action): AppState {
         lastActivity: action.at ?? c.lastActivity,
       }));
     case 'title':
-      return editChat(state, action.chatId, (c) => ({ ...c, title: action.title }));
+      return editChat(state, action.chatId, (c) => (c.titlePinned && !action.pinned ? c : { ...c, title: action.title, ...(action.pinned ? { titlePinned: true } : {}) }));
     case 'permissionAnswered':
       return editItems(state, (i) =>
         i.kind === 'permission' && i.requestId === action.requestId ? { ...i, answer: action.answer, ...(action.auto ? { auto: action.auto } : {}) } : i,
@@ -499,6 +506,33 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate, at?: numbe
 export function titleFrom(text: string): string {
   const line = text.split('\n')[0].trim();
   return line.length > 60 ? `${line.slice(0, 57)}…` : line || 'Untitled task';
+}
+
+const ACK_WORDS = new Set(
+  'hi hii hey hello yo sup thanks thank thx you ok okay k yes yep yeah yup no nope sure go ahead merge it do that this now please pls continue proceed sounds good great cool nice lgtm done fine alright right and then ship push perfect awesome'.split(' '),
+);
+const SHELL_LINE = /^(\$ |(npm|npx|pnpm|yarn|bun|git|cd|ls|brew|pip3?|curl|wget|sudo|node|python3?|docker|rm|mkdir|cat|claude|cargo|chmod|export|gh)\s)/;
+const FILLER = /^((can|could|would|will) you\s+|please\s+|pls\s+|i (want|need) you to\s+|i('d| would) like you to\s+|let'?s\s+|now\s+|also\s+|and\s+)+/i;
+const ARTICLES = new Set(['the', 'a', 'an']);
+const TOPIC_WORDS = 6;
+
+/**
+ * A short topic for the chat from one of your messages: its first clause that
+ * asks for something, at most six words, in sentence case. Null when the
+ * message is a greeting, an acknowledgement ("ok", "go", "merge"), a slash
+ * command or a shell command, so the title stays on the last real request.
+ */
+export function topicTitle(text: string): string | null {
+  const t = text.trim().replace(/^@[a-z]+[\s,:]*/i, '');
+  if (!t || t.startsWith('/') || SHELL_LINE.test(t)) return null;
+  for (const clause of t.split(/[.!?\n,;:]+/)) {
+    const words = clause.trim().replace(FILLER, '').trim().split(/\s+/).filter(Boolean);
+    if (words.length < 3 || words.every((w) => ACK_WORDS.has(w.toLowerCase().replace(/[^a-z]/g, '')))) continue;
+    const kept = words.filter((w) => !ARTICLES.has(w.toLowerCase())).slice(0, TOPIC_WORDS);
+    const title = kept.join(' ').replace(/[\s\p{P}]+$/u, '');
+    return title.charAt(0).toUpperCase() + title.slice(1);
+  }
+  return null;
 }
 
 export type ChatStatus = 'idle' | 'working' | 'needs-you' | 'done' | 'error';

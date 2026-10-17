@@ -43,6 +43,7 @@ import {
   parseMention,
   reduce,
   titleFrom,
+  topicTitle,
   type Action,
   type AgentKey,
   type AppState,
@@ -427,6 +428,19 @@ export class AgentCore {
     await this.sendMessage(chatId, text, images, options);
   }
 
+  /** The chat is named after your latest real request; the first message names it even when it is only "hi". */
+  private retitle(chat: ChatView, text: string): void {
+    const topic = topicTitle(text);
+    if (topic) this.dispatch({ t: 'title', chatId: chat.id, title: topic });
+    else if (!chat.items.some((i) => i.kind === 'user' || i.kind === 'link') && text.trim()) this.dispatch({ t: 'title', chatId: chat.id, title: titleFrom(text) });
+  }
+
+  /** A name you gave: the title stops following the conversation. */
+  renameChat(chatId: string, title: string): void {
+    const name = title.trim();
+    if (name) this.dispatch({ t: 'title', chatId, title: titleFrom(name), pinned: true });
+  }
+
   private async sendMessage(chatId: string, text: string, images: Attachment[] = [], options: SendOptions = {}): Promise<void> {
     const chat = this.requireChat(chatId);
     if (chat.busy) return this.enqueue(chatId, text, images, options);
@@ -439,7 +453,7 @@ export class AgentCore {
       this.addImage(id, src, img.name || 'Attached image', 'you');
     }
     if (options.title) this.dispatch({ t: 'title', chatId, title: titleFrom(options.title) });
-    else if (!chat.items.some((i) => i.kind === 'user' || i.kind === 'link') && text.trim()) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
+    else this.retitle(chat, text);
     this.items(chatId, [{ kind: 'user', text, images: ids, ...(options.refs?.length ? { refs: options.refs } : {}) }]);
     const blocks: acp.ContentBlock[] = [];
     if (options.context) blocks.push({ type: 'text', text: options.context });
@@ -726,7 +740,7 @@ export class AgentCore {
     images.forEach((img, n) => this.addImage(this.id('you'), srcs[n]!, img.name || 'Attached image', 'you'));
     // A chat whose first message is a question for another agent is about that question.
     const chat = this.requireChat(chatId);
-    if (by === 'user' && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link')) this.dispatch({ t: 'title', chatId, title: titleFrom(text) });
+    if (by === 'user') this.retitle(chat, text);
     return this.links.consult(chatId, agent, text, by, { images });
   }
 

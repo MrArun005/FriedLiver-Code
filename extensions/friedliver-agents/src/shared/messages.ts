@@ -54,6 +54,8 @@ export type WebviewMessage =
   /** Answer an agent's request to reach another chat or agent. */
   | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'deny' }
   | { type: 'archive'; chatId: string; archived: boolean }
+  /** Ask for a new name; a name you give stays put. */
+  | { type: 'renameChat'; chatId: string }
   /** Stop and forget a chat. */
   | { type: 'removeChat'; chatId: string }
   /** Show what a task changed: its worktree branch against the main checkout, or the files it touched. */
@@ -295,6 +297,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.requestId) && (m.answer === 'allow' || m.answer === 'allowChat' || m.answer === 'deny')
         ? { type: 'bridge', requestId: m.requestId, answer: m.answer }
         : null;
+    case 'renameChat':
+      return id(m.chatId) ? { type: 'renameChat', chatId: m.chatId } : null;
     case 'archive':
       return id(m.chatId) && typeof m.archived === 'boolean' ? { type: 'archive', chatId: m.chatId, archived: m.archived } : null;
     case 'send': {

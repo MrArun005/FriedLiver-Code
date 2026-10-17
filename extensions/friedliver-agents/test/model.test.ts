@@ -11,6 +11,7 @@ import {
   shortCommand,
   stateLine,
   titleFrom,
+  topicTitle,
   waitingItems,
   type Action,
   type AppState,
@@ -222,5 +223,36 @@ describe('status and task cards', () => {
     expect(lineStats(null, 'a\nb\n')).toEqual({ added: 2, removed: 0 });
     expect(lineStats('a\nb\nc\n', 'a\nB\nc\nd\n')).toEqual({ added: 2, removed: 1 });
     expect(lineStats('same\n', 'same\n')).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe('chat titles from the topic', () => {
+  it('names a chat after a substantive request, short and in sentence case', () => {
+    expect(topicTitle('add auto-update for releases')).toBe('Add auto-update for releases');
+    expect(topicTitle('Hi! Can you please fix the browser approval prompts? They keep popping up.')).toBe('Fix browser approval prompts');
+    expect(topicTitle('@claude refactor the payroll export so it streams rows to disk instead')).toBe('Refactor payroll export so it streams');
+    expect(topicTitle('make the PR list load faster.')).toBe('Make PR list load faster');
+  });
+
+  it('skips greetings, acknowledgements, slash and shell commands', () => {
+    for (const t of ['hi', 'ok', 'go', 'merge', 'yes', 'yes go ahead', 'ok merge it', 'thanks!', 'sounds good, go ahead please', '/review', 'git push origin main', '$ ls -la', 'npm test', '']) {
+      expect(topicTitle(t), t).toBeNull();
+    }
+  });
+
+  it('keeps a pinned (renamed) title and ignores later automatic ones', () => {
+    let s = reduce(EMPTY_STATE, { t: 'created', chat: chat() });
+    s = reduce(s, { t: 'title', chatId: 'chat-1', title: 'First topic' });
+    expect(s.chats[0].title).toBe('First topic');
+    s = reduce(s, { t: 'title', chatId: 'chat-1', title: 'My name', pinned: true });
+    s = reduce(s, { t: 'title', chatId: 'chat-1', title: 'Second topic' });
+    s = reduce(s, { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'session_info_update', title: 'Agent title' } });
+    expect(s.chats[0]).toMatchObject({ title: 'My name', titlePinned: true });
+  });
+
+  it("takes the agent's own session title while not pinned", () => {
+    let s = reduce(EMPTY_STATE, { t: 'created', chat: chat() });
+    s = reduce(s, { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'session_info_update', title: 'Agent title' } });
+    expect(s.chats[0].title).toBe('Agent title');
   });
 });
