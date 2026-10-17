@@ -173,7 +173,7 @@ export function AlwaysAllow({ line, target }: { line: string; target: { requestI
   const rules = ruleCandidates(line);
   if (!rules.length) return null;
   return (
-    <Popover label="Always allow" title="Run this without asking from now on, in this workspace" buttonClass="ghost sm" trigger={<>Always allow…</>}>
+    <Popover label="Always allow" title="Run this without asking from now on, in this workspace" buttonClass="link always-allow" trigger={<>Always allow…</>}>
       {(close) => (
         <>
           <div class="pop-title" aria-hidden="true">
@@ -228,7 +228,10 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
         Needs your OK
         {item.toolKind && <span class="tag">{KIND_WORDS[item.toolKind] ?? item.toolKind}</span>}
       </div>
-      <div class="ask-body">{longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}</div>
+      {/* The command shows in full below; a title that only repeats it says what it is instead. */}
+      <div class="ask-body">
+        {command && command.trim() === item.title.trim() ? 'Run this command' : longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}
+      </div>
       <PermissionDetailView detail={item.detail} requestId={item.requestId} open />
       <div class="actions">
         <PermissionOptions item={item} />

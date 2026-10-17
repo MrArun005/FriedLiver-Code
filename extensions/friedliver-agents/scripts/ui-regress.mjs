@@ -649,6 +649,17 @@ BLOCKS.F24 = async () => {
   await p.close();
 };
 
+// ---- F23: a command card says the command once, and Always allow reads as a link, not a 4th option ----
+BLOCKS.F23 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 800);
+  const card = p.locator('#item-perm-c2');
+  const body = (await card.locator('.ask-body').innerText()).trim();
+  check(body !== 'rm src/legacyStore.ts', `the card's title isn't the command again [${body}]`);
+  const allow = card.locator('.actions [aria-haspopup="menu"]');
+  check((await allow.getAttribute('class'))?.split(' ').includes('link'), 'Always allow… is a link');
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
