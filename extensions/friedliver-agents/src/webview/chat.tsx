@@ -1386,6 +1386,21 @@ function Composer({
 
   const canSend = asking ? !!question : !empty;
   const [micHint, setMicHint] = useState(false);
+  // An image you removed, for Undo; the image you are looking at.
+  const [removed, setRemoved] = useState<{ a: Attachment; at: number } | null>(null);
+  const [preview, setPreview] = useState<Attachment | null>(null);
+  useEffect(() => {
+    if (!removed) return;
+    const t = setTimeout(() => setRemoved(null), 6000);
+    return () => clearTimeout(t);
+  }, [removed]);
+  // Registered at once (a layout effect), so an Esc pressed right after opening closes it.
+  useLayoutEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && (e.preventDefault(), e.stopPropagation(), setPreview(null), area.current?.focus());
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [preview]);
   // The mic: what the host's helper hears goes into the box at the caret, each partial replacing the last.
   const [mic, setMic] = useState<DictationState>('idle');
   const spoken = useRef<Segment | null>(null);
@@ -1462,6 +1477,20 @@ function Composer({
     <div class="composer-dock">
       <div class="composer-col">
         <div class="banners">
+          {removed && (
+            <div class="banner" role="status">
+              <span class="banner-text">Removed {removed.a.name}</span>
+              <button
+                class="sm"
+                onClick={() => {
+                  setAttachments((list) => [...list.slice(0, removed.at), removed.a, ...list.slice(removed.at)].slice(0, 10));
+                  setRemoved(null);
+                }}
+              >
+                Undo
+              </button>
+            </div>
+          )}
           <EditsBar chat={chat} />
           <RunningAgents chat={chat} />
           {micHint && (
@@ -1514,9 +1543,18 @@ function Composer({
             </div>
           )}
           {(attachments.length > 0 || refs.length > 0) && (
-            <div class="cc-chips">
+            <div class="cc-chips" data-over={attachments.length > 3 ? '' : undefined}>
+              {attachments.length > 3 && <span class="cc-chips-count">{attachments.length} images</span>}
               {attachments.map((a, i) => (
-                <AttachmentChip key={i} a={a} onRemove={() => setAttachments((list) => list.filter((_, n) => n !== i))} />
+                <AttachmentChip
+                  key={i}
+                  a={a}
+                  onPreview={() => setPreview(a)}
+                  onRemove={() => {
+                    setAttachments((list) => list.filter((_, n) => n !== i));
+                    setRemoved({ a, at: i });
+                  }}
+                />
               ))}
               {refs.map((r) => (
                 <RefChip key={`${r.path}:${r.startLine}-${r.endLine}`} codeRef={r} cwd={chat.cwd} onRemove={() => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
@@ -1654,6 +1692,11 @@ function Composer({
         </div>
       </div>
       {openMenu === 'agents' && <AgentMap chat={chat} linked={linked} close={closeMenu} />}
+      {preview && (
+        <div class="cc-overlay image-preview" role="dialog" aria-modal="true" aria-label={`Preview of ${preview.name}`} onMouseDown={() => setPreview(null)}>
+          <img src={`data:${preview.mimeType};base64,${preview.data}`} alt={preview.name} />
+        </div>
+      )}
     </div>
   );
 }

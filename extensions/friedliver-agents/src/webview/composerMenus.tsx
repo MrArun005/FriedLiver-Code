@@ -535,17 +535,24 @@ export const ModeButton = memo(function ModeButton({ chat, open }: { chat: ChatV
   );
 }, sameControls);
 
-/** An image waiting to go: thumbnail, name and size; click removes it (an × shows on hover). */
-export function AttachmentChip({ a, onRemove }: { a: Attachment; onRemove: () => void }) {
+/** A long file name cut in the middle, so its end (what tells screenshots apart) stays. */
+export function middleCut(name: string, max = 24): string {
+  return name.length <= max ? name : `${name.slice(0, Math.ceil((max - 1) / 2))}…${name.slice(-Math.floor((max - 1) / 2))}`;
+}
+
+/** An image waiting to go: click previews it; its own × removes it. */
+export function AttachmentChip({ a, onPreview, onRemove }: { a: Attachment; onPreview: () => void; onRemove: () => void }) {
   const [size, setSize] = useState('');
   return (
-    <button type="button" class="cc-chip" title={`Remove ${a.name}`} onClick={onRemove}>
-      <img src={`data:${a.mimeType};base64,${a.data}`} alt="" onLoad={(e) => setSize(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)} />
-      <span class="cc-chip-name">{a.name}</span>
-      {size && <span class="cc-chip-meta">{size}</span>}
-      <span class="cc-chip-x" aria-hidden="true">
-        <Icon name="close" size={14} />
-      </span>
-    </button>
+    <span class="cc-chip">
+      <button type="button" class="cc-chip-open" title={a.name} aria-label={`Preview ${a.name}${size ? `, ${size}` : ''}`} onClick={onPreview}>
+        <img src={`data:${a.mimeType};base64,${a.data}`} alt="" onLoad={(e) => setSize(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)} />
+        <span class="cc-chip-name">{middleCut(a.name)}</span>
+        {size && <span class="cc-chip-meta">{size}</span>}
+      </button>
+      <button type="button" class="cc-chip-remove" aria-label={`Remove ${a.name}`} title={`Remove ${a.name}`} onClick={onRemove}>
+        <Icon name="close" size={12} />
+      </button>
+    </span>
   );
 }

@@ -303,6 +303,41 @@ BLOCKS.F07 = async () => {
   await p.close();
 };
 
+// ---- F08: attachment chips: click previews, a separate × removes (with Undo), names and contrast ----
+BLOCKS.F08 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 640, 900);
+  await p.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 40;
+    c.getContext('2d').fillRect(0, 0, 64, 40);
+    const data = c.toDataURL('image/png').split(',')[1];
+    const images = Array.from({ length: 6 }, (_, n) => ({ name: `screenshot-2026-10-17-at-14.0${n}.png`, mimeType: 'image/png', data }));
+    window.postMessage({ type: 'attached', chatId: 'chat-c5', images }, '*');
+  });
+  await p.waitForSelector('.cc-chip');
+  const count = () => p.locator('.cc-chip').count();
+  check((await count()) === 6, 'six images attached');
+  const name = await p.locator('.cc-chip .cc-chip-name').first().innerText();
+  check(name.includes('…') && name.endsWith('14.00.png'), `a long name keeps its end [${name}]`);
+  check(await p.locator('.cc-chips-count:has-text("6 images")').isVisible(), 'the row says how many images');
+  const fade = await p.locator('.cc-chips').evaluate((r) => ({ over: r.scrollWidth > r.clientWidth, mask: window.getComputedStyle(r).maskImage }));
+  check(!fade.over || fade.mask !== 'none', `the row fades at its edge when it scrolls [${JSON.stringify(fade)}]`);
+  await p.locator('.cc-chip').first().click();
+  check((await p.locator('[role="dialog"].image-preview img').count()) === 1 && (await count()) === 6, 'clicking a chip previews the image and keeps it');
+  await p.keyboard.press('Escape');
+  check((await p.locator('.image-preview').count()) === 0, 'Esc closes the preview');
+  const x = p.locator('.cc-chip-remove').first();
+  check(/^Remove screenshot-/.test((await x.getAttribute('aria-label')) ?? ''), 'the × is its own button, named Remove …');
+  await x.click();
+  check((await count()) === 5 && (await p.locator('.banner:has-text("Removed")').isVisible()), 'the × removes the image and offers Undo');
+  await p.locator('.banner button:has-text("Undo")').click();
+  check((await count()) === 6, 'Undo puts it back');
+  const v = await axe(p, '.cc-chips');
+  check(v === null || !v.some((x) => x.startsWith('color-contrast')), `the chips pass contrast [${v}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();
