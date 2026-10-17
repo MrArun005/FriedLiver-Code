@@ -8,7 +8,12 @@ export const isImagePath = (p: string): boolean => IMAGE_EXT.test(p);
 export interface StepImage {
   path: string;
   title: string;
+  /** A screenshot tool's file, one an edit or write made, or one the step read. */
+  source: 'screenshot' | 'created' | 'read';
 }
+
+const SCREENSHOT = /screenshot/i;
+const MAKES = /^(Write|Edit|MultiEdit|NotebookEdit)$/;
 
 /** A file name as a title: no folder or extension, separators as spaces, a capital first. */
 export function humanTitle(file: string): string {
@@ -24,7 +29,8 @@ export function stepImage(t: Extract<Item, { kind: 'tool' }>): StepImage | null 
   const file = t.locations.find(isImagePath) ?? saved;
   if (!file) return null;
   const shot = saved && /^(Screenshot of .+)$/m.exec(text)?.[1];
-  return { path: file, title: t.about?.trim() || shot || humanTitle(file) };
+  const source = saved || SCREENSHOT.test(t.tool ?? '') || SCREENSHOT.test(t.title) ? 'screenshot' : t.toolKind === 'edit' || MAKES.test(t.tool ?? '') ? 'created' : 'read';
+  return { path: file, title: t.about?.trim() || shot || humanTitle(file), source };
 }
 
 /** Every image the chat's steps read or made, once each, in order. */
