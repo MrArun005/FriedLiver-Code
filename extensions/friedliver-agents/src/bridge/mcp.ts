@@ -14,7 +14,8 @@ export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '202
 const INSTRUCTIONS =
   'Tools from FriedLiver, the editor you run in. They reach the other coding agents and chats open there. ' +
   'The user may be asked to allow each call, and may say no; carry on without it if so. ' +
-  'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code.';
+  'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code. ' +
+  'The index_* tools query a ready index of this project; to find where something is, try index_search or index_symbols before grep or reading many files.';
 
 const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
 const CHAT_ID = { type: 'string', pattern: '^[\\w.:-]{1,128}$' };
@@ -89,8 +90,53 @@ export const TOOLS = [
     },
     annotations: { readOnlyHint: true },
   },
+  ...indexTools(),
   ...browserTools(),
 ].map((t) => ({ ...t, execution: { taskSupport: 'forbidden' } }));
+
+function indexTools() {
+  const PATH = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A file path relative to the workspace folder, like "src/app.ts".' };
+  const ro = { annotations: { readOnlyHint: true } };
+  const PREFER = ' Faster than grep for "where is X": prefer it first.';
+  return [
+    {
+      name: 'index_search',
+      title: 'Search the project index',
+      description: 'Searches FriedLiver\'s index of this project by keywords or identifiers (camelCase and snake_case parts match too) and returns the best-ranked files with matching definitions and lines.' + PREFER,
+      inputSchema: {
+        $schema: DRAFT_07,
+        type: 'object',
+        properties: {
+          query: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'Words or identifiers, like "refresh token expiry" or "parseConfig".' },
+          limit: { type: 'integer', minimum: 1, maximum: 50, description: 'How many files to return. Default 10.' },
+        },
+        required: ['query'],
+      },
+      ...ro,
+    },
+    {
+      name: 'index_symbols',
+      title: 'Find definitions',
+      description: 'Finds where functions, classes, types and the like with this name are defined in the project (exact name, else names starting with it).' + PREFER,
+      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A name, like "UserService".' } }, required: ['name'] },
+      ...ro,
+    },
+    {
+      name: 'index_outline',
+      title: 'Outline a file',
+      description: 'The definitions in one file with their lines, without reading the whole file.',
+      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      ...ro,
+    },
+    {
+      name: 'index_related',
+      title: 'Related files',
+      description: 'The files a file imports and the project files that import it (TS/JS, Python, Go, Java/Kotlin).',
+      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      ...ro,
+    },
+  ];
+}
 
 function browserTools() {
   const tool = (name: string, title: string, description: string, properties: Record<string, object> = {}, required: string[] = [], readOnly = false) => ({

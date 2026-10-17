@@ -146,6 +146,8 @@ export interface CoreOptions {
   externalAutoApprove?: () => boolean;
   /** The browser page's origin and whether a selector there is a password field (browser.ts). */
   browserPage?: ToolHost['browserPage'];
+  /** Answers the index_* tools (projectIndexHost.ts). */
+  index?: ToolHost['index'];
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -297,6 +299,7 @@ export class AgentCore {
       browser: options.browser,
       externalAutoApprove: options.externalAutoApprove,
       browserPage: options.browserPage,
+      index: options.index,
     });
   }
 
