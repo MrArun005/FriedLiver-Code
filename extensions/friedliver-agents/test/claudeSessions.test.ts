@@ -81,7 +81,7 @@ describe('Claude Code sessions', () => {
     expect(claudeColumn(s, 1_000_000 + 119_000)).toBe('working');
     expect(claudeSubagents(s, 1_000_000 + 119_000).map((a) => a.state)).toEqual(['working', 'done']);
     expect(claudeColumn(s, 1_000_000 + 121_000)).toBe('done');
-    expect(claudeSubagents(s, 1_000_000 + 121_000).map((a) => a.state)).toEqual(['done', 'done']);
+    expect(claudeSubagents(s, 1_000_000 + 121_000).map((a) => a.state)).toEqual(['quiet', 'done']);
     expect(filterClaudeSessions([s], 'payroll claude')).toEqual([s]);
     expect(filterClaudeSessions([s], 'codex')).toEqual([]);
   });
