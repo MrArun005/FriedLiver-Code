@@ -16,7 +16,7 @@ import type { AgentToAgent } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
-import { startDictation } from './host/dictation';
+import { DICTATION_SETTINGS } from './host/dictation';
 import { EditorAgent } from './host/editor';
 import { InlineEditor } from './host/inlineEditor';
 import { imagePreview } from './host/imageAccess';
@@ -558,13 +558,8 @@ export class Controller {
           // The editor's image preview shows it (no scripts, SVG included); outside the roots too, since the user asked.
           if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(m.path), vscode.ViewColumn.Beside);
           return;
-        case 'dictate':
-          await startDictation({
-            platform: process.platform,
-            run: (command) => vscode.commands.executeCommand(command),
-            toast: (text, button) => vscode.window.showInformationMessage(text, button),
-            openUrl: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
-          });
+        case 'dictationSettings':
+          await vscode.env.openExternal(vscode.Uri.parse(DICTATION_SETTINGS, true));
           return;
         case 'attach':
           post(surface, { type: 'attached', images: await this.pickImages(), ...(m.chatId ? { chatId: m.chatId } : {}) });

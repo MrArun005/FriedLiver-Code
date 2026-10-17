@@ -44,11 +44,12 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { foldApprovals } from '../shared/steps';
 import { CopyButton, useNow, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, basename, isTyping, memo, send, useHost, usePersisted, useWidth } from './common';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, EditsBar, PermissionCard, QuestionCard, QueueList, SessionControls, UsageMeter, decisionKey } from './controls';
+import { AlwaysAllow, AutoBadge, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
+import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, type ComposerMenu } from './composerMenus';
 import { RefList, refsOf, sameRef } from './refs';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -130,6 +131,7 @@ function App() {
               setRefs={(fn) => setRefs((all) => ({ ...all, [chat.id]: fn(all[chat.id] ?? []) }))}
               focusTick={focusTick}
               found={found?.chatId === chat.id ? found : null}
+              linked={state.chats.filter((c) => c.origin?.chatId === chat.id && !c.archived)}
             />
           </>
         ) : (
@@ -1073,7 +1075,9 @@ function Composer({
   setRefs,
   focusTick,
   found,
+  linked,
 }: {
+  linked: ChatView[];
   chat: ChatView;
   attachments: Attachment[];
   setAttachments(fn: (a: Attachment[]) => Attachment[]): void;
@@ -1090,7 +1094,6 @@ function Composer({
   const [shut, setShut] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
-  const compact = useWidth() < 360;
   useEffect(() => area.current?.focus(), [chat.id, focusTick]);
 
   const setText = (value: string) => {
@@ -1202,12 +1205,30 @@ function Composer({
   };
 
   const canSend = asking ? !!question : !empty;
+  const [micHint, setMicHint] = useState(false);
+  const [openMenu, setMenu] = useState<ComposerMenu>(null);
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    area.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!openMenu || openMenu === 'agents') return;
+    // A click outside the menu and its buttons closes it.
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Element;
+      if (!t.closest?.('.cc-menu, .cc-pill, .cc-mode, .cc-slash-btn')) setMenu(null);
+    };
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, [openMenu]);
+  const samples = usageSamples(chat);
   const queueing = chat.busy && !asking;
   return (
     <>
       <EditsBar chat={chat} />
       <div
         class="composer"
+        data-menu={openMenu ?? undefined}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           const files = Array.from(e.dataTransfer?.files ?? []);
@@ -1246,14 +1267,13 @@ function Composer({
         )}
         <RefList refs={refs} cwd={chat.cwd} onRemove={(r) => setRefs((list) => list.filter((x) => !sameRef(x, r)))} />
         {attachments.length > 0 && (
-          <div class="thumbs">
+          <div class="thumbs cc-chips">
             {attachments.map((a, i) => (
-              <button key={i} class="thumb" title={`Remove ${a.name}`} onClick={() => setAttachments((list) => list.filter((_, n) => n !== i))}>
-                <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
-              </button>
+              <AttachmentChip key={i} a={a} onRemove={() => setAttachments((list) => list.filter((_, n) => n !== i))} />
             ))}
           </div>
         )}
+        <div class="cc-input">
         <textarea
           ref={area}
           value={text}
@@ -1327,50 +1347,74 @@ function Composer({
             }
           }}
         />
-        {chat.busy && text.trim() && <div class="composer-queued">Queued for after this turn · Esc stops</div>}
-        <div class="composer-bar">
-          <button class="chip-btn icon-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
-            <Icon name="plus" />
-          </button>
-          {asking ? (
-            <span class="composer-agent">
-              <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
-            </span>
-          ) : (
-            <SessionControls chat={chat} compact={compact} />
-          )}
-          {hint && <span class="hint composer-hint">{hint}</span>}
-          <span class="spacer" />
-          <UsageMeter usage={chat.session?.usage} compact={compact} />
-          {chat.busy && (
-            <button class="ghost danger sm" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-              <Icon name="stop" /> {!compact && 'Stop'}
-            </button>
-          )}
-          {MAC && (
-            <button
-              class="chip-btn icon-btn mic-btn"
-              aria-label="Dictate"
-              title="Dictate (Fn Fn)"
-              onClick={() => {
-                area.current?.focus();
-                send({ type: 'dictate' });
-              }}
-            >
-              <Icon name="mic" />
-            </button>
-          )}
+        {MAC && (
           <button
-            class="primary send-btn"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-            title={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
+            type="button"
+            class="cc-mic mic-btn"
+            aria-label="Dictate"
+            title="Dictate: press Fn twice in the message box"
+            onClick={() => {
+              // ponytail: macOS gives no reliable programmatic start (patch 0120's startDictation: beeped), so say how.
+              area.current?.focus();
+              setMicHint(true);
+            }}
           >
-            <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
+            <Icon name="mic" />
           </button>
+        )}
+        </div>
+        {micHint && (
+          <span class="composer-queued mic-hint" role="status">
+            Press Fn twice to dictate ·{' '}
+            <a href="#" onClick={(e) => (e.preventDefault(), send({ type: 'dictationSettings' }))}>
+              Dictation settings
+            </a>
+          </span>
+        )}
+        {openMenu === 'model' && <ModelMenu chat={chat} close={closeMenu} />}
+        {openMenu === 'modes' && <ModesMenu chat={chat} close={closeMenu} />}
+        {openMenu === 'slash' && (
+          <SlashMenu
+            chat={chat}
+            close={closeMenu}
+            openModel={() => setMenu('model')}
+            mention={() => insert({ text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}#`, caret: text.length + (text && !/\s$/.test(text) ? 2 : 1) })}
+            command={(name, run) => (run ? send({ type: 'send', chatId: chat.id, text: `/${name}`, images: [] }) : insert({ text: `/${name} `, caret: name.length + 2 }))}
+          />
+        )}
+        <div class="composer-bar">
+          <span class="bar-left">
+            <button type="button" class="cc-icon-btn attach-btn" aria-label="Attach images" title="Attach images" onClick={() => send({ type: 'attach', chatId: chat.id })}>
+              <Icon name="plus" />
+            </button>
+            <ComposerPills chat={chat} linked={linked} samples={samples} open={setMenu} />
+            {asking && (
+              <span class="composer-agent">
+                <Icon name="ask" /> <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
+              </span>
+            )}
+            {hint && <span class="hint composer-hint">{hint}</span>}
+          </span>
+          <span class="bar-right">
+            {chat.busy && (
+              <button class="cc-icon-btn stop-btn" aria-label="Stop" title="Stop (Esc in an empty message box)" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+                <Icon name="stop" />
+              </button>
+            )}
+            <ModeButton chat={chat} open={setMenu} />
+            <button
+              class="primary send-btn"
+              onClick={submit}
+              disabled={!canSend}
+              aria-label={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
+              title={asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
+            >
+              <Icon name={asking ? 'ask' : queueing ? 'queue' : 'up'} />
+            </button>
+          </span>
         </div>
       </div>
+      {openMenu === 'agents' && <AgentMap chat={chat} linked={linked} close={closeMenu} />}
     </>
   );
 }
