@@ -113,7 +113,11 @@ function Step({ n, tool: t, approval, state, still, open, onToggle, chatId, cwd 
         )}
         <span class="step-end">
           {exit !== undefined && exit !== 0 && <span class="tag bad">exit {exit}</span>}
-          {approval && <span class={`tag${approval.ok ? ' ok' : ' bad'}`}>{approval.text}</span>}
+          {approval && (
+            <span class={`tag${approval.ok ? ' ok' : ' bad'}`} title={approval.ok ? `Allowed (${approval.text})` : approval.text}>
+              {approval.ok ? 'allowed' : approval.text}
+            </span>
+          )}
           {t.toolKind && t.toolKind !== 'other' && <span class="tag">{t.toolKind}</span>}
           {t.ms !== undefined && <span class="step-time">{shortDuration(t.ms)}</span>}
           {/* The slot stays without details too, so the kinds line up. */}
