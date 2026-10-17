@@ -440,6 +440,13 @@
           "default": "Inter",
           "markdownDescription": "Font for the chat, the Agent Manager and the other FriedLiver views. `Inter` is bundled; leave it empty to use the editor's UI font. Takes effect when a view next opens."
         },
+        "friedliver.chat.fontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 10,
+          "maximum": 20,
+          "markdownDescription": "Text size (px) a new chat tab starts at. In a tab, Cmd/Ctrl + `=` / `-` / `0` changes that tab only. Takes effect when a view next opens."
+        },
         "friedliver.chat.accentColor": {
           "type": "string",
           "default": "#D97757",

@@ -76,9 +76,12 @@ function page(params) {
   const data =
     params.get('empty') === '1' ? { state: { chats: [], images: [], links: [] } } : params.get('fixture') === 'steps' ? stepsFixture(Date.now()) : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
-  const saved = params.get('view') ? { view: params.get('view') } : undefined;
+  // textSize: a tab's saved text size, as vscode.setState would have kept it.
+  const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
+  const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
   const stub = `
     window.__posted = [];
+    window.__vscodeState = () => saved;
     let saved = ${JSON.stringify(saved ?? null)};
     const snapshot = ${JSON.stringify(snapshot).replace(/</g, '\\u003c')};
     window.acquireVsCodeApi = () => ({
@@ -88,6 +91,7 @@ function page(params) {
       },
       getState: () => saved ?? undefined,
       setState: (s) => { saved = s; },
+      __saved: () => saved,
     });`;
   return `<!doctype html>
 <html lang="en">
@@ -368,6 +372,35 @@ async function shoot() {
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
     check((await linux.locator('.mic-btn').count()) === 0, 'no mic off macOS');
     await linux.close();
+  }
+  {
+    // Text size: Cmd/Ctrl + = - 0 in a tab, that tab only, kept in its own webview state, and never reaching the window's zoom.
+    const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    await p.evaluate(() => {
+      window.__forwarded = 0;
+      window.addEventListener('keydown', (e) => e.key !== 'Meta' && e.key !== 'Control' && window.__forwarded++); // what the webview host forwards to the workbench
+    });
+    const size = async () => (await p.waitForTimeout(50), p.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize));
+    check((await size()) === '13px', 'the chat starts at 13px');
+    await p.click('.composer textarea');
+    await p.keyboard.press('ControlOrMeta+Equal');
+    await p.keyboard.press('ControlOrMeta+Equal');
+    check((await size()) === '15px', 'Cmd/Ctrl + = grows this tab by 1px a press');
+    check(await p.locator('.text-size-toast:has-text("Text 15px")').isVisible(), 'the new size shows briefly');
+    check((await p.evaluate(() => window.__forwarded)) === 0, 'the zoom keys don’t reach the window');
+    check((await p.evaluate(() => window.__vscodeState()?.textSize)) === 15, 'the size is kept in this webview’s state');
+    await p.keyboard.press('ControlOrMeta+Minus');
+    check((await size()) === '14px', 'Cmd/Ctrl + - shrinks it');
+    await p.keyboard.press('ControlOrMeta+Digit0');
+    check((await size()) === '13px', 'Cmd/Ctrl + 0 resets it');
+    await p.close();
+    const restored = await open('surface=chat&theme=black-blue&select=chat-c5&textSize=17', 1200, 800);
+    check((await restored.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '17px', 'a tab comes back at its own size');
+    await restored.close();
+    const other = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
+    check((await other.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize)) === '13px', 'another tab keeps the default');
+    await other.screenshot({ path: path.join(os.homedir(), 'code/chat-sizes-dark.png'), animations: 'disabled', caret: 'hide' });
+    await other.close();
   }
   for (const width of [320, 480, 700, 1200]) {
     // The message box keeps the composer's width however narrow the panel: the pills shrink, not the text.
