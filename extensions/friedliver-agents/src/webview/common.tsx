@@ -666,7 +666,9 @@ const imageSrcs = new Map<string, string | null>();
 const imageWaiters = new Set<() => void>();
 window.addEventListener('message', (e: MessageEvent<{ type?: string; path?: string; src?: string }>) => {
   if (e.data?.type !== 'imageSrc' || typeof e.data.path !== 'string') return;
-  imageSrcs.set(e.data.path, typeof e.data.src === 'string' ? e.data.src : null);
+  // Only raster data: URIs: never a URL or a file the webview could fetch.
+  const src = e.data.src;
+  imageSrcs.set(e.data.path, typeof src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(src) ? src : null);
   for (const w of imageWaiters) w();
 });
 

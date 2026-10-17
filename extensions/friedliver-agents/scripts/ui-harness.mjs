@@ -91,8 +91,16 @@ function page(params) {
         // Step images: a drawn stand-in for files the host would allow; paths with "outside" are refused.
         if (m && m.type === 'imageSrc') {
           const label = m.path.split('/').pop();
-          const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="#e8ecf2"/><rect x="140" y="70" width="200" height="160" rx="10" fill="#fff" stroke="#c6ccd6"/><rect x="165" y="110" width="150" height="18" rx="4" fill="#dfe3ea"/><rect x="165" y="140" width="150" height="18" rx="4" fill="#dfe3ea"/><rect x="165" y="180" width="150" height="26" rx="6" fill="#5b7cfa"/><text x="20" y="285" font-family="sans-serif" font-size="14" fill="#7a8394">' + label + '</text></svg>';
-          setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: 'data:image/svg+xml,' + encodeURIComponent(svg) }) }, '*'), 0);
+          const c = document.createElement('canvas');
+          c.width = 480;
+          c.height = 300;
+          const g = c.getContext('2d');
+          g.fillStyle = '#e8ecf2'; g.fillRect(0, 0, 480, 300);
+          g.fillStyle = '#fff'; g.fillRect(140, 70, 200, 160);
+          g.fillStyle = '#dfe3ea'; g.fillRect(165, 110, 150, 18); g.fillRect(165, 140, 150, 18);
+          g.fillStyle = '#5b7cfa'; g.fillRect(165, 180, 150, 26);
+          g.fillStyle = '#7a8394'; g.font = '14px sans-serif'; g.fillText(label, 20, 285);
+          setTimeout(() => window.postMessage({ type: 'imageSrc', path: m.path, ...(m.path.includes('outside') ? {} : { src: c.toDataURL('image/png') }) }, '*'), 0);
         }
       },
       getState: () => saved ?? undefined,
