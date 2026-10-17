@@ -104,6 +104,13 @@ check from install to two agents talking to each other.
    file for it, and the bar shows how full its context is. Messages you send
    while it works wait in a queue (Send now adds one to the running turn
    where the agent allows it).
+   On a Mac, the **mic** in the message box dictates: click it and talk, and
+   the words appear at the caret as you speak. It stops after 2.5 s without
+   new words, on a second click or on Esc. macOS asks once for microphone and
+   speech-recognition permission for FriedLiver. Recognition runs on the Mac
+   whenever macOS has the language on device (otherwise Apple's server does
+   it). `friedliver.voice.language` (`auto` = the system language, or e.g.
+   `en-IN`, `hi-IN`) and `friedliver.voice.silenceSeconds` tune it.
 5. Connect them. In a chat, start a message with `@gemini` (or `@gpt`,
    `@claude`, `@demo`) to ask that agent; the answer comes back as a card you
    can send on. **Hand off**, **Ask** and **Pipe to** in the chat's header and
@@ -212,7 +219,6 @@ Patches:
 | `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 | `0110-modern-workbench` | The FriedLiver workbench stylesheet: regions separate by tone, soft rounded overlays, an activity pill, thin scrollbars, a pill command center. Theme variables only; high contrast untouched |
-| `0120-macos-dictation-command` | `friedliver.startDictation` (macOS): starts system dictation in the focused text box, for the agents' composer mic button |
 | `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |
 
 ### Writing a patch

@@ -1,6 +1,7 @@
 // Messages between the webviews and the extension host. Webview content is
 // treated as untrusted: every message is checked here before it is acted on.
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
+import type { DictationUpdate } from './dictation';
 import { isRule, type CommandRule } from './rules';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
 import { typeable } from './steps';
@@ -33,6 +34,8 @@ export type WebviewMessage =
   | { type: 'attach'; chatId?: string }
   /** Opens System Settings › Keyboard › Dictation (the mic's hint links there). */
   | { type: 'dictationSettings' }
+  /** The composer's mic: start (`on`) or stop dictating into that chat's message box. */
+  | { type: 'dictate'; chatId: string; on: boolean }
   /** A step's image: the host answers with imageSrc when the webview may show it. */
   | { type: 'imageSrc'; path: string }
   /** Opens an image in the editor's image preview, beside the chat. */
@@ -120,7 +123,9 @@ export type HostMessage =
   /** Put a code reference into that chat's composer, to go with the next message. */
   | { type: 'addRef'; chatId: string; ref: CodeRef }
   /** The workspace's Claude Code sessions FriedLiver didn't start, for the Manager. */
-  | { type: 'claudeSessions'; sessions: ClaudeSession[] };
+  | { type: 'claudeSessions'; sessions: ClaudeSession[] }
+  /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
+  | ({ type: 'dictation'; chatId: string } & DictationUpdate);
 
 /** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
 export interface ClaudeSession {
@@ -232,6 +237,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'otherAgents':
     case 'dictationSettings':
       return { type: m.type };
+    case 'dictate':
+      return id(m.chatId) && typeof m.on === 'boolean' ? { type: 'dictate', chatId: m.chatId, on: m.on } : null;
     case 'attach':
       if (m.chatId === undefined) return { type: 'attach' };
       return id(m.chatId) ? { type: 'attach', chatId: m.chatId } : null;
