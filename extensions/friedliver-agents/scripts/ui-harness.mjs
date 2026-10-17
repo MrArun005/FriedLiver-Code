@@ -780,10 +780,12 @@ async function shoot() {
     await p.locator(`.tab-wrap:has([data-chat="${other}"]) .tab-close`).click();
     let now = await strip();
     check(!now.includes(other) && (await p.locator('.chat-head-title').innerText()).length > 0 && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === 'chat-c5', '× closes that tab and leaves the open chat as it is');
+    check(now.length === before.length - 1 && now.every((id) => before.includes(id)), `closing a tab adds none in its place [${before.length} → ${now.length}]`);
     const third = now.find((id) => id !== 'chat-c5');
     await p.locator(`.tabs [data-chat="${third}"]`).click({ button: 'middle' });
+    const was = now;
     now = await strip();
-    check(!now.includes(third), 'a middle-click closes a tab');
+    check(!now.includes(third) && now.length === was.length - 1 && now.every((id) => was.includes(id)), 'a middle-click closes a tab, and nothing takes its place');
     // Cmd/Ctrl+W closes the open chat's tab and shows its right neighbour (else the left), without reaching the editor.
     const order = await strip();
     const at = order.indexOf('chat-c5');
@@ -793,14 +795,27 @@ async function shoot() {
     await p.waitForTimeout(100);
     check(!(await strip()).includes('chat-c5') && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === expected && (await posted(p)).some((m) => m.type === 'select' && m.chatId === expected), `Cmd/Ctrl+W closes the open tab and shows its neighbour (${expected})`);
     check((await p.evaluate(() => window.__forwarded)) === 0, 'Cmd/Ctrl+W never reaches the editor (its own tab stays)');
-    check(((await p.evaluate(() => window.__vscodeState()?.closedTabs)) ?? []).includes('chat-c5'), 'the closed tabs are kept in this window’s state');
+    const kept = (await p.evaluate(() => window.__vscodeState()?.openTabs)) ?? [];
+    check(kept.length === (await strip()).length && !kept.includes('chat-c5'), 'the open tabs are kept in this window’s state');
     // The chats themselves are untouched: still in the Chats list, nothing stopped or archived.
     await p.click('.all-btn');
     const listed = await p.locator('.all-chats [role="option"]').evaluateAll((os) => os.map((o) => o.id));
     check([other, third, 'chat-c5'].every((id) => listed.some((l) => l.endsWith(`-${id}`))) && !(await posted(p)).some((m) => ['stop', 'archive'].includes(m.type)), 'closed tabs stay in the Chats list; nothing is stopped or archived');
-    await p.keyboard.press('Escape');
+    // Opening a chat from the list adds its tab at the end, as a browser does.
+    await p.locator(`.all-chats [role="option"][id$="-${other}"]`).click();
+    await p.waitForTimeout(100);
+    const reopened = await strip();
+    check(reopened.at(-1) === other && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === other, 'opening a chat from the list adds its tab at the end');
     await p.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/tabs-close.png'), clip: { x: 0, y: 0, width: 1200, height: 140 } }).catch(() => {});
-    // Close them all: the empty state.
+    // More tabs than fit: the strip scrolls sideways, fading at its edges; the tabs keep their size.
+    const many = await open('surface=chat&theme=dark-2026&select=chat-c5', 520, 700);
+    const fit = await many.evaluate(() => {
+      const t = document.querySelector('.tabs');
+      return { scrolls: t.scrollWidth > t.clientWidth, fade: window.getComputedStyle(t).maskImage !== 'none', min: Math.min(...[...t.querySelectorAll('.tab-wrap')].map((w) => w.getBoundingClientRect().width)), page: document.documentElement.scrollWidth <= window.innerWidth };
+    });
+    check(fit.scrolls && fit.fade && fit.min >= 80 && fit.page, `at 520px the tabs scroll sideways with faded edges, none squeezed [${JSON.stringify(fit)}]`);
+    await many.close();
+        // Close them all: the empty state.
     for (let n = 0; n < 40 && (await p.locator('.tabs .tab-close').count()); n++) await p.locator('.tabs .tab-close').first().click();
     check((await p.locator('.empty').count()) === 1, 'closing the last tab shows the empty state');
     await p.close();

@@ -4229,12 +4229,20 @@ code.command-line {
   gap: 2px;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+/* More tabs than fit: they scroll sideways, the strip's edges fade. */
+.tabs[data-overflow] {
+  mask-image: linear-gradient(to right, transparent, black var(--sp-4), black calc(100% - var(--sp-4)), transparent);
 }
 /* A tab and its ×: the × shows on hover, on the open tab and on keyboard focus. */
 .tab-wrap {
   position: relative;
-  flex: 0 1 auto;
+  flex: none;
   display: flex;
   align-items: center;
   min-width: 0;
