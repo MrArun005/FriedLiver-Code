@@ -68,7 +68,7 @@ export interface PausedResponse {
 /**
  * With friedliver.browser.relaxLocalhostCors on, what to do with a paused
  * response: null leaves it alone (anything not from localhost, or a request
- * with no Origin); otherwise the headers to answer with. A preflight
+ * with no Origin, or an Origin that isn't itself localhost); otherwise the headers to answer with. A preflight
  * (OPTIONS) is answered 204 by FriedLiver itself, since dev servers often 404
  * it. Only localhost responses in the browser's own session are touched.
  */
@@ -76,7 +76,8 @@ export function relaxLocalhostCors(paused: PausedResponse): { fulfill: boolean; 
   if (!isLocalhost(paused.request.url)) return null;
   const req = lower(paused.request.headers);
   const origin = req['origin'];
-  if (!origin) return null;
+  // Only a local page talking to a local server: a remote Origin never gets reflected (with credentials) here.
+  if (!origin || !isLocalhost(origin)) return null;
   const cors: Header[] = [
     { name: 'Access-Control-Allow-Origin', value: origin },
     { name: 'Access-Control-Allow-Credentials', value: 'true' },

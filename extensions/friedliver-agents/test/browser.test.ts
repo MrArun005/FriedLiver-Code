@@ -139,4 +139,12 @@ describe('security: only FriedLiver-opened tabs, local-only CORS, private screen
     expect(() => ownTab(mine, [users])).toThrow(/browser_open first/);
   });
 
+  it('leaves a non-local Origin untouched, even on a localhost response', () => {
+    for (const origin of ['https://evil.example', 'http://localhost.evil.com', 'null']) {
+      expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/api', method: 'GET', headers: { Origin: origin } }, responseHeaders: [] })).toBeNull();
+      expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/api', method: 'OPTIONS', headers: { Origin: origin } } })).toBeNull();
+    }
+    expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/', method: 'GET', headers: { Origin: 'http://[::1]:3000' } } })).not.toBeNull();
+  });
+
 });
