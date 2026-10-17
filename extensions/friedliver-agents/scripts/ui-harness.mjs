@@ -761,6 +761,51 @@ async function shoot() {
   }
 
   {
+    // Nothing spills out of a card, list row or map node, at any card width: pills shrink, wrap or cut with an ellipsis.
+    const spills = (p, container) =>
+      p.evaluate((sel) => {
+        const out = [];
+        for (const box of document.querySelectorAll(sel)) {
+          const r = box.getBoundingClientRect();
+          const cs = window.getComputedStyle(box);
+          const inner = { left: r.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) };
+          for (const el of box.querySelectorAll('*')) {
+            const e = el.getBoundingClientRect();
+            if (!e.width || window.getComputedStyle(el).position === 'fixed' || el.closest('.popover')) continue;
+            if (e.left < inner.left - 0.5 || e.right > inner.right + 0.5) out.push(`${el.className || el.tagName} in ${box.getAttribute('data-nav') ?? sel} by ${Math.round(Math.max(inner.left - e.left, e.right - inner.right))}px`);
+          }
+        }
+        return out;
+      }, container);
+    for (const width of [280, 360, 480]) {
+      const board = await open('surface=tasks&theme=dark-2026&view=board', 1440, 900);
+      await board.addStyleTag({ content: `.columns { grid-template-columns: repeat(var(--cols, 3), ${width}px) !important; }` });
+      const bad = await spills(board, '.task-card');
+      check(bad.length === 0, `board cards ${width}px wide: nothing spills out [${bad.slice(0, 4).join('; ')}]`);
+      if (width === 360) await board.screenshot({ path: path.join(os.homedir(), 'code/FriedLiver-Code-design/review/board-after.png'), clip: { x: 0, y: 0, width: 1440, height: 900 } }).catch(() => {});
+      await board.close();
+      // The list and the map at a viewport as narrow as the card.
+      for (const view of ['list', 'map']) {
+        const q = await open(`surface=tasks&theme=dark-2026&view=${view}`, width + 400, 900);
+        const sel = view === 'list' ? '.chat-table td' : '.map-node';
+        const out = view === 'list' ? await spills(q, sel) : await q.evaluate(() => {
+          const out = [];
+          for (const node of document.querySelectorAll('.map-node')) {
+            const box = node.querySelector('.box')?.getBoundingClientRect();
+            if (!box) continue;
+            for (const t of node.querySelectorAll('text')) {
+              const e = t.getBoundingClientRect();
+              if (e.width && (e.left < box.left - 0.5 || e.right > box.right + 0.5)) out.push(`${t.textContent} by ${Math.round(Math.max(box.left - e.left, e.right - box.right))}px`);
+            }
+          }
+          return out;
+        });
+        check(out.length === 0, `${view} at ${width + 400}px: nothing spills out of its ${view === 'list' ? 'cells' : 'nodes'} [${out.slice(0, 4).join('; ')}]`);
+        await q.close();
+      }
+    }
+  }
+  {
     // Steps read as one line each and open to something you can use; replies keep their shape.
     const p = await open('surface=chat&side=1&fixture=steps', 460, 900);
     const row = (text) => p.locator(`.tl-step:has(.step-text:text("${text}"))`);

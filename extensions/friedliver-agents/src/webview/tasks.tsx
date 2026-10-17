@@ -638,9 +638,9 @@ function BadgeView({ badge }: { badge: Badge }) {
     else if (badge.group) document.getElementById(`group-${badge.group}`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   };
   return (
-    <button class="badge" data-kind={badge.kind} onClick={go} title={badge.chatId ? 'Open that chat' : 'Compare them'}>
+    <button class="badge" data-kind={badge.kind} onClick={go} title={`${badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
       <Icon name={BADGE_ICON[badge.kind]} />
-      {badge.text}
+      <span class="badge-text">{badge.text}</span>
     </button>
   );
 }
@@ -728,9 +728,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
             </span>
           )}
           {conflicts.slice(0, 2).map((c) => (
-            <span key={c.file} class="badge conflict" title={`Changed here and in ${c.others.map((o) => o.label).join(', ')}: they clash when merged`}>
+            <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${o.label})`).join(', ')}: they clash when merged`}>
               <Icon name="diff" />
-              {conflictText(c)}
+              <span class="badge-text">{conflictText(c)}</span>
             </span>
           ))}
           {conflicts.length > 2 && <span class="badge conflict">+{conflicts.length - 2} more shared</span>}

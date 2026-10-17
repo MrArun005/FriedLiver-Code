@@ -508,6 +508,8 @@ button.ref:hover:not(:disabled) {
   gap: var(--sp-1);
   height: 18px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 0 var(--sp-2);
   border-radius: var(--r-pill);
   background: var(--pill-bg);
@@ -522,6 +524,11 @@ button.ref:hover:not(:disabled) {
 .badge .icon {
   width: 12px;
   height: 12px;
+}
+.badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .badge[data-kind='pipe'] .icon {
   color: var(--dot-running);
@@ -1071,6 +1078,7 @@ button.count-item .icon {
 .task-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 10px;
   padding: 14px var(--sp-4) 10px;
   border: 1px solid var(--border);
@@ -1143,8 +1151,9 @@ button.count-item .icon {
 }
 .card-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1) var(--sp-2);
   min-width: 0;
   font-size: var(--t-90);
   color: var(--fg-2);
@@ -1152,8 +1161,19 @@ button.count-item .icon {
 .card-top > span:not(.chip) {
   white-space: nowrap;
 }
-.card-top .chip {
-  flex: 0 1 auto;
+.card-top .mode-badge {
+  display: inline-block;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.card-top .chip,
+.card-top .mode-badge,
+.card-top .auto-badge {
+  flex: none;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card-who {
   color: var(--fg-2);
@@ -1240,7 +1260,7 @@ button.count-item .icon {
   align-items: center;
   flex-wrap: wrap;
   gap: 2px;
-  margin: 0 -6px;
+  min-width: 0;
 }
 
 /* Compare: one column per chat of a fan-out. */
