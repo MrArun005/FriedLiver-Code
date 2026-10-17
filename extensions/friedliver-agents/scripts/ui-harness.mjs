@@ -11,6 +11,8 @@
 // Pages: /?surface=tasks|chat|images&theme=black-blue&side=1&select=<chat id>&view=board|list|map&empty=1
 //        &fixture=steps (a Claude chat with long heredoc commands and a plain-text summary, ui-fixture-steps.mjs)
 //        &fixture=subagents (a Claude chat with three subagents, and outside Claude Code sessions, ui-fixture-subagents.mjs)
+//        &fixture=reference (the session in the Claude Code reference screenshots, ui-fixture-reference.mjs)
+//        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -22,6 +24,7 @@ import { parseArgs } from 'node:util';
 import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
 import { subagentsFixture } from './ui-fixture-subagents.mjs';
+import { referenceFixture } from './ui-fixture-reference.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -47,6 +50,13 @@ if (!opts['no-build']) {
 const pkg = JSON.parse(fs.readFileSync(path.join(ext, 'package.json'), 'utf8'));
 
 function readTheme(name) {
+  // The owner's theme, as a webview gets it (test/fixtures/theme-*-2026.css, scripts/theme-fixture.mjs).
+  const fixture = path.join(ext, 'test/fixtures', `theme-${name}.css`);
+  if (/^(dark|light)-2026$/.test(name) && fs.existsSync(fixture)) {
+    const css = fs.readFileSync(fixture, 'utf8');
+    const colors = Object.fromEntries([...css.matchAll(/--vscode-([\w-]+):\s*([^;]+);/g)].map(([, k, v]) => [k.replace(/-/g, '.'), v.trim()]));
+    return { kind: name.startsWith('light') ? 'light' : 'dark', colors, css };
+  }
   const file = path.join(themesDir, `friedliver-${name}-color-theme.json`);
   const text = fs.readFileSync(file, 'utf8');
   let theme;
@@ -82,7 +92,9 @@ function page(params) {
         ? stepsFixture(Date.now())
         : params.get('fixture') === 'subagents'
           ? subagentsFixture(Date.now())
-          : fixture(Date.now());
+          : params.get('fixture') === 'reference'
+            ? referenceFixture(Date.now())
+            : fixture(Date.now());
   const snapshot = { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))]].filter(([, v]) => v);
@@ -490,7 +502,7 @@ async function shoot() {
     const msg = p.locator('.user-msg').first();
     await msg.hover();
     const btn = msg.locator('.rewind-btn');
-    check((await btn.count()) === 1 && (await btn.evaluate((b) => getComputedStyle(b).opacity)) === '1', 'hovering a message shows Rewind to here');
+    check((await btn.count()) === 1 && (await btn.evaluate((b) => window.getComputedStyle(b).opacity)) === '1', 'hovering a message shows Rewind to here');
     await p.screenshot({ path: path.join(os.homedir(), 'code/rewind.png'), animations: 'disabled', caret: 'hide' });
     await btn.click();
     check((await posted(p)).some((m) => m.type === 'rewind' && m.chatId === 'chat-c5' && /^turn-/.test(m.turnId)), 'Rewind to here asks the host for that message');
