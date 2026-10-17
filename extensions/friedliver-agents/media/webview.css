@@ -4591,13 +4591,16 @@ button.jump-item[aria-current='true'] {
   font-weight: 600;
   color: var(--fg);
 }
+/* The agent cards: centred as a row, one size, the glyphs on one line (a note doesn't push its card's up). */
 .pick {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(88px, 120px));
+  justify-content: center;
   gap: var(--sp-2);
   margin: var(--sp-4) 0;
 }
 button.pick-agent {
+  position: relative;
   flex-direction: column;
   justify-content: center;
   gap: 6px;
@@ -4612,6 +4615,29 @@ button.pick-agent:hover {
 }
 .pick-agent .hint {
   font-size: var(--t-85);
+}
+.pick-agent .pick-note {
+  position: absolute;
+  bottom: var(--sp-1);
+}
+.reopen {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(480px, 100%);
+  margin: var(--sp-5) auto 0;
+  text-align: left;
+}
+.reopen .pop-title {
+  margin: 0 0 var(--sp-1);
+  padding: 0 var(--sp-3);
+}
+button.reopen-row {
+  justify-content: flex-start;
+  height: auto;
+  border: 0;
+  background: none;
+  color: var(--fg);
 }
 
 /* The list of chats (its own side bar view, and All chats in a tab): menu rows on the side bar. */
