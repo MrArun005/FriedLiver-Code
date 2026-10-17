@@ -92,7 +92,7 @@ writeFileSync(`${ws}/.vscode/settings.json`, JSON.stringify({ 'editor.quickSugge
 mkdirSync(`${dir}/ud/User`, { recursive: true });
 // Nothing reaches the network.
 const extraSettings = Object.fromEntries(opts.setting.map((kv) => [kv.slice(0, kv.indexOf('=')), JSON.parse(kv.slice(kv.indexOf('=') + 1))]));
-writeFileSync(`${dir}/ud/User/settings.json`, JSON.stringify({ 'friedliver.updates.check': false, 'update.mode': 'none', 'telemetry.telemetryLevel': 'off', 'extensions.autoCheckUpdates': false, ...extraSettings }, null, 2));
+writeFileSync(`${dir}/ud/User/settings.json`, JSON.stringify({ 'friedliver.update.mode': 'off', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off', 'extensions.autoCheckUpdates': false, ...extraSettings }, null, 2));
 mkdirSync(`${dir}/profiles`, { recursive: true });
 
 const launched = Date.now();
