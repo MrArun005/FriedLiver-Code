@@ -7,7 +7,8 @@ import type { AgentKey } from './model';
 /** FriedLiver's own say over what an agent may do without asking, per chat. */
 export type ApprovalLevel = 'ask' | 'edits' | 'full';
 export const APPROVAL_LEVELS: ApprovalLevel[] = ['ask', 'edits', 'full'];
-export const APPROVAL_NAMES: Record<ApprovalLevel, string> = { ask: 'Ask', edits: 'Auto-accept edits', full: 'Full auto' };
+/** The names everywhere (composer, Manager, map, status bar). */
+export const APPROVAL_NAMES: Record<ApprovalLevel, string> = { ask: 'Manual', edits: 'Edit automatically', full: 'Auto' };
 export const APPROVAL_HINTS: Record<ApprovalLevel, string> = {
   ask: 'Edits and commands wait for you',
   edits: 'Edits go through on their own; commands wait for you',
