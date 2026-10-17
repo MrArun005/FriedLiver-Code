@@ -345,8 +345,11 @@ async function measure(page, state, width) {
       row(name, 'divider', 1, (await box('.cc-divider')).height);
     }
     if (state === 'modes-menu') {
-      row(name, 'min width', check('>= 300', (v) => v >= 299.5), menu.width);
-      row(name, 'right-aligned to the composer', comp.right, menu.right);
+      // 7.png: 602 device px with its border, right edge 73 device px in from the composer's.
+      row(name, 'width (not the composer width)', 301, menu.width);
+      row(name, 'right edge, in from the composer', 36.5, comp.right - menu.right);
+      const desc = await box('.cc-modes-menu .cc-item[aria-checked="true"] .cc-item-desc');
+      row(name, 'selected description wraps to two lines', check('2 lines', (v) => v === 2), Math.round(desc.height / (9.95 * 1.2)));
       row(name, 'row font size (.9em)', 11.7, px(await css('.cc-modes-menu .cc-item-name', 'font-size')));
       row(name, 'description size (.85 × .9em)', 9.95, px(await css('.cc-modes-menu .cc-item-desc', 'font-size')));
       row(name, 'row icon box', 20, (await box('.cc-modes-menu .cc-item > .icon')).width);

@@ -2478,7 +2478,9 @@ button.sa-name:hover {
 }
 .cc-modes-menu {
   left: auto;
-  min-width: 300px;
+  /* Measured on 7.png: 301px wide with its border, its right edge on the mode button's (36.5px in from the composer's). */
+  right: 35.5px;
+  width: 301px;
   font-size: var(--t-90);
 }
 .cc-slash-menu,
