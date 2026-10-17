@@ -840,7 +840,8 @@ async function shoot() {
     const strip = () => p.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.chat));
     const before = await strip();
     const closes = await p.locator('.tabs .tab-close').evaluateAll((bs) => bs.map((b) => ({ label: b.getAttribute('aria-label'), title: b.title, w: b.getBoundingClientRect().width })));
-    check(before.length >= 3 && closes.length === before.length && closes.every((c) => /^Close /.test(c.label ?? '') && /^Close tab \((⌘|Ctrl\+)W\)$/.test(c.title) && c.w >= 15.5), `every tab has a labelled × with its shortcut [${closes.length} of ${before.length}]`);
+    // The × is for the pointer (the keyboard closes the focused tab with Delete, QA F05): titled with both keys.
+    check(before.length >= 3 && closes.length === before.length && closes.every((c) => /^Close tab \((⌘|Ctrl\+)W · Delete\)$/.test(c.title) && c.w >= 15.5), `every tab has an × titled with its keys [${closes.length} of ${before.length}]`);
     const opacity = (id) => p.locator(`.tab-wrap:has([data-chat="${id}"]) .tab-close`).evaluate((b) => (new Promise((r) => setTimeout(r, 200))).then(() => window.getComputedStyle(b).opacity));
     const other = before.find((id) => id !== 'chat-c5');
     await p.mouse.move(0, 400);

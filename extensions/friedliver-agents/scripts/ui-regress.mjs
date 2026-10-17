@@ -133,6 +133,46 @@ BLOCKS.F09 = async () => {
   await p.close();
 };
 
+// ---- F04 / F05: a newly opened tab scrolls into view; the strip is a real tablist ----
+BLOCKS.F04 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 640, 800);
+  // Open a chat that has no tab yet, as the list or a notification does.
+  const ids = await p.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.chat));
+  const outside = fixture(Date.now()).state.chats.find((c) => !c.archived && !ids.includes(c.id)).id;
+  await p.evaluate((id) => window.postMessage({ type: 'select', chatId: id }, '*'), outside);
+  await p.waitForTimeout(400);
+  const r = await p.evaluate((id) => {
+    const t = document.querySelector(`.tabs [data-chat="${id}"]`)?.getBoundingClientRect();
+    const s = document.querySelector('.tabs').getBoundingClientRect();
+    return t && { inView: t.left >= s.left - 1 && t.right <= s.right + 1, t: [Math.round(t.left), Math.round(t.right)], s: [Math.round(s.left), Math.round(s.right)] };
+  }, outside);
+  check(!!r?.inView, `a chat opened from outside the strip shows its new tab in view ${JSON.stringify(r)}`);
+  await p.close();
+};
+BLOCKS.F05 = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  const tab = p.locator('.tabs [role="tab"][aria-selected="true"]');
+  await tab.focus();
+  const order = await p.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.chat));
+  const at = order.indexOf('chat-c5');
+  await p.keyboard.press('ArrowRight');
+  const focused = await p.evaluate(() => document.activeElement?.dataset?.chat);
+  check(focused === order[(at + 1) % order.length], `ArrowRight moves to the next tab [${focused}]`);
+  await p.keyboard.press('Home');
+  check((await p.evaluate(() => document.activeElement?.dataset?.chat)) === order[0], 'Home goes to the first tab');
+  await p.keyboard.press('End');
+  check((await p.evaluate(() => document.activeElement?.dataset?.chat)) === order.at(-1), 'End goes to the last tab');
+  const stops = await p.evaluate(() => [...document.querySelectorAll('.tabs [tabindex], .tabs button')].filter((e) => e.tabIndex >= 0).length);
+  check(stops === 1, `the strip is one Tab stop (roving tabindex), not ${stops}`);
+  const last = order.at(-1);
+  await p.keyboard.press('Delete');
+  check(!(await p.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.chat))).includes(last), 'Delete closes the focused tab');
+  check((await p.locator('.tabs [role="tab"]').first().getAttribute('aria-keyshortcuts')) === 'Delete', 'tabs announce Delete as their close key');
+  const v = await axe(p, '.switcher');
+  check(v === null || !v.length, `axe finds nothing in the tab strip [${v ?? 'axe-core not found'}]`);
+  await p.close();
+};
+
 await run();
 await browser.close();
 server.kill();

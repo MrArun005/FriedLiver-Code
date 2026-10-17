@@ -192,20 +192,41 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
     ro.observe(el);
     return () => ro.disconnect();
   }, [tabs.length]);
+  // After the tab is in the strip: a chat opened from the list or a notification gets its new tab shown.
   useEffect(() => {
     box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [active]);
+  }, [active, tabs.length]);
+  // A tablist: one Tab stop; ←/→/Home/End move between tabs, Enter or Space opens one, Delete closes it.
+  const focusable = active && strip.some((c) => c.id === active) ? active : strip[0]?.id;
+  const onKeys = (e: KeyboardEvent) => {
+    const all = [...(box.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];
+    const at = all.indexOf(document.activeElement as HTMLElement);
+    if (at < 0) return;
+    const go = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: all.length - 1 }[e.key];
+    if (go !== undefined) {
+      e.preventDefault();
+      all[(go + all.length) % all.length]?.focus();
+    } else if (e.key === 'Delete') {
+      e.preventDefault();
+      const id = all[at].dataset.chat!;
+      const next = all[at + 1] ?? all[at - 1];
+      onClose(id);
+      requestAnimationFrame(() => next?.isConnected && next.focus());
+    }
+  };
   const open = openChats(state.chats);
   const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
   return (
     <div class="switcher">
-      <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-overflow={over ? '' : undefined}>
+      <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
         {strip.map((c) => (
-          <span key={c.id} class="tab-wrap" data-active={c.id === active ? '' : undefined}>
+          <span key={c.id} class="tab-wrap" role="presentation" data-active={c.id === active ? '' : undefined}>
             <button
               role="tab"
               class="tab"
               data-chat={c.id}
+              tabIndex={c.id === focusable ? 0 : -1}
+              aria-keyshortcuts="Delete"
               aria-selected={c.id === active}
               title={`${c.title} (${c.label})`}
               onClick={() => onSelect(c.id)}
@@ -216,7 +237,8 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
               <AutoBadge chat={c} short />
               <Dot state={statusOf(c)} />
             </button>
-            <button type="button" class="tab-close" aria-label={`Close ${c.title}`} title={`Close tab (${shortcut})`} onClick={() => onClose(c.id)}>
+            {/* For the pointer; the keyboard closes the focused tab with Delete, so it is no Tab stop of its own. */}
+            <button type="button" class="tab-close" tabIndex={-1} aria-hidden="true" title={`Close tab (${shortcut} · Delete)`} onClick={() => onClose(c.id)}>
               <Icon name="close" size={12} />
             </button>
           </span>
