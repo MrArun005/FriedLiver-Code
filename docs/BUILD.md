@@ -81,6 +81,7 @@ Environment variables:
 | `FRIEDLIVER_CACHE_DIR` | `.cache` | Downloaded Node toolchain |
 | `FRIEDLIVER_VERSION` | upstream tag | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag |
 | `FRIEDLIVER_REQUIRE_PINS` | unset | When set, a download with no SHA-256 pin in `scripts/checksums.json` fails the build (release builds set it) |
+| `FRIEDLIVER_KEEP_LOCALES` | `en,en-GB` | Chromium locale packs `--package` keeps (`<lang>.lproj` in macOS's Electron Framework, `locales/<lang>.pak` elsewhere); English is always kept as Chromium's fallback, `all` keeps every pack. The others are about 45 MB on macOS. Only Chromium's own strings (spellcheck and webview context menus, a few native dialogs) are affected; FriedLiver's UI language comes from VS Code language packs |
 
 ### The dictation helper (macOS)
 
@@ -295,6 +296,32 @@ again after changing the artwork.
 
   A clean dev rebuild of `out/` is `npm run transpile-client` in the
   checkout (about 20 s, no type check).
+- **`0200-fast-shell-env.patch`**: the extension host no longer waits for the
+  login shell (`friedliver.fastShellEnv`, see [DEFAULTS.md](DEFAULTS.md)). It
+  adds `src/vs/workbench/services/extensions/common/shellEnvCache.ts` (no
+  imports: the allow-list, the cache and a raw protocol message `0xFE
+  'FLSHENV'` + JSON beside Initialized/Ready/Terminate), uses it in
+  `localProcessExtensionHost.ts` and applies the message in
+  `api/node/extensionHostProcess.ts`. `test/shellEnvCache.test.ts` runs that
+  new file straight out of the patch (`test/patchedFile.ts`), so the filter is
+  tested without an upstream checkout.
+- **`0210-node-compile-cache-posix.patch`**: Node.js compile cache for the
+  utility processes on macOS and Linux. Upstream turned POSIX off with a TODO
+  that blames its *packaged* cache (portable + read-only/eager, generated at
+  build time, `build/lib/nodeCompileCache.ts` makes it for win32-x64 only).
+  This uses the plain Node API instead (`module.enableCompileCache({ directory })`:
+  writable, not portable, not eager), the same call upstream makes on Windows
+  in Electron's Node, documented for CommonJS and ESM since Node 22.1. Node
+  validates entries against the module's source and its own version; the
+  folder is `CachedData/<commit>/node/<kind>`, so the shared process's
+  `CodeCacheCleaner` deletes old versions. `mainImpl.ts` sets
+  `FRIEDLIVER_NODE_COMPILE_CACHE` once the user data folder is known (unless
+  argv.json says `"node-compile-cache": false`, schema in
+  `desktop.contribution.ts`); utility processes inherit it. Node only writes
+  the cache when a process exits normally, so each one also flushes 20 s after
+  it starts. Check: the extension host's log says
+  `[node-compile-cache] extension-host: … (status: enabled, configured: …/CachedData/<commit>/node/extension-host …)`
+  and that folder fills after the first launch.
 - **Built-in extensions**: `friedliver-agents` (`npm ci` + `npm run build`
   first) and `friedliver-theme` are copied without `node_modules` and
   `.vscode-test`. On the copy, the Agents view container moves from

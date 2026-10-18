@@ -1,0 +1,107 @@
+diff --git a/src/mainImpl.ts b/src/mainImpl.ts
+index 3d34aea5..ea9c7172 100644
+--- a/src/mainImpl.ts
++++ b/src/mainImpl.ts
+@@ -80,6 +80,14 @@ if (process.platform === 'linux') {
+ // Resolve code cache path
+ const codeCachePath = getCodeCachePath();
+ 
++// FriedLiver: a writable Node.js compile cache for the utility processes (extension host, shared
++// process, pty host) on macOS and Linux, under CachedData/<commit> so the shared process's code
++// cache cleaner removes old versions. Read by enableNodeCompileCache() in each process. The main
++// process itself is already compiled by now (see nodeCompileCache.ts).
++if (codeCachePath && process.platform !== 'win32' && argvConfig['node-compile-cache'] !== false) {
++	process.env['FRIEDLIVER_NODE_COMPILE_CACHE'] = path.join(codeCachePath, 'node');
++}
++
+ // Disable default menu (https://github.com/electron/electron/issues/35512)
+ Menu.setApplicationMenu(null);
+ 
+diff --git a/src/vs/base/node/nodeCompileCache.ts b/src/vs/base/node/nodeCompileCache.ts
+index b9cea60d..bb4c568e 100644
+--- a/src/vs/base/node/nodeCompileCache.ts
++++ b/src/vs/base/node/nodeCompileCache.ts
+@@ -6,6 +6,7 @@
+ import * as fs from 'fs';
+ import { constants, enableCompileCache, flushCompileCache, getCompileCacheDir } from 'node:module';
+ import { getHeapCodeStatistics } from 'node:v8';
++import { setTimeout as setNodeTimeout } from 'node:timers';
+ import { isEqualOrParent } from '../common/extpath.js';
+ import { join } from '../common/path.js';
+ 
+@@ -63,13 +64,7 @@ export function enableNodeCompileCache(kind: NodeCompileCacheKind): boolean {
+ 
+ 	// TODO: Re-enable POSIX caches once the runtime fixes portable caching with eager/read-only options.
+ 	if (process.platform !== 'win32') {
+-		setNodeCompileCacheStatus({
+-			kind,
+-			status: 'disabled',
+-			configuredDirectory: cacheDirectory,
+-			isPackagedCacheEnabled: false
+-		});
+-		return false;
++		return enableWritableNodeCompileCache(kind, cacheDirectory);
+ 	}
+ 
+ 	const isGeneratingCache = process.env['VSCODE_GENERATE_NODE_COMPILE_CACHE'] === '1';
+@@ -132,6 +127,44 @@ export function enableNodeCompileCache(kind: NodeCompileCacheKind): boolean {
+ 	return isGeneratingCache;
+ }
+ 
++/**
++ * FriedLiver: upstream's packaged cache is portable and read-only (generated at build time), which
++ * is what the TODO above says is broken on POSIX. This is the plain form instead: writable, not
++ * portable, not eager, in the user data folder (`FRIEDLIVER_NODE_COMPILE_CACHE`, set by mainImpl and
++ * inherited by the utility processes). Node checks each entry against the module's source and its
++ * own version, and the folder is per product commit. Off when that variable is missing (first
++ * process: main; argv.json `"node-compile-cache": false`; no commit) or NODE_DISABLE_COMPILE_CACHE=1.
++ */
++function enableWritableNodeCompileCache(kind: NodeCompileCacheKind, packagedDirectory: string): false {
++	const root = process.env['FRIEDLIVER_NODE_COMPILE_CACHE'];
++	if (!root) {
++		setNodeCompileCacheStatus({ kind, status: 'disabled', configuredDirectory: packagedDirectory, isPackagedCacheEnabled: false });
++		return false;
++	}
++
++	const directory = join(root, kind);
++	const result = enableCompileCache({ directory });
++	const status = result.status === constants.compileCacheStatus.ENABLED ? 'enabled'
++		: result.status === constants.compileCacheStatus.ALREADY_ENABLED ? 'already-enabled'
++			: result.status === constants.compileCacheStatus.DISABLED ? 'disabled'
++				: 'failed';
++	setNodeCompileCacheStatus({
++		kind,
++		status,
++		configuredDirectory: directory,
++		activeDirectory: getCompileCacheDir() ?? result.directory,
++		isPackagedCacheEnabled: false,
++		message: result.message
++	});
++
++	// Node writes the cache only when the process exits normally; utility processes are often
++	// killed at shutdown, so write what startup compiled once it is over.
++	if (status === 'enabled') {
++		setNodeTimeout(() => flushCompileCache(), 20_000).unref();
++	}
++	return false;
++}
++
+ export function logNodeCompileCacheStatus(log: (message: string) => void = console.log): void {
+ 	const nodeCompileCacheStatus = processWithNodeCompileCacheStatus._vscodeNodeCompileCacheStatus;
+ 	if (didLogNodeCompileCacheStatus || !nodeCompileCacheStatus) {
+diff --git a/src/vs/workbench/electron-browser/desktop.contribution.ts b/src/vs/workbench/electron-browser/desktop.contribution.ts
+index 41250d7b..a9445681 100644
+--- a/src/vs/workbench/electron-browser/desktop.contribution.ts
++++ b/src/vs/workbench/electron-browser/desktop.contribution.ts
+@@ -435,6 +435,11 @@ import product from '../../platform/product/common/product.js';
+ 				type: 'boolean',
+ 				markdownDescription: localize('argv.enableCrashReporter', 'Allows to disable crash reporting, should restart the app if the value is changed.')
+ 			},
++			'node-compile-cache': {
++				type: 'boolean',
++				default: true,
++				markdownDescription: localize('argv.nodeCompileCache', 'FriedLiver: on macOS and Linux, keep a Node.js compile cache for the extension host, shared process and pty host in the user data folder (`CachedData/<commit>/node`), so they start faster from the second launch on. Set to `false` and restart to turn it off.')
++			},
+ 			'crash-reporter-id': {
+ 				type: 'string',
+ 				markdownDescription: localize('argv.crashReporterId', 'Unique id used for correlating crash reports sent from this app instance.')
