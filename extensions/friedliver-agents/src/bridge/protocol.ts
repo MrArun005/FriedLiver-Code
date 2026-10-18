@@ -1,6 +1,7 @@
 // Lines between the FriedLiver MCP server an agent session runs (dist/bridge.js)
 // and the extension host, over a local socket: one JSON object per line.
 // The host treats every line as untrusted and checks it here first.
+import { READ_LIMITS } from '../host/indexReads';
 import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
 
@@ -71,6 +72,8 @@ const chatId = (v: unknown): v is string => typeof v === 'string' && CHAT_ID.tes
 const short = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.url;
 const query = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.query;
 /** A workspace-relative path: no absolute paths, drive letters or `..`. */
+/** Absent, or an integer in [min, max]. */
+const int = (v: unknown, min: number, max: number) => v === undefined || (Number.isInteger(v) && (v as number) >= min && (v as number) <= max);
 const relPath = (v: unknown): v is string => query(v) && !/^([/\\]|[A-Za-z]:)/.test(v) && !v.split(/[/\\]/).includes('..');
 
 /** The tool call in a request, or null when anything about it is off. */
@@ -109,9 +112,16 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
     case 'browser_reload':
       return { tool };
     case 'index_search': {
-      const limit = a.limit;
-      if (!query(a.query) || (limit !== undefined && !(Number.isInteger(limit) && (limit as number) >= 1 && (limit as number) <= 50))) return null;
-      return { tool, query: a.query, ...(limit !== undefined ? { limit: limit as number } : {}) };
+      const { limit, budget } = a;
+      if (!query(a.query) || !int(limit, 1, 50) || !int(budget, READ_LIMITS.minBudget, READ_LIMITS.maxBudget)) return null;
+      return { tool, query: a.query, ...(limit !== undefined ? { limit: limit as number } : {}), ...(budget !== undefined ? { budget: budget as number } : {}) };
+    }
+    case 'index_read': {
+      const { symbol, lines } = a;
+      if (!relPath(a.path) || (symbol !== undefined && !query(symbol))) return null;
+      if (lines !== undefined && !(Array.isArray(lines) && lines.length === 2 && lines.every((n) => Number.isInteger(n) && n >= 1 && n <= 10_000_000) && lines[0] <= lines[1])) return null;
+      if (symbol !== undefined && lines !== undefined) return null;
+      return { tool, path: a.path, ...(symbol !== undefined ? { symbol: symbol as string } : {}), ...(lines !== undefined ? { lines: [lines[0], lines[1]] as [number, number] } : {}) };
     }
     case 'index_symbols':
       return query(a.name) ? { tool, name: a.name } : null;

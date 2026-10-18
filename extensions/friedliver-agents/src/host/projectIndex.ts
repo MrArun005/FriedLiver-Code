@@ -8,7 +8,9 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { Budget, compactOutline, findSymbol, numbered, READ_LIMITS, symbolRange, windows, type SeenFiles } from './indexReads';
 import { MerkleTree } from './merkle';
+import { estimateTokens } from '../shared/tokens';
 
 export const INDEX_LIMITS = {
   /** Files larger than this are not indexed. */
@@ -316,7 +318,7 @@ export class ProjectIndex {
   }
 
   /** The text and content hash of an indexed file, re-checked first; drops the entry when anything is off. */
-  private async readChecked(rel: string): Promise<{ text: string; hash: string } | null> {
+  async readChecked(rel: string): Promise<{ text: string; hash: string } | null> {
     const got = (await this.check(rel)) ? (this.counts.read++, await readText(path.join(this.root, rel))) : null;
     if (got === null) this.remove(rel);
     return got;
@@ -551,11 +553,6 @@ export class ProjectIndex {
     return d && from ? { from, ...d } : null;
   }
 
-  /** Matching lines of an indexed file for a search result: up to `max`, each cut to INDEX_LIMITS.line. */
-  async snippets(rel: string, query: string, max = 3): Promise<{ line: number; text: string }[]> {
-    const text = await this.read(rel);
-    return text === null ? [] : matchingLines(text, query, max);
-  }
 }
 
 /** Bytes per read, each fed to the hash as it arrives. */
@@ -612,25 +609,31 @@ export const readIndexFile = (file: string): Promise<unknown> =>
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => undefined);
 
-function matchingLines(text: string, query: string, max: number): { line: number; text: string }[] {
-  const terms = [...new Set(query.toLowerCase().match(/[\w$]{2,}/g) ?? [])];
-  // The lines holding the most distinct terms, earliest first among equals.
+/** The 1-based lines holding the most distinct query terms (identifier parts too), best first, at most `max`. */
+function matchingLines(lines: string[], query: string, max: number): number[] {
+  const terms = [...new Set([...(query.toLowerCase().match(/[\w$]{2,}/g) ?? []), ...tokenize(query)])];
   const hits: { line: number; n: number }[] = [];
-  const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].toLowerCase();
     const n = terms.filter((t) => l.includes(t)).length;
-    if (n) hits.push({ line: i, n });
+    if (n) hits.push({ line: i + 1, n });
   }
   hits.sort((a, b) => b.n - a.n || a.line - b.line);
-  return hits
-    .slice(0, max)
-    .sort((a, b) => a.line - b.line)
-    .map((h) => ({ line: h.line + 1, text: lines[h.line].trim().slice(0, INDEX_LIMITS.line) }));
+  return hits.slice(0, max).map((h) => h.line);
+}
+
+/** A file's lines, without the empty one after a final newline. */
+const linesOf = (text: string) => text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
+
+/** Who is asking: the chat, and what it has been shown (index_diff, index_changes since its last turn). */
+export interface IndexContext {
+  chatId: string;
+  seen: SeenFiles;
 }
 
 export type IndexCall =
-  | { tool: 'index_search'; query: string; limit?: number }
+  | { tool: 'index_search'; query: string; limit?: number; budget?: number }
+  | { tool: 'index_read'; path: string; symbol?: string; lines?: [number, number] }
   | { tool: 'index_symbols'; name: string }
   | { tool: 'index_outline'; path: string }
   | { tool: 'index_related'; path: string }
@@ -642,7 +645,7 @@ const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice
  * The answers to the index_* tools over every folder's index. Paths in and out are
  * relative to the folder; with more than one folder they start with its name.
  */
-export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean): Promise<string> {
+export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean, ctx?: IndexContext): Promise<string> {
   if (!indexes.length) return 'No project index: no trusted workspace folder is open, or friedliver.index.enabled is off. Search the files another way.';
   const multi = indexes.length > 1;
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
@@ -656,8 +659,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
     }
     return undefined;
   };
-  const lineOf = (s: Sym) => `  ${s.kind} ${s.name}  (line ${s.line})`;
-  const missing = `${call.tool === 'index_outline' || call.tool === 'index_related' ? call.path : ''} is not in the index (not a workspace-relative path, excluded, or not indexed yet).`;
+  const missing = `${'path' in call ? call.path : ''} is not in the index (not a workspace-relative path, excluded, or not indexed yet).`;
   switch (call.tool) {
     case 'index_search': {
       const limit = Math.min(call.limit ?? 10, INDEX_LIMITS.results);
@@ -665,17 +667,81 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
         .flatMap((ix) => ix.search(call.query, limit).map((h) => ({ ...h, ix })))
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
-      if (!hits.length) return `${note}No indexed file matches "${call.query}".`;
+      const none = `${note}No indexed file matches "${call.query}".`;
+      if (!hits.length) return none;
+      // Room kept for the closing "More matches" line.
+      const budget = new Budget((call.budget ?? READ_LIMITS.budget) - (hits.length > 1 ? 40 : 0));
+      budget.take(note);
       const parts: string[] = [];
+      const more: string[] = [];
+      /** A window's text → the file it was first shown for. */
+      const shownAt = new Map<string, string>();
       for (const h of hits) {
-        const lines = [`${shown(h.ix, h.rel)}  (score ${h.score.toFixed(2)})`];
-        for (const s of h.symbols) lines.push(lineOf(s));
-        for (const s of await h.ix.snippets(h.rel, call.query)) lines.push(`  ${s.line}: ${s.text}`);
+        const text = await h.ix.read(h.rel);
         // The file failed its re-check and was dropped: say nothing about it.
-        if (!h.ix.has(h.rel)) continue;
-        parts.push(lines.join('\n'));
+        if (text === null) continue;
+        const name = shown(h.ix, h.rel);
+        const head = `${name}${h.symbols.length ? ` · ${h.symbols.map((s) => `${s.kind} ${s.name} ${s.line}`).join(', ')}` : ''}`;
+        if (!budget.fits(head)) {
+          more.push(name);
+          continue;
+        }
+        budget.take(head);
+        const block = [head];
+        const lines = linesOf(text);
+        for (const [a, b] of windows(matchingLines(lines, call.query, READ_LIMITS.windowsPerFile), lines.length)) {
+          const key = lines.slice(a - 1, b).join('\n');
+          const first = shownAt.get(key);
+          const part = first ? `(lines ${a}-${b}: same lines as ${first})` : numbered(lines, a, b, INDEX_LIMITS.line);
+          if (!budget.fits(part)) break;
+          budget.take(part);
+          block.push(part);
+          if (!first) shownAt.set(key, name);
+        }
+        parts.push(block.join('\n'));
       }
-      return parts.length ? cap(note + parts.join('\n\n')) : `${note}No indexed file matches "${call.query}".`;
+      if (!parts.length && !more.length) return none;
+      let out = note + parts.join('\n\n');
+      if (more.length) {
+        const limitAll = call.budget ?? READ_LIMITS.budget;
+        for (let n = more.length; n > 0; n--) {
+          const tail = `\n\nMore matches: ${more.slice(0, n).join(', ')}${n < more.length ? ` and ${more.length - n} more` : ''} (raise budget, or index_read one).`;
+          if (n === 1 || estimateTokens(out + tail) <= limitAll) {
+            out += tail;
+            break;
+          }
+        }
+      }
+      return cap(out);
+    }
+    case 'index_read': {
+      const at = find(call.path);
+      if (!at) return missing;
+      const got = await at[0].readChecked(at[1]);
+      if (!got) return missing;
+      const lines = linesOf(got.text);
+      const syms = outline(at[1], got.text);
+      const names = syms.filter((s) => !/^\s/.test(lines[s.line - 1] ?? '')).map((s) => s.name);
+      const head = `${call.path} · ${lines.length} lines · #${got.hash.slice(0, 8)}${names.length ? ` · defines ${names.slice(0, 12).join(', ')}${names.length > 12 ? ` +${names.length - 12}` : ''}` : ''}`;
+      let from = 1;
+      let to = lines.length;
+      let what = '';
+      if (call.symbol) {
+        const found = findSymbol(at[1], lines, syms, call.symbol);
+        if (!found.length) return `${head}\nNo definition named "${call.symbol}" in ${call.path}. Its outline:\n${compactOutline(lines, syms) || '(none)'}`;
+        ({ start: from, end: to } = symbolRange(at[1], lines, syms, found[0]));
+        const others = found.slice(1).map((s) => s.line);
+        what = `${found[0].kind} ${call.symbol}, lines ${from}-${to}${others.length ? ` (also defined at line ${others.join(', ')}: pass lines to read one)` : ''}`;
+      } else if (call.lines) {
+        from = Math.min(call.lines[0], lines.length);
+        to = Math.min(call.lines[1], lines.length);
+      } else if (lines.length > READ_LIMITS.smallLines || got.text.length > READ_LIMITS.smallChars) {
+        return cap(`${head}\nToo big to return whole: pass symbol (a name below, or Outer.inner) or lines: [from, to]. Outline:\n${compactOutline(lines, syms) || '(no definitions found)'}`);
+      }
+      ctx?.seen.set(ctx.chatId, path.join(at[0].root, at[1]), got.hash, got.text);
+      const last = Math.min(to, from + READ_LIMITS.maxLines - 1);
+      const tail = last < to ? `\n… cut at line ${last}; pass lines: [${last + 1}, ${to}] for more.` : '';
+      return cap(`${head}${what ? `\n--- ${what}` : ''}\n${numbered(lines, from, last)}${tail}`);
     }
     case 'index_symbols': {
       const hits = indexes.flatMap((ix) => ix.symbols(call.name, INDEX_LIMITS.results).map((h) => ({ ...h, ix }))).slice(0, INDEX_LIMITS.results);
@@ -685,8 +751,10 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
     case 'index_outline': {
       const at = find(call.path);
       if (!at) return missing;
-      const syms = at[0].outline(at[1])!;
-      return cap(syms.length ? `${call.path}\n${syms.map(lineOf).join('\n')}` : `${call.path} has no outline (no definitions found, or a language the outline doesn't read).`);
+      const text = await at[0].read(at[1]);
+      if (text === null) return missing;
+      const syms = outline(at[1], text);
+      return cap(syms.length ? `${call.path}\n${compactOutline(linesOf(text), syms)}` : `${call.path} has no outline (no definitions found, or a language the outline doesn't read).`);
     }
     case 'index_related': {
       const at = find(call.path);

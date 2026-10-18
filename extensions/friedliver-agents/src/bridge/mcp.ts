@@ -6,6 +6,7 @@
 // With the MCP SDK, zod and ajv in it, each one held about 10 MB more than the
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
+import { READ_LIMITS } from '../host/indexReads';
 import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
 
 /** Newest first; a client asking for another version gets the newest. */
@@ -116,13 +117,16 @@ function indexTools() {
     {
       name: 'index_search',
       title: 'Search the project index',
-      description: 'Searches FriedLiver\'s index of this project by keywords or identifiers (camelCase and snake_case parts match too) and returns the best-ranked files with matching definitions and lines.' + PREFER,
+      description:
+        "Searches FriedLiver's index of this project by keywords or identifiers (camelCase and snake_case parts match too). Returns the best-ranked files, " +
+        'each with its matching definitions and a few numbered ±3-line windows, within a token budget. Repeated windows are named, not repeated.' + PREFER,
       inputSchema: {
         $schema: DRAFT_07,
         type: 'object',
         properties: {
           query: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'Words or identifiers, like "refresh token expiry" or "parseConfig".' },
           limit: { type: 'integer', minimum: 1, maximum: 50, description: 'How many files to return. Default 10.' },
+          budget: { type: 'integer', minimum: READ_LIMITS.minBudget, maximum: READ_LIMITS.maxBudget, description: `Most tokens the answer may take. Default ${READ_LIMITS.budget}.` },
         },
         required: ['query'],
       },
@@ -136,9 +140,27 @@ function indexTools() {
       ...ro,
     },
     {
+      name: 'index_read',
+      title: 'Read part of a file',
+      description:
+        'Reads one definition (symbol, e.g. "parseConfig" or "UserService.save") or a line range of a project file, with numbered lines and a one-line header. ' +
+        'Use it instead of reading whole files: a file over 150 lines comes back as its outline unless you name a symbol or lines.',
+      inputSchema: {
+        $schema: DRAFT_07,
+        type: 'object',
+        properties: {
+          path: PATH,
+          symbol: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A function, class, method or type in the file; Outer.inner for one inside another.' },
+          lines: { type: 'array', items: { type: 'integer', minimum: 1 }, minItems: 2, maxItems: 2, description: 'First and last line, like [120, 180]. Not with symbol.' },
+        },
+        required: ['path'],
+      },
+      ...ro,
+    },
+    {
       name: 'index_outline',
       title: 'Outline a file',
-      description: 'The definitions in one file with their lines, without reading the whole file.',
+      description: 'The signatures of the definitions in one file, with their lines: the cheapest look at a file. Then index_read a symbol.',
       inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
       ...ro,
     },
