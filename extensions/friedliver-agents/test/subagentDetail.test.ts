@@ -99,6 +99,28 @@ describe('a subagent transcript, parsed for its detail', () => {
     expect(v.report).toContain('## Done');
   });
 
+  it('shows no contents of a secrets file: edits, writes, reads, or a command that reads one', () => {
+    let text = user(T0, BRIEF);
+    text += assistant(T0 + 1, 'e1', use('e1', 'Edit', { file_path: '/w/.env', old_string: 'TOKEN=old-value-1', new_string: 'TOKEN=new-value-2' }));
+    text += result(T0 + 2, 'e1', 'The file /w/.env has been updated successfully.');
+    text += assistant(T0 + 3, 'e2', use('e2', 'Write', { file_path: '/w/certs/server.pem', content: 'MIIBsecretbody' }));
+    text += assistant(T0 + 4, 'e3', use('e3', 'MultiEdit', { file_path: '/w/id_rsa', edits: [{ old_string: 'a', new_string: 'b' }] }));
+    text += assistant(T0 + 5, 'e4', use('e4', 'Read', { file_path: '/w/.env.local' }));
+    text += result(T0 + 6, 'e4', 'DB_URL=plainvalue');
+    text += assistant(T0 + 7, 'e5', use('e5', 'Bash', { command: 'cat .env | head -5' }));
+    text += result(T0 + 8, 'e5', 'SESSION=plainvalue');
+    text += assistant(T0 + 9, 'e6', use('e6', 'Bash', { command: 'grep -r KEY ~/.ssh/config' }));
+    text += result(T0 + 10, 'e6', 'IdentityFile plainvalue');
+    const v = detailView(parseSubagentDetail(text), { sessionId: 'S', id: 'x' }, 0);
+    const all = JSON.stringify(v);
+    for (const leak of ['old-value-1', 'new-value-2', 'MIIBsecretbody', 'plainvalue']) expect(all).not.toContain(leak);
+    const tools = v.entries as SubagentTool[];
+    for (const t of tools) expect(t.out).toEqual([{ t: 'text', text: '(not shown: a file that holds secrets)' }]);
+    // The command itself still shows.
+    expect(tools[4].cmd?.line).toBe('cat .env | head -5');
+    expect(tools[0].input).toBeUndefined();
+  });
+
   it('reports its hand-back, or its last words once it stops calling tools', () => {
     expect(detailView(parseSubagentDetail(transcript() + handback(T0 + 60_000)), { sessionId: 'S', id: 'x' }, 0).report).toMatch(/^## Done/);
     const quiet = transcript() + assistant(T0 + 70_000, 'mz', { type: 'text', text: 'All three fixed.' });
@@ -144,6 +166,21 @@ describe('redactSecrets', () => {
     ['-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----', '[redacted private key]'],
   ])('%s', (input, shows) => {
     expect(redactSecrets(input)).toContain(shows);
+  });
+
+  it('finishes fast on long identifier-like input with no value (no catastrophic backtracking)', () => {
+    // 'a.' and 'a-' put a word boundary every other character: the unbounded pattern took ~12 s on these.
+    for (const input of ['a.'.repeat(50_000), 'a-'.repeat(50_000), 'a_'.repeat(50_000),`password${'a_'.repeat(50_000)}`, `${'x'.repeat(100_000)}token`, `--password${'-'.repeat(100_000)}`, `key${'.'.repeat(100_000)}=`, 'eyJa.'.repeat(20_000), 'a://b:'.repeat(20_000), '-----BEGIN RSA PRIVATE KEY-----'.repeat(3000), 'password: '.repeat(10_000)]) {
+      // The best of three: one run can catch a GC pause or a busy CI worker; backtracking is slow every time.
+      const ms = Math.min(
+        ...[0, 1, 2].map(() => {
+          const t = performance.now();
+          redactSecrets(input);
+          return performance.now() - t;
+        }),
+      );
+      expect(ms, input.slice(0, 20)).toBeLessThan(50);
+    }
   });
 
   it('leaves code that only names a secret', () => {
