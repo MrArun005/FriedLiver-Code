@@ -48,6 +48,7 @@ import {
   switcherMeta,
   transcriptGroups,
   statusOf,
+  messageStamp,
 } from '../shared/view';
 import { agentName, chatName, chatTip, chatRef } from '../shared/names';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
@@ -65,7 +66,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab } from './ui';
+import { AgentMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -952,12 +953,13 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
   switch (item.kind) {
     case 'user':
       return (
-        <div class="user-msg" id={`msg-${msgKey}`}>
+        <div class="user-msg" id={`msg-${msgKey}`} data-stamp="">
           {/* Not a button: it holds Show more and reference buttons (QA F19). */}
           <div class="bubble">
             {item.checkpoint && !chat.busy && (
               <IconButton icon="history" label="Rewind to here" size="sm" muted class="rewind-btn" onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })} />
             )}
+            <Timestamp stamp={messageStamp(item)} class="msg-when" />
             {item.text && <ClampedText text={item.text} />}
             <RefList refs={refsOf(item)} cwd={chat.cwd} />
             {item.images.length > 0 && (
@@ -973,8 +975,9 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       );
     case 'agent':
       return (
-        <div class="prose">
+        <div class="prose" data-stamp="">
           <div class="msg-tools">
+            <Timestamp stamp={messageStamp(item)} class="msg-when" />
             <CopyButton text={item.text} label="Copy reply" />
           </div>
           <Markdown key={chat.id} text={item.text} chatId={chat.id} cwd={chat.cwd} full={live} />
@@ -1093,7 +1096,7 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   const name = item.role.startsWith('handoff') && other ? other.title : agentName(item.agent);
   const head = LINK_HEAD[item.role](name);
   return (
-    <section class="link-card" data-role={item.role} aria-label={head}>
+    <section class="link-card" data-role={item.role} aria-label={head} data-stamp="">
       <div class="link-head">
         <Icon name={LINK_ICON[item.role]} />
         <Glyph agent={item.agent} size="sm" />
@@ -1103,6 +1106,7 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
         {item.role.startsWith('piped') && <span class="fl-pill" data-tone="muted">pipe</span>}
         {item.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
         <span class="spacer" />
+        <Timestamp stamp={messageStamp(item)} />
         {other && other.id !== chat.id && (
           <Button variant="quiet" size="sm" onClick={() => onSelect(other.id)}>
             Open <Icon name="open" />

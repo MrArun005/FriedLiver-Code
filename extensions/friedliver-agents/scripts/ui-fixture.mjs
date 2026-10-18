@@ -8,14 +8,20 @@ const ROOT = '/home/dev/inventory-app';
 const tree = (branch) => `${ROOT}/.worktrees/${branch.replace('/', '-')}`;
 
 let turnN = 0;
-const user = (text) => ({ kind: 'user', text, images: [], checkpoint: `turn-${++turnN}` });
-const agent = (text) => ({ kind: 'agent', text });
+// When each message was sent (COMPONENTS.md §2.32): from two hours ago, a minute and a half apart.
+let sent = 0;
+const stamp = () => (sent += 97_000);
+const user = (text) => ({ kind: 'user', text, images: [], checkpoint: `turn-${++turnN}`, at: stamp() });
+const agent = (text) => {
+  const at = stamp();
+  return { kind: 'agent', text, at, end: at + 2_000 + (text.length % 50) * 1_000 };
+};
 const plan = (entries, at) => ({
   kind: 'plan',
   entries: entries.map((content, i) => ({ content, status: i < at ? 'completed' : i === at ? 'in_progress' : 'pending' })),
 });
 const tool = (id, title, status, locations = [], toolKind) => ({ kind: 'tool', id, title, toolKind, status, locations });
-const link = (linkId, role, other, text, by = 'user') => ({ kind: 'link', linkId, role, chatId: other.id, agent: other.agent, label: other.label, text, by });
+const link = (linkId, role, other, text, by = 'user') => ({ kind: 'link', linkId, role, chatId: other.id, agent: other.agent, label: other.label, text, by, at: stamp() });
 const dl = (op, text) => ({ op, text });
 
 // What each agent's session offers, shaped like its adapter's config options (model names are placeholders).
@@ -69,6 +75,7 @@ function session(agentKey, mode, { model = 'default', effort, used, fast } = {})
 }
 
 export function fixture(now = Date.now()) {
+  sent = now - 2 * 3600_000;
   const min = (m) => now - m * 60_000;
   const sec = (s) => now - s * 1000;
   const chat = (id, agentKey, label, title, over) => ({
