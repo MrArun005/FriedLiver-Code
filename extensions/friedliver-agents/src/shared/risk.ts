@@ -23,6 +23,15 @@ export interface Risk {
   push?: ForcePush;
 }
 
+/** The commits a force push would drop from the remote branch, as of the last fetch (the host lists them with git). */
+export interface DroppedCommits {
+  /** origin/main */
+  ref: string;
+  commits: { hash: string; subject: string; author: string }[];
+  /** Beyond the ones listed. */
+  more: number;
+}
+
 export const CAREFUL_LOCK = 'Careful requests are allowed one at a time, never remembered.';
 const SECRETS_LOCK = '.env*, .git/ and ~/.ssh always ask, every time.';
 const SENSITIVE_LOCK = 'Dot-files and agent instructions always ask, every time.';

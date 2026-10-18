@@ -287,3 +287,31 @@ export async function dropCheckpointRef(root: string, ref: string): Promise<void
   if (!ref.startsWith(CHECKPOINT_REFS)) throw new Error(`Not a checkpoint ref: ${ref}`);
   await git(root, ['update-ref', '-d', ref]).catch(() => '');
 }
+
+/**
+ * What a force push of `local` to `remote`/`branch` would drop: the commits the remote-tracking
+ * branch has that `local` doesn't, newest first, as of the last fetch (nothing is fetched). `branch`
+ * undefined: the current branch's name. Null when there is no such tracking branch. The names are
+ * passed as single arguments after checks, never through a shell, and never as options.
+ */
+export async function remoteOnlyCommits(
+  cwd: string,
+  remote: string,
+  branch: string | undefined,
+  local = 'HEAD',
+  max = 10,
+): Promise<{ ref: string; commits: { hash: string; subject: string; author: string }[]; more: number } | null> {
+  const ok = (r: string) => /^[A-Za-z0-9._/-]+$/.test(r) && !r.startsWith('-') && !r.includes('..') && r.length <= 200;
+  const name = branch ?? (await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], undefined, 5000).catch(() => '')).trim();
+  if (!name || name === 'HEAD' || ![remote, name, local].every(ok)) return null;
+  const tracking = `refs/remotes/${remote}/${name}`;
+  if (!(await git(cwd, ['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`], undefined, 5000).catch(() => ''))) return null;
+  const out = await git(cwd, ['log', '--no-color', '--format=%h%x1f%s%x1f%an', tracking, '--not', local, '--'], undefined, 5000).catch(() => null);
+  if (out === null) return null;
+  const lines = out.split('\n').filter(Boolean);
+  const commits = lines.slice(0, max).map((l) => {
+    const [hash, subject, author] = l.split('\x1f');
+    return { hash, subject: subject.slice(0, 200), author: author.slice(0, 80) };
+  });
+  return { ref: `${remote}/${name}`, commits, more: Math.max(0, lines.length - max) };
+}

@@ -10,6 +10,7 @@ import {
   batchMessages,
   confirmKey,
   entryActions,
+  batchable,
   identical,
   inbox,
   inboxKey,
@@ -68,16 +69,24 @@ const state = (...chats: ChatView[]): AppState => ({ ...EMPTY_STATE, chats });
 const ids = (entries: InboxEntry[]) => entries.map((e) => e.id);
 
 describe('the queue', () => {
-  it('lists the oldest first, grouped by chat, the chat with the oldest request first', () => {
+  it('lists careful, then review, then routine; the oldest first in each lane, whatever chat', () => {
     const s = state(
-      chat('a', { items: [run('a1', 'npm test', 30), run('a2', 'npm run lint', 10)] }),
+      chat('a', { items: [run('a1', 'npm test', 30), run('a2', 'npm run lint', 10), run('a3', 'git push --force', 40)] }),
       chat('b', { items: [cmd('b1', 'git status', '/w', 20), { kind: 'review', reviewId: 'b2', path: '/w/x.ts', added: 1, removed: 0, isNew: false, state: 'pending', at: 5 }] }),
     );
     const box = inbox(s);
-    expect(box.groups.map((g) => g.chat.id)).toEqual(['b', 'a']);
-    expect(box.groups.map((g) => ids(g.entries))).toEqual([['b2', 'b1'], ['a2', 'a1']]);
-    expect(ids(box.entries)).toEqual(['b2', 'b1', 'a2', 'a1']);
-    expect(box.entries.map((e) => e.kind)).toEqual(['review', 'command', 'command', 'command']);
+    expect(box.lanes.map((l) => [l.tone, ids(l.entries)])).toEqual([
+      ['careful', ['a3']],
+      ['review', ['b2']],
+      ['routine', ['a2', 'b1', 'a1']],
+    ]);
+    expect(ids(box.entries)).toEqual(['a3', 'b2', 'a2', 'b1', 'a1']);
+    expect(box.entries.map((e) => e.kind)).toEqual(['command', 'review', 'command', 'command', 'command']);
+  });
+
+  it('questions sit in the review lane; empty lanes are left out', () => {
+    const q: Item = { kind: 'question', requestId: 'q', message: 'Which?', fields: [], state: 'awaiting', at: 1 };
+    expect(inbox(state(chat('a', { items: [q] }))).lanes.map((l) => l.tone)).toEqual(['review']);
   });
 
   it('keeps transcript order when items have no time (an older saved state)', () => {
@@ -121,7 +130,7 @@ describe('identical requests', () => {
   it('the same command text in the same folder, from any chat and either kind of request', () => {
     const s = state(chat('a', { items: [run('a1', 'npm test', 1, '/w'), run('a2', 'npm test', 3)] }), chat('b', { items: [cmd('b1', 'npm test', '/w', 2)] }));
     const box = inbox(s);
-    expect(ids(identical(box.entries, box.entries[0]))).toEqual(['a1', 'a2', 'b1']);
+    expect(ids(identical(box.entries, box.entries[0]))).toEqual(['a1', 'b1', 'a2']);
   });
 
   it('never across a different folder, different arguments or differently spaced text', () => {
@@ -168,6 +177,21 @@ describe('identical requests', () => {
     for (const e of box.entries) expect(e.same).toBeUndefined();
   });
 
+  it('Allow all is for routine identical requests only', () => {
+    const s = state(chat('a', { items: [run('a1', 'npm test', 1, '/w'), run('r1', 'rm -rf dist', 2, '/w')] }), chat('b', { items: [run('a2', 'npm test', 3, '/w'), run('r2', 'rm -rf dist', 4, '/w')] }));
+    const box = inbox(s);
+    const at = (id: string) => box.entries.find((e) => e.id === id)!;
+    expect(ids(batchable(box.entries, at('a1')))).toEqual(['a1', 'a2']);
+    // Careful ones are identical too, but each is held and allowed on its own.
+    expect(ids(identical(box.entries, at('r1')))).toEqual(['r1', 'r2']);
+    expect(ids(batchable(box.entries, at('r1')))).toEqual(['r1']);
+    expect(inboxKey({ key: 'Enter', shiftKey: true }, at('r1'), true, box.entries)).toBeNull();
+    expect(inboxKey({ key: 'Enter', shiftKey: true }, at('a1'), true, box.entries)).toEqual({ do: 'batch' });
+    const edits = state(chat('a', { items: [site('o1', 'browser_click', 'a.nav', 1, 'https://x.test'), site('o2', 'browser_click', 'a.nav', 2, 'https://x.test')] }));
+    const e = inbox(edits);
+    expect(ids(batchable(e.entries, e.entries[0]))).toEqual(['o1']);
+  });
+
   it('answers each with its own one-time yes or no, never Always allow', () => {
     const other = [
       { optionId: 'ok-1', name: 'Allow', kind: 'allow_once' },
@@ -206,56 +230,57 @@ describe('the keys', () => {
   const at = (id: string) => box.entries.find((e) => e.id === id)!;
   const key = (k: string, id: string, armed = true) => inboxKey({ key: k }, at(id), armed, box.entries);
 
-  it('j and k move, Esc closes, o opens the chat', () => {
+  it('j and k move, o opens the chat, r replies, Esc closes only an empty inbox', () => {
     expect(key('j', 'p')).toEqual({ do: 'move', by: 1 });
     expect(key('ArrowUp', 'p')).toEqual({ do: 'move', by: -1 });
-    expect(key('Escape', 'p')).toEqual({ do: 'close' });
     expect(key('o', 'p')).toEqual({ do: 'open' });
+    expect(key('r', 'p')).toEqual({ do: 'reply' });
     expect(inboxKey({ key: 'j' }, undefined, true)).toEqual({ do: 'move', by: 1 });
+    expect(inboxKey({ key: 'Escape' }, undefined, true)).toEqual({ do: 'close' });
     expect(inboxKey({ key: 'a' }, undefined, true)).toBeNull();
   });
 
-  it('1–9 pick the numbered answers, a allows once, d denies, Enter gives the primary', () => {
-    expect(key('1', 'p')).toEqual({ do: 'send', messages: [{ type: 'permission', requestId: 'p', optionId: 'yes' }] });
-    expect(key('3', 'p')).toEqual({ do: 'send', messages: [{ type: 'permission', requestId: 'p', optionId: 'no' }] });
-    expect(key('4', 'p')).toBeNull();
-    expect(key('a', 'p')).toEqual({ do: 'send', messages: [{ type: 'permission', requestId: 'p', optionId: 'yes' }] });
+  it('Enter and a allow the way the card says; Esc and d deny; Tab moves the scope', () => {
+    for (const id of ['p', 'c', 'b']) {
+      expect(key('Enter', id)).toEqual({ do: 'allow' });
+      expect(key('a', id)).toEqual({ do: 'allow' });
+      expect(key('Tab', id)).toEqual({ do: 'scope' });
+    }
+    expect(key('Escape', 'p')).toEqual({ do: 'send', messages: [{ type: 'permission', requestId: 'p', optionId: 'no' }] });
     expect(key('d', 'c')).toEqual({ do: 'send', messages: [{ type: 'command', commandId: 'c', approve: false }] });
-    expect(key('Enter', 'c')).toEqual({ do: 'send', messages: [{ type: 'command', commandId: 'c', approve: true }] });
-    expect(key('Enter', 'b')).toEqual({ do: 'send', messages: [{ type: 'bridge', requestId: 'b', answer: 'allow' }] });
-    // A review's Enter opens its diff; a question's opens the chat. Claude's pick is 1, as on its card.
+    expect(key('Escape', 'b')).toEqual({ do: 'send', messages: [{ type: 'bridge', requestId: 'b', answer: 'deny' }] });
+    // A review's Enter opens its diff, a accepts it; a question's Enter opens the chat, 1–9 answer, Esc skips.
     expect(key('Enter', 'r')).toEqual({ do: 'send', messages: [{ type: 'review', reviewId: 'r', action: 'open' }] });
+    expect(key('a', 'r')).toEqual({ do: 'allow' });
     expect(key('Enter', 'q')).toEqual({ do: 'open' });
     expect(key('1', 'q')).toEqual({ do: 'send', messages: [{ type: 'answerQuestion', requestId: 'q', action: 'accept', values: { store: 'sqlite' } }] });
-    expect(key('d', 'q')).toEqual({ do: 'send', messages: [{ type: 'answerQuestion', requestId: 'q', action: 'decline' }] });
-    expect(key('a', 'q')).toBeNull();
+    expect(key('Escape', 'q')).toEqual({ do: 'send', messages: [{ type: 'answerQuestion', requestId: 'q', action: 'decline' }] });
+    expect(key('Tab', 'q')).toBeNull();
+    expect(key('1', 'p')).toBeNull();
+    expect(key('A', 'p')).toBeNull();
   });
 
-  it('A always allows only where the request offers it and the rules permit', () => {
-    expect(key('A', 'p')).toEqual({ do: 'send', messages: [{ type: 'allowAlways', requestId: 'p', grant: { kind: 'exact', command: 'npm test' } }] });
-    // A chained command never gets a rule; a click on an unknown site offers none; reviews and questions none.
-    expect(key('A', 'c')).toBeNull();
-    expect(key('A', 'b')).toBeNull();
-    expect(key('A', 'r')).toBeNull();
-    expect(key('A', 'q')).toBeNull();
-    const outside = inbox(state(chat('x', { items: [cmd('o', 'ls', '/tmp', 1, true)] }))).entries[0];
-    expect(entryActions(outside).always).toBeUndefined();
-    const offered = inbox(state(chat('x', { items: [site('s', 'browser_open', 'https://x.test/', 1, 'https://x.test')] }))).entries[0];
-    expect(inboxKey({ key: 'A' }, offered, true)).toEqual({ do: 'send', messages: [{ type: 'bridge', requestId: 's', answer: 'allowAlways' }] });
+  it('Cmd/Ctrl+D opens the full diff where there is one', () => {
+    expect(inboxKey({ key: 'd', metaKey: true }, at('r'), true)).toEqual({ do: 'send', messages: [{ type: 'review', reviewId: 'r', action: 'open' }] });
+    expect(inboxKey({ key: 'd', ctrlKey: true }, at('p'), true)).toBeNull();
+    const edit: Item = { kind: 'permission', requestId: 'e', title: 'Edit a.ts', toolKind: 'edit', options: OPTIONS, detail: { files: [{ path: '/w/a.ts', added: 1, removed: 0, isNew: false, full: true, lines: [], more: 0 }] }, at: 1 };
+    expect(inboxKey({ key: 'd', metaKey: true }, inbox(state(chat('x', { items: [edit] }))).entries[0], true)).toEqual({ do: 'send', messages: [{ type: 'permissionDiff', requestId: 'e', path: '/w/a.ts' }] });
   });
 
-  it('answer keys do nothing in the grace period; moving and opening still work', () => {
-    for (const k of ['1', 'a', 'A', 'd', 'Enter']) expect(key(k, 'p', false)).toEqual({ do: 'wait' });
+  it('answer keys do nothing in the grace period; moving, scope and opening still work', () => {
+    for (const k of ['a', 'd', 'Enter', 'Escape']) expect(key(k, 'p', false)).toEqual({ do: 'wait' });
     expect(key('j', 'p', false)).toEqual({ do: 'move', by: 1 });
     expect(key('o', 'p', false)).toEqual({ do: 'open' });
+    expect(key('Tab', 'p', false)).toEqual({ do: 'scope' });
   });
 
   it('leaves keys with a modifier to the editor', () => {
     expect(inboxKey({ key: 'a', metaKey: true }, at('p'), true)).toBeNull();
+    expect(inboxKey({ key: 'Enter', altKey: true }, at('p'), true)).toBeNull();
     expect(inboxKey({ key: '1', ctrlKey: true }, at('p'), true)).toBeNull();
   });
 
-  it('b asks to confirm only when there is more than one identical request; the confirmation has its own grace', () => {
+  it('b asks to confirm only when there is more than one identical routine request; the confirmation has its own grace', () => {
     expect(key('b', 'p')).toBeNull();
     const two = inbox(state(chat('a', { items: [run('x', 'ls', 1)] }), chat('b', { items: [run('y', 'ls', 2)] })));
     expect(inboxKey({ key: 'b' }, two.entries[0], true, two.entries)).toEqual({ do: 'batch' });
@@ -334,7 +359,7 @@ describe('answers take the chat cards’ paths', () => {
     );
     for (const e of inbox(s).entries) {
       const a = entryActions(e);
-      const all = [...a.choices.map((c) => c.message), a.allow, a.deny, a.always?.message, a.primary, a.diff].filter((m): m is WebviewMessage => !!m && m !== 'open');
+      const all = [...a.choices.map((c) => c.message), a.allow, a.deny, a.primary, a.diff].filter((m): m is WebviewMessage => !!m && typeof m === 'object');
       for (const m of all) expect(parseWebviewMessage(JSON.parse(JSON.stringify(m)))).toEqual(m);
     }
   });
@@ -347,7 +372,7 @@ describe('answers take the chat cards’ paths', () => {
     const turns = [core.send(one.id, 'native-run'), core.send(two.id, 'native-run')];
     await waitFor(() => inbox(core.snapshot).entries.length === 2);
     const box = inbox(core.snapshot);
-    expect(box.groups.map((g) => g.chat.id).sort()).toEqual([one.id, two.id].sort());
+    expect(box.entries.map((e) => e.chatId).sort()).toEqual([one.id, two.id].sort());
     const same = identical(box.entries, box.entries[0]);
     expect(same).toHaveLength(2);
     for (const m of batchMessages(same, 'allow')) await route(core, m);

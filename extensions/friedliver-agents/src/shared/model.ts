@@ -3,6 +3,7 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { applySessionUpdate, isSessionUpdate, type ApprovalLevel, type ChatSession } from './session';
 import type { QuestionField } from './questions';
+import type { DroppedCommits } from './risk';
 import { appendOutput, claudeMeta, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
 import { stepFacts, withRawOutput, type StepFacts } from './steps';
 
@@ -67,6 +68,10 @@ export interface CommandItem {
   auto?: string;
   /** When it arrived (the host's clock); waiting items get it, for the Decision Inbox's ages. */
   at?: number;
+  /** A force push: the remote's commits it would drop. */
+  dropped?: DroppedCommits;
+  /** A routine command allows itself at this time (host clock) unless stopped (friedliver.approvals.autoRoutineSeconds). */
+  autoAt?: number;
 }
 
 export interface ReviewItem {
@@ -179,7 +184,20 @@ export type Item =
    * `toolKind` and `detail` (optional) say what is being approved: the diff, the command, the plan.
    * `auto` says FriedLiver answered it under the chat's approval level or a rule.
    */
-  | { kind: 'permission'; requestId: string; toolCallId?: string; title: string; options: PermissionOption[]; answer?: string; toolKind?: string; detail?: PermissionDetail; auto?: string; at?: number }
+  | {
+      kind: 'permission';
+      requestId: string;
+      toolCallId?: string;
+      title: string;
+      options: PermissionOption[];
+      answer?: string;
+      toolKind?: string;
+      detail?: PermissionDetail;
+      auto?: string;
+      at?: number;
+      /** A routine request allows itself once at this time (host clock) unless stopped. */
+      autoAt?: number;
+    }
   | ReviewItem
   | CommandItem
   | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; actions?: NoticeAction[] }
@@ -268,6 +286,8 @@ export type Action =
   /** `pinned`: the user named it, and automatic titles stop. */
   | { t: 'title'; chatId: string; title: string; pinned?: boolean }
   | { t: 'permissionAnswered'; requestId: string; answer: string; auto?: string }
+  /** A routine request's countdown was stopped: it waits for you like any other. */
+  | { t: 'autoOff'; id: string }
   | { t: 'review'; reviewId: string; state: ReviewItem['state']; auto?: string }
   | { t: 'command'; commandId: string; patch: Partial<Omit<CommandItem, 'kind' | 'commandId' | 'output'>> }
   | { t: 'commandOutput'; commandId: string; data: string }
@@ -355,6 +375,13 @@ export function reduce(state: AppState, action: Action): AppState {
       return editItems(state, (i) => (i.kind === 'review' && i.reviewId === action.reviewId ? { ...i, state: action.state, ...(action.auto ? { auto: action.auto } : {}) } : i));
     case 'command':
       return editItems(state, (i) => (i.kind === 'command' && i.commandId === action.commandId ? { ...i, ...action.patch } : i));
+    case 'autoOff':
+      return editItems(state, (i) => {
+        if (!((i.kind === 'permission' && i.requestId === action.id) || (i.kind === 'command' && i.commandId === action.id)) || i.autoAt === undefined) return i;
+        const rest = { ...i };
+        delete rest.autoAt;
+        return rest;
+      });
     case 'commandOutput':
       return editItems(state, (i) =>
         i.kind === 'command' && i.commandId === action.commandId ? { ...i, output: (i.output + action.data).slice(-MAX_COMMAND_OUTPUT) } : i,
