@@ -61,6 +61,8 @@ export type WebviewMessage =
   | { type: 'removeWorktree'; chatId: string }
   | { type: 'moveToCenter' }
   | { type: 'openTasks' }
+  /** The Agent Manager on its Inbox: everything any agent waits on. */
+  | { type: 'openInbox' }
   // Connections between chats and agents.
   /** Continue this chat with another agent, in a new chat that starts from its transcript. */
   | { type: 'handoff'; chatId: string; agent: AgentKey }
@@ -95,6 +97,8 @@ export type WebviewMessage =
   | { type: 'permissionDiff'; requestId: string; path: string }
   /** Always allow a command from now on (after a confirmation), and allow this one. */
   | { type: 'allowAlways'; requestId?: string; commandId?: string; grant: Grant }
+  /** Stop a routine request's auto-allow countdown. */
+  | { type: 'stopAuto'; id: string }
   /** Manage Permissions: open it, revoke one remembered "Always allow", or all of them. */
   | { type: 'managePermissions' }
   | { type: 'revokePermission'; id: string }
@@ -150,7 +154,9 @@ export type HostMessage =
   /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
   | ({ type: 'dictation'; chatId: string } & DictationUpdate)
   /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
-  | { type: 'roster'; roster: AgentRoster };
+  | { type: 'roster'; roster: AgentRoster }
+  /** The Agent Manager turns to its Inbox (FriedLiver: Open Decision Inbox). */
+  | { type: 'showInbox' };
 
 /** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
 export interface ClaudeSession {
@@ -283,6 +289,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'ready':
     case 'moveToCenter':
     case 'openTasks':
+    case 'openInbox':
     case 'otherAgents':
     case 'dictationSettings':
       return { type: m.type };
@@ -315,6 +322,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return { type: m.type };
     case 'revokePermission':
       return str(m.id, 5000) && m.id ? { type: 'revokePermission', id: m.id } : null;
+    case 'stopAuto':
+      return id(m.id) ? { type: 'stopAuto', id: m.id } : null;
     case 'reviewAll':
       return id(m.chatId) && (m.action === 'accept' || m.action === 'reject') ? { type: 'reviewAll', chatId: m.chatId, action: m.action } : null;
     case 'unqueue':

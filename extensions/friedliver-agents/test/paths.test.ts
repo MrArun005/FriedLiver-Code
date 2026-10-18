@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { inGitFolder, insideRoots, realPath } from '../src/host/paths';
+import { inGitFolder, insideRoots, realPath, workspacePath } from '../src/host/paths';
 
 /** Directory links: junctions on Windows, which need no special rights. */
 function link(target: string, at: string, kind: 'dir' | 'file'): void {
@@ -114,5 +114,26 @@ describe('.git folders', () => {
     expect(inGitFolder('/work/app/.github/workflows/ci.yml', roots, path.posix)).toBe(false);
     expect(inGitFolder('/work/app/.gitignore', roots, path.posix)).toBe(false);
     expect(inGitFolder('/work/app/src/git.ts', roots, path.posix)).toBe(false);
+  });
+});
+
+describe('workspacePath: where a request really points, for the countdown', () => {
+  it('resolves relative paths against the chat folder, follows links, and fails closed', () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-ws-')));
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.symlinkSync(outside, path.join(root, 'escape'));
+    expect(workspacePath('src', root, [root])).toBe(path.join(root, 'src'));
+    expect(workspacePath(path.join(root, 'src'), undefined, [root])).toBe(path.join(root, 'src'));
+    expect(workspacePath('../outside', path.join(root, 'src'), [root])).toBe(path.join(root, 'outside'));
+    expect(workspacePath(`../${path.basename(outside)}`, root, [root])).toBeNull();
+    expect(workspacePath('../../etc', path.join(root, 'src'), [root])).toBeNull();
+    // A relative path with nothing to resolve it against.
+    expect(workspacePath('src', undefined, [root])).toBeNull();
+    expect(workspacePath('src', 'relative/base', [root])).toBeNull();
+    // A link inside the root that leads out of it.
+    expect(workspacePath('escape', root, [root])).toBeNull();
+    expect(workspacePath(path.join(root, 'escape', 'x'), root, [root])).toBeNull();
+    expect(workspacePath(undefined, root, [root])).toBeNull();
   });
 });
