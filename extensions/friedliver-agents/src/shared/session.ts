@@ -496,5 +496,52 @@ export function usageLines(log: TurnUsage[] | undefined): string[] {
   return [`Tokens in this chat: ${log.length} turn${log.length === 1 ? '' : 's'} · ${kinds(sum)}`, `Last turn: ${kinds(log.at(-1)!)}`];
 }
 
+export interface UsageTotal {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** All four together. */
+  total: number;
+  turns: number;
+}
+
+/** The agents' own token counts across these chats: every logged turn (the window), and the turns since local midnight (today). */
+export function usageTotals(chats: Pick<ChatView, 'usageLog'>[], now: number): { window: UsageTotal; today: UsageTotal } {
+  const zero = (): UsageTotal => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, turns: 0 });
+  const add = (a: UsageTotal, t: TurnUsage) => {
+    a.input += t.input;
+    a.output += t.output;
+    a.cacheRead += t.cacheRead;
+    a.cacheWrite += t.cacheWrite;
+    a.total += t.input + t.output + t.cacheRead + t.cacheWrite;
+    a.turns++;
+  };
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  const out = { window: zero(), today: zero() };
+  for (const c of chats)
+    for (const t of c.usageLog ?? []) {
+      add(out.window, t);
+      if (t.at >= midnight) add(out.today, t);
+    }
+  return out;
+}
+
+/** The Agent Manager's tooltip for those totals. */
+export function usageTotalLines(t: { window: UsageTotal; today: UsageTotal }): string {
+  const kinds = (u: UsageTotal) => `${formatTokens(u.total)} (${formatTokens(u.input)} input · ${formatTokens(u.output)} output · ${formatTokens(u.cacheRead)} cache read · ${formatTokens(u.cacheWrite)} cache write)`;
+  return [`Tokens the agents reported, counted on this computer only.`, `Today: ${kinds(t.today)}`, `All chats in this window: ${kinds(t.window)}`].join('\n');
+}
+
+/**
+ * The optional spending warning (friedliver.usage.dailyTokenWarning, 0 = off): once per local day, when
+ * today's tokens pass the limit. `warned` is the day it last warned (its midnight); returns that day and the words.
+ */
+export function dailyWarning(limit: number, today: number, now: number, warned: number | undefined): { day: number; text: string } | undefined {
+  const day = new Date(now).setHours(0, 0, 0, 0);
+  if (!(limit > 0) || today < limit || warned === day) return undefined;
+  return { day, text: `Today's chats in this window used ${formatTokens(today)} tokens, over your ${formatTokens(limit)} daily warning (friedliver.usage.dailyTokenWarning).` };
+}
+
 /** Tokens FriedLiver saved across these chats (estimate). */
 export const totalSaved = (chats: Pick<ChatView, 'tokens'>[]): number => chats.reduce((n, c) => n + Math.max(0, (c.tokens?.naive ?? 0) - (c.tokens?.sent ?? 0)), 0);
