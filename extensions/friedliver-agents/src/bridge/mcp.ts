@@ -16,7 +16,9 @@ const INSTRUCTIONS =
   'Tools from FriedLiver, the editor you run in. They reach the other coding agents and chats open there. ' +
   'The user may be asked to allow each call, and may say no; carry on without it if so. ' +
   'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code. ' +
-  'The index_* tools query a ready index of this project; to find where something is, try index_search or index_symbols before grep or reading many files.';
+  'The index_* tools query a ready index of this project and cost far fewer tokens than reading files: ' +
+  'find code with index_search or index_symbols (not grep), look at a file with index_outline, read just the part you need with index_read (a symbol or lines, not the whole file), ' +
+  'and after a file changed use index_diff (what changed since you saw it) or index_changes with since "last_turn" instead of reading it again.';
 
 const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
 const CHAT_ID = { type: 'string', pattern: '^[\\w.:-]{1,128}$' };
@@ -112,7 +114,7 @@ export const TOOLS = [
 function indexTools() {
   const PATH = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A file path relative to the workspace folder, like "src/app.ts".' };
   const ro = { annotations: { readOnlyHint: true } };
-  const PREFER = ' Faster than grep for "where is X": prefer it first.';
+  const PREFER = ' Cheaper than grep or reading files for "where is X": use it first.';
   return [
     {
       name: 'index_search',
