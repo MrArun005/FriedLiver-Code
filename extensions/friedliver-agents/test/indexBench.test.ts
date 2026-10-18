@@ -9,12 +9,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fseventsJournal } from '../src/host/changeJournal';
-import { docsFileOf, ProjectIndex, readIndexFile, saveIndexFile } from '../src/host/projectIndex';
+import { docsFileOf, INDEX_DEFAULTS, ProjectIndex, readIndexFile, saveIndexFile } from '../src/host/projectIndex';
 
 const repo = process.env.FL_INDEX_BENCH_REPO;
 const helper = process.env.FL_INDEX_BENCH_JOURNAL;
 const journal = helper ? fseventsJournal(helper) : undefined;
-const opts = { maxFiles: 1_000_000, maxBytes: 8 * 1024 ** 3 };
+// The editor's defaults: the bench fails if they no longer index the whole repository.
+const opts = { maxFiles: INDEX_DEFAULTS.maxFiles, maxBytes: INDEX_DEFAULTS.maxMemoryMB * 1024 ** 2 };
+const mb = (n: number) => `${Math.round(n / 1024 ** 2)} MB`;
 
 /** What the editor does on open: the saved tree loaded (ready), the docs streamed in (search ready) while the files are caught up (verified). Saves on the way out. */
 async function open(file: string, saved: boolean) {
@@ -34,7 +36,9 @@ async function open(file: string, saved: boolean) {
   if (!saved) searchReady = verified;
   const indexed = (await ix.list()).filter((r) => ix.has(r));
   const timings = { readTreeFile: read, ...ix.timings };
-  const out = { mode, caughtUp, ready, searchReady, verified, counts: { ...ix.counts }, size: ix.size, root: ix.tree.root(), changed: ix.changes()?.total, indexed, timings };
+  const { heapUsed, rss } = process.memoryUsage();
+  const memory = { estimate: ix.estimatedBytes, heapUsed, rss, capped: ix.capped };
+  const out = { memory, mode, caughtUp, ready, searchReady, verified, counts: { ...ix.counts }, size: ix.size, root: ix.tree.root(), changed: ix.changes()?.total, indexed, timings };
   ix.tree.snapshot();
   await saveIndexFile(file, ix);
   return out; // the index itself is dropped: three of TypeScript's at once do not fit a runner
@@ -78,12 +82,15 @@ describe.skipIf(!repo)('project index re-open bench', () => {
       '',
       `Changed since the open (edited run): ${edited.changed}`,
       '',
+      `Defaults: maxFiles ${INDEX_DEFAULTS.maxFiles.toLocaleString()}, maxMemoryMB ${INDEX_DEFAULTS.maxMemoryMB}. After the full build: index estimate ${mb(full.memory.estimate)}, heap used ${mb(full.memory.heapUsed)}, RSS ${mb(full.memory.rss)}, capped ${full.memory.capped ? 'yes' : 'no'}`,
+      '',
       ...rows.map(([name, r]) => `${name} phases: ${Object.entries(r.timings).map(([k, v]) => `${k} ${v.toFixed(0)} ms`).join(', ')}`),
     ].join('\n');
     console.log(table);
     if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, table + '\n');
     if (process.env.FL_INDEX_BENCH_OUT) await writeFile(process.env.FL_INDEX_BENCH_OUT, table + '\n');
 
+    expect(full.memory.capped).toBe(false);
     expect([edited.counts.read, edited.counts.reindex]).toEqual([10, 10]);
     expect([touched.counts.read, touched.counts.reindex]).toEqual([10, 0]);
     expect(edited.changed).toBe(10);
