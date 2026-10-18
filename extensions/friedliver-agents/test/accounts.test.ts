@@ -343,3 +343,19 @@ describe('the core with an agent that needs sign-in (the Demo agent standing in)
     await waitFor(() => seen.some((s) => s.agent === 'codex' && s.patch.status === 'signed-in'));
   });
 });
+
+describe('Mac & Windows control on the page', () => {
+  it('takes only known settings with a boolean, for any shown agents', () => {
+    expect(parseAccountsMessage({ type: 'setSystem', key: 'enabled', value: false }, [])).toEqual({ type: 'setSystem', key: 'enabled', value: false });
+    expect(parseAccountsMessage({ type: 'setSystem', key: 'system_clipboard_read', value: true }, [])).toEqual({ type: 'setSystem', key: 'system_clipboard_read', value: true });
+    expect(parseAccountsMessage({ type: 'systemLog' }, [])).toEqual({ type: 'systemLog' });
+    for (const bad of [
+      { type: 'setSystem', key: 'enabled', value: 'true' },
+      { type: 'setSystem', key: 'externalAutoApprove', value: true },
+      { type: 'setSystem', key: '__proto__', value: true },
+      { type: 'setSystem', value: true },
+    ]) {
+      expect(parseAccountsMessage(bad, [])).toBeNull();
+    }
+  });
+});

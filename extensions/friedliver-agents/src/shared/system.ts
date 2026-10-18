@@ -126,10 +126,10 @@ export function alwaysAllowable(tool: SystemTool, target: string): boolean {
   return true;
 }
 
-/** A target for people: "Spotify", "https://example.com", "/Users/me/report.pdf", "any". */
+/** A target for people: "Spotify", "https://example.com", "/Users/me/report.pdf", or "any chat" for none. */
 export function describeTarget(target: string): string {
   const m = /^(app|url|file):(.*)$/s.exec(target);
-  return m ? m[2] : target || 'anything';
+  return m ? m[2] : target || 'any chat';
 }
 
 /** The settings page's view of friedliver.system.* (host reads the user's own settings only). */

@@ -25,6 +25,7 @@ import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
+import { SystemControl, systemSettings } from './host/system';
 import { ReviewUi } from './host/review';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
@@ -97,6 +98,8 @@ export class Controller {
   /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
   editor?: EditorAgent;
   readonly log = vscode.window.createOutputChannel('FriedLiver Agents', { log: true });
+  /** Every system_* attempt (host/system.ts auditLine): who, which chat, what, and how it ended; clipboard text only as its length. */
+  private readonly systemLog = vscode.window.createOutputChannel('FriedLiver: System Actions');
   /** The built-in browser on the right (host/browser.ts). */
   private readonly browser: BrowserPanel;
   /** The last code editor shown in the left group, for the code/chat toggle. */
@@ -193,6 +196,14 @@ export class Controller {
     } catch {
       // Without it agents start in home, as before.
     }
+    const system = new SystemControl({
+      home: os.homedir(),
+      shotsBase: context.globalStorageUri.fsPath,
+      // Never opened for agents, like the places "Always allow" never covers.
+      sensitive: [appBundle(vscode.env.appRoot), userDataDir(context.globalStorageUri.fsPath)],
+      links: () => (vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin'),
+      openInBrowser: (url, signal) => this.browser.call({ tool: 'browser_open', url }, signal),
+    });
     this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => this.showDemo(), (line) => this.log.warn(line));
     this.core = new AgentCore({
       folders: () => this.folders(),
@@ -206,6 +217,13 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
+      system: {
+        settings: () => systemSettings((key) => vscode.workspace.getConfiguration('friedliver.system').inspect<unknown>(key)),
+        prepare: (call) => system.prepare(call),
+        audit: (line) => this.systemLog.appendLine(line),
+        // Codicon syntax in an agent's words stays text.
+        done: (summary) => void vscode.window.setStatusBarMessage(`$(device-desktop) Agent used: ${plainText(summary).replace(/\$\(/g, '$ (')}`, 5000),
+      },
       approvalDefault: () => this.approvalDefault(),
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {
@@ -277,6 +295,7 @@ export class Controller {
 
     context.subscriptions.push(
       this.log,
+      this.systemLog,
       this.statusItem,
       this.workingItem,
       this.autoItem,
@@ -311,6 +330,7 @@ export class Controller {
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
     command('friedliver.openBrowser', () => this.browser.show());
+    command('friedliver.system.showLog', () => this.systemLog.show(true));
     command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
     // Integration tests must not write the developer's ~/.claude.json.
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);

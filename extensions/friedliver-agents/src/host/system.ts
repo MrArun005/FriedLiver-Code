@@ -5,13 +5,14 @@
 // `;`, backtick or newline in them can become code. No vscode here, so all of it is tested with a
 // mocked runner (bridgeRequests.ts asks the user before anything here acts).
 import { spawn } from 'node:child_process';
-import { chmod, readdir, realpath, stat } from 'node:fs/promises';
+import { chmod, mkdir, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { SystemCall } from '../bridge/protocol';
 import { siteOrigin } from '../shared/permissions';
-import { SYSTEM_LIMITS, type SystemTool } from '../shared/system';
+import { SYSTEM_LIMITS, SYSTEM_TOOLS, type SystemTool } from '../shared/system';
 import { checkBrowserUrl, screenshotFile } from './browserRules';
 import { isSensitive } from './permissions';
+import { userSetting, type InspectedSetting } from './settings';
 
 export type Platform = 'mac' | 'win';
 
@@ -409,6 +410,7 @@ export class SystemControl {
         if (!w) throw new Error(`There is no window ${call.window} on screen. Use system_apps to see the windows.`);
         const what = `${w.app}${w.title ? ` — ${w.title}` : ''}`;
         return done(`app:${w.app}`, what, `Screenshot ${w.app}`, async (signal) => {
+          await mkdir(this.deps.shotsBase, { recursive: true, mode: 0o700 });
           const file = await screenshotFile(this.deps.shotsBase, 'window');
           await this.checked(
             p === 'mac' ? { file: MAC_BIN.screencapture, args: ['-x', '-o', `-l${w.id}`, file], timeoutMs: 20_000 } : { ...powershell(PS.screenshot, { pid: w.pid, file }, this.env), timeoutMs: 30_000 },
@@ -561,4 +563,24 @@ export function auditLine(e: { at: number; agent: string; chat: string; call: Sy
   const plain = (s: string) => s.replace(/[\u0000-\u001f\u007f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ');
   const result = e.call.tool === 'system_clipboard_read' && e.result.startsWith('ok') ? 'ok (text not logged)' : e.result;
   return `${new Date(e.at).toISOString()} ${plain(e.agent)} ${plain(e.chat)} ${e.call.tool} ${plain(auditArgs(e.call))} → ${plain(result).slice(0, 300)}`;
+}
+
+/**
+ * friedliver.system.* from the user's own settings only (a repository's settings never turn these on):
+ * on by default, Full auto never covering them unless the user says so, every tool on unless turned off.
+ */
+export function systemSettings(inspect: (key: 'enabled' | 'fullAutoAllowed' | 'tools') => InspectedSetting<unknown> | undefined): {
+  enabled: boolean;
+  fullAutoAllowed: boolean;
+  tools: Record<SystemTool, boolean>;
+} {
+  const enabled = userSetting(inspect('enabled')).value;
+  const fullAuto = userSetting(inspect('fullAutoAllowed')).value;
+  const tools = userSetting(inspect('tools')).value;
+  const t = typeof tools === 'object' && tools !== null ? (tools as Record<string, unknown>) : {};
+  return {
+    enabled: enabled !== false,
+    fullAutoAllowed: fullAuto === true,
+    tools: Object.fromEntries(SYSTEM_TOOLS.map((k) => [k, t[k] !== false])) as Record<SystemTool, boolean>,
+  };
 }
