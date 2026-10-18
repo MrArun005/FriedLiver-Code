@@ -17,7 +17,7 @@ describe('the FriedLiver tools server (MCP)', () => {
           protocolVersion: '2025-06-18',
           capabilities: { tools: { listChanged: true } },
           serverInfo: { name: 'friedliver', version: '1.0.0' },
-          instructions: expect.stringContaining('Tools from FriedLiver'),
+          instructions: expect.stringMatching(/Tools from FriedLiver[\s\S]*index_search[\s\S]*index_outline[\s\S]*index_read[\s\S]*index_diff/),
         },
       },
     });
