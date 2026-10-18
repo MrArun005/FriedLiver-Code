@@ -41,7 +41,9 @@ export type NoticeAction =
   /** The host looks the install command up from the agent; a webview never supplies it. */
   | { label: string; do: 'install'; agent: AgentKey }
   /** Opens Agents & Accounts on the agent's card. */
-  | { label: string; do: 'accounts'; agent: AgentKey };
+  | { label: string; do: 'accounts'; agent: AgentKey }
+  /** Sends the agent's own /compact. */
+  | { label: string; do: 'compact' };
 
 export interface PermissionOption {
   optionId: string;

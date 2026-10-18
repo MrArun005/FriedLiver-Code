@@ -89,6 +89,8 @@ const MAX_PROPOSAL_BYTES = 4 * 1024 * 1024;
 const MAX_OPEN_TOOLS = 200;
 /** Tokens the project map at a session's start takes at most. */
 export const PRIMER_TOKENS = 1500;
+/** The share of the context window past which a chat is offered /compact. */
+export const CONTEXT_FULL = 0.85;
 /** Where agents' tool inputs name the files they act on (Claude, Codex, Gemini, and the obvious others). */
 const TARGET_KEYS = ['file_path', 'filePath', 'path', 'abs_path', 'notebook_path', 'old_path', 'new_path', 'source', 'destination', 'target'];
 /** Messages that can wait for a busy chat. */
@@ -251,6 +253,8 @@ export class AgentCore {
   private readonly openTools = new Map<string, Map<string, OpenTool>>();
   /** Bytes of shared rules each chat's session got, so the project map fits beside them. */
   private readonly rulesBytes = new Map<string, number>();
+  /** Chats offered /compact on this climb toward a full context. */
+  private readonly compactOffered = new Set<string>();
   /** What a permission request would write, for "Open diff", by request. */
   private readonly proposals = new Map<string, Proposal[]>();
   /** Content the user approved on a permission card that showed its diff: the write that follows isn't asked again. */
@@ -289,6 +293,7 @@ export class AgentCore {
           this.noteTool(chatId, update);
           this.dispatch({ t: 'update', chatId, update: compactUpdate(update), at: Date.now() });
           if (update.sessionUpdate === 'available_commands_update') this.updateKnown(chatId);
+          if (update.sessionUpdate === 'usage_update') this.checkContext(chatId, Number(update.used), Number(update.size));
           this.collectImages(chatId, update);
         },
         session: (chatId, start) => this.sessionStarted(chatId, start),
@@ -875,6 +880,7 @@ export class AgentCore {
   /** Stops and forgets a chat. A worktree it had stays on disk; only the record goes. */
   async removeChat(chatId: string): Promise<void> {
     this.rulesBytes.delete(chatId);
+    this.compactOffered.delete(chatId);
     const chat = this.chat(chatId);
     if (!chat) return;
     if (chat.busy) await this.cancel(chatId);
@@ -1294,6 +1300,28 @@ export class AgentCore {
   /** Chats working in the same worktree: a task and the chats it handed off to or consulted. */
   private sharing(wt: TaskWorktree): string[] {
     return [...this.worktrees].filter(([, w]) => w.path === wt.path).map(([id]) => id);
+  }
+
+  /**
+   * Past CONTEXT_FULL of the context window, once per climb: offers the agent's own /compact (or,
+   * without one, a hand-off, which carries a compact summary). Offered again after usage falls below 60%.
+   */
+  private checkContext(chatId: string, used: number, size: number): void {
+    if (!Number.isFinite(used) || !Number.isFinite(size) || size <= 0) return;
+    const share = used / size;
+    if (share < 0.6) this.compactOffered.delete(chatId);
+    if (share < CONTEXT_FULL || this.compactOffered.has(chatId)) return;
+    this.compactOffered.add(chatId);
+    const can = this.chat(chatId)?.session?.commands.some((c) => c.name === 'compact');
+    const text = `The context is ${Math.round(share * 100)}% full. ${
+      can ? 'Compact it now: the agent summarizes the conversation so far and goes on with room to spare.' : 'Hand the task off or start a new chat soon: a hand-off carries a compact summary.'
+    }`;
+    this.items(chatId, [{ kind: 'notice', tone: 'info', text, ...(can ? { actions: [{ label: 'Compact now', do: 'compact' as const }] } : {}) }]);
+  }
+
+  /** Sends the agent's own /compact as the chat's next message. */
+  async compact(chatId: string): Promise<void> {
+    await this.send(chatId, '/compact');
   }
 
   private async rulesFor(chatId: string): Promise<{ text: string; files: string[] } | undefined> {
