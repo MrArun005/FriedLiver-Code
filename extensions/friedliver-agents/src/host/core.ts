@@ -176,8 +176,11 @@ export interface CoreOptions {
   checkpointDir?: string;
 }
 
-/** Where a request came from: FriedLiver Remote (a paired phone) confirms on the Mac whatever keeps allowing. */
-export type Via = 'desktop' | 'remote';
+/**
+ * Where a request came from: the desktop, or a phone paired with FriedLiver Remote (by its name).
+ * A phone's request that loosens review or keeps allowing waits for the user's OK on the Mac.
+ */
+export type Via = 'desktop' | { device: string };
 
 /** Rewind to a message: its files, the conversation, or both. */
 export type RewindMode = 'both' | 'code' | 'conversation';
@@ -637,7 +640,16 @@ export class AgentCore {
   /** FriedLiver's approval level for the chat, and the agent's matching mode. */
   async setApproval(chatId: string, level: ApprovalLevel, via: Via = 'desktop'): Promise<void> {
     const chat = this.requireChat(chatId);
-    if (level === 'full' && !(await this.confirmFull(chat, via))) return;
+    if (via !== 'desktop') {
+      // From a phone: tightening goes ahead; loosening waits for the Mac; nothing becomes a default for new chats.
+      if (level === (chat.approval ?? 'ask')) return;
+      if (level === 'full' && !(await this.confirmFull(chat, via))) return;
+      if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chat.label} accept edits without asking?`, detail: `Edits in “${chat.title}” would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
+      this.dispatch({ t: 'approval', chatId, level });
+      await this.applyLevel(chatId, true);
+      return;
+    }
+    if (level === 'full' && !(await this.confirmFull(chat))) return;
     this.setLevel(chat, level);
     await this.applyLevel(chatId, true);
   }
@@ -658,9 +670,9 @@ export class AgentCore {
   }
 
   private async confirmFull(chat: ChatView, via: Via = 'desktop'): Promise<boolean> {
-    if (via === 'remote') {
+    if (via !== 'desktop') {
       // Every time from the phone, whatever the desktop confirmed before.
-      const ok = await this.confirmRemote({ title: `Run ${chat.label} in Auto?`, detail: `${chat.label} would edit and run commands without asking until the chat is switched back.`, button: 'Use Auto' });
+      const ok = await this.confirmRemote(via, { title: `Run ${chat.label} in Auto?`, detail: `${chat.label} would edit and run commands without asking until the chat is switched back.`, button: 'Use Auto' });
       if (ok) this.confirmedFull.add(chat.id);
       return ok;
     }
@@ -1823,13 +1835,13 @@ export class AgentCore {
     const fromPhone = () => {
       const { what, scope } = describeGrant(grant);
       const title = grant.kind === 'folder' ? `${grant.access === 'read' ? 'reading' : 'changing'} files in ${scope}` : grant.kind === 'site' ? `${scope} in the browser` : grant.kind === 'tool' ? what.toLowerCase() : scope;
-      return this.confirmRemote({ title: `Always allow ${title}?`, detail: `${what}, in every chat, for every agent, until you revoke it in "FriedLiver: Manage Permissions".`, button: 'Always allow' });
+      return via !== 'desktop' && this.confirmRemote(via, { title: `Always allow ${title}?`, detail: `${what}, in every chat, for every agent, until you revoke it in "FriedLiver: Manage Permissions".`, button: 'Always allow' });
     };
     if (grant.kind === 'exact' || grant.kind === 'prefix') {
       // The rule must cover the very command on screen.
       if (!found.line || !matchesRule(found.line, [grant])) return;
-      if (!(await (via === 'remote' ? fromPhone() : this.options.ui.confirmRule?.(grant)))) return;
-    } else if (!found.offered.some((g) => sameGrant(g, grant)) || (via === 'remote' && !(await fromPhone()))) {
+      if (!(await (via !== 'desktop' ? fromPhone() : this.options.ui.confirmRule?.(grant)))) return;
+    } else if (!found.offered.some((g) => sameGrant(g, grant)) || (via !== 'desktop' && !(await fromPhone()))) {
       return;
     }
     if (!remembered.add(grant, AGENT_FACES[found.chat.agent].name)) return;
@@ -1843,9 +1855,9 @@ export class AgentCore {
   }
 
   /** The user's OK on the Mac for a request from FriedLiver Remote; refused when the editor can't ask. */
-  private async confirmRemote(ask: { title: string; detail: string; button: string }): Promise<boolean> {
+  private async confirmRemote(via: { device: string }, ask: { title: string; detail: string; button: string }): Promise<boolean> {
     const confirm = this.options.ui.confirmRemote;
-    return confirm ? (await confirm({ ...ask, title: `${ask.title} Your phone asks.` })) === true : false;
+    return confirm ? (await confirm({ ...ask, title: `${ask.title} ${via.device} asks.` })) === true : false;
   }
 
   /** Accept all / Reject all: the edits waiting now (the editor decides its reviews) and the rest of this turn's. */
