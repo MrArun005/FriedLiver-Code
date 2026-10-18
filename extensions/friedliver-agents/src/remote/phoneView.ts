@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { diffPreview } from '../shared/diff';
 import { AGENT_FACES, bridgeTitle, decisions, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
-import { describeGrant } from '../shared/permissions';
+import { describeGrant, type Grant } from '../shared/permissions';
 import { ESCALATING } from '../shared/tools';
 import { openChats, statusGroups, statusOf, subagents } from '../shared/view';
 import type { PhoneChat, PhoneItem, PhoneList, PhoneSummary } from './protocol';
@@ -13,6 +13,13 @@ const MAX_ITEMS = 120;
 const MAX_TEXT = 12_000;
 const MAX_OUTPUT = 1500;
 const MAX_LINES = 40;
+
+/** "Always allow changing files in src/remote", "Always allow https://example.com". */
+function alwaysLabel(grant: Grant, rel: (p: string) => string): string {
+  if (grant.kind === 'folder') return `Always allow ${grant.access === 'read' ? 'reading' : 'changing'} files in ${rel(grant.folder) || '.'}`;
+  if (grant.kind === 'site') return `Always allow ${grant.origin}`;
+  return `Always allow: ${describeGrant(grant).what}`;
+}
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 const tail = (s: string, max: number) => (s.length > max ? `…${s.slice(-(max - 1))}` : s);
@@ -96,7 +103,7 @@ function phoneItem(
       const d = i.detail;
       const always = [
         ...(d?.command && !i.answer ? [{ grant: { kind: 'exact' as const, command: d.command.line }, label: `Always allow ${clip(d.command.line, 60)}` }] : []),
-        ...(!i.answer ? (d?.always ?? []).map((grant) => ({ grant, label: `Always allow ${describeGrant(grant).what.toLowerCase()}: ${rel(describeGrant(grant).scope)}` })) : []),
+        ...(!i.answer ? (d?.always ?? []).map((grant) => ({ grant, label: alwaysLabel(grant, rel) })) : []),
       ];
       return {
         k: 'permission',
