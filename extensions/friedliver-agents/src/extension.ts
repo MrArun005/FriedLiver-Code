@@ -235,6 +235,7 @@ export class Controller {
       },
       log: (line) => this.log.info(line),
       checkpointDir: path.join(context.globalStorageUri.fsPath, 'checkpoints'),
+      outputDir: path.join(context.globalStorageUri.fsPath, 'output'),
       ui: {
         showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review)),
         closeReview: (id) => void this.reviews.close(id),
