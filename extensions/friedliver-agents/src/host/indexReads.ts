@@ -31,7 +31,9 @@ const CONTINUES = /^[|&.?:)\]},+\-*/=<>]/;
 /** A line with its strings and comments blanked, roughly: enough to count brackets. */
 const code = (line: string) =>
   line
-    .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""')
+    .slice(0, 2000)
+    // Linear: a backslash only ever matches the first branch.
+    .replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""')
     .replace(/\/\*.*?\*\//g, '')
     .replace(/\/\/.*$/, '');
 
@@ -118,7 +120,9 @@ export const numbered = (lines: string[], from: number, to: number, max = 2000):
 export function findSymbol(file: string, lines: string[], syms: Sym[], want: string): Sym[] {
   const dot = want.lastIndexOf('.');
   if (dot > 0) {
-    const outer = findSymbol(file, lines, syms, want.slice(0, dot));
+    // Untrusted input: at most 4 levels, and the first 10 outer matches each.
+    if (want.split('.').length > 4) return [];
+    const outer = findSymbol(file, lines, syms, want.slice(0, dot)).slice(0, 10);
     const name = want.slice(dot + 1);
     return outer.flatMap((o) => {
       const r = symbolRange(file, lines, syms, o);
