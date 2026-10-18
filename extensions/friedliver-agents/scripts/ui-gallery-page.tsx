@@ -8,6 +8,7 @@ import {
   ChoiceRow,
   FileRef,
   Tab,
+  AgentMark,
   Avatar,
   Banner,
   Button,
@@ -555,18 +556,18 @@ function Gallery() {
       <Section id="tabs" title="Tabs · List row · Tree row · Table" note="tabs r5 26 · rows r4 26">
         <div class="fl-tabs" role="tablist" aria-label="Chats">
           <Tab selected onSelect={noop} onClose={noop}>
-            <Avatar agent="claude" size="sm" />
+            <AgentMark agent="claude" />
             <span class="fl-tab__label">Fix formatCents for negative amounts</span>
             <span class="fl-dot" data-state="needs-you" />
           </Tab>
           <Tab selected={false} onSelect={noop} onClose={noop}>
-            <Avatar agent="codex" size="sm" />
+            <AgentMark agent="codex" />
             <span class="fl-tab__label">Add CSV export</span>
             <span class="fl-dot" data-state="working" data-still="" />
           </Tab>
           <span data-force="hover" data-force-target=".fl-tab" class="g-contents">
             <Tab selected={false} onSelect={noop} onClose={noop}>
-              <Avatar agent="gemini" size="sm" />
+              <AgentMark agent="gemini" />
               <span class="fl-tab__label">Speed up the search query (hover)</span>
             </Tab>
           </span>
@@ -695,15 +696,17 @@ function Gallery() {
         </div>
       </Section>
 
-      <Section id="small" title="Avatar · Status dot · Progress · Spinner · Countdown · Kbd · Divider" note="avatar radius = size ÷ 4">
+      <Section id="small" title="Avatar · Agent mark · Status dot · Progress · Spinner · Countdown · Kbd · Divider" note="avatar radius = size ÷ 4">
         <div class="g-line">
           {(['claude', 'codex', 'gemini', 'demo'] as const).map((a) => (
             <>
               <Avatar agent={a} size="sm" />
               <Avatar agent={a} />
               <Avatar agent={a} size="lg" />
+              <AgentMark agent={a} />
             </>
           ))}
+          <AgentMark agent="other" />
           <Divider vertical />
           {['idle', 'working', 'needs-you', 'done', 'error'].map((s) => (
             <span class="g-chip">

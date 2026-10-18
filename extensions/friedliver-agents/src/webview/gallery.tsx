@@ -4,7 +4,7 @@ import type { AppState } from '../shared/model';
 import { ago } from '../shared/view';
 import { Glyph, Icon, useNearScreen, usePersisted, useTabStrip } from './common';
 import { Viewer, useSrc } from './viewer';
-import { FilterPill, Tab } from './ui';
+import { AgentMark, FilterPill, Tab } from './ui';
 
 
 interface Props {
@@ -35,7 +35,7 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
   const at = openKey ? shown.findIndex((i) => i.key === openKey) : -1;
 
   const strip = useRef<HTMLDivElement>(null);
-  const over = useTabStrip(strip, chats.length, tab);
+  const { over } = useTabStrip(strip, chats.length, tab);
   const toggle = (s: ImageSource) => setSources(sources.includes(s) ? sources.filter((x) => x !== s) : [...sources, s]);
 
   if (!images.length) {
@@ -70,7 +70,7 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
                   (strip.current?.children[next]?.firstElementChild as HTMLElement | null)?.focus();
                 }}
               >
-                {c ? <Glyph agent={c.agent} size="sm" /> : <Icon name="grid" size={14} />}
+                {c ? <AgentMark agent={c.agent} /> : <Icon name="grid" size={14} />}
                 <span class="fl-tab__label tab-title">{c ? c.title : 'All'}</span>
                 <span class="fl-count tab-count">{c ? c.count : images.length}</span>
             </Tab>

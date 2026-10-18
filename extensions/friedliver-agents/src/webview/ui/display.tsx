@@ -3,6 +3,7 @@ import type { ButtonHTMLAttributes, ComponentChildren } from 'preact';
 import { Icon, type IconName } from './icon';
 import { AGENT_FACES, type AgentKey } from '../../shared/model';
 import { IconButton, cx } from './controls';
+import { markFor } from './marks';
 
 export type Tone = 'working' | 'done' | 'failed' | 'waiting' | 'warn' | 'accent' | 'muted' | 'info' | 'success' | 'error' | 'routine' | 'review' | 'careful';
 
@@ -130,6 +131,20 @@ export function Avatar({ agent, size }: { agent: AgentKey; size?: 'sm' | 'md' | 
   return (
     <span class={cx('fl-avatar', size && size !== 'md' && `fl-avatar--${size}`)} data-agent={agent} title={face.name} aria-label={face.name} role="img">
       {face.letter}
+    </span>
+  );
+}
+
+/** An agent's mark (§2.22b): a 16px monochrome drawing in the text colour; its hue where the tab is selected or hovered. */
+export function AgentMark({ agent }: { agent: string }) {
+  const m = markFor(agent);
+  const name = AGENT_FACES[agent as AgentKey]?.name ?? 'Agent';
+  return (
+    <span class="fl-mark" data-agent={agent} role="img" aria-label={name} title={name}>
+      <svg viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
+        {m.fill && <path d={m.fill} fill="currentColor" />}
+        <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
     </span>
   );
 }
