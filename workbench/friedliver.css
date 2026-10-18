@@ -1,0 +1,173 @@
+/*---------------------------------------------------------------------------------------------
+ *  FriedLiver: the workbench, built from the design system's components (COMPONENTS.md).
+ *
+ *  - Every size, radius, shadow, duration and colour is a design-system token (--fl-*, generated
+ *    from extensions/friedliver-agents/media/tokens.css into friedliver-tokens.css) or a theme
+ *    colour (--vscode-*). No raw values: test/workbench-css.test.ts enforces it.
+ *  - Each block names the spec component it renders. Upstream widgets paint their colours inline
+ *    from --vscode-* variables, so a block re-points those variables on the widget itself rather
+ *    than fighting the inline style.
+ *  - High contrast is untouched: every rule is scoped to .monaco-workbench:not(.hc-black):not(.hc-light).
+ *  - Builds on upstream's Modern UI (on by default) and must not tie with it on specificity: the
+ *    bundle may order its modules before or after this sheet.
+ *  - No :has(), no class-substring selectors (contrib/modernUI/CSS_PERFORMANCE.md), and no
+ *    transitions on virtualized rows. Hover is instant (spec §1.11).
+ *  - The chat composer lives in a webview and is frozen; nothing here reaches it.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ---- Elevation: upstream's overlay shadows are the spec's ------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) {
+	--vscode-shadow-lg: var(--fl-elev-3);
+	--vscode-shadow-xl: var(--fl-elev-4);
+}
+
+/* ---- Splitters: invisible until hovered, still grabbable --------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-sash::before {
+	border-radius: var(--fl-r-pill);
+}
+
+/* ---- Title bar: the command center is a pill (§2.28 Command center) -- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
+	height: var(--fl-h-md);
+	border-radius: var(--fl-r-pill);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-icon {
+	margin: auto calc(var(--fl-sp-1) + var(--fl-sp-half)) auto 0;
+}
+
+/* ---- Activity bar (§2.28 Nav rail item, P2): a short pill instead of the stripe --------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked:not(:focus) .active-item-indicator::before {
+	border-left-color: transparent !important;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator {
+	overflow: visible;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	content: '';
+	position: absolute;
+	top: 50%;
+	left: 0;
+	width: var(--fl-sp-1);
+	height: var(--fl-sp-4);
+	border-radius: var(--fl-r-pill);
+	background-color: var(--vscode-activityBar-activeBorder, var(--vscode-activityBar-foreground));
+	transform: translateY(-50%);
+	pointer-events: none;
+}
+
+/* Upstream Modern UI insets the item background from the bar edge (the bar's padding plus the
+   indicator's own inset); keep the pill on the edge. */
+.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	left: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + var(--fl-sp-1)) / 2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	left: auto;
+	right: 0;
+}
+
+.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	right: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + var(--fl-sp-1)) / 2);
+}
+
+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item .action-label {
+	border-radius: var(--fl-r-ctl);
+}
+
+/* ---- Editor tabs without Modern UI: a rounded top -------------------------------------- */
+
+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
+	border-top-left-radius: var(--fl-r-ctl);
+	border-top-right-radius: var(--fl-r-ctl);
+}
+
+/* ---- List / tree row §2.19: r4 ------------------------------------------------------------
+   Specificity (0,5,0) on purpose: above Modern UI's generic row radius, below its special cases
+   (suggest boundary rows, notification rows), whichever order the bundle puts them in. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-list .monaco-list-row:where(:not(.separator)) {
+	border-radius: var(--fl-r-row);
+}
+
+/* Upstream Modern UI insets rows in side bar views by 4px; do the same without it. */
+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .monaco-pane-view .pane-body:not(.chat-viewpane) .monaco-list-row {
+	left: var(--fl-sp-1);
+	right: var(--fl-sp-1);
+	width: auto;
+}
+
+/* ---- Scrollbars (§2.28 Scrollbar): thin pill thumbs inside the usual hit area ------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar > .slider {
+	box-sizing: border-box;
+	border: 0 solid transparent;
+	background-clip: padding-box;
+	border-radius: var(--fl-r-pill);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider {
+	border-left-width: var(--fl-sp-half);
+	border-right-width: var(--fl-sp-half);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider {
+	border-top-width: var(--fl-sp-half);
+	border-bottom-width: var(--fl-sp-half);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider {
+	border-left-width: var(--fl-sp-1);
+	border-right-width: var(--fl-sp-1);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider {
+	border-top-width: var(--fl-sp-1);
+	border-bottom-width: var(--fl-sp-1);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
+	border-left-width: var(--fl-line);
+	border-right-width: var(--fl-line);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
+	border-top-width: var(--fl-line);
+	border-bottom-width: var(--fl-line);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
+	border-left-width: calc(var(--fl-sp-1) - var(--fl-line));
+	border-right-width: calc(var(--fl-sp-1) - var(--fl-line));
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
+	border-top-width: var(--fl-sp-half);
+	border-bottom-width: var(--fl-sp-half);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
+	box-sizing: border-box;
+	left: 0;
+	width: 100%;
+	border: 0 solid transparent;
+	border-left-width: var(--fl-sp-1);
+	border-right-width: var(--fl-sp-1);
+	background-clip: padding-box;
+	border-radius: var(--fl-r-pill);
+}
+
+/* ---- Status bar (§2.28 Status bar item, P2): rounded item fills --------------------------------
+   Compact item pairs keep upstream's square seams. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.statusbar > .items-container > .statusbar-item:not(.compact-left):not(.compact-right) > .statusbar-item-label {
+	border-radius: var(--fl-r-ctl);
+}
