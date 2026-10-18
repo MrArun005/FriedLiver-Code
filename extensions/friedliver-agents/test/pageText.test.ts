@@ -47,7 +47,7 @@ describe('browser_snapshot as readable text', () => {
     expect(out).toContain('e1 input[password] "Password"');
     expect(out).toContain('e2 input[email] "Email"');
     expect(out).toContain('e3 button "Go"');
-    expect(out).toContain('e4 link "Help" → /help');
+    expect(out).toContain('e4 link "Help"');
     expect(out).not.toContain('hunter2');
     expect(out).not.toContain('csrf');
     expect(out).not.toContain('Hidden');
@@ -102,6 +102,6 @@ describe('browser_snapshot as readable text', () => {
     const { document, title } = parseHtml('<html><body><main><h1>Hi</h1><p>Text <a href="/a">link</a></p><button>Go</button></main></body></html>');
     const data = isolated(document as never, fakeVisible as never, { title, url: URL_, start: 0 });
     expect(data.lines).toEqual(['# Hi', 'Text [link](https://docs.example.com/a)']);
-    expect(data.elements).toEqual(['e1 link "link" → https://docs.example.com/a', 'e2 button "Go"']);
+    expect(data.elements).toEqual(['e1 link "link"', 'e2 button "Go"']);
   });
 });
