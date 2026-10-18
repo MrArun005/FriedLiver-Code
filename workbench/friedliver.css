@@ -376,6 +376,9 @@
 /* Its actions: Button §2.1 sm (22), gap 4. */
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-buttons-container {
 	gap: var(--fl-sp-1);
+	/* Room for the focus ring inside the row's overflow clip, with no net shift. */
+	margin: calc(-1 * var(--fl-sp-1));
+	padding: var(--fl-sp-1);
 }
 
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button-dropdown,
@@ -453,6 +456,9 @@
 
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons {
 	gap: var(--fl-sp-2);
+	/* Room for the focus ring inside the row's overflow clip, with no net shift. */
+	margin: calc(-1 * var(--fl-sp-1));
+	padding: var(--fl-sp-1);
 }
 
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons > .monaco-button {
