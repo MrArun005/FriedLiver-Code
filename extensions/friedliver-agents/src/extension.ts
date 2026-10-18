@@ -35,10 +35,10 @@ import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
 import { isVendor, rosterOf, shownAgents } from './shared/accounts';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
-import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
+import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
 import { appBundle, Permissions, userDataDir } from './host/permissions';
-import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
+import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
 import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
@@ -153,6 +153,8 @@ export class Controller {
   private stateFile?: StateFile;
   private warnedAgentToAgent = false;
   private warnedApprovals = false;
+  /** The day (its local midnight) the daily token warning last showed. */
+  private usageWarned?: number;
   /**
    * Messages sent again to a chat view that (re)loads soon after: a composer's code references and the
    * item Open scrolls to. A hidden view loses its content and a new one isn't ready yet, so what was
@@ -245,7 +247,7 @@ export class Controller {
       approvalDefault: () => this.approvalDefault(),
       // User settings only: a repository must not make requests allow themselves.
       autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
-      sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
+      sharedRules: (agent) => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted, agent }),
       remember: (fact) => {
         const folder = this.folders()[0];
         if (!folder || !vscode.workspace.isTrusted) return Promise.reject(new Error('This workspace is not trusted (or no folder is open), so FriedLiver keeps no project memory here.'));
@@ -355,10 +357,11 @@ export class Controller {
     const saved = (chatId: string, naive: number, sent: number) => this.core.noteTokens(chatId, { naive, sent });
     this.projectIndex!.onSaved = saved;
     this.browser.onSaved = saved;
-    const unsubscribe = this.core.onAction((action) => {
+    const unsubscribe = this.core.onAction((action, state) => {
       this.remote?.onAction(action);
       this.batcher.push(action);
       this.stateFile?.schedule();
+      if (action.t === 'turnUsage') this.checkUsage(state);
     });
     context.subscriptions.push({ dispose: unsubscribe });
 
@@ -1646,6 +1649,17 @@ export class Controller {
     } catch (err) {
       say(`Could not connect Claude Code to the browser: ${messageOf(err)}`, true);
     }
+  }
+
+  /** The optional daily spending warning (friedliver.usage.dailyTokenWarning; off by default), once a day. */
+  private checkUsage(state: AppState): void {
+    const limit = Number(userSetting(vscode.workspace.getConfiguration('friedliver.usage').inspect<unknown>('dailyTokenWarning')).value) || 0;
+    if (!limit) return;
+    const now = Date.now();
+    const warn = dailyWarning(limit, usageTotals(state.chats, now).today.total, now, this.usageWarned);
+    if (!warn) return;
+    this.usageWarned = warn.day;
+    void vscode.window.showWarningMessage(warn.text);
   }
 
   /** From the user's own settings only: a repository must not let its agents reach other chats unasked. */

@@ -101,6 +101,11 @@ export function fixture(now = Date.now()) {
 
   const chats = [
     chat('chat-c1', 'claude', 'Claude 1', 'Fix formatCents for negative amounts', {
+      // The agent's own token counts per turn: the Agent Manager's "tokens today".
+      usageLog: [
+        { at: min(40), input: 18_400, output: 2_100, cacheRead: 412_000, cacheWrite: 9_800 },
+        { at: min(12), input: 6_200, output: 1_300, cacheRead: 438_000, cacheWrite: 2_400 },
+      ],
       createdAt: min(42),
       lastActivity: sec(20),
       busy: true,
