@@ -678,10 +678,15 @@ BLOCKS.F24 = async () => {
 BLOCKS.F23 = async () => {
   const p = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 800);
   const card = p.locator('#item-perm-c2');
-  // The ApprovalCard: a header row (verb + mono target), the preview under it ($ command).
+  // The ApprovalCard as spec'd (approvals/src/A.html): the header's mono target names the command
+  // ("Run rm src/legacyStore.ts") and the preview under it shows it ($ rm src/legacyStore.ts). Once in
+  // each of those two places, nowhere else: no title or summary repeats it.
+  const cmd = 'rm src/legacyStore.ts';
+  const count = (t) => t.split(cmd).length - 1;
   const text = await card.innerText();
-  const times = text.split('rm src/legacyStore.ts').length - 1;
-  check(times === 1, `the card says the command once [${times}× in: ${text.replace(/\s+/g, ' ')}]`);
+  const inTarget = count(await card.locator('.apv-hd .apv-tg').first().innerText());
+  const inPreview = count(await card.locator('.apv-pre').innerText());
+  check(inTarget === 1 && inPreview === 1 && count(text) === 2, `the card says the command once in its header target and once in its preview [target ${inTarget}, preview ${inPreview}, card ${count(text)}: ${text.replace(/\s+/g, ' ')}]`);
   // Always is a row in the Allow menu (the split button's caret), not another answer button beside Allow.
   const answers = await card.locator('.apv-act .fl-btn:not([aria-haspopup])').allInnerTexts();
   check(answers.length === 2 && !answers.some((t) => /always/i.test(t)), `the card offers Deny and Allow, no Always button [${answers.map((t) => t.replace(/\s+/g, ' ')).join(' | ')}]`);
