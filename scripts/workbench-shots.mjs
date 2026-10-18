@@ -44,6 +44,7 @@ const COMMANDS = {
 	o: 'editor.action.triggerSuggest',
 	p: 'workbench.action.closeQuickOpen',
 	q: 'notifications.hideList',
+	r: 'workbench.action.closeActiveEditor',
 };
 const keyOf = Object.fromEntries(Object.entries(COMMANDS).map(([k, c]) => [c, k]));
 
@@ -239,6 +240,8 @@ async function run(themeKey, out, failures) {
 	await step('14-settings', async () => {
 		await cmd('workbench.action.openSettings2', 2500);
 		await shot('14-settings');
+		// Settings opens in the modal editor, which would cover the next shots.
+		await cmd('workbench.action.closeActiveEditor', 800);
 	});
 	await step('15-extensions', async () => {
 		await cmd('workbench.view.extensions', 3000);
