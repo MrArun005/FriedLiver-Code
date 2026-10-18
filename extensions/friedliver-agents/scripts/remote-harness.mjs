@@ -195,7 +195,12 @@ async function phone(scheme, name, steps, { paired = true, open, hash = '' } = {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: scheme, ignoreHTTPSErrors: true, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
   await context.addInitScript(
     ([t, o, f]) => {
-      if (t) localStorage.setItem('fl.token', t), localStorage.setItem('fl.name', 'Arun’s iPhone'), localStorage.setItem('fl.fingerprint', f);
+      /* global localStorage, sessionStorage */
+      if (t) {
+        localStorage.setItem('fl.token', t);
+        localStorage.setItem('fl.name', 'Arun’s iPhone');
+        localStorage.setItem('fl.fingerprint', f);
+      }
       if (o) sessionStorage.setItem('fl.open', o);
     },
     [paired ? token : '', open ?? '', fp],
@@ -205,7 +210,10 @@ async function phone(scheme, name, steps, { paired = true, open, hash = '' } = {
   page.on('console', (m) => m.type() === 'error' && errors.push(`${name}: ${m.text()}`));
   await page.goto(base + hash);
   await page.waitForTimeout(600);
-  if (steps) await steps(page), await page.waitForTimeout(300);
+  if (steps) {
+    await steps(page);
+    await page.waitForTimeout(300);
+  }
   const file = path.join(opts.out, `remote-phone-${name}-${scheme}.png`);
   await page.screenshot({ path: file });
   shots.push(file);
