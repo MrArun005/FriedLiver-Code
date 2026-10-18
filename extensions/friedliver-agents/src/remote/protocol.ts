@@ -81,7 +81,8 @@ export type PhoneItem =
   | { k: 'command'; id: string; line: string; cwd: string; state: string; outside: boolean; output: string; exitCode?: number | null; auto?: string; onMac?: boolean; risk: Risk }
   | { k: 'question'; id: string; message: string; fields: QuestionField[]; state: string; summary?: string }
   | { k: 'review'; id: string; file: PhoneFile; state: string; auto?: string }
-  | { k: 'bridge'; id: string; title: string; text: string; state: string; always?: string; agent: AgentKey }
+  /** `once`: Allow (once) and Deny only; `careful`: also held to allow. */
+  | { k: 'bridge'; id: string; title: string; text: string; state: string; always?: string; agent: AgentKey; once?: true; careful?: true }
   | { k: 'notice'; text: string; tone: 'info' | 'error' }
   | { k: 'changes'; files: number; undone?: boolean }
   | { k: 'link'; label: string; text: string; role: string };

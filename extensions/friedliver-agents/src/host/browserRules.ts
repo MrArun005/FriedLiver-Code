@@ -105,13 +105,18 @@ let shots = 0;
  * `base` once per session, with 'wx' so an existing file is never overwritten or followed.
  */
 export async function saveScreenshot(base: string, png: Buffer): Promise<string> {
+  const file = await screenshotFile(base);
+  await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+  return file;
+}
+
+/** A new file name in that private folder, for a program that writes the screenshot itself (system.ts). */
+export async function screenshotFile(base: string, name = 'screenshot'): Promise<string> {
   let dir = shotDirs.get(base);
   if (!dir) {
     dir = mkdtemp(path.join(base, 'shots-'));
     shotDirs.set(base, dir);
     dir.catch(() => shotDirs.delete(base));
   }
-  const file = path.join(await dir, `screenshot-${++shots}.png`);
-  await writeFile(file, png, { flag: 'wx', mode: 0o600 });
-  return file;
+  return path.join(await dir, `${name}-${++shots}.png`);
 }

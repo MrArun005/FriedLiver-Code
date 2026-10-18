@@ -26,6 +26,18 @@ const edit = (path: string, always: Item extends never ? never : { kind: 'folder
 const bridge = (over: Partial<Extract<Item, { kind: 'bridge' }>>): Approvable => ({ kind: 'bridge', requestId: 'b', tool: 'ask_agent', target: { agent: 'gemini' }, text: 'Is there a CSV helper?', state: 'awaiting', ...over });
 
 describe('scopes against policy', () => {
+  it('a system request names its action and target; a once-only one locks This chat and Always', () => {
+    const open = approvalOf(bridge({ tool: 'system_open', target: { system: 'Spotify' }, text: '', always: 'Spotify' }), chat);
+    expect(open).toMatchObject({ verb: 'Open', target: 'Spotify', locked: {} });
+    expect(allowMessage(open, 'chat')).toEqual({ type: 'bridge', requestId: 'b', answer: 'allowChat' });
+    const clip = approvalOf(bridge({ tool: 'system_clipboard_read', target: { system: '' }, text: '', once: true }), chat);
+    expect(clip.verb).toBe('Read your clipboard');
+    expect(clip.locked.chat).toBeTruthy();
+    expect(clip.locked.always).toBeTruthy();
+    expect(allowMessage(clip, 'chat')).toBeUndefined();
+    expect(allowMessage(clip, 'always')).toBeUndefined();
+  });
+
   it('a routine command offers all three; This chat is the agent’s own session option, Always its rules', () => {
     const a = approvalOf(run('npm test'), chat);
     expect(a).toMatchObject({ verb: 'Run', target: 'npm test', mono: true, where: 'in ~/code/shop', hold: false, locked: {} });

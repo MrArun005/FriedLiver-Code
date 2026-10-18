@@ -3,6 +3,7 @@
 // Secrets never come here: a card says only whether a key is set.
 import type { LinkMode } from './links';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type AgentKey } from './model';
+import { isSystemTool, type SystemSettingsView, type SystemTool } from './system';
 import { offers, optionKey, type AgentDefaults, type SessionOption } from './session';
 
 export type SignInState = 'signed-in' | 'needs-sign-in' | 'not-installed' | 'error';
@@ -332,6 +333,8 @@ export interface AccountsView {
   showDemo: boolean;
   /** Where links you click open. */
   links: LinkMode;
+  /** "Mac & Windows control": the system_* tools' settings. */
+  system?: SystemSettingsView;
 }
 
 /** Which way of signing in is in use, as well as FriedLiver can tell without asking the agent. */
@@ -366,7 +369,11 @@ export type AccountsMessage =
   | { type: 'signOut'; agent: AgentKey }
   | { type: 'terminal'; agent: VendorKey; what: CliWhat }
   | { type: 'copy'; agent: VendorKey; what: CliWhat }
-  | { type: 'setDefault'; agent: AgentKey; key: DefaultKey; value: string };
+  | { type: 'setDefault'; agent: AgentKey; key: DefaultKey; value: string }
+  /** friedliver.system.enabled, .fullAutoAllowed, or one tool in .tools (the host confirms turning Full auto on). */
+  | { type: 'setSystem'; key: 'enabled' | 'fullAutoAllowed' | SystemTool; value: boolean }
+  /** Shows the "FriedLiver: System Actions" log. */
+  | { type: 'systemLog' };
 
 const METHOD_ID = /^[\w.:-]{1,128}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -380,8 +387,12 @@ const isWhat = (v: unknown): v is CliWhat => v === 'install' || v === 'signIn' |
 export function parseAccountsMessage(raw: unknown, shown: readonly AgentKey[]): AccountsMessage | null {
   if (!isObj(raw) || typeof raw.type !== 'string') return null;
   const m = raw;
-  if (m.type === 'ready' || m.type === 'openSettings') return { type: m.type };
+  if (m.type === 'ready' || m.type === 'openSettings' || m.type === 'systemLog') return { type: m.type };
   if (m.type === 'setLinks') return m.mode === 'builtin' || m.mode === 'external' ? { type: 'setLinks', mode: m.mode } : null;
+  if (m.type === 'setSystem') {
+    const key = m.key;
+    return (key === 'enabled' || key === 'fullAutoAllowed' || isSystemTool(key)) && typeof m.value === 'boolean' ? { type: 'setSystem', key, value: m.value } : null;
+  }
   if (!isAgentKey(m.agent) || !shown.includes(m.agent)) return null;
   const agent = m.agent;
   switch (m.type) {

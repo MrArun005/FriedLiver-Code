@@ -50,6 +50,11 @@ An agent can:
   characters spelled out, or the plan. FriedLiver can only answer the request;
   the agent does the work.
 - Ask you a question as a form, send images, and start a sign-in for its own vendor.
+- Ask to act on your Mac or Windows PC through a fixed set of `system_*` tools
+  (open an installed app, a document or an http(s) link, bring an app to the
+  front, use the clipboard, show a notification, change the volume, run an
+  Apple Shortcut, screenshot a window). Each one waits for your OK; see "Mac &
+  Windows control" below and docs/SYSTEM-CONTROL.md.
 
 Every turn starts with a checkpoint: a git snapshot of the working tree, made
 in a temporary index (your index, stash and branches stay as they are), so
@@ -73,8 +78,12 @@ Through FriedLiver an agent can't:
   (see "Agents reaching other agents" below), or pose as another agent's chat.
 - Get another vendor's API key, swap its own key through a sign-in method, or
   load code into its sign-in command through variables like `NODE_OPTIONS`.
-- Open a web page. The only exception is a sign-in link on its own vendor's
+- Open a web page, an app or a file without your OK (or a rule you added).
+  Without asking, the only exception is a sign-in link on its own vendor's
   site, offered only while you sign in, and only after you click.
+- Run a program, a script or an installer through the `system_*` tools: they
+  open only apps from the installed list, documents, media and folders, and
+  http(s) links, and start only fixed programs with fixed scripts.
 - Show anything but an image as an image. Images, SVG included, are only
   rendered through `<img>`, where scripts don't run.
 - Exhaust the editor's memory with output, replies or images. Output is capped
@@ -181,6 +190,63 @@ It can't:
 - Make agents run without asking. `friedliver.approvals.default` is
   machine-scoped and read from your user settings only, it can't be Full
   auto, and "Always allow" rules aren't settings at all.
+
+### Mac & Windows control (the `system_*` tools)
+
+These let an agent act outside the editor, so prompt injection matters most
+here: a web page, issue or file an agent reads can tell it to open something,
+read the clipboard or screenshot a window. What stands in the way:
+
+- **Every action asks.** Allow once, Allow for this chat (that tool on that
+  exact app, site, file or Shortcut only) or Always allow (the same, remembered).
+  Reading the clipboard, window screenshots, and opening or focusing a
+  terminal, shell, System Settings, Keychain Access, Registry Editor, Task
+  Manager and the like are **Allow once only**: never for a chat, never
+  remembered (a stored rule for them is dropped), and not covered by Full auto.
+  Full auto covers the rest only if you turn on
+  `friedliver.system.fullAutoAllowed` (off by default; turning it on asks).
+  Agent-to-agent "allow" and `friedliver.browser.externalAutoApprove` never
+  cover them. Read-only chats and inline edits don't get them.
+- **A fixed set, nothing arbitrary.** No script, command line or key press
+  from an agent is ever run. Programs start from fixed absolute paths
+  (`/usr/bin/open`, `/usr/bin/osascript`, `/usr/bin/shortcuts`, `pbcopy`,
+  `pbpaste`, `/usr/sbin/screencapture`; Windows PowerShell 5.1 under the real
+  Windows folder), never through a shell or `PATH`, with argument arrays.
+  osascript and PowerShell run fixed scripts; an agent's text reaches them only
+  as JSON in one environment variable (macOS) or base64 JSON on stdin
+  (Windows), so quotes, `$()`, `;`, backticks and newlines stay data.
+- **Narrow targets.** Apps open only by a name from the installed list (their
+  bundle or Start Menu shortcut), never a path to a program. Files open only
+  as documents, images, media or folders, by real path: no programs, scripts,
+  shortcuts, web pages, macro formats, app bundles or packages, nothing under
+  the private places "Always allow" never covers (home dot folders,
+  `~/Library`, `AppData`, system folders, FriedLiver itself), no network
+  shares or alternate data streams. Links are http(s) without credentials.
+  Names, paths and URLs with control or direction characters are refused.
+- **Checked twice.** What the action would touch is worked out before asking
+  and again just before acting; if it changed while you decided (a file
+  swapped, a window gone), nothing happens.
+- **Bounded and logged.** 30 actions a minute per chat (or outside session),
+  100 KB of clipboard text either way, three requests waiting per chat. Every
+  attempt, allowed or not, goes to the **FriedLiver: System Actions** output
+  channel with time, agent, chat, tool and arguments, clipboard text and
+  notification bodies as their length only. Each action that runs shows
+  "Agent used: …" in the status bar.
+- **Settings are yours.** `friedliver.system.*` is machine-scoped and read
+  from your user settings only; turn it all off, or one tool at a time, under
+  Agents & Accounts → Mac & Windows control.
+
+What remains: an action you approve does what it says, with your rights. A
+document you let an agent open is opened by its usual app (a PDF reader, a
+spreadsheet), with that app's own risks. A Shortcut you let it run does
+whatever that Shortcut does. Screenshots and clipboard text go to the agent's
+vendor like anything else the agent reads. The installed-app list includes
+per-user folders (`~/Applications`, the Start Menu in `%APPDATA%`) that any
+program running as you can add to; system folders are listed first, so a new
+entry can't take an existing app's name, but a new name can be anything, and
+an agent that can write files could also register an app that claims a document
+type. Those writes are the agent's own and are what FriedLiver's approvals
+and the agent's permission prompts are for.
 
 ### What a malicious agent can and can't do
 

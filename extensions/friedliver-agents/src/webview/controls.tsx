@@ -318,7 +318,7 @@ export function waitingActions(chat: ChatView): { approve(): void; deny(): void;
     }
     if (i.kind === 'bridge' && i.state === 'awaiting') {
       const answer = (a: 'allow' | 'allowChat' | 'deny') => send({ type: 'bridge', requestId: i.requestId, answer: a });
-      const order = ['allow', 'allowChat', 'deny'] as const;
+      const order = i.once ? (['allow', 'deny'] as const) : (['allow', 'allowChat', 'deny'] as const);
       return { approve: () => answer('allow'), deny: () => answer('deny'), pick: (n) => (order[n] ? (answer(order[n]), true) : false) };
     }
   }

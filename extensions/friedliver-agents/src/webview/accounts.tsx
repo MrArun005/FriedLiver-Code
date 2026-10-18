@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { SIGN_IN_TEXT, type AccountCard, type AccountsView, type CliLine, type CliWhat, type DefaultKey, type KeyView, type MethodView, type VendorKey } from '../shared/accounts';
 import { age } from '../shared/model';
 import type { SessionOption } from '../shared/session';
+import { NEVER_ALWAYS, SYSTEM_TOOLS, SYSTEM_WORDS, unsupportedOn, type SystemSettingsView } from '../shared/system';
 import { Glyph, Icon, Popover, send } from './common';
 
 const KIND_TEXT: Record<MethodView['kind'], string> = { browser: 'in your browser', terminal: 'in a terminal', key: 'API key' };
@@ -60,6 +61,7 @@ function Page() {
       {view.cards.map((card) => (
         <Card key={card.agent} card={card} focused={view.focus?.agent === card.agent} />
       ))}
+      {view.system && <SystemCard s={view.system} />}
       <footer class="acct-foot hint">
         {view.showDemo ? 'The Demo agent is shown: a fake local agent for trying FriedLiver with no account.' : 'The Demo agent, a fake local agent for trying FriedLiver with no account, is hidden.'}{' '}
         <button class="link" onClick={() => send({ type: 'openSettings' })}>
@@ -68,6 +70,56 @@ function Page() {
       </footer>
     </main>
   );
+}
+
+/**
+ * "Mac & Windows control": the system_* tools on or off, one by one, and whether Full auto covers them.
+ * Built from the page's existing classes only (acct-card, acct-top, acct-key, acct-block, acct-tag, cc-switch).
+ */
+function SystemCard({ s }: { s: SystemSettingsView }) {
+  const on = s.supported && s.enabled;
+  const missing = new Set(unsupportedOn(s.platform));
+  return (
+    <section class="acct-card" aria-labelledby="sys-title">
+      <div class="acct-top">
+        <h2 id="sys-title">Mac &amp; Windows control</h2>
+        <Switch label="Mac & Windows control" on={on} disabled={!s.supported} onChange={(value) => send({ type: 'setSystem', key: 'enabled', value })} />
+      </div>
+      <p class="acct-note hint">
+        {s.supported
+          ? 'Agents can ask to open apps, files and links, use the clipboard, show a notification, change the volume or screenshot a window. Each action asks you first and goes in the action log.'
+          : 'Not available here: FriedLiver can act on macOS and Windows only.'}
+      </p>
+      <div class="acct-block">
+        <h3>Actions agents may ask for</h3>
+        {SYSTEM_TOOLS.map((tool) => (
+          <div key={tool} class="acct-key">
+            <span>
+              {SYSTEM_WORDS[tool]}
+              {missing.has(tool) ? <span class="acct-tag">{s.platform === 'win' ? 'macOS only' : 'Not here'}</span> : NEVER_ALWAYS.has(tool) && <span class="acct-tag">Asks every time</span>}
+            </span>
+            <Switch label={SYSTEM_WORDS[tool]} on={on && s.tools[tool]} disabled={!on || missing.has(tool)} onChange={(value) => send({ type: 'setSystem', key: tool, value })} />
+          </div>
+        ))}
+      </div>
+      <div class="acct-block">
+        <div class="acct-top">
+          <h3>Full auto may act without asking</h3>
+          <Switch label="Full auto may act without asking" on={s.fullAutoAllowed} disabled={!on} onChange={(value) => send({ type: 'setSystem', key: 'fullAutoAllowed', value })} />
+        </div>
+        <p class="hint">Off: chats on Full auto still ask before they touch your computer. Reading the clipboard, window screenshots and terminal-like apps always ask.</p>
+        <p class="acct-note">
+          <button class="link" onClick={() => send({ type: 'systemLog' })}>
+            Show the action log
+          </button>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function Switch({ label, on, disabled, onChange }: { label: string; on: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
+  return <button type="button" role="switch" class="cc-switch" aria-label={label} aria-checked={on} disabled={disabled} onClick={() => onChange(!on)} />;
 }
 
 function Card({ card, focused }: { card: AccountCard; focused: boolean }) {

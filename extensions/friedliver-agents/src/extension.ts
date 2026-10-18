@@ -25,6 +25,7 @@ import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
+import { SystemControl, systemSettings } from './host/system';
 import { ReviewUi } from './host/review';
 import { RemoteControl } from './remote/host';
 import { userSetting } from './host/settings';
@@ -104,6 +105,8 @@ export class Controller {
   /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
   editor?: EditorAgent;
   readonly log = vscode.window.createOutputChannel('FriedLiver Agents', { log: true });
+  /** Every system_* attempt (host/system.ts auditLine): who, which chat, what, and how it ended; clipboard text only as its length. */
+  private readonly systemLog = vscode.window.createOutputChannel('FriedLiver: System Actions');
   /** The built-in browser on the right (host/browser.ts). */
   private readonly browser: BrowserPanel;
   /** The last code editor shown in the left group, for the code/chat toggle. */
@@ -206,6 +209,14 @@ export class Controller {
     } catch {
       // Without it agents start in home, as before.
     }
+    const system = new SystemControl({
+      home: os.homedir(),
+      shotsBase: context.globalStorageUri.fsPath,
+      // Never opened for agents, like the places "Always allow" never covers.
+      sensitive: [appBundle(vscode.env.appRoot), userDataDir(context.globalStorageUri.fsPath)],
+      links: () => (vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin'),
+      openInBrowser: (url, signal) => this.browser.call({ tool: 'browser_open', url }, signal),
+    });
     this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => this.showDemo(), (line) => this.log.warn(line));
     this.core = new AgentCore({
       folders: () => this.folders(),
@@ -219,6 +230,13 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
+      system: {
+        settings: () => systemSettings((key) => vscode.workspace.getConfiguration('friedliver.system').inspect<unknown>(key)),
+        prepare: (call) => system.prepare(call),
+        audit: (line) => this.systemLog.appendLine(line),
+        // Codicon syntax in an agent's words stays text.
+        done: (summary) => void vscode.window.setStatusBarMessage(`$(device-desktop) Agent used: ${plainText(summary).replace(/\$\(/g, '$ (')}`, 5000),
+      },
       approvalDefault: () => this.approvalDefault(),
       // User settings only: a repository must not make requests allow themselves.
       autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
@@ -293,6 +311,7 @@ export class Controller {
 
     context.subscriptions.push(
       this.log,
+      this.systemLog,
       this.statusItem,
       this.workingItem,
       this.autoItem,
@@ -340,6 +359,7 @@ export class Controller {
     command('friedliver.links.useBuiltin', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'builtin', vscode.ConfigurationTarget.Global));
     command('friedliver.links.useExternal', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'external', vscode.ConfigurationTarget.Global));
     this.browser.registerLinkOpener(linkMode);
+    command('friedliver.system.showLog', () => this.systemLog.show(true));
     command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
     // Integration tests must not write the developer's ~/.claude.json.
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
@@ -1296,13 +1316,13 @@ export class Controller {
   /** On every approval toast: the remembered "Always allow" answers, to look over or revoke. */
   private readonly manageButton = { title: 'Manage', run: () => this.managePermissions() };
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean }): void {
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean; once?: boolean }): void {
     if (isExternal(ask.chatId)) {
       // No chat holds this request, so it always gets its own popup, whatever else is waiting. Careful: once only.
       const buttons: Record<string, BridgeAnswer | 'manage'> = {
         Allow: 'allow',
-        ...(ask.careful ? {} : { 'Allow for this session': 'allowChat' as const }),
-        ...(ask.always && !ask.careful ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
+        ...(ask.careful || ask.once ? {} : { 'Allow for this session': 'allowChat' as const }),
+        ...(ask.always && !ask.careful && !ask.once ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
         Deny: 'deny',
         Manage: 'manage',
       };
@@ -1314,14 +1334,15 @@ export class Controller {
       });
       return;
     }
-    const always = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId)?.always;
-    // A careful one (a purchase, a form submit) is allowed only by holding on its card.
+    const item = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId);
+    const always = item?.once ? undefined : item?.always;
+    // A careful one (a purchase, a form submit) is allowed only by holding on its card; a once-only one never for the chat or always.
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
       ...(ask.careful
         ? []
         : [
             { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
-            { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
+            ...(item?.once ? [] : [{ title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') }]),
             ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
           ]),
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },

@@ -234,6 +234,15 @@ describe('phone actions, the strict cases', () => {
     expect(calls).toEqual(['bridge br-1 allow']);
   });
 
+  it('allow a once-only system request once, never for the chat or always', async () => {
+    const sys: Item = { kind: 'bridge', requestId: 'sys-1', tool: 'system_clipboard_read', target: { system: '' }, text: '', state: 'awaiting', once: true };
+    const { actions, calls, confirms } = fakeActions([sys], true);
+    expect(await actions.run({ type: 'bridge', requestId: 'sys-1', answer: 'allowChat' }, PHONE)).toMatchObject({ ok: false, error: expect.stringContaining('once') });
+    expect(confirms).toHaveLength(0);
+    expect(await actions.run({ type: 'bridge', requestId: 'sys-1', answer: 'allow' }, PHONE)).toEqual({ ok: true });
+    expect(calls).toEqual(['bridge sys-1 allow']);
+  });
+
   it('refuse to approve a command the phone can’t show whole and plain', async () => {
     const cmd = (id: string, line: string): Item => ({ kind: 'command', commandId: id, commandLine: line, cwd: '/w', outside: false, state: 'awaiting', output: '' });
     const { actions, calls } = fakeActions([cmd('c1', 'rm -rf build \u202e; echo ok'), cmd('c2', `echo ${'x'.repeat(5000)}`), cmd('c3', 'npm test')], true);

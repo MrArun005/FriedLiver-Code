@@ -6,6 +6,7 @@
 // With the MCP SDK, zod and ajv in it, each one held about 10 MB more than the
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
+import { SYSTEM_LIMITS } from '../shared/system';
 import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
 
 /** Newest first; a client asking for another version gets the newest. */
@@ -15,6 +16,7 @@ const INSTRUCTIONS =
   'Tools from FriedLiver, the editor you run in. They reach the other coding agents and chats open there. ' +
   'The user may be asked to allow each call, and may say no; carry on without it if so. ' +
   'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code. ' +
+  'The system_* tools act on the user\'s Mac or Windows PC (open apps, files and links, the clipboard, notifications, volume, window screenshots); each is asked for. ' +
   'The index_* tools query a ready index of this project; to find where something is, try index_search or index_symbols before grep or reading many files.';
 
 const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
@@ -106,6 +108,7 @@ export const TOOLS = [
   },
   ...indexTools(),
   ...browserTools(),
+  ...systemTools(),
 ].map((t) => ({ ...t, execution: { taskSupport: 'forbidden' } }));
 
 function indexTools() {
@@ -182,6 +185,89 @@ function browserTools() {
   ];
 }
 
+function systemTools() {
+  const ASKS = ' The user is asked to allow it first; on Linux it is not supported.';
+  const NAME = { type: 'string', minLength: 1, maxLength: SYSTEM_LIMITS.name };
+  const WINDOW = { type: 'integer', minimum: 1, maximum: 0x7fffffff, description: 'A window id from system_apps.' };
+  // No top-level oneOf (Claude's API refuses it): "exactly one of" is in the words and checked by parseCall.
+  const schema = (properties: Record<string, object>, required: string[] = []) => ({
+    $schema: DRAFT_07,
+    type: 'object',
+    properties,
+    ...(required.length ? { required } : {}),
+    additionalProperties: false,
+  });
+  return [
+    {
+      name: 'system_open',
+      title: 'Open an app, file or link',
+      description:
+        'Opens exactly one of: an installed app by its name from system_apps (`app`), an existing document, image, media file or folder by absolute path (`path`; no programs, scripts or private folders), ' +
+        'or an http/https link (`url`; in FriedLiver\'s browser or the system browser, as the user chose).' + ASKS,
+      inputSchema: schema(
+        { app: { ...NAME, description: 'An app name exactly as system_apps lists it, like "Spotify".' }, path: { ...NAME, description: 'An absolute path.' }, url: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'An http:// or https:// URL.' } },
+      ),
+    },
+    {
+      name: 'system_apps',
+      title: 'List apps and windows',
+      description: 'Lists the installed apps (names to pass to system_open) and the running apps with their windows (ids to pass to system_focus and system_screenshot_window).' + ASKS,
+      inputSchema: NO_INPUT,
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'system_focus',
+      title: 'Bring to the front',
+      description: 'Brings to the front exactly one of: a running app (`app`, its name from system_apps) or the app of a window (`window`, its id).' + ASKS,
+      inputSchema: schema({ app: { ...NAME, description: 'A running app\'s name.' }, window: WINDOW }),
+    },
+    {
+      name: 'system_shortcut',
+      title: 'Run an Apple Shortcut',
+      description: 'macOS only: runs one of the user\'s Shortcuts by its exact name.' + ASKS,
+      inputSchema: schema({ name: { ...NAME, description: 'The Shortcut\'s exact name.' } }, ['name']),
+    },
+    {
+      name: 'system_clipboard_read',
+      title: 'Read the clipboard',
+      description: `The text on the clipboard (up to ${SYSTEM_LIMITS.clipboard / 1024} KB). Asked for every time.` + ASKS,
+      inputSchema: NO_INPUT,
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'system_clipboard_write',
+      title: 'Copy to the clipboard',
+      description: `Puts text on the clipboard, replacing what it held (up to ${SYSTEM_LIMITS.clipboard / 1024} KB).` + ASKS,
+      inputSchema: schema({ text: { type: 'string', minLength: 1, description: 'The text.' } }, ['text']),
+    },
+    {
+      name: 'system_notify',
+      title: 'Show a notification',
+      description: 'Shows a system notification.' + ASKS,
+      inputSchema: schema(
+        { title: { type: 'string', minLength: 1, maxLength: SYSTEM_LIMITS.title, description: 'A short title.' }, body: { type: 'string', maxLength: SYSTEM_LIMITS.body, description: 'The message.' } },
+        ['title', 'body'],
+      ),
+    },
+    {
+      name: 'system_volume',
+      title: 'Volume',
+      description: 'Reads the output volume, sets it (0–100), mutes or unmutes it.' + ASKS,
+      inputSchema: schema(
+        { action: { type: 'string', enum: ['get', 'set', 'mute', 'unmute'] }, level: { type: 'integer', minimum: 0, maximum: 100, description: 'For "set" only.' } },
+        ['action'],
+      ),
+    },
+    {
+      name: 'system_screenshot_window',
+      title: 'Screenshot a window',
+      description: 'Saves a PNG of one window (an id from system_apps) to a private file and returns its path; read that file to see it. Asked for every time.' + ASKS,
+      inputSchema: schema({ window: WINDOW }, ['window']),
+      annotations: { readOnlyHint: true },
+    },
+  ];
+}
+
 export interface ToolResult {
   content: { type: 'text'; text: string }[];
   isError?: true;
@@ -201,12 +287,12 @@ const result = (id: string | number, value: object) => ({ jsonrpc: '2.0', id, re
 const error = (id: string | number, code: number, message: string) => ({ jsonrpc: '2.0', id, error: { code, message } });
 export const toolError = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
 
-/** Only the browser tools: what a client outside FriedLiver (EXTERNAL_CLIENT) is offered. */
-export const BROWSER_TOOLS = TOOLS.filter((t) => t.name.startsWith('browser_'));
+/** The browser and system tools: what a client outside FriedLiver (EXTERNAL_CLIENT) is offered. */
+export const EXTERNAL_TOOLS = TOOLS.filter((t) => t.name.startsWith('browser_') || t.name.startsWith('system_'));
 
-/** One JSON-RPC message from the agent; `browserOnly` offers and takes the browser tools only. */
-export function handle(raw: unknown, browserOnly = false): Handled {
-  const tools = browserOnly ? BROWSER_TOOLS : TOOLS;
+/** One JSON-RPC message from the agent; `external` offers and takes EXTERNAL_TOOLS only. */
+export function handle(raw: unknown, external = false): Handled {
+  const tools = external ? EXTERNAL_TOOLS : TOOLS;
   if (!isObj(raw)) return null;
   const m = raw as Message;
   // Notifications (initialized, cancelled, progress) need no answer.
