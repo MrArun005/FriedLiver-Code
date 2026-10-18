@@ -282,9 +282,22 @@ describe('system tools from Claude Code outside FriedLiver', () => {
 
   it('are refused: the computer stays with FriedLiver\'s own chats, and nothing is asked or run', async () => {
     const s = setup();
+    await expect(s.requests.call(S1, spotify, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
+    expect(s.asks).toHaveLength(0);
+    expect(s.audit).toHaveLength(0);
+  });
+
+  it('refuse the clipboard too, without a popup', async () => {
+    const s = setup();
+    await expect(s.requests.call(S1, { tool: 'system_clipboard_read' }, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
+    expect(s.asks).toHaveLength(0);
+    expect(s.audit).toHaveLength(0);
+  });
+
+  it('are not let through by friedliver.browser.externalAutoApprove', async () => {
+    const s = setup();
     s.h.externalAutoApprove = () => true;
     await expect(s.requests.call(S1, spotify, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
-    await expect(s.requests.call(S1, { tool: 'system_clipboard_read' }, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
     expect(s.asks).toHaveLength(0);
     expect(s.audit).toHaveLength(0);
   });
