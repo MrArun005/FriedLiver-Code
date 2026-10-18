@@ -282,7 +282,7 @@ describe('the keys', () => {
 
   it('b asks to confirm only when there is more than one identical routine request; the confirmation has its own grace', () => {
     expect(key('b', 'p')).toBeNull();
-    const two = inbox(state(chat('a', { items: [run('x', 'ls', 1)] }), chat('b', { items: [run('y', 'ls', 2)] })));
+    const two = inbox(state(chat('a', { items: [run('x', 'npm test', 1)] }), chat('b', { items: [run('y', 'npm test', 2)] })));
     expect(inboxKey({ key: 'b' }, two.entries[0], true, two.entries)).toEqual({ do: 'batch' });
     expect(inboxKey({ key: 'b' }, two.entries[0], false, two.entries)).toEqual({ do: 'wait' });
     expect(confirmKey({ key: 'Enter' }, true)).toBe('allow');

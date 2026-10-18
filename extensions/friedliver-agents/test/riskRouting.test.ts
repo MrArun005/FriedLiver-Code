@@ -253,10 +253,14 @@ describe('routine countdown', () => {
       core.answerPermission(p.requestId, 'reject');
       await turn;
     }
-    // The same read inside the workspace does count down.
+    // A read inside the workspace doesn't count down either: only the exact command list ever does.
     await writeFile(path.join(dir, 'inside.txt'), 'x');
-    await core.send(chat.id, `native-perm read ${JSON.stringify({ file_path: path.join(dir, 'inside.txt'), locations: [path.join(dir, 'inside.txt')] })}`);
-    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({ auto: 'Routine, allowed after the countdown' });
+    const read = core.send(chat.id, `native-perm read ${JSON.stringify({ file_path: path.join(dir, 'inside.txt'), locations: [path.join(dir, 'inside.txt')] })}`);
+    await waitFor(() => core.decisions().length === 1);
+    const r = core.chat(chat.id)!.items.filter((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission').at(-1)!;
+    expect(r.autoAt).toBeUndefined();
+    core.answerPermission(r.requestId, 'reject');
+    await read;
   });
 
   it('never counts down a review or careful request', async () => {
