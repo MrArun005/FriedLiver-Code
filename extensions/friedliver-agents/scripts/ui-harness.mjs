@@ -1997,6 +1997,19 @@ async function discussChecks({ open, check }) {
     console.log(`  ${file}`);
   };
   const noScroll = (p) => p.evaluate(() => [...document.querySelectorAll('.transcript, body')].every((e) => e.scrollWidth <= e.clientWidth + 1));
+  // The header's status pill follows the discussion, not the starter's last turn (never "Done" while another agent speaks).
+  for (const width of [900, 480]) {
+    const p = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main', width, 900, 2);
+    await p.waitForSelector('.fl-discuss');
+    await p.waitForTimeout(500);
+    check((await p.locator('.chat-head .status-pill').innerText()) === 'Discussing · Codex speaking', `${width}: the running discussion's header says who is speaking`);
+    await shot(p, `discuss-header-${width}-dark`);
+    await p.close();
+    const done = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-agreed', width, 900, 2);
+    await done.waitForSelector('.fl-discuss');
+    check((await done.locator('.chat-head .status-pill').innerText()) === 'Done', `${width}: once it ends the header is back to the chat's own status`);
+    await done.close();
+  }
   for (const width of [1200, 640]) {
     const before = await open(`surface=chat&theme=dark-2026&fixture=discuss-before&select=chat-main`, width, 1400, 2);
     await before.waitForSelector('.link-card');
