@@ -4,7 +4,7 @@
 // origin's localStorage and goes only in the Authorization header.
 import { render } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { rowShowsWhole } from './rules';
+import { nextAfter, rowShowsWhole, sheetTarget } from './rules';
 import { parseMarkdown, type Block, type Inline, type ListBlock } from '../../shared/markdown';
 import type { AgentKey } from '../../shared/model';
 import type { QuestionField, QuestionValue } from '../../shared/questions';
@@ -293,6 +293,8 @@ interface Req {
   extra: { label: string; run(): void }[];
   body?: preact.ComponentChildren;
   question?: Extract<PhoneItem, { k: 'question' }>;
+  /** How the request read: an open sheet notices when it changes. */
+  sig: string;
   /** A question's answer. */
   answer?(values: Record<string, QuestionValue>): void;
 }
@@ -306,6 +308,11 @@ const quickAllow = (r: Req, truncated: boolean) =>
 
 /** A pending item as a request; undefined for anything already decided or not a request. */
 function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined {
+  const r = requestShape(item, agent, act);
+  return r && { ...r, sig: JSON.stringify(item) };
+}
+
+function requestShape(item: PhoneItem, agent: AgentKey, act: Act): Omit<Req, 'sig'> | undefined {
   switch (item.k) {
     case 'permission': {
       if (item.answer) return undefined;
@@ -715,15 +722,76 @@ function RequestPanel({ req, done }: { req: Req; done(): void }) {
 }
 
 /** The request sheet: one request, or the queue of them, swiped or paged with ‹ ›. */
-function RequestSheet({ reqs, index, setIndex, close }: { reqs: Req[]; index: number; setIndex(i: number): void; close(): void }) {
-  const req = reqs[Math.min(index, reqs.length - 1)];
+/** What the sheet has open: a request by id, and how it read when opened (its signature). */
+type Open = { id: string; sig: string };
+
+/**
+ * The request sheet: one request, tracked by id, never by position, so a list that changes can't put
+ * another request under your finger. A request that leaves or changes says so instead of being replaced.
+ * After an answer the next one is offered, and opens after a 400 ms settle (or a tap), as a new panel
+ * that needs a fresh press.
+ */
+function RequestSheet({ reqs, open, setOpen, close }: { reqs: Req[]; open: Open; setOpen(o: Open): void; close(): void }) {
   const start = useRef<number | undefined>(undefined);
+  const [settled, setSettled] = useState<{ next?: Req } | undefined>(undefined);
+  const list = reqs.map((r) => ({ id: r.id, sig: r.sig }));
+  const target = sheetTarget(list, open);
+  const at = target.kind === 'ok' ? target.index : -1;
+  const req = at >= 0 ? reqs[at] : undefined;
+  const go = (r: Req | undefined) => (r ? setOpen({ id: r.id, sig: r.sig }) : close());
+  const step = (by: number) => {
+    const from = list.findIndex((r) => r.id === open.id);
+    go(reqs[(Math.max(from, 0) + by + reqs.length) % reqs.length]);
+  };
   useEffect(() => {
-    if (!req) close();
-  }, [req]);
-  if (!req) return null;
-  const at = reqs.indexOf(req);
-  const next = () => (reqs.length > 1 ? setIndex(Math.min(at, reqs.length - 2)) : close());
+    if (!settled) return;
+    const t = setTimeout(() => {
+      setSettled(undefined);
+      const still = settled.next && reqs.find((r) => r.id === settled.next!.id && r.sig === settled.next!.sig);
+      go(still);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [settled]);
+  const answered = () => {
+    const nextId = nextAfter(list.map((r) => r.id), open.id);
+    setSettled({ next: reqs.find((r) => r.id === nextId) });
+  };
+  let content: preact.ComponentChildren;
+  if (settled) {
+    content = (
+      <div class="sheet__state">
+        <p class="sheet__state-title">
+          <Glyph name="check" /> Answered
+        </p>
+        {settled.next ? (
+          <button class="btn-text btn-text--sm" onClick={() => (setSettled(undefined), go(settled.next))}>
+            Next: {settled.next.verb} {settled.next.target && !settled.next.prose ? settled.next.target : ''}
+          </button>
+        ) : null}
+      </div>
+    );
+  } else if (target.kind === 'gone') {
+    content = (
+      <div class="sheet__state">
+        <p class="sheet__state-title">This request is no longer waiting.</p>
+        <p class="meta">It was answered elsewhere, or the agent moved on.</p>
+        <button class="btn-text" onClick={close}>
+          Close
+        </button>
+      </div>
+    );
+  } else if (target.kind === 'changed') {
+    content = (
+      <div class="sheet__state">
+        <p class="sheet__state-title">This request changed. Review it again.</p>
+        <button class="btn-text" onClick={() => setOpen({ id: open.id, sig: reqs.find((r) => r.id === open.id)!.sig })}>
+          Review again
+        </button>
+      </div>
+    );
+  } else {
+    content = <RequestPanel key={`${req!.id}:${req!.sig}`} req={req!} done={answered} />;
+  }
   return (
     <div class="sheet" role="dialog" aria-modal="true" aria-label="Request" onClick={(e) => e.target === e.currentTarget && close()}>
       <div
@@ -731,20 +799,20 @@ function RequestSheet({ reqs, index, setIndex, close }: { reqs: Req[]; index: nu
         onTouchStart={(e) => (start.current = e.touches[0]?.clientX)}
         onTouchEnd={(e) => {
           const dx = (e.changedTouches[0]?.clientX ?? 0) - (start.current ?? 0);
-          if (reqs.length > 1 && Math.abs(dx) > 80 && !(e.target as HTMLElement).closest('pre, .preview')) setIndex((at + (dx < 0 ? 1 : reqs.length - 1)) % reqs.length);
+          if (!settled && req && reqs.length > 1 && Math.abs(dx) > 80 && !(e.target as HTMLElement).closest('pre, .preview, .btn-lg')) step(dx < 0 ? 1 : -1);
         }}
       >
         <div class="sheet__grab" aria-hidden="true" />
         <header class="sheet__nav">
-          {reqs.length > 1 ? (
+          {reqs.length > 1 && req && !settled ? (
             <>
-              <button class="round round--quiet" aria-label="Previous request" onClick={() => setIndex((at + reqs.length - 1) % reqs.length)}>
+              <button class="round round--quiet" aria-label="Previous request" onClick={() => step(-1)}>
                 <Icon name="back" />
               </button>
               <span class="meta">
                 {at + 1} of {reqs.length} waiting
               </span>
-              <button class="round round--quiet round--flip" aria-label="Next request" onClick={() => setIndex((at + 1) % reqs.length)}>
+              <button class="round round--quiet round--flip" aria-label="Next request" onClick={() => step(1)}>
                 <Icon name="back" />
               </button>
             </>
@@ -755,7 +823,7 @@ function RequestSheet({ reqs, index, setIndex, close }: { reqs: Req[]; index: nu
             Close
           </button>
         </header>
-        <RequestPanel key={req.id} req={req} done={next} />
+        {content}
       </div>
     </div>
   );
@@ -891,7 +959,7 @@ function ListScreen({ list, live, open, newChat, settings }: { list: PhoneList |
 function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act; back(): void }) {
   const [text, setText] = useState('');
   const [subsOpen, setSubsOpen] = useState(false);
-  const [sheet, setSheet] = useState<number | undefined>(undefined);
+  const [sheet, setSheet] = useState<Open | undefined>(undefined);
   const flushUndo = useRef<(() => void) | undefined>(undefined);
   /** A swiped answer waits 3 s before it is sent, so Undo really undoes: the agent hasn't seen it. */
   const [undo, setUndo] = useState<{ id: string; text: string; timer: ReturnType<typeof setTimeout> } | undefined>(undefined);
@@ -983,7 +1051,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
         {chat.earlier ? <p class="notice">{chat.earlier} earlier items are on your Mac.</p> : null}
         {chat.items.map((item, i) => {
           const r = requestOf(item, chat.agent, act);
-          if (r) return r.id === undo?.id ? null : <PendingRow key={r.id} req={r} open={() => setSheet(reqs.findIndex((x) => x.id === r.id))} swiped={(dir, run) => swiped(r, dir, run)} />;
+          if (r) return r.id === undo?.id ? null : <PendingRow key={r.id} req={r} open={() => setSheet({ id: r.id, sig: r.sig })} swiped={(dir, run) => swiped(r, dir, run)} />;
           return <ItemView key={`${chat.id}-${i}-${item.k}`} item={item} />;
         })}
         {chat.busy ? <p class="working">Working…</p> : null}
@@ -1004,12 +1072,12 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
           </button>
         </div>
       ) : reqs.length > 1 ? (
-        <button class="waiting" onClick={() => setSheet(0)}>
+        <button class="waiting" onClick={() => setSheet({ id: reqs[0].id, sig: reqs[0].sig })}>
           <span class="waiting__dot" aria-hidden="true" />
           {reqs.length} waiting<span class="waiting__go">Review</span>
         </button>
       ) : null}
-      {sheet !== undefined && reqs.length ? <RequestSheet reqs={reqs} index={sheet} setIndex={setSheet} close={() => setSheet(undefined)} /> : null}
+      {sheet ? <RequestSheet reqs={reqs} open={sheet} setOpen={setSheet} close={() => setSheet(undefined)} /> : null}
       <footer class="composer">
         <textarea
           class="composer__input"
