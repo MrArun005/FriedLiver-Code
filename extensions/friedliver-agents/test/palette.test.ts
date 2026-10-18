@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 const media = (f: string) => readFileSync(path.join(__dirname, '../media', f), 'utf8');
 const tokens = media('tokens.css');
 // Every stylesheet a view loads, in order: the var()s they read must all be defined.
-const css = ['tokens.css', 'components.css', 'webview.css'].map(media).join('\n');
+const css = ['tokens.css', 'webview.css', 'components.css'].map(media).join('\n');
 const declarations = (text: string) => Object.fromEntries([...text.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((d) => [d[1], d[2].trim()]));
 const block = () => {
   const m = tokens.match(/\/\* tokens:start \*\/([\s\S]*?)\/\* tokens:end \*\//);

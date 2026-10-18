@@ -256,7 +256,7 @@ export const DOT_LABEL: Record<string, string> = {
  * an animation that never ends repaints the webview every frame.
  */
 export function Dot({ state, still }: { state: string; still?: boolean }) {
-  return <span class="fl-dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
+  return <span class="fl-dot dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
 }
 
 /** Where a reply is shown: the chat (for Run in terminal) and its folder (for file links). */

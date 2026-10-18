@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Writes test/fixtures/theme-{dark,light}-2026.css: the --vscode-* variables a
+// Writes test/fixtures/theme-{dark,light}-2026.css and theme-hc-dark.css: the --vscode-* variables a
 // webview gets in the owner's theme (Dark 2026, and Light 2026 to check the
 // other kind), for the UI harness (?theme=dark-2026). Reads the built-in theme
 // JSON (its include chain) from an installed FriedLiver or VS Code, then adds
@@ -43,10 +43,53 @@ const FONTS = {
   'editor-font-size': '12px',
 };
 
-for (const [name, file, kind] of [['dark-2026', '2026-dark.json', 'dark'], ['light-2026', '2026-light.json', 'light']]) {
+// High Contrast sets almost nothing itself; a webview gets VS Code's registered hcDark defaults for the
+// keys below (src/vs/platform/theme/common/colors/*). Keys VS Code leaves null there stay unset, as in
+// the editor, so our tokens fall back exactly as they would.
+const HC_DARK = {
+  foreground: '#FFFFFF',
+  descriptionForeground: '#FFFFFFB3',
+  disabledForeground: '#A5A5A5',
+  errorForeground: '#F48771',
+  focusBorder: '#F38518',
+  contrastBorder: '#6FC3DF',
+  contrastActiveBorder: '#F38518',
+  'textLink.foreground': '#21A6FF',
+  'textCodeBlock.background': '#0A0A0A',
+  'textPreformat.foreground': '#FFFFFF',
+  'textPreformat.background': '#000000',
+  'input.background': '#000000',
+  'input.foreground': '#FFFFFF',
+  'input.border': '#6FC3DF',
+  'input.placeholderForeground': '#FFFFFFB3',
+  'inputOption.activeBorder': '#6FC3DF',
+  'menu.background': '#000000',
+  'menu.foreground': '#FFFFFF',
+  'menu.border': '#6FC3DF',
+  'widget.border': '#6FC3DF',
+  'editorWidget.border': '#6FC3DF',
+  'button.foreground': '#FFFFFF',
+  'button.border': '#6FC3DF',
+  'sideBar.background': '#000000',
+  'list.activeSelectionForeground': '#FFFFFF',
+  'editorWarning.foreground': '#FFD370',
+  'gitDecoration.addedResourceForeground': '#A1E3AD',
+  'gitDecoration.deletedResourceForeground': '#C74E39',
+  'charts.blue': '#57A3F8',
+  'charts.green': '#89D185',
+  'charts.orange': '#D18616',
+};
+
+const builds = [
+  ['dark-2026', '2026-dark.json', 'dark'],
+  ['light-2026', '2026-light.json', 'light'],
+  ['hc-dark', 'hc_black.json', 'hc'],
+];
+for (const [name, file, kind] of builds) {
   const c = colors(file);
-  for (const [key, value] of Object.entries(REGISTERED)) c[key] ??= value(c, kind);
-  for (const contributed of pkg.contributes.colors) c[contributed.id] ??= contributed.defaults[kind];
+  if (kind === 'hc') Object.assign(c, HC_DARK, c);
+  else for (const [key, value] of Object.entries(REGISTERED)) c[key] ??= value(c, kind);
+  for (const contributed of pkg.contributes.colors) c[contributed.id] ??= contributed.defaults[kind === 'hc' ? 'highContrast' : kind] ?? contributed.defaults.dark;
   const vars = Object.entries(c)
     .filter(([, v]) => typeof v === 'string' && v)
     .map(([k, v]) => `  --vscode-${k.replace(/\./g, '-')}: ${v};`);

@@ -5,6 +5,7 @@
  * Only tokens.css holds raw values; a component may set its own geometry as custom properties
  * at its root (named --<component>-*). Preact wrappers: src/webview/ui/.
  * Nothing outside this file may style buttons, pills or fields (test/designSystem.test.ts).
+ * Loaded last (tokens.css, webview.css, components.css): a component wins a tie with a view rule.
  */
 
 /* ---- Base: resets, not looks ---- */
@@ -28,7 +29,7 @@
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
-:focus-visible {
+:where(:focus-visible) {
   outline: 1px solid var(--focus);
   outline-offset: -1px;
 }
@@ -72,23 +73,16 @@
   height: var(--i-sm);
   margin: 0;
 }
+/* A key: the text's own size, 1px 4px, r3 on the code tone. */
 :where(kbd),
 .fl-kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--h-2xs);
-  height: var(--h-2xs);
-  padding: 0 var(--sp-1);
+  padding: 1px var(--sp-1);
   border: var(--line) solid var(--border);
   border-radius: var(--r-3);
   background: var(--code-bg);
   color: var(--fg-2);
   font: inherit;
-  font-size: var(--t-85);
-  line-height: 1;
   white-space: nowrap;
-  vertical-align: baseline;
 }
 /* A key inside a button: no box, 55%, after the label ("Allow ⏎"). */
 .fl-kbd--inline {
@@ -116,7 +110,7 @@
   word-break: break-word;
   font-size: var(--t-85);
 }
-.icon {
+:where(.icon) {
   flex: none;
 }
 
@@ -178,11 +172,14 @@
   opacity: 0.4;
   cursor: default;
 }
-/* A toggle button that is on, or the trigger of an open menu. */
-.fl-btn[aria-pressed='true'],
+/* The trigger of an open menu keeps its pressed fill. */
 .fl-btn[aria-expanded='true'] {
-  --btn-bg: var(--sel-bg);
-  --btn-bg-hover: var(--sel-bg);
+  background: var(--btn-bg-active);
+}
+/* A quiet or secondary toggle button that is on: the same "on" as a pressed pill (focus blue at 24%). */
+:is(.fl-btn--secondary, .fl-btn--quiet)[aria-pressed='true'] {
+  --btn-bg: color-mix(in srgb, var(--focus) 24%, transparent);
+  --btn-bg-hover: color-mix(in srgb, var(--focus) 32%, transparent);
   --btn-fg: var(--sel-fg);
   outline: var(--sel-outline);
   outline-offset: -1px;
@@ -272,6 +269,7 @@
 }
 /* Loading: the label keeps its room, a spinner sits in the middle. */
 .fl-btn[aria-busy='true'] {
+  color: transparent;
   cursor: progress;
 }
 .fl-btn[aria-busy='true'] > :not(.fl-spinner) {
@@ -281,6 +279,8 @@
   position: absolute;
   inset: 0;
   margin: auto;
+  border-color: color-mix(in srgb, var(--btn-fg) 25%, transparent);
+  border-top-color: var(--btn-fg);
 }
 .fl-btn__sub {
   color: var(--fg-2);
@@ -444,9 +444,10 @@ button.fl-pill:focus-visible {
 .fl-pill[aria-pressed='true'],
 .fl-pill[aria-selected='true'],
 .fl-pill[aria-checked='true'] {
+  /* On: the theme's focus blue at 24% (a selection, not a status), the strong text colour. */
   --pill-c: var(--sel-fg);
-  --pill-fill: var(--sel-bg);
-  --pill-fill-hover: var(--sel-bg);
+  --pill-fill: color-mix(in srgb, var(--focus) 24%, transparent);
+  --pill-fill-hover: color-mix(in srgb, var(--focus) 32%, transparent);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -594,6 +595,7 @@ button.fl-pill:focus-visible {
   left: calc(var(--tg-w) - var(--tg-k) - (var(--tg-h) - var(--tg-k)) / 2);
 }
 .fl-toggle:hover:not(:disabled) {
+  filter: brightness(1.2);
   outline: var(--hover-outline);
 }
 .fl-toggle:focus-visible {
@@ -1391,10 +1393,11 @@ button.fl-row,
 .fl-row__twisty {
   display: inline-grid;
   color: var(--fg-2);
+  transform: rotate(-90deg);
   transition: transform var(--dur) var(--ease-out);
 }
 .fl-row[aria-expanded='true'] > .fl-row__twisty {
-  transform: rotate(90deg);
+  transform: none;
 }
 
 /* ---- Table (§2.18): full width; header 26, rows 32; hairline rules, no column lines ---- */
@@ -1995,7 +1998,7 @@ button.cc-pill:hover {
 button.cc-agents {
   flex: none;
 }
-button.cc-agents .fl-dot {
+button.cc-agents .dot {
   width: 6px;
   height: 6px;
 }
@@ -2162,14 +2165,11 @@ button.sa-name:hover {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-8);
-  /* The Menu component's surface (§2.11): glass on elevation 3. */
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--elev-3);
+  background: var(--menu-bg);
   color: var(--fg);
   font-size: var(--t-100);
   text-align: left;
-  animation: rise var(--dur) var(--ease-out);
+  animation: var(--fade-menu);
 }
 .cc-modes-menu {
   left: auto;
@@ -2249,7 +2249,7 @@ button.cc-item,
   flex: none;
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 10px;
   margin: 0 var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
   border-radius: var(--r-4);
