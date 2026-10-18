@@ -43,6 +43,54 @@ index f6b4122a..ece7a8ff 100644
  	padding: 0;
  	border-radius: 0;
  }
+diff --git a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
+index 38e72282..92edbdd3 100644
+--- a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
++++ b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
+@@ -39,7 +39,7 @@ import { logNotificationInteraction } from '../../../common/notificationTelemetr
+ 
+ export class NotificationsCenter extends Themable implements INotificationsCenterController {
+ 
+-	private static readonly MAX_DIMENSIONS = new Dimension(450, 400);
++	private static readonly MAX_DIMENSIONS = new Dimension(400, 400); // FriedLiver: Toast §2.13 width
+ 
+ 	private static readonly MAX_NOTIFICATION_SOURCES = 10; // maximum number of notification sources to show in configure dropdown
+ 
+diff --git a/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts b/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
+index 0b62b580..600c14e7 100644
+--- a/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
++++ b/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
+@@ -47,7 +47,7 @@ enum ToastVisibility {
+ 
+ export class NotificationsToasts extends Themable implements INotificationsToastController {
+ 
+-	private static readonly MAX_WIDTH = 450;
++	private static readonly MAX_WIDTH = 400; // FriedLiver: Toast §2.13
+ 	private static readonly MAX_NOTIFICATIONS = 3;
+ 
+ 	private static readonly PURGE_TIMEOUT: { [severity: number]: number } = {
+diff --git a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
+index ebb6b6f9..789518fe 100644
+--- a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
++++ b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
+@@ -39,7 +39,7 @@ import { logNotificationInteraction, NotificationTelemetrySurface } from '../../
+ import { NotificationActionRunner } from './notificationsCommands.js';
+ 
+ /** Default height (px) of a single notification row. */
+-export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 42;
++export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 38; // FriedLiver: Toast §2.13 (8 + 22 + 8)
+ 
+ /** Compact height (px) of a single notification row. */
+ export const COMPACT_NOTIFICATION_ROW_HEIGHT = 34;
+@@ -117,7 +117,7 @@ export class NotificationsListDelegate implements IListVirtualDelegate<INotifica
+ 		if (isNonEmptyArray(notification.actions?.secondary)) {
+ 			actions++; // secondary actions
+ 		}
+-		this.offsetHelper.style.width = `${450 /* notifications container width */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
++		this.offsetHelper.style.width = `${400 /* notifications container width (FriedLiver: Toast §2.13) */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
+ 
+ 		// Render message into offset helper
+ 		const renderedMessage = NotificationMessageRenderer.render(notification.message);
 diff --git a/src/vs/workbench/browser/style.ts b/src/vs/workbench/browser/style.ts
 index 9250ef3f..b3e411a0 100644
 --- a/src/vs/workbench/browser/style.ts
@@ -56,3 +104,46 @@ index 9250ef3f..b3e411a0 100644
  import { registerThemingParticipant } from '../../platform/theme/common/themeService.js';
  import { WORKBENCH_BACKGROUND, TITLE_BAR_ACTIVE_BACKGROUND } from '../common/theme.js';
  import { isWeb, isIOS } from '../../base/common/platform.js';
+diff --git a/src/vs/workbench/electron-browser/desktop.contribution.ts b/src/vs/workbench/electron-browser/desktop.contribution.ts
+index 41250d7b..a609834a 100644
+--- a/src/vs/workbench/electron-browser/desktop.contribution.ts
++++ b/src/vs/workbench/electron-browser/desktop.contribution.ts
+@@ -28,7 +28,6 @@ import { NativeWindow } from './window.js';
+ import { ModifierKeyEmitter } from '../../base/browser/dom.js';
+ import { applicationConfigurationNodeBase, securityConfigurationNodeBase } from '../common/configuration.js';
+ import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from '../../platform/window/electron-browser/window.js';
+-import product from '../../platform/product/common/product.js';
+ 
+ // Actions
+ (function registerActions(): void {
+@@ -281,7 +280,7 @@ import product from '../../platform/product/common/product.js';
+ 						localize(`window.menuStyle.native`, "Use the native menu. This is ignored when {0} is set to {1}.", '`#window.titleBarStyle#`', '`custom`'),
+ 						localize(`window.menuStyle.inherit`, "Matches the menu style to the title bar style defined in {0}.", '`#window.titleBarStyle#`'),
+ 					],
+-				'default': product.quality !== 'stable' ? 'inherit' : (isMacintosh ? 'native' : 'inherit'), // TODO@bpasero figure out the default
++				'default': 'inherit', // FriedLiver: custom menus on macOS too (they follow the custom title bar)
+ 				'scope': ConfigurationScope.APPLICATION,
+ 				'markdownDescription': isMacintosh ?
+ 					localize('window.menuStyle.mac', "Adjust the context menu appearances to either be native by the OS, custom, or inherited from the title bar style defined in {0}.", '`#window.titleBarStyle#`') :
+@@ -291,7 +290,7 @@ import product from '../../platform/product/common/product.js';
+ 			'window.dialogStyle': {
+ 				'type': 'string',
+ 				'enum': ['native', 'custom'],
+-				'default': 'native',
++				'default': 'custom', // FriedLiver: dialogs FriedLiver styles
+ 				'scope': ConfigurationScope.APPLICATION,
+ 				'description': localize('dialogStyle', "Adjust the appearance of dialogs to be native by the OS or custom."),
+ 				agentsWindow: { default: 'custom' },
+diff --git a/src/vs/workbench/services/layout/browser/layoutService.ts b/src/vs/workbench/services/layout/browser/layoutService.ts
+index 6851c3b5..cb87551d 100644
+--- a/src/vs/workbench/services/layout/browser/layoutService.ts
++++ b/src/vs/workbench/services/layout/browser/layoutService.ts
+@@ -62,7 +62,7 @@ export const enum LayoutSettings {
+ export const enum ModernUIFrostedGlassOpacity {
+ 	Minimum = 50,
+ 	Maximum = 100,
+-	Default = 80
++	Default = 84 // FriedLiver: the spec's glass alpha
+ }
+ 
+ export const enum ModernUIEditorTabStyle {
