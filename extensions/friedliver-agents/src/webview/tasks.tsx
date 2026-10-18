@@ -42,7 +42,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill } from './ui';
+import { Button, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
@@ -96,15 +96,14 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
     <ul class="sub-cards" aria-label={label}>
       {(open ? [...live, ...done] : live).map((s) => (
         <li key={s.id}>
-          {onOpen ? (
-            <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => onOpen(s.id)}>
-              <SubCardBody s={s} />
-            </button>
-          ) : (
-            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={[s.title, s.note, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}>
-              <SubCardBody s={s} />
-            </div>
-          )}
+          <UiRow
+            class={onOpen ? 'sub-card' : 'sub-card static'}
+            title={onOpen ? s.title : [s.title, s.note, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}
+            meta={[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}
+            onPress={onOpen && (() => onOpen(s.id))}
+          >
+            <Dot state={SUB_DOT[s.state]} /> {s.title}
+          </UiRow>
         </li>
       ))}
       {done.length > 0 && (
@@ -119,12 +118,9 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
 /** "34 done · show": the folded done subagents of one chat or session. */
 function SubFold({ n, open, onToggle }: { n: number; open: boolean; onToggle(): void }) {
   return (
-    <button type="button" class="sub-card sub-fold" data-status="done" aria-expanded={open} aria-label={`${n} done subagent${n === 1 ? '' : 's'}: ${open ? 'hide' : 'show'}`} onClick={onToggle}>
-      <Dot state="done" still />
-      <span class="sub-title">
-        {n} done · {open ? 'hide' : 'show'}
-      </span>
-    </button>
+    <UiRow class="sub-card sub-fold" expanded={open} label={`${n} done subagent${n === 1 ? '' : 's'}: ${open ? 'hide' : 'show'}`} onPress={onToggle}>
+      {n} done · {open ? 'hide' : 'show'}
+    </UiRow>
   );
 }
 
@@ -185,15 +181,6 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
   );
 }
 
-function SubCardBody({ s }: { s: Subagent }) {
-  return (
-    <>
-      <Dot state={SUB_DOT[s.state]} />
-      <span class="sub-title">{s.title}</span>
-      <span class="hint">{[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}</span>
-    </>
-  );
-}
 
 const openClaude = (sessionId: string) => send({ type: 'openClaudeSession', sessionId });
 const OUTSIDE_TIP = 'Started outside FriedLiver (the claude CLI or the Claude Code extension). FriedLiver only reads it until you open it here.';
@@ -209,7 +196,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
       <article class="fl-card task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
         <div class="card-top">
           <Glyph agent="claude" />
-          <span class="tag" title={OUTSIDE_TIP}>
+          <span class="fl-pill" data-tone="muted" title={OUTSIDE_TIP}>
             {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
           <span class="sep">·</span>
@@ -251,7 +238,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
           </span>
         </td>
         <td class="c-agent">
-          <span class="tag" title={OUTSIDE_TIP}>
+          <span class="fl-pill" data-tone="muted" title={OUTSIDE_TIP}>
             {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
         </td>
@@ -647,10 +634,9 @@ function BadgeView({ badge }: { badge: Badge }) {
     else if (badge.group) document.getElementById(`group-${badge.group}`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   };
   return (
-    <button class="badge" data-kind={badge.kind} onClick={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
-      <Icon name={BADGE_ICON[badge.kind]} />
-      <span class="badge-text">{badge.text}</span>
-    </button>
+    <FilterPill icon={BADGE_ICON[badge.kind]} class="badge" onPress={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
+      {badge.text}
+    </FilterPill>
   );
 }
 
@@ -690,7 +676,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <span class="spacer" />
         <AutoBadge chat={chat} short />
         {(reportedMode(chat.session)?.tone === 'full' || reportedMode(chat.session)?.tone === 'auto') && chat.approval !== 'full' && <ModeBadge session={chat.session} agent={chat.agent} />}
-        {chat.merged && <span class="tag">merged</span>}
+        {chat.merged && <span class="fl-pill" data-tone="muted">merged</span>}
         {/* Connections: out of sight until the card is hovered or has focus; ⋯ holds them too. */}
         <span class="card-connect">
           <HandoffMenu chat={chat} compact />
@@ -708,7 +694,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <Dot state={status} />
         <span class="card-state-text">{line.text}</span>
         {line.waiting > 1 && (
-          <span class="tag loud" title={`${line.waiting} decisions waiting`}>
+          <span class="fl-pill" data-tone="waiting" title={`${line.waiting} decisions waiting`}>
             +{line.waiting - 1}
           </span>
         )}
@@ -730,18 +716,18 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       {(chat.branch || badges.length > 0 || conflicts.length > 0) && (
         <div class="card-pills">
           {chat.branch && (
-            <span class="chip" title={`${chat.branch}\n${chat.cwd}`}>
+            <span class="fl-pill" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
               <Icon name="branch" />
-              <span class="chip-text">{chat.branch}</span>
+              <span class="fl-pill__text">{chat.branch}</span>
             </span>
           )}
           {conflicts.slice(0, 2).map((c) => (
             <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${agentName(o.agent)})`).join(', ')}: they clash when merged`}>
               <Icon name="diff" />
-              <span class="badge-text">{conflictText(c)}</span>
+              <span class="fl-pill__text">{conflictText(c)}</span>
             </span>
           ))}
-          {conflicts.length > 2 && <span class="badge conflict">+{conflicts.length - 2} more shared</span>}
+          {conflicts.length > 2 && <span class="fl-pill" data-tone="warn">+{conflicts.length - 2} more shared</span>}
           {badges.map((b) => (
             <BadgeView key={b.text} badge={b} />
           ))}
@@ -983,9 +969,9 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
             {c.title}
           </span>
           {c.branch && (
-            <span class="chip" title={c.branch}>
+            <span class="fl-pill" data-tone="muted" title={c.branch}>
               <Icon name="branch" />
-              <span class="chip-text">{c.branch}</span>
+              <span class="fl-pill__text">{c.branch}</span>
             </span>
           )}
         </div>
@@ -1097,7 +1083,7 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
           {outside.map((s) => (
             <li key={s.id} class="history-row">
               <Glyph agent="claude" size="sm" />
-              <span class="tag history-label" title={OUTSIDE_TIP}>
+              <span class="fl-pill history-label" data-tone="muted" title={OUTSIDE_TIP}>
                 Claude Code
               </span>
               <button class="title-btn history-title" title={s.title} onClick={() => openClaude(s.id)}>

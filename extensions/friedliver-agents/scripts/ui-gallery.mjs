@@ -70,7 +70,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--fo
 .g-contents { display: contents; }
 .g-show { opacity: 1 !important; }
 .g-paused * { animation-play-state: paused !important; animation-delay: -3s !important; }
-.g-mid::after { animation-play-state: paused !important; animation-delay: -300ms !important; }
+.g-mid::after { transform: scaleX(0.5) !important; transition: none !important; }
 .g-overlay { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: end; padding: 32px; border-radius: 8px; background: var(--overlay); }
 .g-sheet { border-radius: var(--r-12) var(--r-12) 0 0; }
 .composer textarea { width: 100%; }

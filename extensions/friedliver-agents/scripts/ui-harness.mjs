@@ -777,7 +777,7 @@ async function shoot() {
     await p.locator('.link-card[aria-label="Asked Gemini 4"] button:has-text("Open")').click();
     check(await shows('Which session store fits serverless?'), 'Open on a consultation card shows that chat');
     await p.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c7' }, '*'));
-    check((await shows('Rename the price helpers')) && (await p.locator('.link-strip .tag:has-text("archived")').count()) === 1, 'Open from a notification shows an archived chat');
+    check((await shows('Rename the price helpers')) && (await p.locator('.link-strip .fl-pill:has-text("archived")').count()) === 1, 'Open from a notification shows an archived chat');
     await p.close();
   }
   {
@@ -792,7 +792,7 @@ async function shoot() {
       return window.getComputedStyle(document.body).backgroundColor === want;
     }), 'the chat background is the editor background exactly');
     check((await p.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'the placeholder is just Message…');
-    check((await p.locator('.link-strip .badge[data-kind="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
+    check((await p.locator('.link-strip .badge[title*="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
     await p.close();
     const d = await open('surface=chat&theme=black-blue&select=chat-c2', 1200, 800);
     check((await d.locator('.apv .opt-num, .apv .q-num').count()) === 0 && (await d.locator('.apv').count()) > 0, 'decisions are cards with one header row, no numbered option rows');
@@ -1266,7 +1266,7 @@ async function shoot() {
     check((await row('cat << EOF | python3 minidb.py').locator('.step-lines').innerText()) === '15 lines', 'a heredoc command shows its line count');
     check(await p.locator('.tl-step:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))').count() === 1, 'cat << EOF > README.md reads as Write README.md');
     check((await row('python3 minidb.py test.sql 2>&1').locator('.step-main').getAttribute('title'))?.includes(`cd ${STEPS_ROOT} && python3`) ?? false, 'the tooltip has the full command');
-    check(await p.locator('.tl-step[data-open]:has(.tag.bad:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
+    check(await p.locator('.tl-step[data-open]:has(.fl-pill[data-tone="failed"]:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
     const answered = p.locator('.answered:has(.step-label)');
     check((await answered.count()) === 1 && (await answered.evaluate((el) => Math.round(el.getBoundingClientRect().height))) <= 26, 'an answered request for a long command is one line');
     await row('cat << EOF | python3 minidb.py').locator('.step-main').click();

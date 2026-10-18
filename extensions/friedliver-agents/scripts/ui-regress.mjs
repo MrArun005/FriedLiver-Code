@@ -811,7 +811,7 @@ BLOCKS.QUESTION = async () => {
   const after = { kind: 'agent', text: Array.from({ length: 40 }, (_, n) => `Meanwhile, step ${n + 1} of the plan.`).join('\n\n') };
   for (const width of [1200, 640]) {
     const p = await load(width, [rich(), after]);
-    const labels = await p.locator('#item-q-rich .q-opt-label').allInnerTexts();
+    const labels = await p.locator('#item-q-rich .q-opt .fl-radio__text > span:first-child').allInnerTexts();
     check(/^Redis\s*Recommended/.test(labels[0]) && labels.at(-1).startsWith('Other'), `at ${width}px the recommended option comes first with its tag, Other… last [${labels.join(' | ')}]`);
     const nums = await p.locator('#item-q-rich .q-num').allInnerTexts();
     check(nums.join(',') === '1,2,3,4', `rows are numbered [${nums}]`);

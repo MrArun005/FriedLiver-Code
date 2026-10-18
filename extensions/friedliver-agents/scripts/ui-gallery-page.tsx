@@ -4,6 +4,10 @@
 import { render, type ComponentChildren } from 'preact';
 import { Icon } from '../src/webview/common';
 import {
+  ChipButton,
+  ChoiceRow,
+  FileRef,
+  Tab,
   Avatar,
   Banner,
   Button,
@@ -136,6 +140,7 @@ function Gallery() {
             ['icon (muted)', SIZES.map((z) => <IconButton size={z} icon="copy" label="Copy" muted />)],
             ['icon (secondary)', SIZES.map((z) => <IconButton size={z} variant="secondary" icon="plus" label="Add" />)],
             ['icon (brand: send)', SIZES.map((z) => <IconButton size={z} variant="brand" icon="up" label="Send" />)],
+            ['icon round (pagers, phone)', SIZES.map((z) => <IconButton size={z} round variant="secondary" icon="forward" label="Next" />)],
           ]}
         />
         <Matrix
@@ -232,6 +237,16 @@ function Gallery() {
         />
         <div class="g-line">
           Counts: <Count n={3} /> <Count n={12} /> <Count n="99+" /> <Count n={4} loud label="4 waiting" />
+          <span class="g-note">File refs:</span>
+          <FileRef path="src/webview/format.ts" onOpen={noop} />
+          <FileRef path="test/format.test.ts" onOpen={noop} />
+          <span class="g-note">Chips with ×:</span>
+          <ChipButton icon="pipe" onPress={noop} onRemove={noop} removeLabel="Stop the pipe">
+            pipes to Review each search change
+          </ChipButton>
+          <ChipButton lead={<Avatar agent="codex" size="sm" />} onPress={noop}>
+            Codex 3
+          </ChipButton>
         </div>
       </Section>
 
@@ -326,6 +341,12 @@ function Gallery() {
           ]}
         />
         <div class="g-radios">
+          <ChoiceRow selected label="Redis" desc="Shared across instances" kbd="1" onPick={noop} />
+          <ChoiceRow selected={false} label="SQLite" desc="One file" kbd="2" onPick={noop} />
+          <ChoiceRow multi selected label="Lint" kbd="3" onPick={noop} />
+          <ChoiceRow multi selected={false} label="Type-check" kbd="4" onPick={noop} />
+        </div>
+        <div class="g-radios">
           <RadioRow name="g" checked onChange={noop} label="Redis" desc="Shared across instances" />
           <span data-force="hover" data-force-target=".fl-radio">
             <RadioRow name="g" checked={false} onChange={noop} label="SQLite" desc="One file" />
@@ -369,7 +390,9 @@ function Gallery() {
                 <button type="button" class="fl-select" disabled>
                   {selectTrigger('High')}
                 </button>,
-                <span />,
+                <button type="button" class="fl-select fl-select--sm">
+                  {selectTrigger('Default')}
+                </button>,
                 <span />,
               ],
             ],
@@ -472,6 +495,9 @@ function Gallery() {
               ['focused (the keys act on it)', { focus: true }],
               ['needs you', { tone: 'waiting' }],
               ['failed', { tone: 'error' }],
+              ['ghost (a routine sentence row)', { variant: 'ghost' }],
+              ['careful', { tone: 'careful' }],
+              ['focused + careful', { focus: true, tone: 'careful' }],
             ] as const
           ).map(([name, p]) => (
             <Card {...p}>
@@ -527,6 +553,24 @@ function Gallery() {
       </Section>
 
       <Section id="tabs" title="Tabs · List row · Tree row · Table" note="tabs r5 26 · rows r4 26">
+        <div class="fl-tabs" role="tablist" aria-label="Chats">
+          <Tab selected onSelect={noop} onClose={noop}>
+            <Avatar agent="claude" size="sm" />
+            <span class="fl-tab__label">Fix formatCents for negative amounts</span>
+            <span class="fl-dot" data-state="needs-you" />
+          </Tab>
+          <Tab selected={false} onSelect={noop} onClose={noop}>
+            <Avatar agent="codex" size="sm" />
+            <span class="fl-tab__label">Add CSV export</span>
+            <span class="fl-dot" data-state="working" data-still="" />
+          </Tab>
+          <span data-force="hover" data-force-target=".fl-tab" class="g-contents">
+            <Tab selected={false} onSelect={noop} onClose={noop}>
+              <Avatar agent="gemini" size="sm" />
+              <span class="fl-tab__label">Speed up the search query (hover)</span>
+            </Tab>
+          </span>
+        </div>
         <Tabs
           label="Images"
           value="all"
