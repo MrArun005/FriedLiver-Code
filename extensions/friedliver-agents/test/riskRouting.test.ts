@@ -115,6 +115,31 @@ describe('routine countdown', () => {
     }
   });
 
+  it('never counts down a request outside the workspace: a command’s folder or a read’s file', async () => {
+    const dir = await gitRepo();
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'fl-outside-'));
+    await writeFile(path.join(outside, 'notes.txt'), 'x');
+    const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
+    const chat = await core.createChat('demo');
+    for (const [kind, input] of [
+      ['execute', { command: 'git status', cwd: outside }],
+      ['read', { file_path: path.join(outside, 'notes.txt'), locations: [path.join(outside, 'notes.txt')] }],
+    ] as const) {
+      const turn = core.send(chat.id, `native-perm ${kind} ${JSON.stringify(input)}`);
+      await waitFor(() => core.decisions().length === 1);
+      const p = core.chat(chat.id)!.items.filter((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission').at(-1)!;
+      expect(p.autoAt, kind).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(core.decisions(), kind).toHaveLength(1);
+      core.answerPermission(p.requestId, 'reject');
+      await turn;
+    }
+    // The same read inside the workspace does count down.
+    await writeFile(path.join(dir, 'inside.txt'), 'x');
+    await core.send(chat.id, `native-perm read ${JSON.stringify({ file_path: path.join(dir, 'inside.txt'), locations: [path.join(dir, 'inside.txt')] })}`);
+    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({ auto: 'Routine, allowed after the countdown' });
+  });
+
   it('never counts down a review or careful request', async () => {
     const dir = await gitRepo();
     const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
