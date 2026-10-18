@@ -7,6 +7,7 @@ import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '
 import type { ClaudeSession } from '../shared/messages';
 import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
+import { Button, IconButton } from './ui';
 
 const TIP_W = 288;
 
@@ -479,9 +480,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         <b>Subagent</b>
         <span class="hint" title={info?.note}>{SUB_LABEL[state_]}{ms !== undefined ? ` · ${shortDuration(ms)}` : ''}</span>
         <span class="spacer" />
-        <button class="ghost icon-btn sm" aria-label="Close" title="Close" onClick={onClose}>
-          <Icon name="close" />
-        </button>
+        <IconButton icon="close" label="Close" muted size="sm" title="Close" onClick={onClose} />
       </div>
       <div class="tip-title">{info?.title ?? sub.title}</div>
       <div class="tip-meta" title={chat?.label}>of {chat ? chat.title : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
@@ -499,9 +498,9 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
       {session && info?.last && <div class="tip-line">Last step: {info.last}</div>}
       {!steps.length && !answer && !info?.last && <div class="tip-line">{session ? 'Its steps are in that session\'s transcript; FriedLiver lists only its title and state.' : 'No steps reported yet.'}</div>}
       {chat && (
-        <button class="link" onClick={() => send({ type: 'openChat', chatId: chat.id, item: sub.item })}>
+        <Button variant="link" onClick={() => send({ type: 'openChat', chatId: chat.id, item: sub.item })}>
           Show in its chat
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -488,7 +488,7 @@ BLOCKS.F16 = async () => {
     await pick.click();
     const items = p.locator('.fl-menu [role="menuitemradio"]');
     check((await items.count()) > 1 && (await p.locator('.fl-menu [role="menuitemradio"][aria-checked="true"]').count()) === 1, 'it lists the choices with the current one checked');
-    const want = (await items.nth(1).locator('.grow').innerText()).trim();
+    const want = (await items.nth(1).locator('.fl-menu__label').innerText()).trim();
     await items.nth(1).click();
     const label = (await pick.innerText()).trim();
     check(label === want && !(await items.count()), `the button shows the new choice [${label}]`);

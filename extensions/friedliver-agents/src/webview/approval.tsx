@@ -7,8 +7,8 @@
 //   and Always), the preview under it. A sensitive path gets a plain "Allow once" and a lock line. A
 //   careful request is red-toned, lists what would be lost and a safer way, is once only, and allows
 //   on a press-and-hold.
-// Shared component classes (fl-btn and its --sm/--quiet/--brand/--inverse/--danger/--ghost/--icon modifiers, fl-split, fl-hold, fl-chip, fl-card) are the swap points onto
-// the design system's components.
+// Drawn with the design system's components (src/webview/ui, COMPONENTS.md): Button, SplitButton, the hold
+// Button, Segmented, Pill, Countdown, MenuItem and the Card classes.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { SCOPES, SCOPE_NAMES, allowMessage, approvalOf, commandLine, nextScope, primaryLabel, scopeRule, type Approvable, type Approval, type Scope } from '../shared/approval';
@@ -19,6 +19,7 @@ import { siteOrigin } from '../shared/permissions';
 import { relativePath } from '../shared/view';
 import { CopyButton, Glyph, Icon, Markdown, Popover, basename, send, useNow, type IconName } from './common';
 import { DiffView } from './controls';
+import { Button, Countdown as Drain, Kbd, MenuItem, MenuSep, MenuTitle, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
 
 /** What the decision keys do to a request on screen, by its id: set while it is shown. */
 export interface CardKeys {
@@ -130,35 +131,36 @@ export function ApprovalCard(props: ApprovalCardProps) {
 
   const what = <What a={a} item={item} chat={chat} withChip={a.risk.tone !== 'routine' || !!compact} />;
   const deny = a.deny && (
-    <button type="button" class="fl-btn fl-btn--ghost" onClick={() => send(a.deny!)}>
-      {item.kind === 'review' ? 'Reject' : 'Deny'} <span class="k">Esc</span>
-    </button>
+    <Button variant="quiet" kbd="Esc" onClick={() => send(a.deny!)}>
+      {item.kind === 'review' ? 'Reject' : 'Deny'}
+    </Button>
   );
-  const primary = on ? 'fl-btn--brand' : 'fl-btn--quiet';
+  // The request the keys act on gets the one brand button; the others a secondary one.
+  const primary: Variant = on ? 'brand' : 'secondary';
 
   // Routine: one sentence row, with the scope as a token.
   if (a.risk.tone === 'routine' && !compact) {
     return (
-      <section class="fl-card apv apv-row" id={`item-${a.id}`} data-risk="routine" data-on={on ? '' : undefined} aria-label={`${AGENT_FACES[chat.agent].name}: ${a.verb} ${a.target}`.trim()} {...frame}>
+      <section class="fl-card fl-card--ghost fl-card--bare apv apv-row" data-enter="" id={`item-${a.id}`} data-risk="routine" data-focus={on ? '' : undefined} aria-label={`${AGENT_FACES[chat.agent].name}: ${a.verb} ${a.target}`.trim()} {...frame}>
         <div class="apv-hd">
           {what}
           <span class="apv-act">
             {autoAt ? (
               <>
-                <button type="button" class="fl-btn fl-btn--ghost" onClick={stopAuto}>
-                  Stop <span class="k">Esc</span>
-                </button>
-                <button type="button" class={`fl-btn ${primary}`} onClick={() => allowRef.current('once')}>
-                  Allow now <span class="k">⏎</span>
-                </button>
+                <Button variant="quiet" kbd="Esc" onClick={stopAuto}>
+                  Stop
+                </Button>
+                <Button variant={primary} kbd="⏎" onClick={() => allowRef.current('once')}>
+                  Allow now
+                </Button>
               </>
             ) : (
               <>
                 <ScopeToken a={a} item={item} chat={chat} scope={current} setScope={setScope} />
                 {deny}
-                <button type="button" class={`fl-btn ${primary}`} onClick={() => allowRef.current()}>
-                  {a.yes} <span class="k">⏎</span>
-                </button>
+                <Button variant={primary} kbd="⏎" onClick={() => allowRef.current()}>
+                  {a.yes}
+                </Button>
               </>
             )}
           </span>
@@ -174,10 +176,12 @@ export function ApprovalCard(props: ApprovalCardProps) {
   const offered = SCOPES.filter((s) => s !== 'once' && allowMessage(a, s));
   return (
     <section
-      class="fl-card apv"
+      class="fl-card fl-card--bare apv"
+      data-enter=""
       id={`item-${a.id}`}
       data-risk={a.risk.tone}
-      data-on={on ? '' : undefined}
+      data-tone={a.risk.tone === 'careful' ? 'careful' : undefined}
+      data-focus={on ? '' : undefined}
       data-compact={compact ? '' : undefined}
       aria-label={`${AGENT_FACES[chat.agent].name}: ${a.verb} ${a.target}`.trim()}
       {...frame}
@@ -186,27 +190,21 @@ export function ApprovalCard(props: ApprovalCardProps) {
         {what}
         <span class="apv-act">
           {a.hold && (
-            <span class="fl-chip apv-once" title={a.risk.lock}>
-              <Icon name="lock" size={12} /> once only
-            </span>
+            <Pill icon="lock" title={a.risk.lock} class="apv-once">
+              once only
+            </Pill>
           )}
           {a.others.length > 0 && (
-            <Popover label="Other answers" title="The agent's other answers" buttonClass="fl-btn fl-btn--ghost fl-btn--icon" align="end" trigger={<Icon name="more" size={14} />}>
-              {(close) =>
-                a.others.map((o) => (
-                  <button key={o.label} role="menuitem" onClick={() => (close(), send(o.message))}>
-                    <span class="menu-label">{o.label}</span>
-                  </button>
-                ))
-              }
+            <Popover label="Other answers" title="The agent's other answers" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" align="end" trigger={<Icon name="more" />}>
+              {(close) => a.others.map((o) => <MenuItem key={o.label} label={o.label} onSelect={() => (close(), send(o.message))} />)}
             </Popover>
           )}
           {deny}
           {a.hold
             ? a.allow.once && (
-                <button
-                  type="button"
-                  class="fl-btn fl-btn--danger fl-hold"
+                <Button
+                  variant="danger"
+                  class="fl-btn--hold"
                   data-holding={holding ? '' : undefined}
                   aria-label={`Press and hold to ${a.yes.toLowerCase()}`}
                   onPointerDown={(e) => e.button === 0 && start()}
@@ -222,17 +220,17 @@ export function ApprovalCard(props: ApprovalCardProps) {
                   onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && release()}
                 >
                   <span>
-                    Hold <span class="k">⏎</span> to {a.yes.toLowerCase()}
+                    Hold <Kbd inline>⏎</Kbd> to {a.yes.toLowerCase()}
                   </span>
-                </button>
+                </Button>
               )
             : a.allow.once &&
               (offered.length ? (
                 <SplitAllow a={a} item={item} chat={chat} tone={primary} scope={current} allow={(s, g) => allowRef.current(s, g)} />
               ) : (
-                <button type="button" class={`fl-btn ${primary}`} onClick={() => allowRef.current('once')}>
-                  {primaryLabel(a, 'once')} <span class="k">⏎</span>
-                </button>
+                <Button variant={primary} kbd="⏎" onClick={() => allowRef.current('once')}>
+                  {primaryLabel(a, 'once')}
+                </Button>
               ))}
         </span>
       </div>
@@ -240,7 +238,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
       {compact && a.risk.consequences.length > 0 && <Risks a={a} />}
       {a.risk.lock && !a.hold && (
         <div class="apv-lock">
-          <Icon name="lock" size={12} />
+          <Icon name="lock" />
           {a.risk.lock}
         </div>
       )}
@@ -271,10 +269,9 @@ function What({ a, item, chat, withChip }: { a: Approval; item: Approvable; chat
       </span>
       {a.where && <span class="apv-wh">{a.where}</span>}
       {withChip ? (
-        <span class="fl-chip" data-tone={a.risk.tone} title={a.risk.lock}>
-          {a.risk.lock && a.risk.tone !== 'careful' ? <Icon name="lock" size={12} /> : null}
-          <span>{a.risk.label}</span>
-        </span>
+        <Pill tone={a.risk.tone} dot={!(a.risk.lock && a.risk.tone !== 'careful')} icon={a.risk.lock && a.risk.tone !== 'careful' ? 'lock' : undefined} title={a.risk.lock}>
+          {a.risk.label}
+        </Pill>
       ) : (
         <span class="apv-label">· {a.risk.label.toLowerCase()}</span>
       )}
@@ -283,7 +280,7 @@ function What({ a, item, chat, withChip }: { a: Approval; item: Approvable; chat
 }
 
 /** "Allow once ⏎ │ ▾": the label repeats the scope Tab chose; the menu allows with any scope, each naming its exact rule. */
-function SplitAllow({ a, item, chat, tone, scope, allow }: { a: Approval; item: Approvable; chat: ChatView; tone: string; scope: Scope; allow(scope: Scope, grant?: number): void }) {
+function SplitAllow({ a, item, chat, tone, scope, allow }: { a: Approval; item: Approvable; chat: ChatView; tone: Variant; scope: Scope; allow(scope: Scope, grant?: number): void }) {
   const rows: { scope: Scope; grant: number; rule?: string; why?: string }[] = [
     { scope: 'once', grant: 0, rule: scopeRule(a, item, chat, 'once') },
     { scope: 'chat', grant: 0, rule: scopeRule(a, item, chat, 'chat'), why: a.locked.chat },
@@ -292,44 +289,40 @@ function SplitAllow({ a, item, chat, tone, scope, allow }: { a: Approval; item: 
       : [{ scope: 'always' as const, grant: 0, rule: scopeRule(a, item, chat, 'always'), why: a.locked.always }]),
   ];
   return (
-    <span class="fl-split">
-      <button type="button" class={`fl-btn ${tone}`} onClick={() => allow(scope)}>
-        {primaryLabel(a, scope)} <span class="k">⏎</span>
-      </button>
-      <Popover label="Allow" title="Once, for this chat or always (Tab picks the default)" buttonClass={`fl-btn ${tone} fl-btn--icon fl-split-caret`} align="end" trigger={<Icon name="chevron" size={12} />}>
-        {(close) => (
-          <>
-            <div class="fl-menu__title" aria-hidden="true">
-              Allow
-            </div>
-            {rows.map((r) => (
-              <button
-                key={`${r.scope}${r.grant}`}
-                role="menuitemradio"
-                aria-checked={r.scope === scope && r.grant === 0}
-                class="apv-scope-row"
-                disabled={!r.rule}
-                title={r.why}
-                onClick={() => (close(), allow(r.scope, r.grant))}
-              >
-                <span class="apv-check">{r.scope === scope && r.grant === 0 && <Icon name="check" size={14} />}</span>
-                <span class="apv-scope-text">
-                  <span class="menu-label">
-                    {r.scope === 'chat' ? 'For this chat' : SCOPE_NAMES[r.scope]}
-                    {!r.rule && <Icon name="lock" size={12} />}
-                  </span>
-                  <span class="menu-sub">{r.rule ? <Ticks text={r.rule} /> : r.why}</span>
-                </span>
-              </button>
-            ))}
-            <div class="fl-menu__sep" />
-            <button role="menuitem" onClick={() => (close(), send({ type: 'managePermissions' }))}>
-              <span class="menu-label">Manage permissions…</span>
-            </button>
-          </>
-        )}
-      </Popover>
-    </span>
+    <SplitButton
+      variant={tone}
+      kbd="⏎"
+      onClick={() => allow(scope)}
+      menu={(triggerClass) => (
+        <Popover label="Allow" title="Once, for this chat or always (Tab picks the default)" buttonClass={cx(triggerClass, 'fl-split-caret')} align="end" trigger={<Icon name="chevronDown" />}>
+          {(close) => (
+            <>
+              <MenuTitle>Allow</MenuTitle>
+              {rows.map((r) => (
+                <MenuItem
+                  key={`${r.scope}${r.grant}`}
+                  class="apv-scope-row"
+                  checked={r.scope === scope && r.grant === 0}
+                  disabled={!r.rule}
+                  title={r.why}
+                  label={
+                    <>
+                      {r.scope === 'chat' ? 'For this chat' : SCOPE_NAMES[r.scope]} {!r.rule && <Icon name="lock" size={12} />}
+                    </>
+                  }
+                  desc={r.rule ? <Ticks text={r.rule} /> : r.why}
+                  onSelect={() => (close(), allow(r.scope, r.grant))}
+                />
+              ))}
+              <MenuSep />
+              <MenuItem label="Manage permissions…" onSelect={() => (close(), send({ type: 'managePermissions' }))} />
+            </>
+          )}
+        </Popover>
+      )}
+    >
+      {primaryLabel(a, scope)}
+    </SplitButton>
   );
 }
 
@@ -337,9 +330,9 @@ function SplitAllow({ a, item, chat, tone, scope, allow }: { a: Approval; item: 
 function ScopeToken({ a, item, chat, scope, setScope }: { a: Approval; item: Approvable; chat: ChatView; scope: Scope; setScope(s: Scope): void }) {
   if (!allowMessage(a, 'chat') && !allowMessage(a, 'always')) {
     return (
-      <span class="fl-chip apv-once" title={a.risk.lock ?? a.locked.always}>
-        <Icon name="lock" size={12} /> once only
-      </span>
+      <Pill icon="lock" title={a.risk.lock ?? a.locked.always} class="apv-once">
+        once only
+      </Pill>
     );
   }
   return (
@@ -348,11 +341,11 @@ function ScopeToken({ a, item, chat, scope, setScope }: { a: Approval; item: App
       title="Remember: once, for this chat or always (Tab cycles)"
       kind="dialog"
       align="end"
-      buttonClass="fl-btn fl-btn--sm fl-btn--quiet apv-token"
+      buttonClass="fl-btn fl-btn--sm fl-btn--secondary apv-token"
       trigger={
         <>
           {scope === 'chat' ? 'for this chat' : scope}
-          <Icon name="chevron" size={12} />
+          <Icon name="chevronDown" />
         </>
       }
     >
@@ -364,26 +357,16 @@ function ScopeToken({ a, item, chat, scope, setScope }: { a: Approval; item: App
               <kbd>Tab</kbd> cycles
             </span>
           </div>
-          <div class="apv-scope-opts" role="radiogroup" aria-label="Remember">
-            {SCOPES.map((s) => {
+          <Segmented
+            label="Remember"
+            block
+            value={scope}
+            onChange={setScope}
+            options={SCOPES.map((s) => {
               const ok = !!allowMessage(a, s);
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  role="radio"
-                  class={`fl-btn fl-btn--sm ${scope === s ? 'fl-btn--inverse' : 'fl-btn--quiet'}`}
-                  aria-checked={scope === s}
-                  disabled={!ok}
-                  title={ok ? undefined : a.locked[s as 'chat' | 'always']}
-                  onClick={() => setScope(s)}
-                >
-                  {!ok && <Icon name="lock" size={12} />}
-                  {SCOPE_NAMES[s]}
-                </button>
-              );
+              return { value: s, label: SCOPE_NAMES[s], icon: ok ? undefined : 'lock', disabled: !ok, title: ok ? undefined : a.locked[s as 'chat' | 'always'] };
             })}
-          </div>
+          />
           <div class="apv-scope-rule">
             <Ticks text={scopeRule(a, item, chat, scope) ?? ''} />
           </div>
@@ -399,11 +382,11 @@ function Countdown({ at }: { at: number }) {
   const left = Math.max(0, Math.ceil((at - now) / 1000));
   const total = useRef(Math.max(at - Date.now(), 1)).current;
   return (
-    <div class="apv-auto" role="timer" aria-live="off">
+    <div class="apv-auto" aria-live="off">
       <Icon name="clock" size={12} />
       Auto-allows in {left}s · your setting for routine requests
-      <span class="apv-auto-bar" aria-hidden="true">
-        <i style={{ animationDuration: `${total}ms` }} />
+      <span class="apv-auto-bar">
+        <Drain seconds={total / 1000} label={`Auto-allows in ${left}s`} />
       </span>
     </div>
   );
@@ -420,9 +403,9 @@ function Batch({ a, batch }: { a: Approval; batch: NonNullable<ApprovalCardProps
         </b>{' '}
         · <code>{a.target}</code> in {batch.chats} chat{batch.chats === 1 ? '' : 's'}
       </span>
-      <button type="button" class="fl-btn fl-btn--sm fl-btn--quiet" onClick={() => batch.messages.forEach(send)}>
-        Allow all {batch.count} <span class="k">⇧⏎</span>
-      </button>
+      <Button size="sm" kbd="⇧⏎" onClick={() => batch.messages.forEach(send)}>
+        Allow all {batch.count}
+      </Button>
     </div>
   );
 }
@@ -471,9 +454,9 @@ function Preview({ a, item, chat, state, diff }: { a: Approval; item: Approvable
               <span class="plus">+{item.added}</span> <span class="minus">−{item.removed}</span>
             </span>
             <span class="spacer" />
-            <button type="button" class="fl-btn fl-btn--sm fl-btn--ghost" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
-              <kbd>{MOD}D</kbd> open the diff
-            </button>
+            <Button variant="quiet" size="sm" kbd={`${MOD}D`} onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
+              Open the diff
+            </Button>
           </div>
         </div>
       )}
@@ -519,18 +502,18 @@ function MiniDiff({ file, chat, open: startOpen, diff, requestId }: { file: Prop
   return (
     <div class="apv-diff">
       <div class="apv-dh">
-        <button type="button" class="apv-file" aria-expanded={open} title={file.path} onClick={() => setOpen(!open)}>
-          <span class="mono">{relativePath(chat.cwd, file.path)}</span>
-        </button>
-        {file.isNew && <span class="fl-chip">new</span>}
+        <Button variant="text" truncate class="apv-file mono" aria-expanded={open} title={file.path} onClick={() => setOpen(!open)}>
+          {relativePath(chat.cwd, file.path)}
+        </Button>
+        {file.isNew && <Pill>new</Pill>}
         <span class="stats">
           <span class="plus">+{file.added}</span> <span class="minus">−{file.removed}</span>
         </span>
         <span class="spacer" />
         {file.full && (
-          <button type="button" class="fl-btn fl-btn--sm fl-btn--ghost" title="The whole file with this change, read-only" onClick={() => send(diff ?? { type: 'permissionDiff', requestId, path: file.path })}>
-            {diff && <kbd>{MOD}D</kbd>} full diff
-          </button>
+          <Button variant="quiet" size="sm" kbd={diff ? `${MOD}D` : undefined} title="The whole file with this change, read-only" onClick={() => send(diff ?? { type: 'permissionDiff', requestId, path: file.path })}>
+            Full diff
+          </Button>
         )}
       </div>
       {open && file.lines.length > 0 && <DiffView lines={file.lines} more={file.more} />}
@@ -580,9 +563,7 @@ function BridgePreview({ item, a, state }: { item: Extract<Approvable, { kind: '
         <div class="apv-shares">
           {item.tool === 'read_chat' ? 'Reads' : 'Shares'}
           {a.shares.map((s) => (
-            <span key={s} class="fl-chip">
-              {s}
-            </span>
+            <Pill key={s}>{s}</Pill>
           ))}
         </div>
       )}

@@ -21,6 +21,7 @@ import { AGENT_FACES, age, formatDuration, type AppState, type ChatView } from '
 import { oneClickQuestion, recommended } from '../shared/questions';
 import { Glyph, Icon, Markdown, isTyping, send, type IconName } from './common';
 import { ApprovalCard, cardKeys } from './approval';
+import { Button, Pill, Textarea } from './ui';
 
 const KIND: Record<InboxKind, { icon: IconName; label: string }> = {
   command: { icon: 'terminal', label: 'Run a command' },
@@ -225,9 +226,9 @@ function Detail({ entry: e, chat, state, now, same, confirming, reply, onBatch, 
         </span>
         <h2 class="inbox-detail-title">{e.title}</h2>
         <span class="spacer" />
-        <button type="button" class="fl-btn fl-btn--ghost inbox-open" title="See it in its chat (o)" onClick={() => openAt(e)}>
-          Open in chat <Icon name="open" size={14} />
-        </button>
+        <Button variant="quiet" iconEnd="open" class="inbox-open" title="See it in its chat (o)" onClick={() => openAt(e)}>
+          Open in chat
+        </Button>
       </header>
       <div class="inbox-meta">
         <Glyph agent={chat.agent} size="sm" />
@@ -266,9 +267,9 @@ function Detail({ entry: e, chat, state, now, same, confirming, reply, onBatch, 
                   </b>{' '}
                   · the same in {new Set(same.map((x) => x.chatId)).size} chats
                 </span>
-                <button type="button" class="fl-btn fl-btn--sm fl-btn--quiet" onClick={onBatch}>
-                  Allow all {same.length} <span class="k">⇧⏎</span>
-                </button>
+                <Button size="sm" kbd="⇧⏎" onClick={onBatch}>
+                  Allow all {same.length}
+                </Button>
               </div>
             )
           )}
@@ -296,7 +297,7 @@ function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: {
       <label class="inbox-reply-label" for={`reply-${entry.id}`}>
         Or tell {AGENT_FACES[chat.agent].name} instead
       </label>
-      <textarea
+      <Textarea
         id={`reply-${entry.id}`}
         ref={box}
         rows={3}
@@ -314,9 +315,9 @@ function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: {
           }
         }}
       />
-      <button type="button" class="fl-btn fl-btn--quiet" disabled={!text.trim()} onClick={go}>
-        Send and deny <span class="k">{MAC ? '⌘⏎' : 'Ctrl+⏎'}</span>
-      </button>
+      <Button disabled={!text.trim()} kbd={MAC ? '⌘⏎' : 'Ctrl+⏎'} onClick={go}>
+        Send and deny
+      </Button>
     </aside>
   );
 }
@@ -341,7 +342,11 @@ function QuestionWhat({ entry: e }: { entry: InboxEntry }) {
               <span class="q-opt-text">
                 <span class="q-opt-label">
                   {label}
-                  {rec && <span class="fl-chip q-rec">Recommended</span>}
+                  {rec && (
+                    <Pill tone="info" class="q-rec">
+                      Recommended
+                    </Pill>
+                  )}
                 </span>
                 {o.description && <span class="q-opt-desc">{o.description}</span>}
               </span>
@@ -356,12 +361,12 @@ function QuestionWhat({ entry: e }: { entry: InboxEntry }) {
       )}
       <div class="q-foot">
         <span class="spacer" />
-        <button type="button" class="fl-btn fl-btn--ghost" onClick={() => actions.deny && send(actions.deny)}>
-          Skip <span class="k">Esc</span>
-        </button>
-        <button type="button" class="fl-btn fl-btn--quiet" onClick={() => openAt(e)}>
-          Answer in the chat <span class="k">⏎</span>
-        </button>
+        <Button variant="quiet" kbd="Esc" onClick={() => actions.deny && send(actions.deny)}>
+          Skip
+        </Button>
+        <Button kbd="⏎" onClick={() => openAt(e)}>
+          Answer in the chat
+        </Button>
       </div>
     </div>
   );
@@ -389,15 +394,15 @@ function Confirm({ entries, state, now, onAnswer, onCancel }: { entries: InboxEn
         })}
       </ul>
       <div class="inbox-confirm-actions">
-        <button type="button" class="fl-btn fl-btn--ghost" onClick={onCancel}>
-          Cancel <span class="k">Esc</span>
-        </button>
-        <button type="button" class="fl-btn fl-btn--ghost" onClick={() => onAnswer('deny')}>
-          Deny all {entries.length} <span class="k">d</span>
-        </button>
-        <button type="button" class="fl-btn fl-btn--brand" onClick={() => onAnswer('allow')}>
-          Allow all {entries.length} once <span class="k">⏎</span>
-        </button>
+        <Button variant="quiet" kbd="Esc" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="quiet" kbd="d" onClick={() => onAnswer('deny')}>
+          Deny all {entries.length}
+        </Button>
+        <Button variant="brand" kbd="⏎" onClick={() => onAnswer('allow')}>
+          Allow all {entries.length} once
+        </Button>
       </div>
     </div>
   );

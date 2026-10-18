@@ -41,7 +41,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, MenuItem, MenuSep, MenuTitle } from './ui';
+import { Button, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
@@ -159,9 +159,7 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           <td class="c-age num" />
           <td class="c-act">
             {onOpen && (
-              <button class="ghost icon-btn sm" title="Show in chat" aria-label={`Show ${sub.title} in ${parent}`} onClick={() => onOpen(sub.id)}>
-                <Icon name="open" />
-              </button>
+              <IconButton icon="open" label={`Show ${sub.title} in ${parent}`} muted size="sm" title="Show in chat" onClick={() => onOpen(sub.id)} />
             )}
           </td>
         </tr>
@@ -171,9 +169,9 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           <td class="c-status" />
           <td class="c-agent" />
           <td class="c-task">
-            <button type="button" class="link sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
+            <Button variant="link" class="sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
               ↳ {done.length} done · {open ? 'hide' : 'show'}
-            </button>
+            </Button>
           </td>
           <td class="c-activity num" />
           <td class="c-files num" />
@@ -266,9 +264,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         <td class="c-files num">{plural(s.messages, 'message')}</td>
         <td class="c-age num" />
         <td class="c-act">
-          <button class="ghost icon-btn sm" title={openTip(col)} aria-label={`Open ${s.title} in FriedLiver`} onClick={() => openClaude(s.id)}>
-            <Icon name="open" />
-          </button>
+          <IconButton icon="open" label={`Open ${s.title} in FriedLiver`} muted size="sm" title={openTip(col)} onClick={() => openClaude(s.id)} />
         </td>
       </tr>
       <SubRows subs={claudeSubagents(s, now)} parent={s.title} />
@@ -382,28 +378,29 @@ function Manager() {
                 <Dot state="done" /> {tally.done} done
               </span>
               {tally.archived > 0 && (
-                <button
-                  class="link count-item"
+                <Button
+                  variant="link"
+                  icon="history"
+                  class="count-item"
                   onClick={() => {
                     setHistoryOpen(true);
                     requestAnimationFrame(() => document.getElementById('history')?.scrollIntoView({ block: 'start', behavior: scrollBehavior() }));
                   }}
                 >
-                  <Icon name="history" /> {tally.archived} archived
-                </button>
+                  {tally.archived} archived
+                </Button>
               )}
             </div>
           </div>
           <span class="spacer" />
           {view === 'inbox' ? null : waiting.length > 0 ? (
-            <button class="pill loud" onClick={() => setView('inbox')} title="Open the Inbox (5)">
-              <Dot state="needs-you" />
+            <FilterPill size="md" tone="waiting" class="mgr-waiting" onPress={() => setView('inbox')} title="Open the Inbox (5)">
               {waiting.length} decision{waiting.length === 1 ? '' : 's'} waiting
-            </button>
+            </FilterPill>
           ) : (
-            <span class="pill quiet">
-              <Icon name="check" /> Nothing waiting
-            </span>
+            <Pill size="md" tone="muted" icon="check">
+              Nothing waiting
+            </Pill>
           )}
           {view !== 'inbox' && (
             <label class="search">
@@ -546,9 +543,9 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         <label class="check" title="A separate git checkout on its own branch, so agents can't clash">
           <input type="checkbox" checked={own} onChange={(e) => setWorktree(e.currentTarget.checked)} /> Own worktree
         </label>
-        <button class="primary" disabled={!prompt.trim()} onClick={start}>
+        <Button variant="primary" disabled={!prompt.trim()} onClick={start}>
           Start <Kbd>⏎</Kbd>
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -610,9 +607,9 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
   if (d.kind === 'question') {
     return (
       <div class="actions">
-        <button class="decide sm" onClick={() => open(chat.id)}>
+        <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
           Answer
-        </button>
+        </Button>
       </div>
     );
   }
@@ -1020,45 +1017,45 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
   const d = line.decision;
   if (!d) {
     return chat.busy ? (
-      <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-        <Icon name="stop" /> Stop
-      </button>
+      <Button variant="quiet-danger" icon="stop" size="sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+        Stop
+      </Button>
     ) : null;
   }
   if (d.kind === 'review') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
+      <Button variant="primary" size="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
         Review
-      </button>
+      </Button>
     );
   }
   // A careful request is allowed by holding on its card, never in one click from a row.
   const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
   if (item && approvalOf(item, chat).hold) {
     return (
-      <button class="decide sm" onClick={() => open(chat.id)}>
+      <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
         Review
-      </button>
+      </Button>
     );
   }
   if (d.kind === 'command') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
-        <Icon name="play" /> Run
-      </button>
+      <Button variant="primary" icon="play" size="sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
+        Run
+      </Button>
     );
   }
   if (d.kind === 'bridge') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
+      <Button variant="primary" size="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
         Allow
-      </button>
+      </Button>
     );
   }
   return (
-    <button class="decide sm" onClick={() => open(chat.id)}>
+    <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
       Answer
-    </button>
+    </Button>
   );
 }
 

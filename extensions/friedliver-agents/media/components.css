@@ -316,8 +316,10 @@
   border-color: color-mix(in srgb, var(--btn-fg) 25%, transparent);
   border-top-color: var(--btn-fg);
 }
+/* A quieter second part of a label: the label's own colour at 75% (stays 4.5:1 on every fill). */
 .fl-btn__sub {
-  color: var(--fg-2);
+  color: inherit;
+  opacity: 0.75;
 }
 
 /* Split button: the default action and a ▾ for the others, one r5 outline. */
@@ -348,6 +350,11 @@
 .fl-btn--hold {
   overflow: hidden;
 }
+.fl-btn--hold {
+  user-select: none;
+  touch-action: none;
+}
+/* The fill tracks the hold: it sweeps in over 600ms while held and drains back (200ms) when let go early. */
 .fl-btn--hold::after {
   content: '';
   position: absolute;
@@ -356,10 +363,12 @@
   opacity: 0.22;
   transform: scaleX(0);
   transform-origin: left;
+  transition: transform var(--dur-slow) var(--ease-out);
   pointer-events: none;
 }
 .fl-btn--hold[data-holding]::after {
-  animation: fill var(--dur-hold) var(--ease-linear) forwards;
+  transform: scaleX(1);
+  transition: transform var(--dur-hold) var(--ease-linear);
 }
 
 /* ---- Pill / Chip / Tag (§2.3): status, risk, filter; sm 18 · md 22 · touch 32; pill radius ---- */
@@ -371,7 +380,8 @@
   --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
   --pill-fill-hover: var(--pill-hover);
-  flex: none;
+  /* Shrinks with its row; the text ends in an ellipsis. */
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
@@ -896,6 +906,11 @@ textarea.fl-input {
   box-shadow: var(--focus-halo);
   outline: none;
 }
+.fl-select--sm {
+  min-width: 0;
+  height: var(--h-sm);
+  font-size: var(--t-90);
+}
 .fl-select:disabled {
   opacity: 0.4;
   cursor: default;
@@ -1170,6 +1185,19 @@ textarea.fl-input {
 }
 .fl-card--raised {
   box-shadow: var(--elev-1);
+}
+.fl-card--bare {
+  --card-pad: 0;
+  gap: 0;
+}
+/* Ghost: no fill or border at rest (a routine request's sentence row); the focus ring still applies. */
+.fl-card--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+/* A card that just arrived: the 150ms rise. */
+.fl-card[data-enter] {
+  animation: rise var(--dur) var(--ease-out);
 }
 .fl-card--sm {
   --card-pad: var(--sp-2) var(--sp-3);
@@ -2165,11 +2193,6 @@ button.send-btn:disabled {
 .banner a {
   color: var(--link);
 }
-.banner button.sm {
-  height: auto;
-  padding: 6px var(--sp-3);
-  font-size: var(--t-100);
-}
 /* While subagents run: one muted line, each name a link to its card. */
 .sa-strip {
   padding: 0 var(--sp-2);
@@ -2451,6 +2474,11 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
 }
 .cc-search::placeholder {
   color: var(--fg-50);
+}
+
+/* The frozen send button's border colour, which the old button.primary rule set: kept so its computed style is unchanged. */
+.composer button.send-btn {
+  border-color: transparent;
 }
 
 /* Phone app (remote): one switch makes every control touch-sized. */

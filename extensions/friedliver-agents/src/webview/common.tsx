@@ -620,9 +620,9 @@ export function ClampedText({ text, onMore }: { text: string; onMore?: () => voi
         {text}
       </div>
       {over && (
-        <button type="button" class="link msg-more" aria-expanded={open && !onMore} onClick={() => (onMore ? onMore() : setOpen(!open))}>
+        <Button variant="link" class="msg-more" aria-expanded={open && !onMore} onClick={() => (onMore ? onMore() : setOpen(!open))}>
           {open && !onMore ? 'Show less' : 'Show more'}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -759,9 +759,9 @@ export function ImageThumb({ path, title }: { path: string; title: string }) {
     return (
       <span class="image-thumb missing" title={path}>
         <span class="image-title">{title}</span>
-        <button class="link" onClick={open}>
+        <Button variant="link" onClick={open}>
           Open
-        </button>
+        </Button>
       </span>
     );
   }
