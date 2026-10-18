@@ -96,11 +96,15 @@
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox {
 	--vscode-input-border: var(--fl-field-border);
+	--vscode-settings-textInputBorder: var(--fl-field-border);
+	--vscode-settings-numberInputBorder: var(--fl-field-border);
 	border-radius: var(--fl-r-ctl);
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox:hover {
 	--vscode-input-border: var(--fl-border);
+	--vscode-settings-textInputBorder: var(--fl-border);
+	--vscode-settings-numberInputBorder: var(--fl-border);
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox > .ibwrapper > .input,
@@ -138,6 +142,8 @@
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box {
 	--vscode-dropdown-background: var(--fl-input-bg);
 	--vscode-dropdown-border: var(--fl-field-border);
+	--vscode-settings-dropdownBackground: var(--fl-input-bg);
+	--vscode-settings-dropdownBorder: var(--fl-field-border);
 	height: var(--fl-h-md);
 	padding: 0 var(--fl-sp-2);
 	border-radius: var(--fl-r-ctl);
@@ -145,6 +151,7 @@
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box:hover {
 	--vscode-dropdown-border: var(--fl-border);
+	--vscode-settings-dropdownBorder: var(--fl-border);
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box:focus-visible {
@@ -163,10 +170,14 @@
 
 /* ---- Checkbox §2.9: 14 square, r3; checked = the button colour with a check ------------- */
 
-.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox {
+/* Doubled class: above the settings editor's own 18px checkbox rule (0,5,0). */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox {
 	--vscode-checkbox-background: var(--fl-input-bg);
 	--vscode-checkbox-border: color-mix(in srgb, var(--fl-fg-2) 70%, transparent);
 	--vscode-checkbox-foreground: var(--fl-button-fg);
+	--vscode-settings-checkboxBackground: var(--fl-input-bg);
+	--vscode-settings-checkboxBorder: color-mix(in srgb, var(--fl-fg-2) 70%, transparent);
+	--vscode-settings-checkboxForeground: var(--fl-button-fg);
 	width: var(--fl-i-sm);
 	height: var(--fl-i-sm);
 	margin-right: var(--fl-sp-2);
@@ -177,9 +188,11 @@
 	font-size: var(--fl-i-xs) !important;
 }
 
-.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox.checked {
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox.checked {
 	--vscode-checkbox-background: var(--fl-button-bg);
 	--vscode-checkbox-border: var(--fl-button-bg);
+	--vscode-settings-checkboxBackground: var(--fl-button-bg);
+	--vscode-settings-checkboxBorder: var(--fl-button-bg);
 }
 
 /* ---- Count / Badge §2.6: 16 tall, pill --------------------------------------------------- */
@@ -319,6 +332,10 @@
 	--vscode-notificationToast-border: var(--fl-border);
 	--vscode-notificationCenter-border: var(--fl-border);
 	--vscode-notificationLink-foreground: var(--fl-link);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts:not(.bottom-left) {
+	right: calc(var(--fl-sp-4) - var(--fl-sp-1)); /* the toasts keep a 4px shadow gutter */
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts .notification-toast-container > .notification-toast {
