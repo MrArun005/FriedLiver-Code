@@ -4,6 +4,7 @@ import { Icon, type IconName } from './icon';
 import { AGENT_FACES, type AgentKey } from '../../shared/model';
 import { IconButton, cx } from './controls';
 import { markFor } from './marks';
+import { useTooltip } from './overlays';
 
 export type Tone = 'working' | 'done' | 'failed' | 'waiting' | 'warn' | 'accent' | 'muted' | 'info' | 'success' | 'error' | 'routine' | 'review' | 'careful';
 
@@ -270,18 +271,24 @@ export const CardFoot = ({ start, children }: { start?: boolean; children: Compo
   </div>
 );
 
-/** One tab in a strip the caller lays out (role tablist): its own keyboard, an optional × to close it. */
+/**
+ * One tab in a strip the caller lays out (role tablist): its own keyboard, an optional × to close it.
+ * `tip`: an immediate tooltip below it (§2.18, a mark-only tab) in place of the native title.
+ */
 export function Tab({
   selected,
   onSelect,
   onClose,
   closeTitle = 'Close',
+  tip,
   children,
   ...rest
-}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'class' | 'role' | 'onClick'> & { selected: boolean; onSelect(): void; onClose?: () => void; closeTitle?: string; children: ComponentChildren }) {
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'class' | 'role' | 'onClick'> & { selected: boolean; onSelect(): void; onClose?: () => void; closeTitle?: string; tip?: string; children: ComponentChildren }) {
+  const tooltip = useTooltip<HTMLSpanElement>({ text: tip, delay: 0, side: 'below' });
   return (
-    <span class="fl-tab-wrap tab-wrap" data-active={selected ? '' : undefined}>
-      <button {...rest} type="button" role="tab" class="fl-tab tab" aria-selected={selected} onClick={onSelect}>
+    <span ref={tooltip.ref} class="fl-tab-wrap tab-wrap" data-active={selected ? '' : undefined} {...tooltip.handlers}>
+      {tooltip.tip}
+      <button {...rest} title={tip ? undefined : rest.title} type="button" role="tab" class="fl-tab tab" aria-selected={selected} onClick={onSelect}>
         {children}
       </button>
       {onClose && (

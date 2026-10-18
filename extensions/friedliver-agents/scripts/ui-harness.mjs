@@ -1072,34 +1072,101 @@ async function shoot() {
     const reopened = await strip();
     check(reopened.at(-1) === other && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === other, 'opening a chat from the list adds its tab at the end');
     await p.screenshot({ path: path.join(opts.out, 'tabs-close.png'), clip: { x: 0, y: 0, width: 1200, height: 140 } }).catch(() => {});
-    // Crowded strips shrink before they scroll: every tab keeps its mark and status, the open one its title (COMPONENTS.md §2.18 Fit).
-    for (const n of [2, 6, 15])
-      for (const w of [300, 420, 600]) {
-        const many = await open(`surface=chat&theme=dark-2026&tabs=${n}`, w, 500);
-        const s = await many.evaluate(() => {
-          const t = document.querySelector('.tabs');
-          const tabs = [...t.querySelectorAll('[role="tab"]')];
-          const open = t.querySelector('[aria-selected="true"]');
-          const label = (tab) => tab.querySelector('.fl-tab__label').getBoundingClientRect().width;
-          const sb = t.getBoundingClientRect();
-          const ob = open.getBoundingClientRect();
-          return {
-            fit: t.dataset.fit,
-            tabs: tabs.length,
-            marks: tabs.every((x) => x.querySelectorAll('.fl-mark').length === 1 && x.querySelectorAll('.fl-dot').length === 1),
-            openLabel: Math.round(label(open)),
-            otherLabels: t.dataset.fit === 'icon' ? tabs.filter((x) => x !== open).every((x) => label(x) === 0) : true,
-            openInView: ob.left >= sb.left - 1 && ob.right <= sb.right + 1,
-            fade: t.scrollWidth <= t.clientWidth + 1 || window.getComputedStyle(t).maskImage !== 'none',
-            page: document.documentElement.scrollWidth <= window.innerWidth,
-          };
-        });
-        check(
-          s.tabs === n && s.marks && s.openLabel >= 24 && s.otherLabels && s.openInView && s.fade && s.page && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
-          `${n} tabs at ${w}px: a mark and a dot on every tab, the open one titled and in view, faded if it still scrolls [${JSON.stringify(s)}]`,
-        );
-        await many.close();
-      }
+    // Crowded strips shrink before they scroll: every tab keeps its mark and status, the open one its title;
+    // the strip shows whole tabs only, mark-only tabs carry their dot as a badge (COMPONENTS.md §2.18 Fit).
+    const stripState = (page) =>
+      page.evaluate(() => {
+        const t = document.querySelector('.tabs');
+        const tabs = [...t.querySelectorAll('[role="tab"]')];
+        const open = t.querySelector('[aria-selected="true"]');
+        const lab = (tab) => tab.querySelector('.fl-tab__label');
+        const sb = t.getBoundingClientRect();
+        const ob = open.getBoundingClientRect();
+        const css = window.getComputedStyle(t);
+        const px = (v) => parseFloat(css.getPropertyValue(v)) || 0;
+        const lo = sb.left + px('--clip-l');
+        const hi = sb.right - px('--clip-r');
+        const ol = lab(open);
+        const others = tabs.filter((x) => x !== open);
+        const visible = (r) => r.right > lo + 0.5 && r.left < hi - 0.5;
+        return {
+          fit: t.dataset.fit,
+          tabs: tabs.length,
+          marks: tabs.every((x) => x.querySelectorAll('.fl-mark').length === 1 && x.querySelectorAll('.fl-dot').length === 1),
+          openLabel: Math.round(ol.getBoundingClientRect().width),
+          openTitleWhole: ol.scrollWidth <= ol.clientWidth + 1,
+          otherLabels: t.dataset.fit === 'icon' ? others.every((x) => lab(x).getBoundingClientRect().width === 0) : true,
+          // Mark-only tabs: one glyph wide, the dot a badge inside the mark's corner.
+          markOnly:
+            t.dataset.fit !== 'icon' ||
+            others.every((x) => {
+              const r = x.getBoundingClientRect();
+              const m = x.querySelector('.fl-mark').getBoundingClientRect();
+              const d = x.querySelector('.fl-dot').getBoundingClientRect();
+              return r.width <= 27 && d.left >= m.left && d.right <= m.right + 3 && d.top >= m.top && d.bottom <= m.bottom + 3;
+            }),
+          openInView: ob.left >= lo - 1 && ob.right <= hi + 1,
+          // No partial tab: each is wholly inside the shown part of the strip or wholly outside it; no fade over anything.
+          whole: [...t.querySelectorAll('.fl-tab-wrap')].every((w) => {
+            const r = w.getBoundingClientRect();
+            return !visible(r) || (r.left >= lo - 0.5 && r.right <= hi + 0.5);
+          }),
+          noFade: css.maskImage === 'none',
+          page: document.documentElement.scrollWidth <= window.innerWidth,
+        };
+      });
+    for (const theme of ['dark-2026', 'light-2026'])
+      for (const n of [2, 6, 15])
+        for (const w of [300, 420, 600]) {
+          const many = await open(`surface=chat&theme=${theme}&tabs=${n}`, w, 500);
+          const s = await stripState(many);
+          check(
+            s.tabs === n && s.marks && s.markOnly && s.otherLabels && s.openInView && s.whole && s.noFade && s.page &&
+              (s.openLabel >= 110 || s.openTitleWhole) && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
+            `${theme} ${n} tabs at ${w}px: whole tabs only, a mark and a dot on each (a badge when mark-only), the open one titled (≥ 110) and in view [${JSON.stringify(s)}]`,
+          );
+          if (n === 15) {
+            // A wheel notch moves the strip by whole tabs: still no partial tab.
+            const before = await many.evaluate(() => document.querySelector('.tabs').scrollLeft);
+            await many.hover('.tabs');
+            await many.mouse.wheel(0, before > 0 ? -120 : 120);
+            await many.waitForTimeout(500);
+            const after = await many.evaluate(() => document.querySelector('.tabs').scrollLeft);
+            const s2 = await stripState(many);
+            check(after !== before && s2.whole, `${theme} 15 tabs at ${w}px: a wheel notch scrolls by whole tabs [${before} → ${after}, whole ${s2.whole}]`);
+          }
+          // Narrow: the trailing cluster folds (no open count, no Agent Manager button); "+" stays.
+          const cluster = await many.evaluate(() => ({
+            count: document.querySelector('.all-count')?.getBoundingClientRect().width ?? 0,
+            manager: document.querySelector('.switcher .manager-btn')?.getBoundingClientRect().width ?? 0,
+            plus: document.querySelector('.switcher [aria-label="New chat with"], .switcher [title="New chat"]')?.getBoundingClientRect().width ?? 0,
+          }));
+          check(w < 360 ? cluster.count === 0 && cluster.manager === 0 && cluster.plus > 0 : cluster.count > 0 && cluster.manager > 0, `${theme} ${w}px: the strip's buttons ${w < 360 ? 'fold to All chats and +' : 'show the count and the Agent Manager'} [${JSON.stringify(cluster)}]`);
+          await many.close();
+        }
+    {
+      // A mark-only tab says what it is at once: a tooltip below it with the title, agent and status.
+      const tip = await open('surface=chat&theme=dark-2026&tabs=15', 420, 500);
+      // The mark just before the open tab: in the shown window, so hovering it scrolls nothing.
+      const other = tip.locator('.tabs .fl-tab-wrap:has(+ .fl-tab-wrap[data-active]) [role="tab"]');
+      const name = await other.getAttribute('aria-label');
+      await other.hover();
+      await tip.waitForTimeout(120);
+      const t = await tip.evaluate(() => {
+        const el = document.querySelector('.fl-tip');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const s = document.querySelector('.tabs').getBoundingClientRect();
+        return { text: el.textContent, below: r.top >= s.bottom - 2, inside: r.left >= 0 && r.right <= window.innerWidth };
+      });
+      const shown = await tip.evaluate(() => {
+        const s = document.querySelector('.tabs').getBoundingClientRect();
+        const o = document.querySelector('.tabs [aria-selected="true"]').getBoundingClientRect();
+        return o.left >= s.left && o.right <= s.right;
+      });
+      check(!!t && shown && t.below && t.inside && / · (Idle|Working|Needs you|Done|Problem)/.test(t.text) && t.text === name, `hovering a mark-only tab shows its tooltip at once, below, in view [${JSON.stringify(t)} vs ${name}]`);
+      await tip.close();
+    }
     {
       // Keys switch tabs: Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..8 pick one, 9 the last; the "All chats" list leads with every open tab.
       const k = await open('surface=chat&theme=dark-2026&tabs=15', 420, 600);

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AGENT_KEYS, type ChatView } from '../src/shared/model';
-import { TAB_MIN, switcherGroups, tabFit, tabForKey } from '../src/shared/view';
+import { TAB_MIN, switcherGroups, tabFit, tabForKey, tabTip } from '../src/shared/view';
 import { FRIEDLIVER_MARK } from '../src/webview/ui/friedliverMark';
 import { MARKS, markFor } from '../src/webview/ui/marks';
 
@@ -56,24 +56,26 @@ describe('a mark on every tab', () => {
 });
 
 describe('tabs shrink before they scroll', () => {
+  // The open tab is counted at TAB_MIN.open (a title of at least 110), the others at their fit's minimum, 4 apart.
   it('keeps titles while each tab can have its full minimum', () => {
     expect(tabFit(600, 2)).toBe('full');
     expect(tabFit(420, 2)).toBe('full');
     expect(tabFit(300, 2)).toBe('full');
-    expect(tabFit(228, 2)).toBe('full');
+    expect(tabFit(600, 4)).toBe('full');
   });
 
   it('squeezes titles next', () => {
-    expect(tabFit(600, 6)).toBe('compact');
-    expect(tabFit(300, 3)).toBe('compact');
+    expect(tabFit(660, 6)).toBe('compact');
+    expect(tabFit(400, 3)).toBe('compact');
   });
 
   it('drops to marks only (the open tab keeps its title) when even that is too tight', () => {
+    expect(tabFit(299, 2)).toBe('compact');
+    expect(tabFit(275, 2)).toBe('icon');
+    expect(tabFit(214, 2)).toBe('icon');
+    expect(tabFit(600, 6)).toBe('icon');
     expect(tabFit(300, 6)).toBe('icon');
-    expect(tabFit(420, 6)).toBe('icon');
-    expect(tabFit(160, 2)).toBe('icon');
     expect(tabFit(600, 15)).toBe('icon');
-    expect(tabFit(300, 15)).toBe('icon');
   });
 
   it('a zero-width (not yet laid out) strip or no tabs is full', () => {
@@ -81,10 +83,27 @@ describe('tabs shrink before they scroll', () => {
     expect(tabFit(300, 0)).toBe('full');
   });
 
+  it('the open tab leaves at least 110 for its title beside its mark, Auto pill and dot', () => {
+    // padding 8 + mark 16 + gap 4 + Auto 22 + gap 4 + dot 8 + gap 4 + padding 8 = 74
+    expect(TAB_MIN.open - 74).toBeGreaterThanOrEqual(110);
+  });
+
   it('the thresholds are the tokens the CSS uses', () => {
     const tokens = readFileSync(path.join(__dirname, '../media/tokens.css'), 'utf8');
     expect(tokens).toContain(`--tab-min: ${TAB_MIN.full}px;`);
     expect(tokens).toContain(`--tab-min-compact: ${TAB_MIN.compact}px;`);
+    expect(tokens).toContain(`--tab-open-min: ${TAB_MIN.open}px;`);
+  });
+});
+
+describe('a mark-only tab says what it is', () => {
+  it('its tooltip has the title, the agent and the status', () => {
+    expect(tabTip(chat('a', { title: 'Fix the flaky test', agent: 'codex' }))).toBe('Fix the flaky test · Codex · Idle');
+    expect(tabTip(chat('a', { title: 'Ship it', busy: true }))).toBe('Ship it · Claude · Working');
+  });
+
+  it('and says Auto when edits and commands go through without asking', () => {
+    expect(tabTip(chat('a', { title: 'Ship it', approval: 'full' }))).toBe('Ship it · Claude · Idle · Auto');
   });
 });
 

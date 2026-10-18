@@ -3604,6 +3604,15 @@ code.command-line {
   gap: 2px;
   padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--border);
+  container: switcher / inline-size;
+}
+/* Narrow (§2.18): the trailing cluster folds so the open tab keeps its title; the count and the
+   Agent Manager are in the All chats popover, "+" stays. */
+@container switcher (max-width: 359px) {
+  .all-count,
+  .switcher > .manager-btn {
+    display: none;
+  }
 }
 .tabs {
   display: flex;
@@ -3615,10 +3624,6 @@ code.command-line {
 }
 .tabs::-webkit-scrollbar {
   display: none;
-}
-/* More tabs than fit: they scroll sideways, the strip's edges fade. */
-.tabs[data-overflow] {
-  mask-image: linear-gradient(to right, transparent, black var(--sp-4), black calc(100% - var(--sp-4)), transparent);
 }
 
 button.all-btn {
