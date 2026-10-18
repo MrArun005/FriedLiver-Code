@@ -368,7 +368,7 @@ async function shoot() {
     const p = await open('surface=accounts&focus=gemini', 900, 700);
     await p.waitForTimeout(50);
     check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
-    check((await p.locator('.acct-card:not(.acct-links)').count()) === 4, 'a card per agent, Demo included when shown');
+    check((await p.locator('.acct-card[id^="card-"]').count()) === 4, 'a card per agent, Demo included when shown');
     const codex = p.locator('#card-codex');
     check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
     await codex.locator('button:has-text("ChatGPT")').click();
@@ -450,7 +450,7 @@ async function shoot() {
     await p.keyboard.press('Enter');
     const consult = (await posted(p)).find((m) => m.type === 'consult');
     check(consult?.agent === 'gemini' && consult.text === 'is this safe for de-CH?' && consult.chatId === ids.side, 'a mention sends a consultation');
-    await p.click('button:has-text("Send to Claude 1")');
+    await p.click('button:has-text("Send to Claude")');
     check((await posted(p)).some((m) => m.type === 'forward' && m.fromChatId === 'chat-g1' && m.toChatId === ids.side), 'Send to forwards the reply');
     await p.click('.all-btn');
     await p.keyboard.type('swappable');
@@ -774,7 +774,7 @@ async function shoot() {
     const shows = (text) => p.locator('.chat-head-title', { hasText: text }).waitFor({ timeout: 2000 }).then(() => true, () => false);
     await p.locator('.link-card button:has-text("Open")').first().click();
     check((await shows('Make the session store swappable')) && (await posted(p)).some((m) => m.type === 'select' && m.chatId === 'chat-x3'), 'Open on a hand-off card shows that chat');
-    await p.locator('.link-card[aria-label="Asked Gemini 4"] button:has-text("Open")').click();
+    await p.locator('.link-card[aria-label="Asked Gemini"] button:has-text("Open")').click();
     check(await shows('Which session store fits serverless?'), 'Open on a consultation card shows that chat');
     await p.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c7' }, '*'));
     check((await shows('Rename the price helpers')) && (await p.locator('.link-strip .fl-pill:has-text("archived")').count()) === 1, 'Open from a notification shows an archived chat');
@@ -1233,15 +1233,15 @@ async function shoot() {
     await p.close();
 
     const m = await open('surface=permissions', 1200, 820);
-    check((await m.locator('.perms-group h2').allInnerTexts()).map((t) => t.replace(/\s*\d+$/, '')).join(',') === 'Websites,Folders,Commands,Agent tools', 'Manage Permissions groups websites, folders, commands and agent tools');
-    check((await m.locator('.perms tbody tr').count()) === 7, 'every remembered rule is listed');
+    check((await m.locator('.perms-group h2').allInnerTexts()).map((t) => t.replace(/\s*\d+$/, '')).join(',') === 'Websites,Folders,Commands,Agent tools,Mac & Windows control', 'Manage Permissions groups websites, folders, commands, agent tools and Mac & Windows control');
+    check((await m.locator('.perms tbody tr').count()) === 8, 'every remembered rule is listed');
     check((await m.locator('.perms tbody tr').first().innerText()).includes('https://www.irctc.co.in') && (await m.locator('.perms tbody tr').first().innerText()).includes('Claude'), 'a rule shows where and which agent asked');
     const wide = await m.evaluate(() => document.querySelector('.perms table').getBoundingClientRect().width / window.innerWidth);
     check(wide > 0.9, `the list uses the whole width (${Math.round(wide * 100)}%)`);
     await save(m, 'permissions-manage');
     await m.locator('.perms tbody tr').first().locator('button:has-text("Revoke")').click();
     check((await posted(m)).some((x) => x.type === 'revokePermission' && x.id === 'site https://www.irctc.co.in'), 'Revoke sends that rule');
-    await m.waitForFunction(() => document.querySelectorAll('.perms tbody tr').length === 6);
+    await m.waitForFunction(() => document.querySelectorAll('.perms tbody tr').length === 7);
     await m.locator('button:has-text("Revoke all")').click();
     check((await posted(m)).some((x) => x.type === 'revokeAllPermissions'), 'Revoke all asks the host');
     await m.close();

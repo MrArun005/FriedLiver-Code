@@ -1071,7 +1071,7 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   const other = state.chats.find((c) => c.id === item.chatId);
   const long = item.text.length > 700 || item.text.split('\n').length > 12;
   const [expanded, setExpanded] = useState(!long);
-  // A hand-off names the chat it went to (or came from) by its topic, like the header chips; the label is in the tooltip.
+  // A hand-off names the chat it went to (or came from) by its topic, like the header chips; "<topic> · Agent" is its tooltip.
   const name = item.role.startsWith('handoff') && other ? other.title : agentName(item.agent);
   const head = LINK_HEAD[item.role](name);
   return (
