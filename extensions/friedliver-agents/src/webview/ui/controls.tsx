@@ -5,7 +5,7 @@ import { createElement, type ButtonHTMLAttributes, type ComponentChildren, type 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon, type IconName } from '../common';
 
-export type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'brand' | 'link';
+export type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'quiet-danger' | 'brand' | 'link' | 'text';
 export type Size = 'sm' | 'md' | 'lg' | 'touch';
 
 /** Joins class names, dropping empty ones. */
@@ -23,18 +23,28 @@ type ButtonBase = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'size' | 'icon' 
   /** The spinner replaces the label; the button keeps its width and is not clickable. */
   loading?: boolean;
   block?: boolean;
+  /** Text buttons: one line, cut with an ellipsis. */
+  truncate?: boolean;
   /** Extra classes for layout only (margin, flex); never for looks. */
   class?: string;
   ref?: Ref<HTMLButtonElement>;
 };
 
 function buttonClass(p: { variant?: Variant; size?: Size; block?: boolean; class?: string }, extra?: string) {
-  return cx('fl-btn', `fl-btn--${p.variant ?? 'secondary'}`, p.size && p.size !== 'md' && `fl-btn--${p.size}`, p.block && 'fl-btn--block', extra, p.class);
+  const v = p.variant ?? 'secondary';
+  return cx('fl-btn', v === 'quiet-danger' ? 'fl-btn--quiet fl-btn--danger' : `fl-btn--${v}`, p.size && p.size !== 'md' && `fl-btn--${p.size}`, p.block && 'fl-btn--block', extra, p.class);
 }
 
-export function Button({ variant, size, icon, iconEnd, kbd, loading, block, class: className, children, type = 'button', disabled, onClick, ...rest }: ButtonBase) {
+export function Button({ variant, size, icon, iconEnd, kbd, loading, block, truncate, class: className, children, type = 'button', disabled, onClick, ...rest }: ButtonBase) {
   return (
-    <button {...rest} type={type} class={buttonClass({ variant, size, block, class: className })} disabled={disabled} aria-busy={loading ? 'true' : undefined} onClick={loading ? undefined : onClick}>
+    <button
+      {...rest}
+      type={type}
+      class={buttonClass({ variant, size, block, class: cx(truncate && 'fl-btn--truncate', className) })}
+      disabled={disabled}
+      aria-busy={loading ? 'true' : undefined}
+      onClick={loading ? undefined : onClick}
+    >
       {icon && <Icon name={icon} />}
       {children}
       {kbd && <kbd class="fl-kbd fl-kbd--inline">{kbd}</kbd>}

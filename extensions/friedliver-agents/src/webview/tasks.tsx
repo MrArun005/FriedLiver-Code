@@ -44,6 +44,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
+import { Button, MenuItem, MenuSep, MenuTitle } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
@@ -203,7 +204,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
   const col = claudeColumn(s, now);
   return (
     <>
-      <article class="task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
+      <article class="fl-card task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
         <div class="card-top">
           <Glyph agent="claude" />
           <span class="tag" title={OUTSIDE_TIP}>
@@ -213,9 +214,9 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
           <span title="Last activity">{ago(s.lastActivity, now)}</span>
         </div>
         <h3 class="card-title">
-          <button class="title-btn" title={s.title} onClick={() => openClaude(s.id)}>
+          <Button variant="text" title={s.title} onClick={() => openClaude(s.id)}>
             {s.title}
-          </button>
+          </Button>
         </h3>
         <div class="card-state">
           <Dot state={col} />
@@ -226,9 +227,9 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
         </div>
         <div class="card-actions">
           <span class="spacer" />
-          <button class="sm" title={openTip(col)} onClick={() => openClaude(s.id)}>
-            <Icon name="open" /> Open in FriedLiver
-          </button>
+          <Button size="sm" icon="open" title={openTip(col)} onClick={() => openClaude(s.id)}>
+            Open in FriedLiver
+          </Button>
         </div>
       </article>
       <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} />
@@ -739,8 +740,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
   const archive = () => send({ type: 'archive', chatId: chat.id, archived: true });
   return (
     <article
-      class="task-card"
+      class="fl-card fl-card--interactive task-card"
       data-status={status}
+      data-tone={status === 'needs-you' ? 'waiting' : status === 'error' ? 'error' : undefined}
       data-nav={chat.id}
       tabIndex={tabbable ? 0 : -1}
       aria-label={`${chat.label}: ${chat.title}. ${DOT_LABEL[status]}`}
@@ -767,9 +769,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <CardMore chat={chat} canMerge={canMerge} changes={files > 0 || !!chat.branch} archive={archive} />
       </div>
       <h3 class="card-title">
-        <button class="title-btn" title={chat.title} onClick={() => open(chat.id)}>
+        <Button variant="text" title={chat.title} onClick={() => open(chat.id)}>
           {chat.title}
-        </button>
+        </Button>
       </h3>
       <div class="card-state" data-decision={line.decision ? '' : undefined}>
         <Dot state={status} />
@@ -818,13 +820,13 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       {(chat.busy || (canMerge && !line.decision)) && (
         <div class="card-actions">
           {chat.busy ? (
-            <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-              <Icon name="stop" /> Stop
-            </button>
+            <Button variant="quiet-danger" size="sm" icon="stop" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+              Stop
+            </Button>
           ) : (
-            <button class="sm" onClick={() => send({ type: 'merge', chatId: chat.id })}>
-              <Icon name="merge" /> Merge
-            </button>
+            <Button size="sm" icon="merge" onClick={() => send({ type: 'merge', chatId: chat.id })}>
+              Merge
+            </Button>
           )}
         </div>
       )}
@@ -843,46 +845,30 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
   // Hand off only to agents the pickers offer (Demo when shown).
   const agents = useRoster().agents;
   return (
-    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn sm card-more" trigger={<Icon name="more" />}>
+    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
         <>
-          <button role="menuitem" onClick={() => (close(false), open(chat.id))}>
-            <Icon name="open" /> Open chat
-          </button>
-          <button role="menuitem" disabled={!changes} title={changes ? undefined : 'No changes yet'} onClick={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))}>
-            <Icon name="diff" /> View changes
-          </button>
-          <button role="menuitem" onClick={() => (close(false), ask())}>
-            <Icon name="ask" /> Ask another agent…
-          </button>
-          <div class="fl-menu__sep" role="separator" />
-          <div class="fl-menu__title" aria-hidden="true">Hand off to</div>
+          <MenuItem icon="open" label="Open chat" onSelect={() => (close(false), open(chat.id))} />
+          <MenuItem icon="diff" label="View changes" disabled={!changes} title={changes ? undefined : 'No changes yet'} onSelect={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))} />
+          <MenuItem icon="ask" label="Ask another agent…" onSelect={() => (close(false), ask())} />
+          <MenuSep />
+          <MenuTitle>Hand off to</MenuTitle>
           {agents.map((agent) => (
-            <button key={agent} role="menuitem" onClick={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}>
-              <Glyph agent={agent} size="sm" />
-              <span class="grow">{agentName(agent)}</span>
-              {agent === chat.agent && <span class="hint">new chat</span>}
-            </button>
+            <MenuItem
+              key={agent}
+              lead={<Glyph agent={agent} size="sm" />}
+              label={agentName(agent)}
+              end={agent === chat.agent ? 'new chat' : undefined}
+              onSelect={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}
+            />
           ))}
-          <div class="fl-menu__sep" role="separator" />
+          <MenuSep />
           <PipeTargets chat={chat} close={close} />
-          <div class="fl-menu__sep" role="separator" />
-          <button role="menuitem" onClick={() => (close(), send({ type: 'renameChat', chatId: chat.id }))}>
-            <Icon name="rename" /> Rename chat
-          </button>
-          {canMerge && (
-            <button role="menuitem" onClick={() => (close(), send({ type: 'merge', chatId: chat.id }))}>
-              <Icon name="merge" /> Merge into main
-            </button>
-          )}
-          {chat.branch && !chat.busy && (
-            <button role="menuitem" class="danger" onClick={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))}>
-              <Icon name="trash" /> Delete worktree
-            </button>
-          )}
-          <button role="menuitem" onClick={() => (close(false), archive())}>
-            <Icon name="archive" /> Archive
-          </button>
+          <MenuSep />
+          <MenuItem icon="rename" label="Rename chat" onSelect={() => (close(), send({ type: 'renameChat', chatId: chat.id }))} />
+          {canMerge && <MenuItem icon="merge" label="Merge into main" onSelect={() => (close(), send({ type: 'merge', chatId: chat.id }))} />}
+          {chat.branch && !chat.busy && <MenuItem icon="trash" label="Delete worktree" tone="error" onSelect={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))} />}
+          <MenuItem icon="archive" label="Archive" onSelect={() => (close(false), archive())} />
         </>
       )}
     </Popover>
@@ -907,9 +893,9 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
         </span>
         <span class="hint">{group.chats.length} agents, same task</span>
         <span class="spacer" />
-        <button class="ghost sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
+        <Button variant="quiet" size="sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? 'Show' : 'Hide'}
-        </button>
+        </Button>
       </header>
       {!collapsed && (
         <div class="compare-grid" style={{ gridTemplateColumns: `repeat(${group.chats.length}, minmax(0, 1fr))` }}>
@@ -923,9 +909,11 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                   <span class="compare-agent" title={c.label}>
                     {agentName(c.agent)}
                   </span>
-                  <button class="title-btn compare-topic" title={c.title} onClick={() => open(c.id)}>
-                    {c.title}
-                  </button>
+                  <span class="compare-topic">
+                    <Button variant="text" truncate title={c.title} onClick={() => open(c.id)}>
+                      {c.title}
+                    </Button>
+                  </span>
                   <Dot state={status} />
                   <span class="hint">{DOT_LABEL[status]}</span>
                   <span class="spacer" />
@@ -935,13 +923,13 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                 </div>
                 <p class="compare-reply">{reply || <span class="hint">No reply yet.</span>}</p>
                 <div class="actions">
-                  <button class="ghost sm" onClick={() => send({ type: 'viewChanges', chatId: c.id })}>
-                    <Icon name="diff" /> Changes
-                  </button>
+                  <Button variant="quiet" size="sm" icon="diff" onClick={() => send({ type: 'viewChanges', chatId: c.id })}>
+                    Changes
+                  </Button>
                   <span class="spacer" />
-                  <button class="sm" disabled={c.busy} title={c.busy ? 'Still working' : c.branch ? 'Merge this one, archive the others' : 'Archive the others'} onClick={() => keep(c.id)}>
-                    <Icon name="keep" /> Keep this one
-                  </button>
+                  <Button size="sm" icon="keep" disabled={c.busy} title={c.busy ? 'Still working' : c.branch ? 'Merge this one, archive the others' : 'Archive the others'} onClick={() => keep(c.id)}>
+                    Keep this one
+                  </Button>
                 </div>
               </article>
             );
@@ -1158,12 +1146,12 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
                 {c.title}
               </button>
               <span class="hint num">{age(c.createdAt, now)}</span>
-              <button class="ghost sm" onClick={() => send({ type: 'archive', chatId: c.id, archived: false })}>
-                <Icon name="unarchive" /> Unarchive
-              </button>
-              <button class="ghost danger sm" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
-                <Icon name="trash" /> Remove
-              </button>
+              <Button variant="quiet" size="sm" icon="unarchive" onClick={() => send({ type: 'archive', chatId: c.id, archived: false })}>
+                Unarchive
+              </Button>
+              <Button variant="quiet-danger" size="sm" icon="trash" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
+                Remove
+              </Button>
             </li>
           ))}
           {outside.map((s) => (

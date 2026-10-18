@@ -60,6 +60,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
+import { Banner, Button, Card, CardHead } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -1020,11 +1021,8 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       const doneCount = item.entries.filter((e) => e.status === 'completed').length;
       const current = item.entries.findIndex((e) => e.status !== 'completed');
       return (
-        <section class="card plan" aria-label="Plan">
-          <div class="card-head">
-            <span>Plan</span>
-            <span class="hint">{current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`}</span>
-          </div>
+        <Card size="sm" class="msg-card plan" label="Plan">
+          <CardHead icon="plan" title="Plan" meta={current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`} />
           <ol class="plan-steps">
             {item.entries.map((e, i) => {
               const s = PLAN_STATE[e.status] ?? 'next';
@@ -1041,7 +1039,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
               <i key={i} data-step={e.status === 'completed' ? 'done' : i === current ? 'working' : 'next'} />
             ))}
           </div>
-        </section>
+        </Card>
       );
     }
     case 'permission':
@@ -1052,26 +1050,24 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       return <Command item={item} chat={chat} />;
     case 'notice':
       return (
-        <div class="notice" data-tone={item.tone} role={item.tone === 'error' ? 'alert' : undefined}>
-          <div>{item.text}</div>
-          {item.detail && <code class="detail">{item.detail}</code>}
-          {item.actions && (
-            <div class="actions">
-              {item.actions.map((a) => (
-                <button key={a.label} class="sm" onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          )}
+        <div class="msg-card notice">
+          <Banner
+            tone={item.tone === 'error' ? 'error' : undefined}
+            actions={item.actions?.map((a) => (
+              <Button key={a.label} size="sm" onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
+                {a.label}
+              </Button>
+            ))}
+          >
+            <div>{item.text}</div>
+            {item.detail && <code class="notice-detail">{item.detail}</code>}
+          </Banner>
         </div>
       );
     case 'changes':
       return (
-        <section class="card changes" data-undone={item.undone ? 'true' : undefined}>
-          <div class="card-head">
-            <span>{item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`}</span>
-          </div>
+        <Card size="sm" class="msg-card changes" data-muted={item.undone ? '' : undefined}>
+          <CardHead icon="diff" title={item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`} />
           <div class="files">
             {item.files.map((f) => (
               <button key={f} class="ref" title={f} onClick={() => send({ type: 'openFile', path: f })}>
@@ -1080,18 +1076,18 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
             ))}
           </div>
           {!item.undone && (
-            <div class="actions">
+            <div class="fl-card__foot" data-start="">
               {canUndo && (
-                <button class="sm" onClick={() => send({ type: 'undo', chatId: chat.id, turnId: item.turnId })}>
-                  <Icon name="undo" /> Undo this turn
-                </button>
+                <Button size="sm" icon="undo" onClick={() => send({ type: 'undo', chatId: chat.id, turnId: item.turnId })}>
+                  Undo this turn
+                </Button>
               )}
-              <button class="ghost sm" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
-                <Icon name="diff" /> Changes
-              </button>
+              <Button variant="quiet" size="sm" icon="diff" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
+                Changes
+              </Button>
             </div>
           )}
-        </section>
+        </Card>
       );
     case 'link':
       return <LinkView item={item} chat={chat} state={state} onSelect={onSelect} />;

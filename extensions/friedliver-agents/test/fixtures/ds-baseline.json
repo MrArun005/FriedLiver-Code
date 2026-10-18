@@ -2,8 +2,8 @@
   "css": {
     "webview.css": {
       "colour": 9,
-      "px": 143,
-      "effect": 9,
+      "px": 140,
+      "effect": 7,
       "restyle": [
         ".acct-choice button.mini-select",
         ".acct-tag",
@@ -25,7 +25,6 @@
         ".badge-x:hover:not(:disabled)",
         ".badge.conflict",
         ".badge:has(.badge-btn:hover)",
-        ".card-actions > button.sm",
         ".card-top .auto-badge",
         ".card-top .chip",
         ".card-top .mode-badge",
@@ -33,9 +32,7 @@
         ".chip",
         ".chip-text",
         ".code-ref button.ref",
-        ".code-tools button.sm",
         ".col-count",
-        ".compare-top .title-btn",
         ".count",
         ".count-item",
         ".count.loud",
@@ -90,7 +87,6 @@
         ".title-btn",
         ".title-btn:hover:not(:disabled)",
         ".tl-group-btn",
-        ".tool-tools button.sm",
         ".user-msg:hover .rewind-btn",
         ".viewer-count",
         ".you-badge",
@@ -103,8 +99,6 @@
         "button.cc-mic[data-state]::after",
         "button.chat-head-title",
         "button.chat-head-title:hover",
-        "button.copy-btn",
-        "button.copy-btn:hover:not(:disabled)",
         "button.count-item",
         "button.danger",
         "button.decide",
@@ -167,7 +161,6 @@
         "button.seg-item[aria-checked='true']",
         "button.seg-item[aria-selected='true']",
         "button.sm",
-        "button.sm-link",
         "button.sm:hover:not(:disabled)",
         "button.starter",
         "button.starter:hover",
@@ -184,7 +177,6 @@
         "button.viewer-thumb",
         "button.viewer-thumb:hover",
         "button.viewer-thumb[aria-selected='true']",
-        "button.wrap-btn[aria-pressed='true']",
         "input.q-input",
         "th[aria-sort] .th-btn"
       ]
@@ -192,8 +184,8 @@
   },
   "tsx": {
     "accounts.tsx": 12,
-    "chat.tsx": 53,
-    "common.tsx": 8,
+    "chat.tsx": 50,
+    "common.tsx": 4,
     "composerMenus.tsx": 17,
     "connect.tsx": 7,
     "controls.tsx": 20,
@@ -201,16 +193,16 @@
     "map.tsx": 2,
     "permissions.tsx": 2,
     "refs.tsx": 2,
-    "steps.tsx": 6,
+    "steps.tsx": 3,
     "subagents.tsx": 3,
-    "tasks.tsx": 54,
+    "tasks.tsx": 35,
     "viewer.tsx": 11
   },
   "totals": {
     "colour": 9,
-    "px": 143,
-    "effect": 9,
-    "restyle": 182,
-    "rawControls": 201
+    "px": 140,
+    "effect": 7,
+    "restyle": 174,
+    "rawControls": 172
   }
 }

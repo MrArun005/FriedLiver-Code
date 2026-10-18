@@ -1100,7 +1100,7 @@ async function shoot() {
     await card.locator('.card-more').click();
     const items = await p.locator('.fl-menu[role="menu"] [role^="menuitem"]').allInnerTexts();
     check(['Open chat', 'View changes', 'Ask another agent…'].every((t) => items.some((i) => i.includes(t))) && items.some((i) => i.includes('Claude')) && items.some((i) => i.includes('Rename')), `⋯ holds Open, View changes, Hand off, Ask, Pipe to and the rest [${items.join(' | ')}]`);
-    check((await p.locator('.fl-menu .pop-title:text-is("Hand off to")').count()) === 1 && (await p.locator('.fl-menu .pop-title:has-text("Pipe each reply to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
+    check((await p.locator('.fl-menu .fl-menu__title:text-is("Hand off to")').count()) === 1 && (await p.locator('.fl-menu .fl-menu__title:has-text("Pipe each reply to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
     await p.keyboard.press('Escape');
     const calm = await p.evaluate(() => {
       const c = document.querySelector('.task-card');

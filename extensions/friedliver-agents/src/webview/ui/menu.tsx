@@ -141,6 +141,7 @@ export function Popover({
 /** A menu row: icon, label (and a description under it), then a value, key or check at the end. */
 export function MenuItem({
   icon,
+  lead,
   label,
   desc,
   end,
@@ -152,6 +153,8 @@ export function MenuItem({
   onSelect,
 }: {
   icon?: IconName;
+  /** In place of the icon: an avatar or another 16px mark. */
+  lead?: ComponentChildren;
   label: ComponentChildren;
   desc?: ComponentChildren;
   end?: ComponentChildren;
@@ -175,6 +178,7 @@ export function MenuItem({
       onClick={onSelect}
     >
       {icon && <Icon name={icon} />}
+      {lead}
       {desc ? (
         <span class="fl-menu__text">
           <span class="fl-menu__label">{label}</span>
@@ -203,7 +207,7 @@ export const MenuSep = () => <div class="fl-menu__sep" role="separator" />;
 export function MenuTitle({ children, end }: { children: ComponentChildren; end?: ComponentChildren }) {
   return (
     <div class="fl-menu__title" aria-hidden="true">
-      <span>{children}</span>
+      {end ? <span>{children}</span> : children}
       {end}
     </div>
   );

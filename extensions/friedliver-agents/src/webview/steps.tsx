@@ -13,6 +13,7 @@ import type { ToolOut } from '../shared/tools';
 import { Code, CopyButton, Icon, ImageThumb, RunButton, basename, memo, send } from './common';
 import { stepImage } from '../shared/stepImages';
 import { DiffView } from './controls';
+import { Button, IconButton } from './ui';
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
 
@@ -213,16 +214,14 @@ function ToolRow({ label, class: className, text, lang, out, tools, children, ..
       <div class="tool-cell">
         <Code code={text} lang={lang} class={long && !all ? 'capped' : ''} />
         {long && (
-          <button class="link sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
+          <Button variant="link" size="sm" class="sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
             {all ? 'Show less' : `Show all ${lines} lines`}
-          </button>
+          </Button>
         )}
         {children}
         <span class="tool-tools">
           {tools}
-          <button type="button" class="ghost icon-btn sm" aria-label="Open in editor" title="Open in an editor tab (long lines wrap)" onClick={() => send({ type: 'openText', text })}>
-            <Icon name="open" />
-          </button>
+          <IconButton icon="open" label="Open in editor" title="Open in an editor tab (long lines wrap)" size="sm" variant="secondary" muted onClick={() => send({ type: 'openText', text })} />
         </span>
       </div>
     </section>
@@ -238,9 +237,9 @@ function HeredocFile({ doc, cwd }: { doc: Heredoc; cwd: string }) {
     <ToolRow label="FILE" class="step-file" aria-label={`Written to ${basename(file)}`} text={doc.body} lang={langOf(file)} tools={
       <>
         {inside && (
-          <button type="button" class="ghost sm" title={`Open ${inside}`} onClick={() => send({ type: 'openFile', path: inside })}>
+          <Button variant="secondary" size="sm" title={`Open ${inside}`} onClick={() => send({ type: 'openFile', path: inside })}>
             Open file
-          </button>
+          </Button>
         )}
         <CopyButton text={doc.body} label="Copy file text" />
       </>
