@@ -121,6 +121,15 @@ describe('a subagent transcript, parsed for its detail', () => {
     expect(tools[0].input).toBeUndefined();
   });
 
+  it('redacts before it cuts: a secret where an output’s shown tail begins doesn’t leak its end', () => {
+    const token = `sk-ant-${'Q7'.repeat(30)}`;
+    // The kept tail (2 KB) starts 20 characters into the token.
+    const output = `${'x'.repeat(5000)}\n${token}\n${'y'.repeat(2048 - token.length + 19)}`;
+    const text = user(T0, BRIEF) + assistant(T0 + 1, 'm1', use('b1', 'Bash', { command: 'npm run env-dump' })) + result(T0 + 2, 'b1', output);
+    const v = detailView(parseSubagentDetail(text), { sessionId: 'S', id: 'x' }, 0);
+    expect(JSON.stringify(v)).not.toContain('Q7Q7');
+  });
+
   it('reports its hand-back, or its last words once it stops calling tools', () => {
     expect(detailView(parseSubagentDetail(transcript() + handback(T0 + 60_000)), { sessionId: 'S', id: 'x' }, 0).report).toMatch(/^## Done/);
     const quiet = transcript() + assistant(T0 + 70_000, 'mz', { type: 'text', text: 'All three fixed.' });
@@ -181,6 +190,20 @@ describe('redactSecrets', () => {
       );
       expect(ms, input.slice(0, 20)).toBeLessThan(50);
     }
+  });
+
+  it('redacts a secret whole however long it is, and one far into a long text', () => {
+    const long = (n: number) => 'Zq9'.repeat(n).slice(0, n);
+    const url = redactSecrets(`git clone https://arun:${long(600)}@github.com/x/y`);
+    expect(url).toContain('https://arun:[redacted]@github.com');
+    expect(url).not.toContain('Zq9');
+    for (const text of [`api_key=${long(2000)}`, `deploy --token ${long(2000)}`, `export GITHUB_TOKEN="${long(2000)}"`]) expect(redactSecrets(text)).not.toContain('Zq9');
+    // A PEM block (and an assignment) where a 64 KB piece boundary used to fall.
+    const pem = `-----BEGIN RSA PRIVATE KEY-----\n${'MIIEowZq9\n'.repeat(20)}-----END RSA PRIVATE KEY-----`;
+    const far = `${'x'.repeat(65_530)}\n${pem}\n${'y'.repeat(70_000)}\npassword = "${long(300)}"`;
+    const out = redactSecrets(far);
+    expect(out).not.toContain('Zq9');
+    expect(out).toContain('[redacted private key]');
   });
 
   it('leaves code that only names a secret', () => {
