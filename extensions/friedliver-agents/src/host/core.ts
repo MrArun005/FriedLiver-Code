@@ -1793,10 +1793,16 @@ export class AgentCore {
       });
       signal.addEventListener('abort', () => this.answerPermission(requestId, null), { once: true });
       const allow = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
-      // Routine, with a plain one-time yes, and not a plan: it may count down (off unless the user set it).
+      // Routine, with a plain one-time yes, not a plan, and wholly inside the workspace (the command's folder,
+      // every file it names, all of them resolvable): it may count down (off unless the user set it).
+      const inside = (p: string | undefined) => !!p && insideRoots(p, this.roots()) !== null;
+      const inWorkspace = detail.command
+        ? inside(detail.command.cwd ?? chat?.cwd)
+        : files.complete && files.paths.length > 0 && [...files.paths, ...(detail.locations ?? [])].every(inside);
+      const routine = inWorkspace && (detail.command ? autoRoutineCommand(detail.command.line) : risk.tone === 'routine');
       const autoAt =
         allow && !detail.plan && kind !== 'switch_mode'
-          ? this.autoRoutine(requestId, detail.command ? autoRoutineCommand(detail.command.line) : risk.tone === 'routine', () => {
+          ? this.autoRoutine(requestId, routine, () => {
               autoFired = true;
               this.answerPermission(requestId, allow.optionId);
             })
