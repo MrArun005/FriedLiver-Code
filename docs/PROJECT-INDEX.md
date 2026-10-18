@@ -62,9 +62,19 @@ re-open after editing 10 files about 0.6–1.2 s with 20,010 stats and 10 reads;
 the diff visits 21 of 1,021 directories.
 
 `.github/workflows/index-bench.yml` runs `test/indexBench.test.ts` on a
-throwaway clone of microsoft/TypeScript: a full build, a re-open after
-editing 10 files, and one after touching 10 more with the same content. The
-numbers go to the run's summary.
+throwaway clone of microsoft/TypeScript at v6.0.3: a full build, a re-open
+after editing 10 files, and one after touching 10 more with the same
+content. The numbers go to the run's summary. Run 39112512864 (ubuntu-latest,
+81,369 files indexed, saved index 93.9 MB):
+
+| Scenario | Time | Stats | Reads | Re-indexed |
+|---|---|---|---|---|
+| Full build | 30.1 s | 162,805 | 81,385 | 81,369 |
+| Re-open, 10 files edited | 4.9 s | 162,799 | 10 | 10 |
+| Re-open, 10 files touched (same content) | 4.9 s | 162,799 | 10 | 0 |
+
+Re-open time is now the stat floor: each file is checked twice (lstat and
+realpath when the saved entry loads, again in the sync pass).
 
 ## Later uses (design only)
 
