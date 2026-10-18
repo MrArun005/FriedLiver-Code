@@ -5,7 +5,8 @@ import path from 'node:path';
 import { diffPreview } from '../shared/diff';
 import { AGENT_FACES, bridgeTitle, decisions, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
 import { describeGrant, type Grant } from '../shared/permissions';
-import { ESCALATING } from '../shared/tools';
+import { ESCALATING, denyOption, primaryOption } from '../shared/tools';
+import { commandRisk, requestRisk } from './risk';
 import { openChats, statusGroups, statusOf, subagents } from '../shared/view';
 import { DISGUISE, plainCommand } from './actions';
 import type { PhoneChat, PhoneItem, PhoneList, PhoneSummary } from './protocol';
@@ -24,6 +25,9 @@ function alwaysLabel(grant: Grant, rel: (p: string) => string): string {
 
 /** Control, bidi and zero-width characters spelled out, so a command reads as it runs. */
 const visible = (s: string) => s.replace(new RegExp(DISGUISE.source, 'gu'), (c) => `⟨U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}⟩`);
+
+/** Agent answers that switch its mode rather than allow for the session: not "This chat". */
+const MODE_CHANGE = /bypass|auto mode|auto-accept|full access|yolo|clear context/i;
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 const tail = (s: string, max: number) => (s.length > max ? `…${s.slice(-(max - 1))}` : s);
@@ -105,7 +109,15 @@ function phoneItem(
       return { k: 'plan', entries: i.entries.slice(0, 30).map((e) => ({ content: clip(e.content, 300), status: e.status })) };
     case 'permission': {
       const d = i.detail;
-      const always = [
+      const risk = requestRisk(d);
+      const careful = risk.level === 'careful';
+      const once = primaryOption(i.options);
+      const deny = denyOption(i.options);
+      const chatScope = careful ? undefined : i.options.find((o) => o.kind === 'allow_always' && !MODE_CHANGE.test(o.name));
+      const mapped = new Set([once, deny, chatScope].filter(Boolean));
+      const verb = d?.command ? 'Run' : d?.files?.length ? (d.files.every((f) => f.isNew) ? 'Create' : 'Edit') : d?.url ? 'Fetch' : d?.plan ? 'Approve plan' : '';
+      const target = d?.command ? d.command.line.split('\n')[0] : d?.files?.length ? d.files.map((f) => rel(f.path)).join(', ') : d?.url ? d.url : undefined;
+      const always = careful ? [] : [
         ...(d?.command && !i.answer && plainCommand(d.command.line) ? [{ grant: { kind: 'exact' as const, command: d.command.line }, label: `Always allow ${clip(d.command.line, 60)}` }] : []),
         ...(!i.answer ? (d?.always ?? []).map((grant) => ({ grant, label: alwaysLabel(grant, rel) })) : []),
       ];
@@ -113,7 +125,13 @@ function phoneItem(
         k: 'permission',
         id: i.requestId,
         title: clip(i.title, 300),
-        options: i.options.map((o) => ({ id: o.optionId, name: o.name, kind: o.kind, escalates: o.kind === 'allow_always' || ESCALATING.test(o.name) })),
+        verb: verb || clip(i.title, 120),
+        ...(verb && target ? { target: clip(visible(target), 200) } : {}),
+        risk,
+        ...(once ? { once: once.optionId } : {}),
+        ...(chatScope ? { chat: chatScope.optionId } : {}),
+        ...(deny ? { deny: deny.optionId } : {}),
+        options: i.options.filter((o) => !mapped.has(o) && !(careful && o.kind.startsWith('allow'))).map((o) => ({ id: o.optionId, name: o.name, kind: o.kind, escalates: o.kind === 'allow_always' || ESCALATING.test(o.name) })),
         ...(i.answer ? { answer: i.answer } : {}),
         ...(i.auto ? { auto: i.auto } : {}),
         ...(d?.command ? { command: { line: clip(visible(d.command.line), 4000), ...(d.command.cwd ? { cwd: rel(d.command.cwd) } : {}) }, ...(plainCommand(d.command.line) ? {} : { onMac: true }) } : {}),
@@ -132,6 +150,7 @@ function phoneItem(
         id: i.commandId,
         line: clip(visible(i.commandLine), 4000),
         ...(plainCommand(i.commandLine) ? {} : { onMac: true }),
+        risk: i.outside ? { level: 'careful', label: 'Outside the workspace', consequences: ['It runs in a folder you didn’t open'] } : commandRisk(i.commandLine),
         cwd: rel(i.cwd),
         state: i.state,
         outside: i.outside,
@@ -157,6 +176,7 @@ function phoneItem(
         k: 'bridge',
         id: i.requestId,
         title: titles.get(i.requestId) ?? bridgeTitle(state, chat, i, true),
+        agent: chat.agent,
         text: clip(i.text, 2000),
         state: i.state,
         ...(i.always && i.state === 'awaiting' ? { always: i.always } : {}),
