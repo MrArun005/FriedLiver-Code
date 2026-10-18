@@ -45,6 +45,7 @@ import { isImagePath } from './shared/stepImages';
 import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
 import { agentName, chatName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
+import { codexModelVisibility } from './host/codexModels';
 
 /** friedliver.links.openIn: where web links you click open. */
 const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
@@ -258,6 +259,8 @@ export class Controller {
         done: (summary) => void vscode.window.setStatusBarMessage(`$(device-desktop) Agent used: ${plainText(summary).replace(/\$\(/g, '$ (')}`, 5000),
       },
       approvalDefault: () => this.approvalDefault(),
+      // Codex keeps which models the account may use; the other agents list only those already.
+      modelVisibility: (agent) => (agent === 'codex' ? codexModelVisibility() : Promise.resolve(undefined)),
       // User settings only: a repository must not make requests allow themselves.
       autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
@@ -921,12 +924,12 @@ export class Controller {
           this.openTasks();
           return;
         case 'handoff': {
-          const chat = await this.core.handoff(m.chatId, m.agent);
+          const chat = await this.core.handoff(m.chatId, m.agent, m.fresh);
           this.selectOn(surface, chat.id);
           return;
         }
         case 'consult':
-          void this.core.consult(m.chatId, m.agent, m.text).catch((err: unknown) => this.error(err));
+          void this.core.consult(m.chatId, m.agent, m.text, 'user', [], m.fresh).catch((err: unknown) => this.error(err));
           return;
         case 'pipe':
           this.core.pipe(m.from, m.to);
@@ -1094,6 +1097,11 @@ export class Controller {
         return;
       case 'compact':
         await this.core.compact(chatId).catch((err: unknown) => this.error(err));
+        return;
+      case 'setOption':
+        // Only a value the agent offers; then the message that failed goes again.
+        await this.core.setOption(chatId, action.optionId, action.value).catch((err: unknown) => this.error(err));
+        retry();
         return;
       case 'signIn':
         await this.accounts.signIn(action.agent, action.methodId, retry);
