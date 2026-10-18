@@ -429,7 +429,10 @@ export class ProjectIndex {
       }
     }
     const lowerTerms = new Set(terms);
-    const ranked = [...scores].map(([rel, score]) => {
+    // Boosts (at most +4.5) only for the best by BM25: scoring every symbol of every file with a common word is what made big repos slow.
+    // ponytail: top max(100, 10×limit) by BM25 get boosts; a file further down would need a 4.5-point boost to place.
+    const top = [...scores].sort((a, b) => b[1] - a[1]).slice(0, Math.max(100, limit * 10));
+    const ranked = top.map(([rel, score]) => {
       const symbols = this.docs.get(rel)!.symbols.filter((s) => lowerTerms.has(s.name.toLowerCase()) || tokenize(s.name).some((t) => lowerTerms.has(t)));
       const exact = symbols.some((s) => lowerTerms.has(s.name.toLowerCase()));
       return { rel, score: score + (exact ? 3 : 0) + Math.min(symbols.length, 3) * 0.5, symbols: symbols.slice(0, 5) };
