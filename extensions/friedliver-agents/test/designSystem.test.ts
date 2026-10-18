@@ -208,3 +208,33 @@ describe('the design system draws every control', () => {
     expect(withoutVars('calc(var(--a, 4px) + 2px)')).toBe('calc( + 2px)');
   });
 });
+
+describe('component states that QA caught', () => {
+  const sys = declarations(readFileSync(path.join(media, 'components.css'), 'utf8'));
+  const parts = (d: Decl) => d.selector.split(',').map((s) => s.trim());
+
+  it('no later state rule (selected, hover…) hides a control’s focus ring', () => {
+    const hidden: string[] = [];
+    sys.forEach((d, i) => {
+      if (!d.prop.startsWith('outline') || d.prop === 'outline-offset') return;
+      for (const p of parts(d)) {
+        const m = /^([.\w-]+):focus-visible$/.exec(p);
+        // Menu items show focus as the hover fill, not a ring (COMPONENTS.md §1.12).
+        if (!m || m[1] === '.fl-menu__item') continue;
+        for (const later of sys.slice(i + 1))
+          if (later.prop.startsWith('outline') && later.prop !== 'outline-offset')
+            for (const q of parts(later)) if (q.startsWith(m[1]) && /^[[:]/.test(q.slice(m[1].length)) && !q.includes('focus')) hidden.push(`${p} ← ${q}`);
+      }
+    });
+    expect(hidden).toEqual([]);
+  });
+
+  it('a key inside a button is not dimmed below AA contrast', () => {
+    expect(sys.filter((d) => d.selector.includes('.fl-kbd--inline') && d.prop === 'opacity' && Number(d.value) < 1)).toEqual([]);
+  });
+
+  it('a pill that shrinks ends its text in an ellipsis, and a decision count is a Count', () => {
+    expect(sys.some((d) => d.selector === '.fl-pill' && d.prop === 'text-overflow' && d.value === 'ellipsis')).toBe(true);
+    expect(readFileSync(path.join(src, 'webview/tasks.tsx'), 'utf8')).not.toMatch(/class="fl-pill"[^>]*>\s*\+\{[^}]*\}\s*<\/span>/);
+  });
+});
