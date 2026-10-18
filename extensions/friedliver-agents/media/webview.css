@@ -1,7 +1,7 @@
 /*
  * FriedLiver's views: layout and the parts unique to one view. Colours, sizes, radii, shadows
  * and blur come from tokens.css; every button, pill, field, menu and card is a component in
- * components.css (spec: ~/code/FriedLiver-Code-design/COMPONENTS.md). Loaded after both.
+ * components.css (spec: ~/code/FriedLiver-Code-design/COMPONENTS.md), which loads after this file.
  * test/designSystem.test.ts counts what this file still does by hand; that count only goes down.
  */
 

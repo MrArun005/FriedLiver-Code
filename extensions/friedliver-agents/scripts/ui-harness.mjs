@@ -191,8 +191,8 @@ function page(params) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>${theme.css} body { background-color: ${background}; }</style>
 <link rel="stylesheet" href="/media/tokens.css">
-<link rel="stylesheet" href="/media/components.css">
 <link rel="stylesheet" href="/media/webview.css">
+<link rel="stylesheet" href="/media/components.css">
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>

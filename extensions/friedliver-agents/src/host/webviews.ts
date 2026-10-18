@@ -4,8 +4,11 @@ import { parseWebviewMessage, type HostMessage, type WebviewMessage } from '../s
 import type { ChatView } from '../shared/model';
 
 
-/** The design system's tokens and components, then the views' own layout (COMPONENTS.md). */
-export const STYLESHEETS = ['tokens.css', 'components.css', 'webview.css'];
+/**
+ * Tokens, the views' own layout, then the components last, so a component wins a tie with a view rule
+ * and the frozen composer keeps the precedence it had at the end of webview.css (COMPONENTS.md §1.9).
+ */
+export const STYLESHEETS = ['tokens.css', 'webview.css', 'components.css'];
 export type Script = 'chat' | 'tasks' | 'images';
 
 /** One webview showing agent state: the side view, the center chat, the task board or images. */
