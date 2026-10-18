@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { handle } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
-import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, tokenize } from '../src/host/projectIndex';
+import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, readIndexFile, saveIndexFile, STAT_BATCH, tokenize } from '../src/host/projectIndex';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -175,9 +176,9 @@ describe('what is never indexed', () => {
     const outside = await project({ 'leak.ts': 'outsidesecret' });
     const root = await project({ 'ok.ts': 'fine' });
     await symlink(path.join(outside, 'leak.ts'), path.join(root, 'link.ts'));
-    const doc = (rel: string) => ({ rel, mtime: 0, size: 1, len: 1, tokens: [['outsidesecret', 1]], symbols: [], imports: [] });
+    const doc = (rel: string) => ({ rel, mtimeNs: '0', size: 1, hash: 'a'.repeat(64), len: 1, tokens: [['outsidesecret', 1]], symbols: [], imports: [] });
     const ix = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
-    await ix.load({ v: 1, docs: [doc('link.ts'), doc('.env'), doc('gone.ts'), doc('ok.ts')] });
+    await ix.load({ v: 2, docs: [doc('link.ts'), doc('.env'), doc('gone.ts'), doc('ok.ts')] });
     expect(['link.ts', '.env', 'gone.ts'].map((r) => ix.has(r))).toEqual([false, false, false]);
     expect(ix.has('ok.ts')).toBe(true);
   });
@@ -223,4 +224,163 @@ describe('the index_* tools on the tools server', () => {
     expect(parseCall('index_search', { query: 'x', limit: 51 })).toBeNull();
     expect(parseCall('index_related', { path: 'src/a.ts' })).toEqual({ tool: 'index_related', path: 'src/a.ts' });
   });
+});
+
+/** What the editor does on open: the saved index back, then every listed file through update(). */
+async function reopen(root: string, saved: unknown, opts: Partial<ConstructorParameters<typeof ProjectIndex>[1]> = {}): Promise<ProjectIndex> {
+  const ix = new ProjectIndex(root, { maxFiles: 100_000, maxBytes: 1e9, ...opts });
+  await ix.load(saved);
+  ix.counts.stat = ix.counts.read = ix.counts.reindex = 0;
+  const files = await ix.list();
+  ix.prune(new Set(files));
+  for (let i = 0; i < files.length; i += STAT_BATCH) await ix.updateBatch(files.slice(i, i + STAT_BATCH));
+  return ix;
+}
+const saveOf = (ix: ProjectIndex) => {
+  ix.tree.snapshot();
+  return JSON.parse(JSON.stringify(ix));
+};
+
+describe('the Merkle tree over the index', () => {
+  it('holds exactly the indexed files: every exclusion of the full build applies', async () => {
+    const outside = await project({ 'leak.ts': 'x' });
+    const root = await project(
+      {
+        '.gitignore': 'ignored/\n',
+        'ignored/a.ts': 'x',
+        'gen/b.ts': 'x',
+        '.env': 'x',
+        'keys/id_rsa': 'x',
+        'node_modules/x/index.js': 'x',
+        '.hidden/c.ts': 'x',
+        'bin.dat': 'x\0\0',
+        'big.ts': 'x'.repeat(INDEX_LIMITS.fileBytes + 1),
+        'ok.ts': 'x',
+        'src/ok2.ts': 'y',
+      },
+      true,
+    );
+    await symlink(path.join(outside, 'leak.ts'), path.join(root, 'link.ts'));
+    await symlink(outside, path.join(root, 'linkdir'));
+    const ix = await build(root, { exclude: ['gen'] });
+    await ix.updateMany(['linkdir/leak.ts', 'link.ts', '.env', 'ignored/a.ts']);
+    expect(ix.tree.size).toBe(ix.size);
+    expect(['.gitignore', 'ok.ts', 'src/ok2.ts'].every((r) => ix.tree.get(r))).toBe(true);
+    expect(ix.tree.size).toBe(3);
+    expect(ix.tree.get('src/ok2.ts')).toBe(createHash('sha256').update('y').digest('hex'));
+  });
+
+  it('on reopen reads only changed files and re-indexes only changed content', async () => {
+    const files = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`d${i % 4}/f${i}.ts`, `export const v${i} = ${i};\n`]));
+    const root = await project(files);
+    const first = await build(root);
+    const saved = saveOf(first);
+    const before = first.tree.root();
+
+    await writeFile(path.join(root, 'd0/f0.ts'), 'export const changed = 1;\n');
+    await writeFile(path.join(root, 'd1/f1.ts'), 'export const changed = 2;\n');
+    const later = new Date(Date.now() + 5000);
+    await utimes(path.join(root, 'd2/f2.ts'), later, later); // a checkout that rewrote it unchanged
+    await writeFile(path.join(root, 'd3/new.ts'), 'export const fresh = 1;\n');
+    await rm(path.join(root, 'd3/f3.ts'));
+
+    const ix = await reopen(root, saved);
+    // Every listed file once (the floor without a file-system journal), and again right before each read.
+    expect(ix.counts.stat).toBe(40 + 4);
+    expect(ix.counts.read).toBe(4); // two edits, the touched file, the new one
+    expect(ix.counts.reindex).toBe(3); // the touched file's content matched: not re-tokenized
+    expect(ix.tree.base).toBe(before);
+    expect(ix.changes()!.changes).toEqual([
+      { path: 'd0/f0.ts', change: 'M' },
+      { path: 'd1/f1.ts', change: 'M' },
+      { path: 'd3/f3.ts', change: 'D' },
+      { path: 'd3/new.ts', change: 'A' },
+    ]);
+    expect(ix.search('fresh', 5)[0].rel).toBe('d3/new.ts');
+
+    // Nothing changed: nothing read.
+    const again = await reopen(root, saveOf(ix));
+    expect([again.counts.read, again.counts.reindex]).toEqual([0, 0]);
+    expect(again.changes()!.total).toBe(0);
+  });
+
+  it('tracks a rename through watcher updates and recomputes the root lazily', async () => {
+    const root = await project({ 'a/x.ts': 'one', 'b/y.ts': 'two' });
+    const ix = await build(root);
+    const before = ix.tree.snapshot();
+    await mkdir(path.join(root, 'c'));
+    await writeFile(path.join(root, 'c/x.ts'), 'one');
+    await rm(path.join(root, 'a'), { recursive: true });
+    await ix.updateMany(['a/x.ts', 'c/x.ts']);
+    expect(ix.changes(before.slice(0, 12))!.changes).toEqual([
+      { path: 'a/x.ts', change: 'D' },
+      { path: 'c/x.ts', change: 'A' },
+    ]);
+    expect(ix.tree.root()).not.toBe(before);
+  });
+
+  it('starts over from a corrupt, foreign or old saved file, and saves it private', async () => {
+    const root = await project({ 'a.ts': 'one', 'b.ts': 'two' });
+    const store = await mkdtemp(path.join(os.tmpdir(), 'fl-store-'));
+    dirs.push(store);
+    const file = path.join(store, 'index', 'ix.json');
+    const ix = await build(root);
+    ix.tree.snapshot();
+    await saveIndexFile(file, ix);
+    expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect((await reopen(root, await readIndexFile(file))).counts.read).toBe(0);
+
+    for (const bad of ['{not json', JSON.stringify({ v: 1, docs: [] }), JSON.stringify({ v: 2, docs: 'x', merkle: 7 })]) {
+      await writeFile(file, bad);
+      const re = await reopen(root, await readIndexFile(file));
+      expect(re.counts.read).toBe(2); // a full build
+      expect(re.size).toBe(2);
+      expect(re.changes()).toBeNull(); // no earlier root to compare with
+    }
+    // A forged node in an otherwise good file: the history goes, the docs stay.
+    const good = JSON.parse(JSON.stringify(ix));
+    good.merkle.nodes[0][1][0][1] = 'f'.repeat(64);
+    await writeFile(file, JSON.stringify(good));
+    const re = await reopen(root, await readIndexFile(file));
+    expect([re.counts.read, re.changes()]).toEqual([0, null]);
+  });
+
+  it('answers index_changes', async () => {
+    const root = await project({ 'a.ts': 'one', 'b.ts': 'two' });
+    const ix = await reopen(root, saveOf(await build(root)));
+    expect(await answerIndex([ix], { tool: 'index_changes' }, false)).toMatch(/^Project hash [0-9a-f]{12}, the same as when the project was opened\./);
+    await writeFile(path.join(root, 'a.ts'), 'changed');
+    await ix.update('a.ts');
+    const out = await answerIndex([ix], { tool: 'index_changes' }, false);
+    expect(out).toContain('1 file changed since');
+    expect(out).toContain('M a.ts');
+    expect(await answerIndex([ix], { tool: 'index_changes', since: 'deadbeefdead' }, false)).toContain('No kept project hash starts with deadbeefdead');
+    const fresh = await build(root);
+    expect(await answerIndex([fresh], { tool: 'index_changes' }, false)).toContain('No earlier project hash');
+  });
+
+  it('reopens a synthetic 20k-file tree reading only the touched files', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'fl-index-big-'));
+    dirs.push(root);
+    const N = 20_000;
+    const rels = Array.from({ length: N }, (_, i) => `p${i % 20}/q${Math.floor(i / 20) % 50}/f${i}.ts`);
+    for (const d of new Set(rels.map((r) => path.dirname(r)))) await mkdir(path.join(root, d), { recursive: true });
+    for (let i = 0; i < N; i += 500) await Promise.all(rels.slice(i, i + 500).map((r, j) => writeFile(path.join(root, r), `export const v${i + j} = ${i + j};\n`)));
+
+    let t = performance.now();
+    const full = await reopen(root, undefined);
+    const fullMs = performance.now() - t;
+    expect(full.size).toBe(N);
+    const saved = saveOf(full);
+    for (const r of rels.slice(0, 10)) await writeFile(path.join(root, r), 'export const touched = 1;\n');
+    t = performance.now();
+    const re = await reopen(root, saved);
+    const reMs = performance.now() - t;
+    expect([re.counts.read, re.counts.reindex]).toEqual([10, 10]);
+    re.tree.visits = 0;
+    expect(re.changes()!.total).toBe(10);
+    expect(re.tree.visits).toBeLessThanOrEqual(21); // root + the changed directories, not all 1,021
+    console.log(`20k files: full build ${fullMs.toFixed(0)} ms, reopen after 10 edits ${reMs.toFixed(0)} ms (${re.counts.stat} stats, ${re.counts.read} reads)`);
+  }, 120_000);
 });
