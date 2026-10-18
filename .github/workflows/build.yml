@@ -5,6 +5,8 @@ name: Build FriedLiver
 # upload them. About an hour per OS, so docs-only changes don't start it.
 # A pushed tag vX.Y.Z or vX.Y.Z-N (the upstream version, then FriedLiver's own
 # build number) builds the same way and then publishes a GitHub release.
+# The Release workflow (release.yml) calls this one with a version, a main commit
+# and notes: it builds that commit and publishes the release, creating the tag.
 on:
   push:
     branches: [main]
@@ -16,6 +18,20 @@ on:
       - 'test/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Release tag to create, v1.142.0-8
+        type: string
+        required: true
+      sha:
+        description: The main commit to build and tag
+        type: string
+        required: true
+      notes:
+        description: Release notes (Markdown)
+        type: string
+        required: true
 
 # Read-only everywhere; only the release job below can write, and only releases.
 permissions:
@@ -24,7 +40,7 @@ permissions:
 # A build takes most of an hour: a newer push waits for the running build instead of
 # cancelling it, and GitHub keeps only the newest waiting push.
 concurrency:
-  group: fork-${{ github.ref }}
+  group: fork-${{ inputs.version || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -42,10 +58,11 @@ jobs:
       # Scripts read these as variables, never as ${{ }} pasted into a script.
       ARTIFACT: ${{ matrix.artifact }}
       TARGET: ${{ matrix.target }}
-      # Tag builds stamp the release version into product.json, which the update check compares with GitHub's latest release.
-      FRIEDLIVER_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      # Release builds (a tag, or a version from release.yml) stamp the release version into product.json,
+      # which the update check compares with GitHub's latest release.
+      FRIEDLIVER_VERSION: ${{ inputs.version || github.ref_type == 'tag' && github.ref_name || '' }}
       # Release builds refuse a download that has no pinned checksum (scripts/checksums.json).
-      FRIEDLIVER_REQUIRE_PINS: ${{ github.ref_type == 'tag' && '1' || '' }}
+      FRIEDLIVER_REQUIRE_PINS: ${{ (inputs.version || github.ref_type == 'tag') && '1' || '' }}
     steps:
       - name: Free disk space (the upstream checkout and build need about 10 GB)
         if: runner.os == 'Linux'
@@ -71,11 +88,13 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          # release.yml's commit; empty (the pushed commit) otherwise.
+          ref: ${{ inputs.sha }}
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           # Release builds start from an empty npm cache.
-          cache: ${{ github.ref_type != 'tag' && 'npm' || '' }}
+          cache: ${{ !(inputs.version || github.ref_type == 'tag') && 'npm' || '' }}
       # Root packages: the ACP SDK that agent-core/ and the demo agent import.
       - run: npm ci
       - run: node scripts/fetch.mjs
@@ -167,7 +186,7 @@ jobs:
           path: installers/*
           if-no-files-found: error
 
-  # For tags only: the installers and portable apps of this run, with their SHA-256 sums,
+  # For releases only (a tag, or release.yml): the installers and portable apps of this run, with their SHA-256 sums,
   # attached to a GitHub release. The Agents extension checks for it every 4 hours and installs
   # the DMG only when its SHA-256 in SHA256SUMS.txt matches.
   # The workbench visual harness on this run's macOS app, for manual builds (a branch's look):
@@ -208,7 +227,7 @@ jobs:
 
   release:
     needs: build
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: inputs.version || github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -230,14 +249,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.version || github.ref_name }}
+          SHA: ${{ inputs.sha }}
+          NOTES: ${{ inputs.notes }}
         run: |
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
             echo "::error::Release tags look like v1.142.0 or v1.142.0-2, not $TAG"
             exit 1
           fi
+          if [[ -n "$SHA" && ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Not a commit: $SHA"
+            exit 1
+          fi
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
+          elif [ -n "$SHA" ]; then
+            # release.yml: the release creates the tag on that commit, so a failed build leaves no tag behind.
+            # (A tag made with the workflow token starts no other workflow, so this doesn't build twice.)
+            printf '%s\n' "$NOTES" > "$RUNNER_TEMP/notes.md"
+            gh release create "$TAG" release/* --target "$SHA" --title "FriedLiver ${TAG#v}" --notes-file "$RUNNER_TEMP/notes.md"
           else
             gh release create "$TAG" release/* --verify-tag --title "FriedLiver ${TAG#v}" --generate-notes
           fi
