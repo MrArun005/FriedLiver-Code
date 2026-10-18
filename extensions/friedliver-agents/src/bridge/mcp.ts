@@ -7,6 +7,7 @@
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
 import { READ_LIMITS } from '../host/indexReads';
+import { SHOT } from '../host/browserRules';
 import { SNAPSHOT_LIMITS } from '../host/pageText';
 import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
 
@@ -239,7 +240,18 @@ function browserTools() {
       selector: SELECTOR,
       text: { type: 'string', maxLength: BRIDGE_LIMITS.text, description: 'What to type.' },
     }, ['selector', 'text']),
-    tool('browser_screenshot', 'Screenshot', 'Saves a PNG of the visible page to a private file in FriedLiver\'s storage and returns its path; read that file to see it.', {}, [], true),
+    tool(
+      'browser_screenshot',
+      'Screenshot',
+      "Saves a JPEG of the visible page, or of one element, to a private file in FriedLiver's storage and returns its path and its cost in image tokens; read that file to see it. " +
+        'Only for what text can not tell (layout, colors, images): browser_snapshot is far cheaper. Crop to the element you care about with selector.',
+      {
+        selector: { ...SELECTOR, description: 'Only this element (an id like "e12" from browser_snapshot, or a CSS selector), with a small margin.' },
+        max_width: { type: 'integer', minimum: SHOT.minWidth, maximum: SHOT.maxMaxWidth, description: `Widest the image may be, in pixels. Default ${SHOT.maxWidth}.` },
+      },
+      [],
+      true,
+    ),
     tool('browser_console', 'Console', 'The open page\'s latest console messages and uncaught errors (up to 100).', {}, [], true),
     tool('browser_back', 'Go back', 'Goes back one page in the browser\'s history.' + ASKS),
     tool('browser_reload', 'Reload', 'Reloads the open page.' + ASKS),
