@@ -42,7 +42,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
+import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
@@ -694,9 +694,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <Dot state={status} />
         <span class="card-state-text">{line.text}</span>
         {line.waiting > 1 && (
-          <span class="fl-pill" data-tone="waiting" title={`${line.waiting} decisions waiting`}>
-            +{line.waiting - 1}
-          </span>
+          <Count n={`+${line.waiting - 1}`} loud label={`${line.waiting} decisions waiting`} />
         )}
       </div>
       {line.code &&
