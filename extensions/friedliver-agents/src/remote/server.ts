@@ -191,8 +191,9 @@ export class RemoteServer {
   private async request(s: { endpoint: Endpoint; port: number }, req: IncomingMessage, res: ServerResponse): Promise<void> {
     const ip = req.socket.remoteAddress ?? '';
     try {
-      this.headers(s, req, res);
+      // The Host goes into the CSP, so it is checked first.
       if (!this.sameSite(s, req, false)) return json(res, 421, { error: 'Wrong host.' });
+      this.headers(s, req, res);
       if (this.options.lockout.blocked(ip)) return json(res, 429, { error: 'Too many failed attempts. Wait a few minutes.' });
       const url = new URL(req.url ?? '/', 'https://remote.invalid');
       const route = `${req.method} ${url.pathname}`;

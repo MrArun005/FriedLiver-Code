@@ -718,7 +718,7 @@ function defaultName(): string {
 }
 
 /** "AB:CD:…" in groups of four bytes, so it is easy to compare with the browser's certificate view. */
-const groupedFp = (fp: string) => (fp.match(/([0-9A-F]{2}:?){1,4}/g) ?? []).map((g) => g.replace(/:$/, '')).join('  ');
+const groupedFp = (fp: string) => (fp.replace(/:/g, '').match(/.{1,8}/g) ?? []).join(' ');
 
 function Pairing({ code, fp, done }: { code: string | undefined; fp: string | undefined; done(): void }) {
   const [name, setName] = useState(defaultName());
