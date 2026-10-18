@@ -280,6 +280,41 @@ describe('the WebSocket', () => {
   });
 });
 
+describe('revoking', () => {
+  it('Revoke all closes every open session', async () => {
+    const { port, pairing, server } = await start();
+    const socks: Awaited<ReturnType<typeof ws>>[] = [];
+    for (const name of ['A', 'B']) {
+      const { token } = await pair(port, pairing, name);
+      const ticket = ((await post(port, '/api/ticket', {}, { authorization: `Bearer ${token}` })).json() as { ticket: string }).ticket;
+      socks.push(await ws(port, `/ws?ticket=${ticket}`));
+    }
+    await waitFor(() => server.connected().length === 2);
+    server.revokeAll();
+    await waitFor(() => socks.every((s) => s.closed()));
+    expect(server.connected()).toEqual([]);
+  });
+
+  it('a ticket issued before the revoke no longer opens a socket', async () => {
+    const { port, pairing, server } = await start();
+    const { token, device } = await pair(port, pairing);
+    const ticket = ((await post(port, '/api/ticket', {}, { authorization: `Bearer ${token}` })).json() as { ticket: string }).ticket;
+    server.revoke(device.id);
+    expect((await ws(port, `/ws?ticket=${ticket}`)).status).toBe(401);
+  });
+
+  it('closes a socket whose device another window revoked, at the next check', async () => {
+    const { port, pairing, server, devices } = await start();
+    const { token, device } = await pair(port, pairing);
+    const ticket = ((await post(port, '/api/ticket', {}, { authorization: `Bearer ${token}` })).json() as { ticket: string }).ticket;
+    const sock = await ws(port, `/ws?ticket=${ticket}`);
+    await waitFor(() => server.connected().length === 1);
+    devices.revoke(device.id);
+    (server as unknown as { ping(): void }).ping();
+    await waitFor(() => sock.closed());
+  });
+});
+
 describe('where it listens', () => {
   it('refuses the wildcard, loopback and public addresses without a test override', async () => {
     for (const host of ['0.0.0.0', '::', '127.0.0.1', '8.8.8.8']) {
