@@ -1,6 +1,7 @@
-// How much care a request needs before you say yes: routine (looks, runs the project's own checks),
-// review (changes something you can undo or see), careful (loses work, history, data or money, or
-// touches secrets). The tone picks the card's weight, its inbox lane, and whether Allow is a
+// How much care a request needs before you say yes: routine (only the exact short list in
+// AUTO_ROUTINE: npm test, git status…), review (everything else, the default), careful (loses work,
+// history, data or money, or touches secrets). The patterns here only name a request and RAISE
+// caution (review → careful); nothing they match ever makes a request routine or allows anything. The tone picks the card's weight, its inbox lane, and whether Allow is a
 // press-and-hold. Pure: the webviews draw it, the host uses it to keep careful requests one at a
 // time (no rule, no "this chat", no notification button answers them).
 //
@@ -116,10 +117,7 @@ const READ_ONLY = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg
 /** Commands that print the environment, where tokens and keys live. */
 const ENV_DUMP = new Set(['printenv', 'set', 'declare', 'compgen']);
 const GIT_READ = new Set(['status', 'diff', 'log', 'show', 'blame', 'rev-parse', 'ls-files', 'grep', 'describe', 'shortlog', 'reflog', 'remote', 'branch', 'tag']);
-/**
- * Shell syntax that runs more than one command, substitutes, redirects or expands (globs, ~, $VAR):
- * a line with any of it is never routine, whatever its words look like.
- */
+/** Shell syntax that runs more than one command, substitutes, redirects or expands (globs, ~, $VAR). */
 const SHELL_SYNTAX = /[$`&;|<>*?[\]{}~!\\()\n\r]/;
 /** Options that run another program or write a file, for any program (git -c is caught before). */
 const RUNS_OR_WRITES = /^--(output|upload-pack|receive-pack|exec|ext-diff|config-env|pre|pre-glob|compress-program|search-zip|files0-from)(=|$)/;
@@ -211,22 +209,24 @@ export function commandRisk(line: string): Risk {
     const push = forcePush(line);
     return { tone: 'careful', ...hit, lock: CAREFUL_LOCK, ...(push ? { push } : {}) };
   }
+  // Routine comes only from the exact list; every other command is review, and the rest only names it.
+  if (autoRoutineCommand(line)) return { tone: 'routine', label: AUTO_LABEL[normalizeLine(line).split(' ')[0]] ?? 'Runs project scripts', consequences: [] };
   const segs = segments(line);
   // Writing a file through a redirect changes files.
   const writes = /(^|[^0-9&>])>{1,2}(?!\s*&|\s*\/dev\/null)/.test(line.replace(/\d?>&\d/g, ''));
-  // Routine: one plain command, no shell syntax at all, no wrapper (sudo, env…), that only looks or runs the project's checks.
-  const only = segs.length === 1 && !SHELL_SYNTAX.test(line) ? program(segs[0]) : undefined;
-  const kind = only && only.words.length === segs[0].length ? routine(only.words) : undefined;
-  // Looking at the environment or at secrets is never routine.
-  const dumps = segs.some((s) => ENV_DUMP.has(s[0]) || (s[0] === 'env' && !program(s).words.length) || (s[0] === 'export' && s.slice(1).every((w) => w.startsWith('-'))));
-  if (dumps) return { tone: 'review', label: 'Reads environment variables', consequences: [] };
-  const secret = kind && segs[0].map((w) => sensitivePath(w)).find((h) => h?.careful);
-  if (secret) return { tone: 'review', label: `Reads ${secret.label === 'Secrets file' ? 'a secrets file' : secret.label.toLowerCase()}`, consequences: [] };
-  if (kind) return { tone: 'routine', label: kind, consequences: [] };
-  const words = program(segs[0] ?? []).words;
+  const progs = segs.map((s) => program(s).words);
+  // Only looks: plain commands with no shell syntax, each of which only reads (for the chip; still review).
+  const reads = progs.length > 0 && !SHELL_SYNTAX.test(line) && progs.every((w) => !!looks(w));
+  if (segs.some(envDump)) return { tone: 'review', label: 'Reads environment variables', consequences: [] };
+  // Secrets, keys or .git named anywhere, an option's value included (--file=.env, -f.env).
+  const secret = segs.flatMap((s) => s.flatMap(pathsIn)).map(sensitivePath).find((h) => h?.careful);
+  if (secret && reads) return { tone: 'review', label: `Reads ${secret.label === 'Secrets file' ? 'a secrets file' : secret.label.toLowerCase()}`, consequences: [] };
+  if (secret) return { tone: 'careful', label: `Touches ${secret.label === 'Secrets file' ? 'a secrets file' : secret.label.toLowerCase()}`, consequences: ['Runs a command on a file that holds secrets, keys or git’s own config'], lock: CAREFUL_LOCK };
+  const words = progs[0] ?? [];
   const p = words[0];
-  const label =
-    p === 'git' && gitSub(words).sub === 'push'
+  const label = reads
+    ? (progs.map((w) => looks(w)!).find((l) => l !== 'Reads files') ?? 'Reads files')
+    : p === 'git' && gitSub(words).sub === 'push'
       ? 'Pushes to a remote'
       : (RUNNERS.has(p) && /^(i|install|add|ci|remove|uninstall)$/.test(words[1] ?? '')) || p === 'pip' || p === 'brew'
         ? 'Installs packages'
@@ -236,6 +236,40 @@ export function commandRisk(line: string): Risk {
   return { tone: 'review', label, consequences: [] };
 }
 
+const AUTO_LABEL: Record<string, string> = { git: 'Reads the repository', node: 'Read-only' };
+const normalizeLine = (line: string) => line.trim().replace(/[ \t]+/g, ' ');
+
+/** Printing the environment (where tokens and keys live): printenv, env, set, export -p, jq env / $ENV / -n. */
+function envDump(s: string[]): boolean {
+  const { words } = program(s);
+  if (ENV_DUMP.has(s[0]) || (s[0] === 'env' && !words.length) || (s[0] === 'export' && s.slice(1).every((w) => w.startsWith('-')))) return true;
+  if (words[0] !== 'jq') return false;
+  const args = words.slice(1);
+  const filter = args.find((w) => !w.startsWith('-'));
+  return args.some((w) => /\benv\b|\$ENV|\$__loc__/.test(w)) || (flags(args).short.includes('n') && args.filter((w) => !w.startsWith('-')).length <= 1 && !!filter);
+}
+
+/** A word as paths: itself, an option's value after =, and a short option's attached value (-f.env). */
+function pathsIn(word: string): string[] {
+  const out = [word];
+  const eq = /^--?[^=]+=(.+)$/.exec(word);
+  if (eq) out.push(eq[1]);
+  if (/^-[A-Za-z][^=-]/.test(word)) out.push(word.slice(2));
+  return out;
+}
+
+/** What a command that only looks does, for its chip ("Searches files" when it reads whole folders); undefined: it doesn't only look. */
+function looks(words: string[]): string | undefined {
+  const kind = routine(words);
+  if (!kind) return undefined;
+  if (kind === 'Runs project scripts') return 'Runs project scripts';
+  const [p] = words;
+  const f = flags(words.slice(1));
+  if (p === 'rg' || p === 'ag' || p === 'find' || p === 'tree' || p === 'du' || ((p === 'grep' || p === 'ls') && /[rR]/.test(f.short)) || f.long.includes('recursive')) return 'Searches files';
+  if (p === 'git') return 'Reads the repository';
+  return 'Reads files';
+}
+
 /**
  * The few commands that may allow themselves after a countdown (friedliver.approvals.autoRoutineSeconds):
  * exactly these words, nothing added. Anything else, however harmless it looks, waits for you.
@@ -243,7 +277,7 @@ export function commandRisk(line: string): Risk {
 const AUTO_ROUTINE = new Set(['npm test', 'npm run test', 'pnpm test', 'pnpm run test', 'yarn test', 'bun test', 'npm run lint', 'npm run typecheck', 'git status', 'git diff', 'git log', 'node --version']);
 
 export function autoRoutineCommand(line: string): boolean {
-  return AUTO_ROUTINE.has(line.trim().replace(/[ \t]+/g, ' '));
+  return AUTO_ROUTINE.has(normalizeLine(line));
 }
 
 // ---- Files ----
@@ -260,7 +294,7 @@ const AGENT_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md', 'agent
 export function sensitivePath(file: string): { careful: boolean; label: string } | undefined {
   const parts = file.split(/[\\/]/).filter(Boolean);
   const name = (parts.at(-1) ?? '').normalize('NFC').toLowerCase();
-  if (parts.some((p) => p === '.git')) return { careful: true, label: 'Git internals' };
+  if (parts.some((p) => p.normalize('NFC').toLowerCase() === '.git')) return { careful: true, label: 'Git internals' };
   if (SECRET_NAME.test(name)) return { careful: true, label: name.startsWith('.env') ? 'Secrets file' : 'Keys and credentials' };
   if (parts.some((p) => SECRET_DIR.test(p))) return { careful: true, label: 'Keys and credentials' };
   if (AGENT_FILES.has(name)) return { careful: false, label: 'Agent instructions' };
@@ -275,7 +309,8 @@ export function filesRisk(files: string[], access: 'read' | 'write', cwd?: strin
   const hits = files.map(sensitivePath);
   const careful = hits.find((h) => h?.careful);
   if (access === 'read') {
-    return careful ? { tone: 'review', label: careful.label === 'Secrets file' ? 'Reads a secrets file' : `Reads ${careful.label.toLowerCase()}`, consequences: [] } : { tone: 'routine', label: 'Reads files', consequences: [] };
+    // Reads are review: routine is only ever the exact command list.
+    return { tone: 'review', label: careful ? (careful.label === 'Secrets file' ? 'Reads a secrets file' : `Reads ${careful.label.toLowerCase()}`) : 'Reads files', consequences: [] };
   }
   if (careful) {
     return {
@@ -299,7 +334,7 @@ const SUBMIT = /\b(submit|send|delete|remove|confirm|sign[-_\s]?up|register|publ
 /** How careful to be with a browser action: `text` is the element (selector or its words) or what it types. */
 export function browserRisk(tool: string, text: string, origin?: string): Risk {
   const where = origin ? ` on ${origin.replace(/^https?:\/\//, '')}` : '';
-  if (tool === 'browser_open' || tool === 'browser_back' || tool === 'browser_reload') return { tone: 'routine', label: tool === 'browser_open' ? 'Opens a page' : 'Navigates', consequences: [] };
+  if (tool === 'browser_open' || tool === 'browser_back' || tool === 'browser_reload') return { tone: 'review', label: tool === 'browser_open' ? 'Opens a page' : 'Navigates', consequences: [] };
   if (tool === 'browser_click' && BUY.test(text)) {
     return { tone: 'careful', label: 'Places an order or pays', consequences: [`Can place a real order or payment${where}`, 'Money spent or orders sent can’t be taken back from here'], lock: CAREFUL_LOCK };
   }

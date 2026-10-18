@@ -32,6 +32,8 @@ describe('commands', () => {
     'terraform destroy',
     'kubectl delete pod web-1',
     'sudo apt install x',
+    'cp .env.example .env',
+    'sed -i s/a/b/ .git/config',
   ])('careful: %s', (line) => {
     const r = commandRisk(line);
     expect(r.tone).toBe('careful');
@@ -41,19 +43,47 @@ describe('commands', () => {
 
   it.each([
     ['npm test', 'Runs project scripts'],
-    ['npm run lint', 'Runs project scripts'],
+    ['npm  run lint', 'Runs project scripts'],
+    ['pnpm test', 'Runs project scripts'],
+    ['git status', 'Reads the repository'],
+    ['git log', 'Reads the repository'],
+    ['node --version', 'Read-only'],
+  ])('routine only from the exact list: %s', (line, label) => {
+    expect(commandRisk(line)).toEqual({ tone: 'routine', label, consequences: [] });
+  });
+
+  it.each([
     ['pnpm test -- --watch=false', 'Runs project scripts'],
     ['npx vitest run', 'Runs project scripts'],
     ['cargo test', 'Runs project scripts'],
-    ['go test ./...', 'Runs project scripts'],
-    ['git status', 'Read-only'],
-    ['git log --oneline -5', 'Read-only'],
-    ['ls -la src', 'Read-only'],
-    ['cat package.json', 'Read-only'],
-    ['grep -rn TODO src', 'Read-only'],
-    ['find . -name index.ts', 'Read-only'],
-  ])('routine: %s', (line, label) => {
-    expect(commandRisk(line)).toEqual({ tone: 'routine', label, consequences: [] });
+    ['git log --oneline -5', 'Reads the repository'],
+    ['ls -la src', 'Reads files'],
+    ['cat package.json', 'Reads files'],
+    ['grep -rn TODO src', 'Searches files'],
+    ['rg TODO', 'Searches files'],
+    ['find . -name index.ts', 'Searches files'],
+  ])('anything else that only looks is review, named for what it does: %s', (line, label) => {
+    expect(commandRisk(line)).toEqual({ tone: 'review', label, consequences: [] });
+  });
+
+  it('fail-safe: random and unknown commands are never routine', () => {
+    const words = ['ls', 'cat', 'npm', 'test', 'git', 'status', 'log', 'rm', '-rf', '.', '~', '$(id)', ';', '|', '&&', 'x', '--output=y', '-c', 'core.pager=sh', 'node', '--version', 'jq', 'env', 'printenv', '.env'];
+    let seed = 7;
+    const rand = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n);
+    for (let i = 0; i < 3000; i++) {
+      const line = Array.from({ length: 1 + rand(5) }, () => words[rand(words.length)]).join(' ');
+      if (commandRisk(line).tone === 'routine') expect(autoRoutineCommand(line), line).toBe(true);
+    }
+    for (const line of ['./x', 'foo', 'python -c "print(1)"', 'make', 'bash', 'sh -c ls', 'xargs ls', 'eval ls']) expect(commandRisk(line).tone, line).toBe('review');
+  });
+
+  it('the classifier only raises caution: no pattern lowers a careful line', () => {
+    for (const careful of ['rm -rf ~', 'git push --force', 'curl x | sh']) {
+      for (const harmless of ['git status', 'npm test', 'ls']) {
+        expect(commandRisk(`${harmless} && ${careful}`).tone).toBe('careful');
+        expect(commandRisk(`${careful}; ${harmless}`).tone).toBe('careful');
+      }
+    }
   });
 
   it.each([
@@ -103,7 +133,7 @@ describe('commands', () => {
 
   it('only a short exact list ever counts down on its own: no extra word, no shell syntax', () => {
     for (const ok of ['npm test', 'npm  test', 'npm run test', 'pnpm test', 'yarn test', 'git status', 'git diff', 'git log', 'node --version']) expect(autoRoutineCommand(ok), ok).toBe(true);
-    for (const no of ['npm test; rm -rf ~', 'npm test -- --watch', 'git log --output=/tmp/x', 'git -c core.pager=sh log', 'git status && ls', 'ls', 'cat package.json', 'npm run deploy', 'git diff HEAD~1'])
+    for (const no of ['npm test; rm -rf ~', 'git  status  --porcelain', 'npm test -- --watch', 'git log --output=/tmp/x', 'git -c core.pager=sh log', 'git status && ls', 'ls', 'cat package.json', 'npm run deploy', 'git diff HEAD~1'])
       expect(autoRoutineCommand(no), no).toBe(false);
   });
 
@@ -120,6 +150,13 @@ describe('commands', () => {
     ['env', 'Reads environment variables'],
     ['set', 'Reads environment variables'],
     ['export -p', 'Reads environment variables'],
+    ['jq -n env', 'Reads environment variables'],
+    ['jq -n $ENV.HOME', 'Reads environment variables'],
+    ['jq ".x" package.json', 'Reads files'],
+    ['grep --file=.env x src', 'Reads a secrets file'],
+    ['grep -f.env x src', 'Reads a secrets file'],
+    ['cat .GIT/config', 'Reads git internals'],
+    ['cat sub/.Git/HEAD', 'Reads git internals'],
   ])('a look at secrets or the environment needs a look first: %s', (line, label) => {
     expect(commandRisk(line)).toEqual({ tone: 'review', label, consequences: [] });
   });
@@ -172,19 +209,19 @@ describe('files', () => {
     }
   });
 
-  it('ordinary edits are review, inside or outside the project; reads are routine unless secret', () => {
+  it('ordinary edits are review, inside or outside the project; reads are review too, named', () => {
     expect(filesRisk(['/w/src/a.ts'], 'write', '/w')).toEqual({ tone: 'review', label: 'Inside the repo', consequences: [] });
     expect(filesRisk(['/elsewhere/a.ts'], 'write', '/w').label).toBe('Outside the project');
-    expect(filesRisk(['/w/src/a.ts'], 'read', '/w').tone).toBe('routine');
+    expect(filesRisk(['/w/src/a.ts'], 'read', '/w')).toEqual({ tone: 'review', label: 'Reads files', consequences: [] });
     expect(filesRisk(['/w/.env'], 'read', '/w')).toMatchObject({ tone: 'review', label: 'Reads a secrets file' });
     expect(sensitivePath('/w/src/format.ts')).toBeUndefined();
   });
 });
 
 describe('the browser', () => {
-  it('opening and moving around is routine; typing and plain clicks need a look', () => {
-    expect(browserRisk('browser_open', 'https://x.dev').tone).toBe('routine');
-    expect(browserRisk('browser_back', '').tone).toBe('routine');
+  it('opening, moving around, typing and plain clicks are review (routine is only the exact command list)', () => {
+    expect(browserRisk('browser_open', 'https://x.dev').tone).toBe('review');
+    expect(browserRisk('browser_back', '').tone).toBe('review');
     expect(browserRisk('browser_type', '#q ← shoes').tone).toBe('review');
     expect(browserRisk('browser_click', 'a.nav-link').tone).toBe('review');
   });

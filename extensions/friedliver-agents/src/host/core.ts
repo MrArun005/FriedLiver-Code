@@ -1808,7 +1808,8 @@ export class AgentCore {
       const inWorkspace = detail.command
         ? inside(detail.command.cwd ?? chat?.cwd)
         : files.complete && files.paths.length > 0 && [...files.paths, ...(detail.locations ?? [])].every(inside);
-      const routine = inWorkspace && (detail.command ? autoRoutineCommand(detail.command.line) : risk.tone === 'routine');
+      // Only the exact command list ever counts down; nothing the classifier says does.
+      const routine = inWorkspace && !!detail.command && autoRoutineCommand(detail.command.line);
       const autoAt =
         allow && !detail.plan && kind !== 'switch_mode'
           ? this.autoRoutine(requestId, routine, () => {
