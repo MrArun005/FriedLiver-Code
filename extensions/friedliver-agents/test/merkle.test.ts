@@ -50,6 +50,29 @@ describe('Merkle tree hashing', () => {
     expect(t.hashed).toBe(3); // clean: nothing recomputed
   });
 
+  it('matches a fresh build after any mix of edits, deletes and root() calls', () => {
+    let seed = 7;
+    const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n);
+    const t = new MerkleTree();
+    const live = new Map<string, string>();
+    for (let i = 0; i < 3000; i++) {
+      const rel = `a${rnd(3)}/b${rnd(4)}/c${rnd(3)}/f${rnd(6)}.ts`;
+      if (rnd(4) === 0) {
+        t.delete(rel);
+        live.delete(rel);
+      } else {
+        const hash = h(String(rnd(5)));
+        t.set(rel, hash);
+        live.set(rel, hash);
+      }
+      if (rnd(5) === 0) {
+        const fresh = new MerkleTree();
+        for (const [r, x] of live) fresh.set(r, x);
+        expect(t.root()).toBe(fresh.root());
+      }
+    }
+  });
+
   it('drops empty directories on delete', () => {
     const t = tree({ 'a.ts': '1' });
     const root = t.root();

@@ -70,6 +70,8 @@ export class MerkleTree {
       const dir = parentOf(child);
       let set = this.kids.get(dir);
       if (!set) this.kids.set(dir, (set = new Set()));
+      // Already there and already dirty: so are all its ancestors (a dirty directory's ancestors are dirty).
+      if (set.has(key) && !this.clean.has(dir)) break;
       set.add(key);
       this.clean.delete(dir);
       if (!dir) break;

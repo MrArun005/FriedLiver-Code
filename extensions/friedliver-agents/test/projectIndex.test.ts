@@ -456,6 +456,17 @@ describe('opening: ready at once, then caught up from the journal', () => {
     expect(await answerIndex([ix], { tool: 'index_search', query: 'v7' }, 'verifying')).toContain('checking files changed since the last session');
   });
 
+  it('applies changed name rules (files.exclude) to the saved tree on load', async () => {
+    const root = await project({ 'gen/a.ts': 'one', 'src/b.ts': 'two' });
+    const saved = await saveOf(await build(root));
+    const same = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
+    same.load(await readIndexFile(saved));
+    expect(same.size).toBe(2);
+    const excluded = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8, exclude: ['gen'] });
+    excluded.load(await readIndexFile(saved));
+    expect([excluded.size, excluded.tree.get('gen/a.ts')]).toEqual([1, undefined]);
+  });
+
   it('re-checks only the journal\'s paths, rescans its directories, and moves the mark', async () => {
     const root = await project(files40);
     const saved = await savedWith(await build(root));

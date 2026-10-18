@@ -108,7 +108,7 @@ export class ProjectIndexHost implements vscode.Disposable {
     try {
       // The saved docs stream in while the files are checked; a doc whose file changed meanwhile is skipped.
       const tick = () => this.tick(gen);
-      const done = await Promise.all(this.indexes.map((ix) => Promise.all([ix.loadDocs(docsFileOf(this.file(ix)), tick), ix.catchUp(this.journal, tick)])));
+      const done = await Promise.all(this.indexes.map((ix) => Promise.all([ix.loadDocs(docsFileOf(this.file(ix)), tick), ix.catchUp(this.journal, tick, () => this.verified(gen))])));
       if (done.some(([, mode]) => !mode)) return;
     } finally {
       if (gen === this.generation) {
@@ -117,6 +117,11 @@ export class ProjectIndexHost implements vscode.Disposable {
         this.scheduleSave();
       }
     }
+  }
+
+  /** One folder's files are verified: once all are, the status says so (docs may still be streaming in). */
+  private verified(gen: number): void {
+    if (gen === this.generation && this.building === 'verifying') this.status(this.summary());
   }
 
   /** Between batches: yields to the editor, shows progress, and says whether to go on (not superseded). */

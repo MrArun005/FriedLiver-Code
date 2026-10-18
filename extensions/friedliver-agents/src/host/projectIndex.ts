@@ -210,7 +210,14 @@ export class ProjectIndex {
     private readonly options: IndexOptions,
   ) {
     this.exclude = (options.exclude ?? []).map(globToRegex);
+    this.rulesKey = createHash('sha256')
+      .update(JSON.stringify([SECRET.source, [...SKIP_DIRS], options.exclude ?? []]))
+      .digest('hex')
+      .slice(0, 16);
   }
+
+  /** The name rules in force (denylists and files.exclude), so a save made under the same rules is not re-checked by name on load. */
+  private readonly rulesKey: string;
 
   /** Indexed files (the tree's leaves). */
   get size(): number {
@@ -499,38 +506,53 @@ export class ProjectIndex {
    * the journal can't vouch for its history, every file is checked. A .gitignore that changed rescans
    * its directory. Returns how, or undefined when `onBatch` stopped it.
    */
-  async catchUp(journal?: Journal, onBatch?: () => Promise<boolean>): Promise<'journal' | 'full' | undefined> {
+  async catchUp(journal?: Journal, onBatch?: () => Promise<boolean>, onVerified?: () => void): Promise<'journal' | 'full' | undefined> {
     let t = performance.now();
     const lap = (name: string) => {
       this.timings[name] = performance.now() - t;
       t = performance.now();
     };
-    const hint = await this.gitHint();
-    lap('gitHint');
-    if (hint.paths.length) await this.updateMany(hint.paths);
-    lap('hinted');
+    // git status walks the whole tree: it runs while the journal is read.
+    const hinting = this.gitHint();
     const got = this.mark && journal ? await journal.since(this.root, this.mark) : null;
     lap('journal');
+    /** Directories to rescan for a .gitignore or .git/info/exclude among `paths`. */
+    const ignoreDirs = (paths: string[]) => [
+      ...paths.filter((f) => f === '.gitignore' || f.endsWith('/.gitignore')).map((f) => (path.posix.dirname(f) === '.' ? '' : path.posix.dirname(f))),
+      ...(paths.includes('.git/info/exclude') ? [''] : []),
+    ];
     let mode: 'journal' | 'full';
     if (got) {
-      const changed = [...got.files, ...hint.paths];
-      const dirs = [...got.dirs];
-      for (const f of changed) if (f === '.gitignore' || f.endsWith('/.gitignore')) dirs.push(path.posix.dirname(f) === '.' ? '' : path.posix.dirname(f));
-      if (changed.includes('.git/info/exclude')) dirs.push('');
-      const hinted = new Set(hint.paths);
-      await this.updateMany(got.files.filter((f) => !hinted.has(f)));
+      // The journal is complete for its span: once applied, the index is verified. git's hint follows.
+      await this.updateMany(got.files);
+      const dirs = [...got.dirs, ...ignoreDirs(got.files)];
       if (dirs.length && !(await this.rescan(dirs, onBatch))) return undefined;
       this.mark = got.next;
       mode = 'journal';
       lap('journaled');
-    } else {
-      // Taken before the check: whatever changes during it is seen by the watcher and by the next open.
-      const next = await journal?.now(this.root);
-      if (!(await this.syncAll(onBatch))) return undefined;
-      this.mark = next;
-      mode = 'full';
-      lap('fullCheck');
+      onVerified?.();
+      const hint = await hinting;
+      lap('gitHint');
+      const seen = new Set(got.files);
+      await this.updateMany(hint.paths.filter((p) => !seen.has(p)));
+      const more = ignoreDirs(hint.paths.filter((p) => !seen.has(p)));
+      if (more.length && !(await this.rescan(more, onBatch))) return undefined;
+      lap('hinted');
+      if (hint.head) this.gitHead = hint.head;
+      return mode;
     }
+    // No journal: git's hint first, so the likely changes show within moments; then every file.
+    const hint = await hinting;
+    lap('gitHint');
+    if (hint.paths.length) await this.updateMany(hint.paths);
+    lap('hinted');
+    // Taken before the check: whatever changes during it is seen by the watcher and by the next open.
+    const next = await journal?.now(this.root);
+    if (!(await this.syncAll(onBatch))) return undefined;
+    this.mark = next;
+    mode = 'full';
+    lap('fullCheck');
+    onVerified?.();
     if (hint.head) this.gitHead = hint.head;
     return mode;
   }
@@ -637,6 +659,7 @@ export class ProjectIndex {
   treeJSON(): object {
     return {
       v: 3,
+      rules: this.rulesKey,
       leaves: [...this.leaves].map(([rel, l]) => [rel, l.size, l.mtimeNs, l.hash]),
       unreadable: [...this.unreadable],
       merkle: this.tree,
@@ -666,12 +689,15 @@ export class ProjectIndex {
   private loadTree(saved: unknown): void {
     const s = saved as { v?: unknown; leaves?: unknown; unreadable?: unknown; merkle?: unknown; mark?: unknown; gitHead?: unknown } | null;
     if (!s || s.v !== 3 || !Array.isArray(s.leaves)) return;
+    // Saved under today's name rules (same denylists, same files.exclude): its paths passed them already.
+    // Every read still checks them again.
+    const sameRules = (s as { rules?: unknown }).rules === this.rulesKey;
     for (const l of s.leaves as unknown[]) {
       if (this.leaves.size >= this.options.maxFiles) break;
       if (!Array.isArray(l) || l.length !== 4) continue;
       const [rel, size, mtimeNs, hash] = l as unknown[];
       if (typeof rel !== 'string' || typeof size !== 'number' || typeof mtimeNs !== 'string' || !/^\d+$/.test(mtimeNs) || typeof hash !== 'string' || !HASH.test(hash)) continue;
-      if (!this.allowed(rel) || this.leaves.has(rel)) continue;
+      if ((!sameRules && !this.allowed(rel)) || this.leaves.has(rel)) continue;
       this.leaves.set(rel, { size, mtimeNs, hash });
       this.tree.set(rel, hash);
     }

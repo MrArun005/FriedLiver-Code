@@ -28,12 +28,13 @@ async function open(file: string, saved: boolean) {
   let verified = 0;
   const [, mode] = await Promise.all([
     saved ? ix.loadDocs(docsFileOf(file)).then(() => (searchReady = performance.now() - t)) : undefined,
-    ix.catchUp(journal).then((m) => ((verified = performance.now() - t), m)),
+    ix.catchUp(journal, undefined, () => (verified = performance.now() - t)),
   ]);
+  const caughtUp = performance.now() - t;
   if (!saved) searchReady = verified;
   const indexed = (await ix.list()).filter((r) => ix.has(r));
   const timings = { readTreeFile: read, ...ix.timings };
-  const out = { mode, ready, searchReady, verified, counts: { ...ix.counts }, size: ix.size, root: ix.tree.root(), changed: ix.changes()?.total, indexed, timings };
+  const out = { mode, caughtUp, ready, searchReady, verified, counts: { ...ix.counts }, size: ix.size, root: ix.tree.root(), changed: ix.changes()?.total, indexed, timings };
   ix.tree.snapshot();
   await saveIndexFile(file, ix);
   return out; // the index itself is dropped: three of TypeScript's at once do not fit a runner
@@ -68,9 +69,12 @@ describe.skipIf(!repo)('project index re-open bench', () => {
     const table = [
       `Project index on ${path.basename(repo!)} (${process.platform}): ${full.size.toLocaleString()} files, root ${full.root.slice(0, 12)}, journal ${journal ? 'FSEvents' : 'none'}`,
       '',
-      '| Scenario | Tree ready | Search ready | Verified | How | Stats | Reads | Re-indexed |',
-      '|---|---|---|---|---|---|---|---|',
-      ...rows.map(([name, r]) => `| ${name} | ${name === 'Full build' ? '–' : ms(r.ready)} | ${ms(r.searchReady)} | ${ms(r.verified)} | ${r.mode} | ${r.counts.stat} | ${r.counts.read} | ${r.counts.reindex} |`),
+      '| Scenario | Tree ready | Verified | Search ready | git hint done | How | Stats | Reads | Re-indexed |',
+      '|---|---|---|---|---|---|---|---|---|',
+      ...rows.map(
+        ([name, r]) =>
+          `| ${name} | ${name === 'Full build' ? '–' : ms(r.ready)} | ${ms(r.verified)} | ${ms(r.searchReady)} | ${ms(r.caughtUp)} | ${r.mode} | ${r.counts.stat} | ${r.counts.read} | ${r.counts.reindex} |`,
+      ),
       '',
       `Changed since the open (edited run): ${edited.changed}`,
       '',
