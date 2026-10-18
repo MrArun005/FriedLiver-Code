@@ -110,10 +110,10 @@
   "tsx": {
     "remote/phone/app.tsx": 2,
     "webview/accounts.tsx": 1,
-    "webview/chat.tsx": 14,
+    "webview/chat.tsx": 13,
     "webview/common.tsx": 2,
     "webview/composerMenus.tsx": 14,
-    "webview/connect.tsx": 5,
+    "webview/connect.tsx": 4,
     "webview/controls.tsx": 1,
     "webview/gallery.tsx": 2,
     "webview/inbox.tsx": 1,
@@ -128,6 +128,6 @@
     "px": 204,
     "effect": 7,
     "restyle": 92,
-    "rawControls": 59
+    "rawControls": 57
   }
 }
