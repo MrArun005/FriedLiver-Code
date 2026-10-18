@@ -38,12 +38,12 @@ describe('phone actions', () => {
     const turn = core.send(chat.id, 'native-run');
     await waitFor(() => !!open(core, chat.id));
     const p = open(core, chat.id)!;
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'made-up' })).toEqual({ ok: false, error: 'The agent did not offer that answer.' });
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' })).toEqual({ ok: true });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'made-up' }, 'Arun’s iPhone')).toEqual({ ok: false, error: 'The agent did not offer that answer.' });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' }, 'Arun’s iPhone')).toEqual({ ok: true });
     await turn;
     expect(core.chat(chat.id)!.items.find((i) => i.kind === 'permission')).toMatchObject({ answer: 'Yes' });
     expect(confirms).toEqual([]);
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' })).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' }, 'Arun’s iPhone')).toMatchObject({ ok: false });
   });
 
   it('need the Mac’s OK for an agent’s “don’t ask again”, and leave the card waiting without it', async () => {
@@ -53,10 +53,11 @@ describe('phone actions', () => {
     await waitFor(() => !!open(core, chat.id));
     const p = open(core, chat.id)!;
     const always = p.options.find((o) => o.kind === 'allow_always')!;
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: always.optionId })).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: always.optionId }, 'Arun’s iPhone')).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
     expect(confirms).toHaveLength(1);
+    expect(confirms[0]).toMatch(/^Answer “Yes, and don't ask again for this session” for Demo\? Arun’s iPhone asks\.$/);
     expect(open(core, chat.id)?.requestId).toBe(p.requestId);
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: null })).toEqual({ ok: true });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: null }, 'Arun’s iPhone')).toEqual({ ok: true });
     await turn;
   });
 
@@ -67,36 +68,39 @@ describe('phone actions', () => {
     await waitFor(() => !!open(core, chat.id));
     hidden.add(chat.id);
     const p = open(core, chat.id)!;
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' })).toMatchObject({ ok: false });
-    expect(await actions.run({ type: 'send', chatId: chat.id, text: 'hi' })).toMatchObject({ ok: false });
-    expect(await actions.run({ type: 'stop', chatId: chat.id })).toMatchObject({ ok: false });
-    expect(await actions.run({ type: 'approval', chatId: chat.id, level: 'edits' })).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' }, 'Arun’s iPhone')).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'send', chatId: chat.id, text: 'hi' }, 'Arun’s iPhone')).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'stop', chatId: chat.id }, 'Arun’s iPhone')).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'approval', chatId: chat.id, level: 'edits' }, 'Arun’s iPhone')).toMatchObject({ ok: false });
     expect(phoneChats(core.snapshot, (id) => hidden.has(id))).toEqual([]);
     hidden.clear();
-    await actions.run({ type: 'stop', chatId: chat.id });
+    await actions.run({ type: 'stop', chatId: chat.id }, 'Arun’s iPhone');
     await turn;
   });
 
-  it('turn on Auto only after the Mac says yes', async () => {
+  it('turn on Auto or auto-accept edits only after the Mac says yes', async () => {
     const no = await setup(false);
     const chat = await no.core.createChat('demo');
-    await no.actions.run({ type: 'approval', chatId: chat.id, level: 'full' });
+    await no.actions.run({ type: 'approval', chatId: chat.id, level: 'full' }, 'Arun’s iPhone');
     expect(no.core.chat(chat.id)!.approval).toBeUndefined();
-    expect(no.confirms).toEqual(['Run Demo in Auto? Your phone asks.']);
+    expect(no.confirms).toEqual(['Run Demo in Auto? Arun’s iPhone asks.']);
+    await no.actions.run({ type: 'approval', chatId: chat.id, level: 'edits' }, 'Arun’s iPhone');
+    expect(no.core.chat(chat.id)!.approval).toBeUndefined();
+    expect(no.confirms).toHaveLength(2);
   });
 
   it('send, stop, and start a chat in one of the window’s folders with one of the shown agents', async () => {
     const { core, actions, dir } = await setup();
-    expect(await actions.run({ type: 'newChat', agent: 'codex', folder: dir, text: '' })).toMatchObject({ ok: false });
-    expect(await actions.run({ type: 'newChat', agent: 'demo', folder: '/etc', text: '' })).toMatchObject({ ok: false });
-    const made = await actions.run({ type: 'newChat', agent: 'demo', folder: dir, text: 'say hello' });
+    expect(await actions.run({ type: 'newChat', agent: 'codex', folder: dir, text: '' }, 'Arun’s iPhone')).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'newChat', agent: 'demo', folder: '/etc', text: '' }, 'Arun’s iPhone')).toMatchObject({ ok: false });
+    const made = await actions.run({ type: 'newChat', agent: 'demo', folder: dir, text: 'say hello' }, 'Arun’s iPhone');
     expect(made).toMatchObject({ ok: true, chatId: expect.any(String) });
     const chatId = (made as { chatId: string }).chatId;
     await waitFor(() => !core.chat(chatId)!.busy && core.chat(chatId)!.items.some((i) => i.kind === 'agent'));
     expect(core.chat(chatId)!.items[0]).toMatchObject({ kind: 'user', text: 'say hello' });
-    await actions.run({ type: 'send', chatId, text: 'wait' });
+    await actions.run({ type: 'send', chatId, text: 'wait' }, 'Arun’s iPhone');
     await waitFor(() => core.chat(chatId)!.busy);
-    await actions.run({ type: 'stop', chatId });
+    await actions.run({ type: 'stop', chatId }, 'Arun’s iPhone');
     await waitFor(() => !core.chat(chatId)!.busy);
   });
 
@@ -114,7 +118,7 @@ describe('phone actions', () => {
       return p && { before: p.before, proposed: p.proposed };
     });
     expect(view.items.find((i) => i.k === 'review')).toMatchObject({ k: 'review', id, state: 'pending', file: { path: 'README.md', lines: expect.arrayContaining([expect.objectContaining({ op: '+' })]) } });
-    expect(await actions.run({ type: 'review', reviewId: id, action: 'reject' })).toEqual({ ok: true });
+    expect(await actions.run({ type: 'review', reviewId: id, action: 'reject' }, 'Arun’s iPhone')).toEqual({ ok: true });
     expect(reviews).toEqual([`reject ${id}`]);
     core.decideReview(id, false);
   });
@@ -149,7 +153,7 @@ describe('parsing what the phone sends', () => {
     expect(parseRemoteAction({ type: 'send', chatId: 'chat-1', text: 'hi' })).toEqual({ type: 'send', chatId: 'chat-1', text: 'hi' });
     expect(parseRemoteAction({ type: 'send', chatId: 'chat-1', text: 'hi', images: [{ name: 'x', mimeType: 'image/png', data: 'AA==' }] })).toEqual({ type: 'send', chatId: 'chat-1', text: 'hi' });
     expect(parseRemoteAction({ type: 'review', reviewId: 'review-1', action: 'open' })).toBeNull();
-    for (const t of ['openFile', 'runInTerminal', 'insert', 'copy', 'removeChat', 'merge', 'setOption', 'fanout', 'createTask', 'revokeAllPermissions', 'openText']) {
+    for (const t of ['openFile', 'runInTerminal', 'insert', 'copy', 'removeChat', 'merge', 'setOption', 'plan', 'fanout', 'createTask', 'revokeAllPermissions', 'openText']) {
       expect(parseRemoteAction({ type: t, chatId: 'chat-1', path: '/etc/passwd', command: 'ls', text: 'x' }), t).toBeNull();
     }
     expect(parseRemoteAction({ type: 'approval', chatId: 'chat-1', level: 'full' })).toEqual({ type: 'approval', chatId: 'chat-1', level: 'full' });

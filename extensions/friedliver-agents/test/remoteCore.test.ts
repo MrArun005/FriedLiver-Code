@@ -15,6 +15,8 @@ afterEach(disposeCores);
 type Permission = Extract<Item, { kind: 'permission' }>;
 const open = (c: AgentCore, chatId: string) => c.chat(chatId)!.items.find((i): i is Permission => i.kind === 'permission' && !i.answer);
 
+const PHONE = { device: 'Arun’s iPhone' };
+
 function setup(dir: string, remoteAnswer: boolean | undefined) {
   const asked = { remote: [] as string[], desktopFull: 0, desktopRule: 0 };
   const permissions = memoryPermissions();
@@ -32,16 +34,16 @@ describe('Auto from the phone', () => {
     const dir = await gitRepo();
     const { c, asked } = setup(dir, false);
     const chat = await c.createChat('demo');
-    await c.setApproval(chat.id, 'full', 'remote');
+    await c.setApproval(chat.id, 'full', PHONE);
     expect(c.chat(chat.id)!.approval).toBeUndefined();
-    expect(asked.remote).toEqual(['Run Demo in Auto? Your phone asks.']);
+    expect(asked.remote).toEqual(['Run Demo in Auto? Arun’s iPhone asks.']);
     expect(asked.desktopFull).toBe(0);
 
     await c.setApproval(chat.id, 'full');
     expect(c.chat(chat.id)!.approval).toBe('full');
-    await c.setApproval(chat.id, 'ask', 'remote');
+    await c.setApproval(chat.id, 'ask', PHONE);
     expect(c.chat(chat.id)!.approval ?? 'ask').toBe('ask');
-    await c.setApproval(chat.id, 'full', 'remote');
+    await c.setApproval(chat.id, 'full', PHONE);
     expect(asked.remote).toHaveLength(2);
     expect(c.chat(chat.id)!.approval ?? 'ask').toBe('ask');
   });
@@ -50,19 +52,50 @@ describe('Auto from the phone', () => {
     const dir = await gitRepo();
     const { c } = setup(dir, undefined);
     const chat = await c.createChat('demo');
-    await c.setApproval(chat.id, 'full', 'remote');
+    await c.setApproval(chat.id, 'full', PHONE);
     expect(c.chat(chat.id)!.approval).toBeUndefined();
   });
 
-  it('happens once the Mac says yes; lower levels need no OK', async () => {
+  it('happens once the Mac says yes', async () => {
     const dir = await gitRepo();
-    const { c, asked } = setup(dir, true);
+    const { c } = setup(dir, true);
     const chat = await c.createChat('demo');
-    await c.setApproval(chat.id, 'edits', 'remote');
-    expect(asked.remote).toEqual([]);
-    expect(c.chat(chat.id)!.approval).toBe('edits');
-    await c.setApproval(chat.id, 'full', 'remote');
+    await c.setApproval(chat.id, 'full', PHONE);
     expect(c.chat(chat.id)!.approval).toBe('full');
+  });
+});
+
+describe('looser review from the phone', () => {
+  it('waits for the Mac before auto-accepting edits, and a no leaves the chat as it was', async () => {
+    const dir = await gitRepo();
+    let answer!: (ok: boolean) => void;
+    const asked: string[] = [];
+    const defaults = { all: {} as Record<string, unknown>, get: (a: string) => defaults.all[a] as never, set: (a: string, v: unknown) => void (defaults.all[a] = v) };
+    const c = makeCore(dir, {
+      defaults,
+      ui: { showReview: () => {}, closeReview: () => {}, askCommand: () => {}, confirmRemote: (a) => (asked.push(a.title), new Promise<boolean>((r) => (answer = r))) },
+    });
+    const chat = await c.createChat('demo');
+    let set = c.setApproval(chat.id, 'edits', PHONE);
+    await waitFor(() => asked.length === 1);
+    expect(asked).toEqual(['Let Demo accept edits without asking? Arun’s iPhone asks.']);
+    expect(c.chat(chat.id)!.approval).toBeUndefined();
+    answer(false);
+    await set;
+    expect(c.chat(chat.id)!.approval).toBeUndefined();
+
+    set = c.setApproval(chat.id, 'edits', PHONE);
+    await waitFor(() => asked.length === 2);
+    answer(true);
+    await set;
+    expect(c.chat(chat.id)!.approval).toBe('edits');
+
+    // Tightening needs no OK.
+    await c.setApproval(chat.id, 'ask', PHONE);
+    expect(asked).toHaveLength(2);
+    expect(c.chat(chat.id)!.approval ?? 'ask').toBe('ask');
+    // The phone's choices never become the level new chats start at.
+    expect((defaults.all.demo as { approval?: string } | undefined)?.approval).toBeUndefined();
   });
 });
 
@@ -74,8 +107,8 @@ describe('"Always allow" from the phone', () => {
     const turn = c.send(chat.id, 'native-run');
     await waitFor(() => !!open(c, chat.id));
     const p = open(c, chat.id)!;
-    await c.allowAlways({ requestId: p.requestId }, { kind: 'exact', command: 'node --version' }, 'remote');
-    expect(asked.remote).toEqual(['Always allow node --version? Your phone asks.']);
+    await c.allowAlways({ requestId: p.requestId }, { kind: 'exact', command: 'node --version' }, PHONE);
+    expect(asked.remote).toEqual(['Always allow node --version? Arun’s iPhone asks.']);
     expect(asked.desktopRule).toBe(0);
     expect(permissions.commands()).toEqual([]);
     expect(open(c, chat.id)?.requestId).toBe(p.requestId);
@@ -91,10 +124,10 @@ describe('"Always allow" from the phone', () => {
     await waitFor(() => !!open(c, chat.id));
     const p = open(c, chat.id)!;
     const elsewhere = await mkdtemp(path.join(os.tmpdir(), 'fl-other-'));
-    await c.allowAlways({ requestId: p.requestId }, { kind: 'folder', folder: elsewhere, access: 'write' }, 'remote');
+    await c.allowAlways({ requestId: p.requestId }, { kind: 'folder', folder: elsewhere, access: 'write' }, PHONE);
     expect(asked.remote).toEqual([]);
-    await c.allowAlways({ requestId: p.requestId }, { kind: 'folder', folder: dir, access: 'write' }, 'remote');
-    expect(asked.remote).toEqual([`Always allow changing files in ${dir}? Your phone asks.`]);
+    await c.allowAlways({ requestId: p.requestId }, { kind: 'folder', folder: dir, access: 'write' }, PHONE);
+    expect(asked.remote).toEqual([`Always allow changing files in ${dir}? Arun’s iPhone asks.`]);
     await turn;
     expect(permissions.list()).toMatchObject([{ grant: { kind: 'folder', folder: dir } }]);
   });

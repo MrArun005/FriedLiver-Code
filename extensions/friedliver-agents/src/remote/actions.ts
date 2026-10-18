@@ -46,8 +46,11 @@ export class RemoteActions {
     return undefined;
   }
 
-  async run(a: RemoteAction): Promise<ActionResult> {
+  /** `device`: the paired phone's name, shown on the Mac when it asks for an OK. */
+  async run(a: RemoteAction, device: string): Promise<ActionResult> {
     const { core } = this.deps;
+    const via = { device };
+    const confirm = (ask: { title: string; detail: string; button: string }) => this.deps.confirm({ ...ask, title: `${ask.title} ${device} asks.` });
     switch (a.type) {
       case 'send': {
         if (!this.chat(a.chatId)) return refused('No such chat.');
@@ -64,7 +67,7 @@ export class RemoteActions {
         const option = a.optionId === null ? undefined : found.item.options.find((o) => o.optionId === a.optionId);
         if (a.optionId !== null && !option) return refused('The agent did not offer that answer.');
         if (option && option.kind.startsWith('allow') && (option.kind === 'allow_always' || ESCALATING.test(option.name))) {
-          const ok = await this.deps.confirm({
+          const ok = await confirm({
             title: `Answer “${option.name}” for ${found.chat.label}?`,
             detail: `${found.item.title}. This answer keeps allowing, or changes how ${found.chat.label} asks from now on.`,
             button: 'Allow',
@@ -92,7 +95,7 @@ export class RemoteActions {
         if (!found) return refused('That request is no longer waiting.');
         if (a.answer === 'allowAlways') {
           if (!found.item.always) return refused('Always allow is not offered here.');
-          const ok = await this.deps.confirm({ title: `Always allow ${found.item.always}?`, detail: `${found.chat.label}'s request, and the same again later, without asking.`, button: 'Always allow' });
+          const ok = await confirm({ title: `Always allow ${found.item.always}?`, detail: `${found.chat.label}'s request, and the same again later, without asking.`, button: 'Always allow' });
           if (!ok) return refused('Not confirmed on the Mac.');
         }
         core.answerBridge(a.requestId, a.answer);
@@ -101,12 +104,12 @@ export class RemoteActions {
       case 'allowAlways': {
         const id = a.requestId ?? a.commandId!;
         if (!(a.requestId ? this.waiting('permission', id) : this.waiting('command', id))) return refused('That request is no longer waiting.');
-        await core.allowAlways(a.requestId ? { requestId: a.requestId } : { commandId: a.commandId! }, a.grant, 'remote');
+        await core.allowAlways(a.requestId ? { requestId: a.requestId } : { commandId: a.commandId! }, a.grant, via);
         return { ok: true };
       }
       case 'approval':
         if (!this.chat(a.chatId)) return refused('No such chat.');
-        await core.setApproval(a.chatId, a.level, 'remote');
+        await core.setApproval(a.chatId, a.level, via);
         return { ok: true };
       case 'newChat': {
         if (!this.deps.agents().includes(a.agent)) return refused('That agent is not available.');
