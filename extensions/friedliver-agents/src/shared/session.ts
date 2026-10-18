@@ -2,7 +2,7 @@
 // models, slash commands, usage), and how FriedLiver's approval levels map onto
 // each agent's own modes. Pure, so the host and the webviews agree.
 import type * as acp from '@agentclientprotocol/sdk';
-import type { AgentKey } from './model';
+import type { AgentKey, ChatView, TokenTally, TurnUsage } from './model';
 
 /** FriedLiver's own say over what an agent may do without asking, per chat. */
 export type ApprovalLevel = 'ask' | 'edits' | 'full';
@@ -441,3 +441,23 @@ export function readOnlyChoice(options: SessionOption[]): { option: SessionOptio
 export const CLAUDE_READ_ONLY_META = {
   claudeCode: { options: { tools: [], disallowedTools: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] } },
 };
+
+/** The usage tooltip's lines about tokens: what FriedLiver saved here (an estimate against the naive way) and the prompt cache's share. */
+export function savedLines(t: TokenTally | undefined): string[] {
+  if (!t) return [];
+  const out: string[] = [];
+  if (t.naive > t.sent) out.push(`FriedLiver saved ~${formatTokens(t.naive - t.sent)} tokens in this chat (${formatTokens(t.sent)} sent where the naive way takes ~${formatTokens(t.naive)})`);
+  if (t.input + t.cacheRead > 0) out.push(`Prompt cache: ${Math.round((100 * t.cacheRead) / (t.input + t.cacheRead))}% of input tokens read from cache`);
+  return out;
+}
+
+/** The usage tooltip's lines from the agent's own per-turn counts: this chat's totals and the last turn. */
+export function usageLines(log: TurnUsage[] | undefined): string[] {
+  if (!log?.length) return [];
+  const sum = log.reduce((a, t) => ({ input: a.input + t.input, output: a.output + t.output, cacheRead: a.cacheRead + t.cacheRead, cacheWrite: a.cacheWrite + t.cacheWrite }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  const kinds = (t: typeof sum) => `${formatTokens(t.input)} input · ${formatTokens(t.output)} output · ${formatTokens(t.cacheRead)} cache read · ${formatTokens(t.cacheWrite)} cache write`;
+  return [`Tokens in this chat: ${log.length} turn${log.length === 1 ? '' : 's'} · ${kinds(sum)}`, `Last turn: ${kinds(log.at(-1)!)}`];
+}
+
+/** Tokens FriedLiver saved across these chats (estimate). */
+export const totalSaved = (chats: Pick<ChatView, 'tokens'>[]): number => chats.reduce((n, c) => n + Math.max(0, (c.tokens?.naive ?? 0) - (c.tokens?.sent ?? 0)), 0);

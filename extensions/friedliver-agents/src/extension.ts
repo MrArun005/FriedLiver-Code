@@ -227,10 +227,14 @@ export class Controller {
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
       agentToAgent: () => this.agentToAgent(),
-      browser: (_chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin),
+      browser: (chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin, chatId),
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
+      autoAllowLinkedReads: () => userSetting(vscode.workspace.getConfiguration('friedliver.chat').inspect<unknown>('autoAllowLinkedReads')).value === true,
       browserPage: (selector) => this.browser.inspect(selector),
-      index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
+      index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
+      indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),
+      indexTurnEnded: (chatId) => this.projectIndex?.turnEnded(chatId),
+      primer: async (_chatId, text, maxTokens) => this.projectIndex?.primer(text, maxTokens),
       system: {
         settings: () => systemSettings((key) => vscode.workspace.getConfiguration('friedliver.system').inspect<unknown>(key)),
         prepare: (call) => system.prepare(call),
@@ -266,6 +270,7 @@ export class Controller {
       },
       log: (line) => this.log.info(line),
       checkpointDir: path.join(context.globalStorageUri.fsPath, 'checkpoints'),
+      outputDir: path.join(context.globalStorageUri.fsPath, 'output'),
       ui: {
         showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review)),
         closeReview: (id) => void this.reviews.close(id),
@@ -316,7 +321,7 @@ export class Controller {
       this.statusItem,
       this.workingItem,
       this.autoItem,
-      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m))),
+      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m), context.extensionPath)),
       this.reviews,
       this.accounts,
       this.accountsPage,
@@ -346,6 +351,10 @@ export class Controller {
       log: (line) => this.log.info(line),
     });
     context.subscriptions.push(this.remote);
+    // What FriedLiver's compact answers saved, per chat, for the usage tooltip and the Agent Manager.
+    const saved = (chatId: string, naive: number, sent: number) => this.core.noteTokens(chatId, { naive, sent });
+    this.projectIndex!.onSaved = saved;
+    this.browser.onSaved = saved;
     const unsubscribe = this.core.onAction((action) => {
       this.remote?.onAction(action);
       this.batcher.push(action);
@@ -958,6 +967,9 @@ export class Controller {
     switch (action.do) {
       case 'retry':
         retry();
+        return;
+      case 'compact':
+        await this.core.compact(chatId).catch((err: unknown) => this.error(err));
         return;
       case 'signIn':
         await this.accounts.signIn(action.agent, action.methodId, retry);

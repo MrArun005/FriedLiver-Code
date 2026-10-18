@@ -537,6 +537,39 @@ export const openTab = (tabs: readonly string[], id: string): string[] => (tabs.
 /** Closing a tab takes it out; nothing takes its place. */
 export const closeTab = (tabs: readonly string[], id: string): string[] => tabs.filter((t) => t !== id);
 
+/** A tab's least width with its title (`full`), squeezed (`compact`), the open tab's (`open`); the gap between tabs. Mirrors --tab-*min in tokens.css. */
+export const TAB_MIN = { full: 112, compact: 88, open: 184, gap: 4 } as const;
+export type TabFit = 'full' | 'compact' | 'icon';
+/**
+ * How tabs fit a strip `width` wide: titles while each keeps its minimum, then squeezed, then marks only.
+ * The open tab always keeps its title (TAB_MIN.open: at least 110 of it), so it is counted at that.
+ */
+export function tabFit(width: number, count: number): TabFit {
+  if (width <= 0 || count === 0) return 'full';
+  const need = (min: number) => (count - 1) * (min + TAB_MIN.gap) + TAB_MIN.open;
+  return need(TAB_MIN.full) <= width ? 'full' : need(TAB_MIN.compact) <= width ? 'compact' : 'icon';
+}
+
+/** A mark-only tab's tooltip: the title, the agent, the status, and Auto when on. */
+export const tabTip = (chat: ChatView): string => `${chatTip(chat)} · ${STATUS_TITLES[statusOf(chat)]}${chat.approval === 'full' ? ' · Auto' : ''}`;
+
+/** The tab a key goes to: Ctrl+Tab / Ctrl+Shift+Tab cycle (as browsers do, on every platform); Cmd+1..8 (Ctrl elsewhere) pick that tab, 9 the last. */
+export function tabForKey(
+  strip: readonly string[],
+  active: string | undefined,
+  e: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean },
+  mac: boolean,
+): string | undefined {
+  if (!strip.length || e.altKey) return undefined;
+  if (e.key === 'Tab' && e.ctrlKey && !e.metaKey) {
+    const at = Math.max(0, strip.indexOf(active ?? ''));
+    return strip[(at + (e.shiftKey ? -1 : 1) + strip.length) % strip.length];
+  }
+  const cmd = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  if (!cmd || e.shiftKey || !/^[1-9]$/.test(e.key)) return undefined;
+  return e.key === '9' ? strip.at(-1) : strip[Number(e.key) - 1];
+}
+
 /** The tab to show after closing `closing` in `strip` (ids in order): the active one stays, else the right neighbour, else the left. */
 export function tabAfterClose(strip: readonly string[], closing: string, active: string | undefined): string | undefined {
   if (active !== closing) return active;
@@ -562,11 +595,19 @@ export function statusGroups(chats: ChatView[], all = false): StatusGroup[] {
   return STATUS_ORDER.map((status) => ({ status, title: STATUS_TITLES[status], chats: shown.filter((c) => statusOf(c) === status) })).filter((g) => all || g.chats.length > 0);
 }
 
-/** Open chats matching the query, grouped by status; starred ones first, in a group of their own. */
-export function switcherGroups(chats: ChatView[], query: string): (StatusGroup | { status: 'starred'; title: string; chats: ChatView[] })[] {
-  const shown = filterChats(openChats(chats), query);
+/**
+ * Open chats matching the query, grouped by status; starred ones first, in a group of their own.
+ * With `tabs` (the strip, in order) the open tabs come first, archived ones too, and aren't listed again below.
+ */
+export function switcherGroups(chats: ChatView[], query: string, tabs: readonly string[] = []): (StatusGroup | { status: 'starred' | 'tabs'; title: string; chats: ChatView[] })[] {
+  const open = filterChats(tabs.flatMap((id) => chats.find((c) => c.id === id) ?? []), query);
+  const shown = filterChats(openChats(chats), query).filter((c) => !tabs.includes(c.id));
   const starred = sortChats(shown.filter((c) => c.starred), { key: 'activity', dir: 'asc' });
-  return [...(starred.length ? [{ status: 'starred' as const, title: 'Starred', chats: starred }] : []), ...statusGroups(shown.filter((c) => !c.starred))];
+  return [
+    ...(open.length ? [{ status: 'tabs' as const, title: 'Open tabs', chats: open }] : []),
+    ...(starred.length ? [{ status: 'starred' as const, title: 'Starred', chats: starred }] : []),
+    ...statusGroups(shown.filter((c) => !c.starred)),
+  ];
 }
 
 /** "Needs you · 42s ago" under a chat's title in the switcher. */

@@ -1,6 +1,9 @@
 // Lines between the FriedLiver MCP server an agent session runs (dist/bridge.js)
 // and the extension host, over a local socket: one JSON object per line.
 // The host treats every line as untrusted and checks it here first.
+import { READ_LIMITS } from '../host/indexReads';
+import { SHOT } from '../host/browserRules';
+import { SNAPSHOT_LIMITS } from '../host/pageText';
 import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
 import { SYSTEM_LIMITS } from '../shared/system';
@@ -36,7 +39,9 @@ export type BridgeCall =
   | { tool: 'browser_open'; url: string }
   | { tool: 'browser_click'; selector?: string; text?: string }
   | { tool: 'browser_type'; selector: string; text: string }
-  | { tool: 'browser_snapshot' | 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' }
+  | { tool: 'browser_snapshot'; elements?: boolean; budget?: number; full?: boolean }
+  | { tool: 'browser_screenshot'; selector?: string; maxWidth?: number }
+  | { tool: 'browser_console' | 'browser_back' | 'browser_reload' }
   | IndexCall
   | SystemCall;
 
@@ -101,6 +106,8 @@ const oneOf = (a: Obj, keys: string[]): string | undefined => {
 };
 
 /** A workspace-relative path: no absolute paths, drive letters or `..`. */
+/** Absent, or an integer in [min, max]. */
+const int = (v: unknown, min: number, max: number) => v === undefined || (Number.isInteger(v) && (v as number) >= min && (v as number) <= max);
 const relPath = (v: unknown): v is string => query(v) && !/^([/\\]|[A-Za-z]:)/.test(v) && !v.split(/[/\\]/).includes('..');
 
 /** The tool call in a request, or null when anything about it is off. */
@@ -132,21 +139,38 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       return short(a.selector) ? { tool, selector: a.selector } : { tool, text: a.text as string };
     case 'browser_type':
       return short(a.selector) && typeof a.text === 'string' && a.text.length <= BRIDGE_LIMITS.text ? { tool, selector: a.selector, text: a.text } : null;
-    case 'browser_snapshot':
-    case 'browser_screenshot':
+    case 'browser_snapshot': {
+      const { elements, budget, full } = a;
+      if ((elements !== undefined && typeof elements !== 'boolean') || (full !== undefined && typeof full !== 'boolean') || !int(budget, SNAPSHOT_LIMITS.minBudget, SNAPSHOT_LIMITS.maxBudget)) return null;
+      return { tool, ...(elements !== undefined ? { elements } : {}), ...(budget !== undefined ? { budget: budget as number } : {}), ...(full !== undefined ? { full } : {}) };
+    }
+    case 'browser_screenshot': {
+      const { selector } = a;
+      const maxWidth = a.max_width;
+      if ((selector !== undefined && !short(selector)) || !int(maxWidth, SHOT.minWidth, SHOT.maxMaxWidth)) return null;
+      return { tool, ...(selector !== undefined ? { selector: selector as string } : {}), ...(maxWidth !== undefined ? { maxWidth: maxWidth as number } : {}) };
+    }
     case 'browser_console':
     case 'browser_back':
     case 'browser_reload':
       return { tool };
     case 'index_search': {
-      const limit = a.limit;
-      if (!query(a.query) || (limit !== undefined && !(Number.isInteger(limit) && (limit as number) >= 1 && (limit as number) <= 50))) return null;
-      return { tool, query: a.query, ...(limit !== undefined ? { limit: limit as number } : {}) };
+      const { limit, budget } = a;
+      if (!query(a.query) || !int(limit, 1, 50) || !int(budget, READ_LIMITS.minBudget, READ_LIMITS.maxBudget)) return null;
+      return { tool, query: a.query, ...(limit !== undefined ? { limit: limit as number } : {}), ...(budget !== undefined ? { budget: budget as number } : {}) };
+    }
+    case 'index_read': {
+      const { symbol, lines } = a;
+      if (!relPath(a.path) || (symbol !== undefined && !query(symbol))) return null;
+      if (lines !== undefined && !(Array.isArray(lines) && lines.length === 2 && lines.every((n) => Number.isInteger(n) && n >= 1 && n <= 10_000_000) && lines[0] <= lines[1])) return null;
+      if (symbol !== undefined && lines !== undefined) return null;
+      return { tool, path: a.path, ...(symbol !== undefined ? { symbol: symbol as string } : {}), ...(lines !== undefined ? { lines: [lines[0], lines[1]] as [number, number] } : {}) };
     }
     case 'index_symbols':
       return query(a.name) ? { tool, name: a.name } : null;
     case 'index_outline':
     case 'index_related':
+    case 'index_diff':
       return relPath(a.path) ? { tool, path: a.path } : null;
     case 'system_apps':
     case 'system_clipboard_read':
@@ -177,6 +201,9 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       return (a.action === 'get' || a.action === 'mute' || a.action === 'unmute') && a.level === undefined ? { tool, action: a.action } : null;
     case 'system_screenshot_window':
       return windowId(a.window) ? { tool, window: a.window } : null;
+    case 'index_changes':
+      if (a.since === undefined) return { tool };
+      return typeof a.since === 'string' && /^([0-9a-fA-F]{8,64}|last_turn)$/.test(a.since) ? { tool, since: a.since } : null;
     default:
       return null;
   }
