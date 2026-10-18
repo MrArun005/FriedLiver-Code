@@ -4,7 +4,7 @@
 // bounded: the last WINDOW entries, the in-flight calls, totals, and up to MAX_FILES file names.
 import { lstat, open } from 'node:fs/promises';
 import { diffPreview } from '../shared/diff';
-import { redactSecrets } from '../shared/redact';
+import { MAX_REDACT, redactSecrets } from '../shared/redact';
 import { sensitivePath } from '../shared/risk';
 import { cut } from '../shared/steps';
 import type { SubagentDetail, SubagentEntry, SubagentFile, SubagentNote, SubagentTool, SubagentUsage } from '../shared/subagentDetail';
@@ -137,8 +137,9 @@ function toolStep(b: Block, secret: boolean): Omit<SubagentTool, 'seq' | 'rev'> 
   }
   if (EDITS.has(name) && file && secret) return { ...base, title: `${name === 'Write' ? 'Write' : 'Edit'} ${file}`, out: [{ t: 'text', text: HIDDEN }] };
   if (EDITS.has(name) && file) {
-    const old = name === 'Write' ? null : redactSecrets((str(input.old_string) ?? '').slice(0, MAX_DIFF_IN));
-    const now = redactSecrets((str(input.new_string) ?? str(input.content) ?? str(input.new_source) ?? '').slice(0, MAX_DIFF_IN));
+    // Redacted whole, then cut: a cut first could split a secret into a piece no pattern knows.
+    const old = name === 'Write' ? null : redactSecrets(str(input.old_string) ?? '').slice(0, MAX_DIFF_IN);
+    const now = redactSecrets(str(input.new_string) ?? str(input.content) ?? str(input.new_source) ?? '').slice(0, MAX_DIFF_IN);
     const edits = name === 'MultiEdit' && Array.isArray(input.edits) ? input.edits.length : 0;
     const p = edits ? null : diffPreview(old, now);
     return {
@@ -162,7 +163,7 @@ function toolStep(b: Block, secret: boolean): Omit<SubagentTool, 'seq' | 'rev'> 
                 ? about
                 : name;
   const shown = secret || name === 'Read' || name === 'Glob' || name === 'Grep' ? '' : redactSecrets(JSON.stringify(input, null, 2) ?? '');
-  return { ...base, title: redactSecrets(cut(title, 300)), ...(shown && shown !== '{}' ? { input: cut(shown, MAX_IN) } : {}) };
+  return { ...base, title: cut(redactSecrets(title), 300), ...(shown && shown !== '{}' ? { input: cut(shown, MAX_IN) } : {}) };
 }
 
 function addUsage(s: DetailState, m: Msg): void {
@@ -191,10 +192,10 @@ export function feedDetail(s: DetailState, o: Line): void {
       if (!said.trim() || said.trimStart().startsWith('<')) return;
       if (s.prompt === undefined && !s.partial) {
         s.promptCut = said.length > MAX_PROMPT;
-        s.prompt = redactSecrets(said.slice(0, MAX_PROMPT));
+        s.prompt = redactSecrets(said).slice(0, MAX_PROMPT);
       } else {
         // A message from its caller (SendMessage, a resume): it runs again, so the earlier report no longer stands.
-        push(s, { kind: 'note', id: `n${s.seq + 1}`, text: redactSecrets(cut(said.trim(), MAX_NOTE)), caller: true });
+        push(s, { kind: 'note', id: `n${s.seq + 1}`, text: cut(redactSecrets(said.trim()), MAX_NOTE), caller: true });
         s.handback = undefined;
         s.lastText = undefined;
         s.quiet = false;
@@ -210,7 +211,8 @@ export function feedDetail(s: DetailState, o: Line): void {
       if (step.startedAt !== undefined && !Number.isNaN(at)) step.ms = Math.max(0, at - step.startedAt);
       if (s.secret.delete(b.tool_use_id)) step.out = [{ t: 'text', text: HIDDEN }];
       else {
-        const text = redactSecrets(tail(textOf(b.content), MAX_OUT));
+        // The end is what shows: redact the last MB of it whole, then keep its tail.
+        const text = tail(redactSecrets(textOf(b.content).slice(-MAX_REDACT)), MAX_OUT);
         // An edit's diff says what it did; its "updated successfully" line adds nothing unless it failed.
         if (text.trim() && (!step.out?.length || b.is_error)) step.out = [...(step.out ?? []), { t: 'text', text }];
       }
@@ -227,7 +229,7 @@ export function feedDetail(s: DetailState, o: Line): void {
       calls++;
       const input = (b.input ?? {}) as Record<string, unknown>;
       if (b.name === HANDBACK) {
-        s.handback = redactSecrets(str(input.message)?.slice(0, MAX_REPORT) ?? '');
+        s.handback = redactSecrets(str(input.message) ?? '').slice(0, MAX_REPORT);
         continue;
       }
       const secret = holdsSecrets(b.name ?? '', input);
@@ -244,10 +246,10 @@ export function feedDetail(s: DetailState, o: Line): void {
       const file = step.locations[0];
       if (file) touch(s, file, EDITS.has(b.name ?? ''));
     } else if (b.type === 'text' && b.text?.trim()) {
-      s.lastText = redactSecrets(b.text.slice(0, MAX_REPORT));
-      push(s, { kind: 'note', id: `n${s.seq + 1}`, text: redactSecrets(cut(b.text.trim(), MAX_NOTE)) });
+      s.lastText = redactSecrets(b.text).slice(0, MAX_REPORT);
+      push(s, { kind: 'note', id: `n${s.seq + 1}`, text: cut(s.lastText.trim(), MAX_NOTE) });
     } else if (b.type === 'thinking' && typeof (b as { thinking?: string }).thinking === 'string' && (b as { thinking: string }).thinking.trim()) {
-      push(s, { kind: 'note', id: `n${s.seq + 1}`, text: redactSecrets(cut((b as { thinking: string }).thinking.trim(), MAX_THOUGHT)), thinking: true });
+      push(s, { kind: 'note', id: `n${s.seq + 1}`, text: cut(redactSecrets((b as { thinking: string }).thinking.trim()), MAX_THOUGHT), thinking: true });
     }
   }
   // One message streams as one line per block: a text line then a tool line. Only a message that ends on words is quiet.
