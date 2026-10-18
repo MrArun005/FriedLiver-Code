@@ -212,6 +212,13 @@ describe('incremental updates and caps', () => {
     expect(ix.size).toBe(0);
   });
 
+  it('reads a file once when several ask for it at the same time', async () => {
+    const root = await project({ 'a.ts': 'one' });
+    const ix = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
+    await Promise.all([ix.update('a.ts'), ix.update('a.ts'), ix.updateMany(['a.ts']), ix.updateBatch(['a.ts'])]);
+    expect([ix.counts.read, ix.size]).toEqual([1, 1]);
+  });
+
   it('stops at the file cap', async () => {
     const root = await project(Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`f${i}.ts`, 'word'])));
     const ix = await build(root, { maxFiles: 3 });
