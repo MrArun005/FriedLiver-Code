@@ -3418,6 +3418,11 @@ body[data-surface='chat'] {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  /* Never sideways: a long word, path or URL anywhere in a message, card or notice wraps (inherited),
+     so nothing can push the transcript wider and slide its content past the left gutter. Code blocks
+     and diffs keep their own sideways scroll. */
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
   padding: var(--sp-5) var(--gutter) 40px;
   line-height: 1.5;
 }
@@ -4763,7 +4768,12 @@ button.apv-file {
   background: var(--tl-success);
 }
 .apv-risks code {
+  min-width: 0;
   color: var(--sel-fg);
+}
+/* A word, never broken a letter a line beside a long command. */
+.apv-risks .apv-safer {
+  flex: none;
 }
 .apv-commits {
   background: color-mix(in srgb, var(--error) 7%, var(--code-bg));
