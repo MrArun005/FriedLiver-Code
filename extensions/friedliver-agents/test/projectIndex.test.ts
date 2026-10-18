@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
 import type { Journal } from '../src/host/changeJournal';
-import { answerIndex, globToRegex, imports, INDEX_DEFAULTS, INDEX_LIMITS, isSecret, outline, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
+import { answerIndex, globToRegex, imports, INDEX_DEFAULTS, INDEX_LIMITS, isSecret, outline, partialIndex, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -224,7 +224,7 @@ describe('incremental updates and caps', () => {
     const root = await project(Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`f${i}.ts`, 'word'])));
     const ix = await build(root, { maxFiles: 3 });
     expect(ix.size).toBe(3);
-    expect(ix.capped).toBe(true);
+    expect(ix.capped).toBe('files');
   });
 
   it('caps tool output and results', async () => {
@@ -561,10 +561,50 @@ describe('opening: ready at once, then caught up from the journal', () => {
 });
 
 describe('index defaults', () => {
-  it('package.json offers the same defaults the host falls back to, big enough for a 150k-file repository', () => {
+  it('package.json offers the same defaults the host falls back to', () => {
     const props = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).contributes.configuration.properties;
     expect(props['friedliver.index.maxFiles'].default).toBe(INDEX_DEFAULTS.maxFiles);
     expect(props['friedliver.index.maxMemoryMB'].default).toBe(INDEX_DEFAULTS.maxMemoryMB);
-    expect(INDEX_DEFAULTS.maxFiles).toBeGreaterThanOrEqual(150_000);
+    expect(INDEX_DEFAULTS.maxFiles).toBe(200_000);
+    // A big repository stops early with a partial-index notice instead of taking ~1 GB of heap.
+    expect(INDEX_DEFAULTS.maxMemoryMB).toBe(150);
+  });
+});
+
+describe('partial index', () => {
+  const files5 = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`f${i}.ts`, `export const word${i} = ${i};\n`]));
+
+  it('says which limit stopped it and how many of the files it holds', async () => {
+    const root = await project(files5);
+    const byFiles = new ProjectIndex(root, { maxFiles: 3, maxBytes: 1e8 });
+    await byFiles.syncAll();
+    expect([byFiles.capped, byFiles.listed]).toEqual(['files', 5]);
+    expect(partialIndex([byFiles])).toBe('Partial index: 3 of 5 files (file limit)');
+    const byMemory = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1 });
+    await byMemory.syncAll();
+    expect(byMemory.capped).toBe('memory');
+    expect(partialIndex([byMemory])).toBe('Partial index: 0 of 5 files (memory limit)');
+    const whole = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1e8 });
+    await whole.syncAll();
+    expect([whole.capped, partialIndex([whole])]).toEqual([false, undefined]);
+  });
+
+  it('tells agents their answers come from part of the project', async () => {
+    const root = await project(files5);
+    const ix = new ProjectIndex(root, { maxFiles: 3, maxBytes: 1e8 });
+    await ix.syncAll();
+    expect(await answerIndex([ix], { tool: 'index_search', query: 'nothingmatches' }, false)).toContain('Partial index: 3 of 5 files (file limit)');
+  });
+
+  it('stays partial across a re-open, and fills in once the limit is raised, even with a journal', async () => {
+    const root = await project(files5);
+    const first = new ProjectIndex(root, { maxFiles: 3, maxBytes: 1e8 });
+    await first.syncAll();
+    first.mark = { kind: 'fsevents', uuid: 'U', id: '100' };
+    const saved = await saveOf(first);
+    const same = await reopen(root, saved, { maxFiles: 3 }, fakeJournal({ files: [] }));
+    expect(partialIndex([same])).toBe('Partial index: 3 of 5 files (file limit)');
+    const raised = await reopen(root, saved, { maxFiles: 100 }, fakeJournal({ files: [] }));
+    expect([raised.size, raised.capped, partialIndex([raised])]).toEqual([5, false, undefined]);
   });
 });

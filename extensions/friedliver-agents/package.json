@@ -998,9 +998,9 @@
         },
         "friedliver.index.maxMemoryMB": {
           "type": "number",
-          "default": 400,
+          "default": 150,
           "minimum": 10,
-          "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files."
+          "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files. A stopped index shows *Partial index* in the status bar; raise this to index a large repository in full (about 400 for 80,000 files, at roughly 1 GB of memory)."
         },
         "friedliver.index.primer": {
           "type": "boolean",

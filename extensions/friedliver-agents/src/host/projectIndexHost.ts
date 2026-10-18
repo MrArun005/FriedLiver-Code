@@ -11,7 +11,7 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import { fseventsJournal, journalHelper, type Journal, type JournalMark } from './changeJournal';
 import { SeenFiles } from './indexReads';
-import { answerIndex, docsFileOf, INDEX_DEFAULTS, ProjectIndex, projectPrimer, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
+import { answerIndex, docsFileOf, INDEX_DEFAULTS, partialIndex, ProjectIndex, projectPrimer, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
 
 /** git files that move on a checkout, pull or branch switch: re-check every file's stat then. */
 const HEAD_MOVED = /[/\\]\.git[/\\](HEAD|ORIG_HEAD|FETCH_HEAD)$/;
@@ -159,12 +159,13 @@ export class ProjectIndexHost implements vscode.Disposable {
     return gen === this.generation;
   }
 
-  /** `Index · 12,345 files · #1a2b3c4d · 7 changed since last open`. */
+  /** `Index · 12,345 files · #1a2b3c4d · 7 changed since last open`, or `Partial index: 3,000 of 81,000 files (memory limit) · …` when a cap stopped it. */
   private summary(): string {
     const changed = this.indexes.reduce((n, ix) => n + (ix.changes(undefined, 0)?.total ?? 0), 0);
     const ids = this.indexes.map((ix) => `#${ix.tree.root().slice(0, 8)}`).join(' ');
     const since = this.indexes.some((ix) => ix.tree.base) ? ` · ${changed.toLocaleString()} changed since last open` : '';
-    return `$(database) Index · ${this.count().toLocaleString()} files${this.indexes.some((ix) => ix.capped) ? ' (capped)' : ''} · ${ids}${since}`;
+    const partial = partialIndex(this.indexes);
+    return `${partial ? `$(warning) ${partial}` : `$(database) Index · ${this.count().toLocaleString()} files`} · ${ids}${since}`;
   }
 
   private async flush(gen: number): Promise<void> {
@@ -221,7 +222,19 @@ export class ProjectIndexHost implements vscode.Disposable {
   private status(text: string): void {
     this.item.text = text;
     const roots = this.indexes.map((ix) => `${path.basename(ix.root)}: ${ix.tree.root()}`).join('\n');
-    this.item.tooltip = `FriedLiver project index, which agents search with the index_* tools. Project hash:\n${roots}\nClick to rebuild it in full.`;
+    const head = `FriedLiver project index, which agents search with the index_* tools. Project hash:\n${roots}\n`;
+    const partial = partialIndex(this.indexes);
+    if (partial) {
+      // Stopped at a cap: the action is the setting that lifts it (a change there re-checks every file).
+      const setting = this.indexes.some((ix) => ix.capped === 'memory') ? 'friedliver.index.maxMemoryMB' : 'friedliver.index.maxFiles';
+      this.item.command = { title: 'Open index limit setting', command: 'workbench.action.openSettings', arguments: [setting] };
+      this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      this.item.tooltip = `${partial}. Agents miss the files outside it.\n${head}Click to open ${setting} and raise the limit.`;
+      return;
+    }
+    this.item.command = 'friedliver.index.rebuild';
+    this.item.backgroundColor = undefined;
+    this.item.tooltip = `${head}Click to rebuild it in full.`;
   }
 
   dispose(): void {
