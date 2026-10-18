@@ -3,7 +3,8 @@
 // from the Markdown parser, never as HTML. The device token lives in this
 // origin's localStorage and goes only in the Authorization header.
 import { render } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { rowShowsWhole } from './rules';
 import { parseMarkdown, type Block, type Inline, type ListBlock } from '../../shared/markdown';
 import type { AgentKey } from '../../shared/model';
 import type { QuestionField, QuestionValue } from '../../shared/questions';
@@ -268,6 +269,9 @@ function CommandPreview({ line, cwd }: { line: string; cwd?: string }) {
   );
 }
 
+/** The row would allow if it showed more: say so, so the missing ✓ isn't a mystery. */
+const quickAllowBlocked = (r: Req) => r.tone !== 'careful' && !r.onMac && !r.question && !!r.scopes.once && !(r.full !== undefined && r.full.includes('\n'));
+
 /** One pending request, as the row and the sheet both read it. */
 interface Req {
   id: string;
@@ -276,6 +280,8 @@ interface Req {
   target?: string;
   /** The target is prose (a question), not machine text. */
   prose?: boolean;
+  /** The whole command this request approves, when it approves one: sent back as `shown`, and the row must show all of it to allow. */
+  full?: string;
   tone: Tone;
   chip: string;
   consequences: string[];
@@ -291,20 +297,26 @@ interface Req {
   answer?(values: Record<string, QuestionValue>): void;
 }
 
-/** The quick ✓ and swipe-right: the plain one-time yes, never for careful requests, questions or what the phone can't show. */
-const quickAllow = (r: Req) => (r.tone !== 'careful' && !r.onMac && !r.question ? r.scopes.once?.[0]?.run : undefined);
+/**
+ * The quick ✓ and swipe-right: the plain one-time yes, only when the row shows everything it approves
+ * (one line, not cut off), and never for careful requests, questions or what the phone can't show.
+ */
+const quickAllow = (r: Req, truncated: boolean) =>
+  r.tone !== 'careful' && !r.onMac && !r.question && rowShowsWhole(r.full, r.target, truncated) ? r.scopes.once?.[0]?.run : undefined;
 
 /** A pending item as a request; undefined for anything already decided or not a request. */
 function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined {
   switch (item.k) {
     case 'permission': {
       if (item.answer) return undefined;
-      const answer = (optionId: string) => () => void act({ type: 'permission', requestId: item.id, optionId });
+      const shown = item.command?.line;
+      const answer = (optionId: string) => () => void act({ type: 'permission', requestId: item.id, optionId, ...(shown !== undefined ? { shown } : {}) });
       return {
         id: item.id,
         agent,
         verb: item.verb,
-        target: item.target,
+        target: item.command ? item.command.line.split('\n')[0] : item.target,
+        ...(shown !== undefined ? { full: shown } : {}),
         tone: item.risk.level,
         chip: item.risk.label,
         consequences: item.risk.consequences,
@@ -314,7 +326,7 @@ function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined 
         scopes: {
           ...(item.once ? { once: [{ rule: 'Just this request', run: answer(item.once) }] } : {}),
           ...(item.chat ? { chat: [{ rule: `${item.verb}${item.target ? ` ${item.target}` : ''} again, until this chat ends`, run: answer(item.chat) }] } : {}),
-          ...(item.always.length ? { always: item.always.map((c) => ({ rule: c.label.replace(/^Always allow (\w)/, (_, ch: string) => ch.toUpperCase()), run: () => void act({ type: 'allowAlways', requestId: item.id, grant: c.grant }) })) } : {}),
+          ...(item.always.length ? { always: item.always.map((c) => ({ rule: c.label.replace(/^Always allow (\w)/, (_, ch: string) => ch.toUpperCase()), run: () => void act({ type: 'allowAlways', requestId: item.id, grant: c.grant, ...(shown !== undefined ? { shown } : {}) }) })) } : {}),
         },
         ...(item.deny ? { deny: answer(item.deny) } : {}),
         extra: item.options.map((o) => ({ label: o.name, run: answer(o.id) })),
@@ -341,6 +353,7 @@ function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined 
         agent,
         verb: 'Run',
         target: first,
+        full: item.line,
         tone: item.risk.level,
         chip: item.risk.label,
         consequences: item.risk.consequences,
@@ -348,8 +361,8 @@ function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined 
         allowWord: 'Run',
         denyWord: 'Deny',
         scopes: {
-          once: [{ rule: 'Just this command', run: () => void act({ type: 'command', commandId: item.id, approve: true }) }],
-          ...(item.outside || item.onMac ? {} : { always: [{ rule: `${first}, exactly, in every chat`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line } }) }] }),
+          once: [{ rule: 'Just this command', run: () => void act({ type: 'command', commandId: item.id, approve: true, shown: item.line }) }],
+          ...(item.outside || item.onMac ? {} : { always: [{ rule: `${first}, exactly, in every chat`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line }, shown: item.line }) }] }),
         },
         deny: () => void act({ type: 'command', commandId: item.id, approve: false }),
         extra: [],
@@ -420,8 +433,15 @@ function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined 
 }
 
 /** A pending request in the transcript: one row; ✕ / ✓ on the right; swipe right allows once, left denies. */
-function PendingRow({ req, open, swiped }: { req: Req; open(): void; swiped(dir: 'allow' | 'deny'): void }) {
-  const allow = quickAllow(req);
+function PendingRow({ req, open, swiped }: { req: Req; open(): void; swiped(dir: 'allow' | 'deny', run: () => void): void }) {
+  const targetRef = useRef<HTMLSpanElement>(null);
+  const [truncated, setTruncated] = useState(true);
+  useLayoutEffect(() => {
+    const el = targetRef.current;
+    setTruncated(!!el && el.scrollWidth > el.clientWidth + 1);
+  });
+  const allow = quickAllow(req, truncated);
+  const moreLines = req.full ? req.full.split('\n').length - 1 : 0;
   const [dx, setDx] = useState(0);
   const drag = useRef<{ x: number; y: number; id: number; moving: boolean; armed: boolean } | undefined>(undefined);
   const LIMIT = 96;
@@ -451,8 +471,8 @@ function PendingRow({ req, open, swiped }: { req: Req; open(): void; swiped(dir:
     drag.current = undefined;
     if (!d) return;
     if (!d.moving) return open();
-    if (dx >= LIMIT && allow) swiped('allow');
-    else if (dx <= -LIMIT && req.deny) swiped('deny');
+    if (dx >= LIMIT && allow) swiped('allow', allow);
+    else if (dx <= -LIMIT && req.deny) swiped('deny', req.deny);
     setDx(0);
   };
   return (
@@ -481,9 +501,17 @@ function PendingRow({ req, open, swiped }: { req: Req; open(): void; swiped(dir:
         <span class="req__text">
           <span class="req__line">
             <span class="req__verb">{req.verb}</span>
-            {req.target ? <span class={req.prose ? 'req__prose' : 'mono req__target'}>{req.target}</span> : null}
+            {req.target ? (
+              <span ref={targetRef} class={req.prose ? 'req__prose' : 'mono req__target'}>
+                {req.target}
+              </span>
+            ) : null}
           </span>
-          <Chip tone={req.tone} label={req.chip} />
+          <span class="req__meta">
+            <Chip tone={req.tone} label={req.chip} />
+            {moreLines ? <span class="meta">+{moreLines} more line{moreLines === 1 ? '' : 's'}</span> : null}
+            {!allow && quickAllowBlocked(req) ? <span class="meta">Tap to review</span> : null}
+          </span>
         </span>
         {req.deny ? (
           <button class="round" aria-label={req.denyWord} onClick={req.deny}>
@@ -892,9 +920,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
     const r = requestOf(item, chat.agent, act);
     return r && r.id !== undo?.id ? [r] : [];
   });
-  const swiped = (r: Req, dir: 'allow' | 'deny') => {
-    const run = dir === 'allow' ? quickAllow(r) : r.deny;
-    if (!run) return;
+  const swiped = (r: Req, dir: 'allow' | 'deny', run: () => void) => {
     if (undo) {
       // The earlier one goes now.
       clearTimeout(undo.timer);
@@ -957,7 +983,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
         {chat.earlier ? <p class="notice">{chat.earlier} earlier items are on your Mac.</p> : null}
         {chat.items.map((item, i) => {
           const r = requestOf(item, chat.agent, act);
-          if (r) return r.id === undo?.id ? null : <PendingRow key={r.id} req={r} open={() => setSheet(reqs.findIndex((x) => x.id === r.id))} swiped={(dir) => swiped(r, dir)} />;
+          if (r) return r.id === undo?.id ? null : <PendingRow key={r.id} req={r} open={() => setSheet(reqs.findIndex((x) => x.id === r.id))} swiped={(dir, run) => swiped(r, dir, run)} />;
           return <ItemView key={`${chat.id}-${i}-${item.k}`} item={item} />;
         })}
         {chat.busy ? <p class="working">Working…</p> : null}

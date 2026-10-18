@@ -41,11 +41,11 @@ describe('phone actions', () => {
     await waitFor(() => !!open(core, chat.id));
     const p = open(core, chat.id)!;
     expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'made-up' }, PHONE)).toEqual({ ok: false, error: 'The agent did not offer that answer.' });
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' }, PHONE)).toEqual({ ok: true });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow', shown: 'node --version' }, PHONE)).toEqual({ ok: true });
     await turn;
     expect(core.chat(chat.id)!.items.find((i) => i.kind === 'permission')).toMatchObject({ answer: 'Yes' });
     expect(confirms).toEqual([]);
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' }, PHONE)).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow', shown: 'node --version' }, PHONE)).toMatchObject({ ok: false });
   });
 
   it('need the Mac’s OK for an agent’s “don’t ask again”, and leave the card waiting without it', async () => {
@@ -55,7 +55,7 @@ describe('phone actions', () => {
     await waitFor(() => !!open(core, chat.id));
     const p = open(core, chat.id)!;
     const always = p.options.find((o) => o.kind === 'allow_always')!;
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: always.optionId }, PHONE)).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: always.optionId, shown: 'node --version' }, PHONE)).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
     expect(confirms).toHaveLength(1);
     expect(confirms[0]).toBe('Phone “Arun’s iPhone” asks: Answer “Yes, and don\'t ask again for this session” for Demo?');
     expect(open(core, chat.id)?.requestId).toBe(p.requestId);
@@ -70,7 +70,7 @@ describe('phone actions', () => {
     await waitFor(() => !!open(core, chat.id));
     hidden.add(chat.id);
     const p = open(core, chat.id)!;
-    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow' }, PHONE)).toMatchObject({ ok: false });
+    expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: 'allow', shown: 'node --version' }, PHONE)).toMatchObject({ ok: false });
     expect(await actions.run({ type: 'send', chatId: chat.id, text: 'hi' }, PHONE)).toMatchObject({ ok: false });
     expect(await actions.run({ type: 'stop', chatId: chat.id }, PHONE)).toMatchObject({ ok: false });
     expect(await actions.run({ type: 'approval', chatId: chat.id, level: 'edits' }, PHONE)).toMatchObject({ ok: false });
@@ -171,6 +171,7 @@ describe('phone actions, the strict cases', () => {
     expect(await actions.run({ type: 'permission', requestId: 'perm-1', optionId: 'no' }, PHONE)).toEqual({ ok: true });
     expect(await actions.run({ type: 'permission', requestId: 'perm-1', optionId: 'yes' }, PHONE)).toEqual({ ok: true });
     expect(confirms).toHaveLength(1);
+    // That card names no command, so nothing has to match.
     expect(calls).toEqual(['permission perm-1 no', 'permission perm-1 yes']);
   });
 
@@ -195,8 +196,33 @@ describe('phone actions, the strict cases', () => {
     expect(view).toMatchObject({ k: 'permission', verb: 'Run', target: 'git push --force origin main', risk: { level: 'careful', label: 'Rewrites shared history' }, once: 'yes', deny: 'no', always: [] });
     expect(view.k === 'permission' && view.chat).toBeUndefined();
     expect(view.k === 'permission' && view.options).toEqual([]);
-    expect(await actions.run({ type: 'permission', requestId: 'perm-2', optionId: 'yes' }, PHONE)).toEqual({ ok: true });
+    expect(await actions.run({ type: 'permission', requestId: 'perm-2', optionId: 'yes', shown: 'git push --force origin main' }, PHONE)).toEqual({ ok: true });
     expect(calls).toEqual(['permission perm-2 yes']);
+  });
+
+  it('allow a command only with the exact text the phone showed, so a changed request is not approved blind', async () => {
+    const perm: Item = {
+      kind: 'permission',
+      requestId: 'perm-5',
+      title: 'Run make',
+      toolKind: 'execute',
+      detail: { command: { line: 'make test', cwd: '/w' } },
+      options: [
+        { optionId: 'yes', name: 'Yes', kind: 'allow_once' },
+        { optionId: 'no', name: 'No', kind: 'reject_once' },
+      ],
+    };
+    const cmd: Item = { kind: 'command', commandId: 'c9', commandLine: 'npm test', cwd: '/w', outside: false, state: 'awaiting', output: '' };
+    const { actions, calls } = fakeActions([perm, cmd], true);
+    const changed = { ok: false, error: 'The command changed. Review it again.' };
+    expect(await actions.run({ type: 'permission', requestId: 'perm-5', optionId: 'yes' }, PHONE)).toEqual(changed);
+    expect(await actions.run({ type: 'permission', requestId: 'perm-5', optionId: 'yes', shown: 'make' }, PHONE)).toEqual(changed);
+    expect(await actions.run({ type: 'command', commandId: 'c9', approve: true, shown: 'npm test && rm -rf ~' }, PHONE)).toEqual(changed);
+    expect(await actions.run({ type: 'allowAlways', commandId: 'c9', grant: { kind: 'exact', command: 'npm test' } }, PHONE)).toEqual(changed);
+    // Saying no needs nothing shown.
+    expect(await actions.run({ type: 'command', commandId: 'c9', approve: false }, PHONE)).toEqual({ ok: true });
+    expect(await actions.run({ type: 'permission', requestId: 'perm-5', optionId: 'yes', shown: 'make test' }, PHONE)).toEqual({ ok: true });
+    expect(calls).toEqual(['command c9 false', 'permission perm-5 yes']);
   });
 
   it('confirm “For this chat” on an agent’s request too, since it keeps allowing', async () => {
@@ -214,7 +240,7 @@ describe('phone actions, the strict cases', () => {
     expect(await actions.run({ type: 'command', commandId: 'c1', approve: true }, PHONE)).toMatchObject({ ok: false, error: expect.stringContaining('Mac') });
     expect(await actions.run({ type: 'command', commandId: 'c2', approve: true }, PHONE)).toMatchObject({ ok: false });
     expect(await actions.run({ type: 'command', commandId: 'c1', approve: false }, PHONE)).toEqual({ ok: true });
-    expect(await actions.run({ type: 'command', commandId: 'c3', approve: true }, PHONE)).toEqual({ ok: true });
+    expect(await actions.run({ type: 'command', commandId: 'c3', approve: true, shown: 'npm test' }, PHONE)).toEqual({ ok: true });
     expect(calls).toEqual(['command c1 false', 'command c3 true']);
   });
 
@@ -331,6 +357,8 @@ describe('parsing what the phone sends', () => {
       expect(parseRemoteAction({ type: t, chatId: 'chat-1', path: '/etc/passwd', command: 'ls', text: 'x' }), t).toBeNull();
     }
     expect(parseRemoteAction({ type: 'approval', chatId: 'chat-1', level: 'full' })).toEqual({ type: 'approval', chatId: 'chat-1', level: 'full' });
+    expect(parseRemoteAction({ type: 'command', commandId: 'c1', approve: true, shown: 'npm test' })).toEqual({ type: 'command', commandId: 'c1', approve: true, shown: 'npm test' });
+    expect(parseRemoteAction({ type: 'command', commandId: 'c1', approve: true, shown: 5 })).toBeNull();
     expect(parseRemoteAction({ type: 'newChat', agent: 'claude', folder: '/w', text: 'x' })).toEqual({ type: 'newChat', agent: 'claude', folder: '/w', text: 'x' });
     expect(parseRemoteAction({ type: 'newChat', agent: 'evil', folder: '/w', text: '' })).toBeNull();
     expect(parseRemoteAction([])).toBeNull();

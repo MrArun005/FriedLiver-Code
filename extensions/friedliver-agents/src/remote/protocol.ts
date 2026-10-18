@@ -100,12 +100,13 @@ export type PhoneEvent = { type: 'changed'; chats: string[] } | { type: 'revoked
 export type RemoteAction =
   | { type: 'send'; chatId: string; text: string }
   | { type: 'stop'; chatId: string }
-  | { type: 'permission'; requestId: string; optionId: string | null }
-  | { type: 'command'; commandId: string; approve: boolean }
+  /** `shown`: the exact command the phone showed; an allow is refused unless it matches the request now. */
+  | { type: 'permission'; requestId: string; optionId: string | null; shown?: string }
+  | { type: 'command'; commandId: string; approve: boolean; shown?: string }
   | { type: 'answerQuestion'; requestId: string; action: 'accept' | 'decline'; values?: Record<string, QuestionValue> }
   | { type: 'review'; reviewId: string; action: 'accept' | 'reject' }
   | { type: 'bridge'; requestId: string; answer: 'allow' | 'allowChat' | 'allowAlways' | 'deny' }
-  | { type: 'allowAlways'; requestId?: string; commandId?: string; grant: Grant }
+  | { type: 'allowAlways'; requestId?: string; commandId?: string; grant: Grant; shown?: string }
   | { type: 'approval'; chatId: string; level: ApprovalLevel }
   | { type: 'newChat'; agent: AgentKey; folder: string; text: string };
 
@@ -115,7 +116,12 @@ const SAME_AS_WEBVIEW = new Set(['stop', 'permission', 'command', 'answerQuestio
 export function parseRemoteAction(raw: unknown): RemoteAction | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
-  if (typeof m.type === 'string' && SAME_AS_WEBVIEW.has(m.type)) return parseWebviewMessage(m) as RemoteAction | null;
+  if (typeof m.type === 'string' && SAME_AS_WEBVIEW.has(m.type)) {
+    const parsed = parseWebviewMessage(m) as RemoteAction | null;
+    if (!parsed || m.shown === undefined) return parsed;
+    if (typeof m.shown !== 'string' || m.shown.length > LIMITS.command * 2 || !(parsed.type === 'permission' || parsed.type === 'command' || parsed.type === 'allowAlways')) return null;
+    return { ...parsed, shown: m.shown };
+  }
   switch (m.type) {
     case 'send': {
       // Text only: no images, no code references from the phone.
