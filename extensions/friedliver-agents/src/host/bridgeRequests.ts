@@ -44,6 +44,8 @@ export interface ToolHost {
   browser?(chatId: string, call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string>;
   /** Appends a fact to the project's memory (sharedRules.ts remember); absent when there is no trusted folder. */
   remember?(fact: string): Promise<string>;
+  /** Whether read_chat skips the user's OK between chats a hand-off or consultation linked. Default no. */
+  autoAllowLinkedReads?(): boolean;
   /** Whether browser actions by the external client (EXTERNAL_CLIENT) skip the user's OK. Default no. */
   externalAutoApprove?(): boolean;
   /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
@@ -122,8 +124,8 @@ export class BridgeRequests {
       text: call.tool === 'ask_agent' ? call.prompt : call.tool === 'send_to_chat' ? call.message : '',
       state: 'awaiting',
     };
-    // Reading the chat that handed this one its task, or that consulted it: the user (or their OK) already linked the two for that.
-    const linked = call.tool === 'read_chat' && this.host.state.links.some((l) => (l.kind === 'handoff' || l.kind === 'consult') && l.from === call.chatId && l.to === caller.id);
+    // Reading the chat that handed this one its task, or that consulted it, when the user turned that on (friedliver.chat.autoAllowLinkedReads).
+    const linked = call.tool === 'read_chat' && this.host.autoAllowLinkedReads?.() === true && this.host.state.links.some((l) => (l.kind === 'handoff' || l.kind === 'consult') && l.from === call.chatId && l.to === caller.id);
     settled(await this.approve(caller, item, linked || this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal, this.toolGrant(call.tool)));
     // The state may have changed while the user decided.
     this.check(caller, call);
