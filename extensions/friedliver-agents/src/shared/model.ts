@@ -53,6 +53,9 @@ export interface PermissionOption {
   kind: string;
 }
 
+/** What a request still waiting when the window closed says: the agent stopped, so it was neither allowed nor rejected. */
+export const EXPIRED = 'Expired — the agent stopped';
+
 export type CommandState = 'awaiting' | 'running' | 'denied' | 'exited';
 
 export interface CommandItem {
@@ -75,6 +78,8 @@ export interface CommandItem {
   dropped?: DroppedCommits;
   /** A routine command allows itself at this time (host clock) unless stopped (friedliver.approvals.autoRoutineSeconds). */
   autoAt?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
 }
 
 export interface ReviewItem {
@@ -88,6 +93,8 @@ export interface ReviewItem {
   /** Decided without the diff editor, and why: "Auto-accept edits", "Approved above". */
   auto?: string;
   at?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
 }
 
 // ---- Connections between chats ----
@@ -137,6 +144,8 @@ export interface BridgeItem {
   /** Why it went ahead without asking: a remembered rule. */
   auto?: string;
   at?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
   /** Only "Allow" (once) and "Deny" are offered: not for this chat, never always (clipboard, screenshots, terminals). */
   once?: true;
 }
@@ -202,6 +211,8 @@ export type Item =
       at?: number;
       /** A routine request allows itself once at this time (host clock) unless stopped. */
       autoAt?: number;
+      /** Still waiting when the window closed: nobody decided it. */
+      expired?: true;
     }
   | ReviewItem
   | CommandItem
@@ -221,6 +232,8 @@ export interface QuestionItem {
   /** The answer, in one line, once given. */
   summary?: string;
   at?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
 }
 
 export interface ChatView {

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AGENT_FACES, EMPTY_STATE, isAgentKey, MAX_USAGE_LOG, type TurnUsage, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
+import { AGENT_FACES, EMPTY_STATE, EXPIRED, isAgentKey, MAX_USAGE_LOG, type TurnUsage, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
 import type { ChatSession, SessionOption } from '../shared/session';
 
 /** What the next window needs to bring a chat back. Never API keys or bridge tokens. */
@@ -119,17 +119,18 @@ export function settleRestored(state: AppState): AppState {
   const chats = state.chats.map((chat) => {
     let stopped = chat.busy;
     const items = chat.items.map((i): Item => {
+      // Still waiting: nobody decided it, so it says it expired, never "Rejected" or "Denied", and the Inbox doesn't list it as your answer.
       if (i.kind === 'permission' && !i.answer) {
         stopped = true;
-        return { ...i, answer: STOPPED };
+        return { ...i, answer: EXPIRED, expired: true };
       }
       if (i.kind === 'review' && i.state === 'pending') {
         stopped = true;
-        return { ...i, state: 'rejected' };
+        return { ...i, state: 'rejected', expired: true };
       }
       if (i.kind === 'command' && i.state === 'awaiting') {
         stopped = true;
-        return { ...i, state: 'denied' };
+        return { ...i, state: 'denied', expired: true };
       }
       if (i.kind === 'command' && i.state === 'running') {
         stopped = true;
@@ -137,11 +138,11 @@ export function settleRestored(state: AppState): AppState {
       }
       if (i.kind === 'question' && i.state === 'awaiting') {
         stopped = true;
-        return { ...i, state: 'declined' };
+        return { ...i, state: 'declined', expired: true };
       }
       if (i.kind === 'bridge' && i.state === 'awaiting') {
         stopped = true;
-        return { ...i, state: 'denied' };
+        return { ...i, state: 'denied', expired: true };
       }
       return i;
     });

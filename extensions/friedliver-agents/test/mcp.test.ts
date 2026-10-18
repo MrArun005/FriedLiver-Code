@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSIONS, TOOLS, handle } from '../src/bridge/mcp';
+import { OMIT_ENV, PROTOCOL_VERSIONS, TOOLS, handle, omittedTools, toolsFor } from '../src/bridge/mcp';
 import { BRIDGE_LIMITS, TOKEN_ENV, BRIDGE_ENV } from '../src/bridge/protocol';
 import { AGENT_KEYS } from '../src/shared/model';
-import { SYSTEM_TOOLS } from '../src/shared/system';
+import { SYSTEM_TOOLS, type SystemTool } from '../src/shared/system';
 import { buildBridge } from './helpers';
 
 const request = (id: number, method: string, params?: object) => ({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) });
@@ -90,5 +90,58 @@ describe('the FriedLiver tools server (MCP)', () => {
     expect(lines[2]).toMatchObject({ result: { isError: true, content: [{ text: expect.stringContaining('FriedLiver closed the connection') }] } });
     child.stdin.end();
     expect(await exited).toBe(0);
+  }, 20_000);
+});
+
+describe('tools/list carries only what a session can use', () => {
+  const allOn = Object.fromEntries(SYSTEM_TOOLS.map((t) => [t, true])) as Record<SystemTool, boolean>;
+  const names = (omit: string[]) => toolsFor(omit).map((t) => t.name);
+
+  it('sends no $schema in any input schema', () => {
+    expect(JSON.stringify(TOOLS)).not.toContain('$schema');
+  });
+
+  it('leaves out system_* where unsupported or turned off, and index_* with the index off', () => {
+    expect(omittedTools({ platform: 'mac', system: { enabled: true, tools: allOn }, index: true })).toEqual([]);
+    expect(omittedTools({ platform: 'win', system: { enabled: true, tools: allOn }, index: true })).toEqual(['system_shortcut']);
+    expect(omittedTools({ platform: 'other', system: { enabled: true, tools: allOn }, index: true }).sort()).toEqual([...SYSTEM_TOOLS].sort());
+    expect(omittedTools({ platform: 'mac', system: { enabled: false, tools: allOn }, index: true }).sort()).toEqual([...SYSTEM_TOOLS].sort());
+    expect(omittedTools({ platform: 'mac', index: true }).sort()).toEqual([...SYSTEM_TOOLS].sort());
+    expect(omittedTools({ platform: 'mac', system: { enabled: true, tools: { ...allOn, system_volume: false } as Record<SystemTool, boolean> }, index: true })).toEqual(['system_volume']);
+    const noIndex = omittedTools({ platform: 'mac', system: { enabled: true, tools: allOn }, index: false });
+    expect(noIndex.length).toBe(7);
+    expect(noIndex.every((n) => n.startsWith('index_'))).toBe(true);
+
+    const linux = omittedTools({ platform: 'other', system: { enabled: true, tools: allOn }, index: false });
+    expect(names(linux).some((n) => /^(system|index)_/.test(n))).toBe(false);
+    expect(names(linux)).toContain('browser_open');
+    // Smaller by the schemas left out, and the same object each time (cheap to answer every session).
+    expect(JSON.stringify(toolsFor(linux)).length).toBeLessThan(JSON.stringify(TOOLS).length * 0.7);
+    expect(toolsFor(linux)).toBe(toolsFor([...linux].reverse()));
+  });
+
+  it('answers tools/list, tools/call and the instructions to match', () => {
+    const omit = omittedTools({ platform: 'other', index: false });
+    const list = handle(request(1, 'tools/list'), false, omit) as { reply: { result: { tools: { name: string }[] } } };
+    expect(list.reply.result.tools.map((t) => t.name)).toEqual(names(omit));
+    expect(handle(request(2, 'tools/call', { name: 'index_search', arguments: { query: 'x' } }), false, omit)).toMatchObject({ reply: { result: { isError: true, content: [{ text: expect.stringContaining('not found') }] } } });
+    const init = handle(request(3, 'initialize', { protocolVersion: '2025-06-18' }), false, omit) as { reply: { result: { instructions: string } } };
+    expect(init.reply.result.instructions).not.toMatch(/index_|system_/);
+    expect(init.reply.result.instructions).toContain('browser_*');
+  });
+
+  it('takes the list the editor worked out over stdio', async () => {
+    const script = await buildBridge();
+    const child = spawn(process.execPath, [script], { env: { ...process.env, [BRIDGE_ENV]: '/nonexistent/friedliver.sock', [TOKEN_ENV]: 'a'.repeat(64), [OMIT_ENV]: 'index_search,system_open' }, stdio: ['pipe', 'pipe', 'inherit'] });
+    let out = '';
+    child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d));
+    child.stdin.write(`${JSON.stringify(request(1, 'tools/list'))}\n`);
+    const end = Date.now() + 10_000;
+    while (!out.includes('\n') && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+    const tools = (JSON.parse(out.split('\n')[0]) as { result: { tools: { name: string }[] } }).result.tools.map((t) => t.name);
+    expect(tools).not.toContain('index_search');
+    expect(tools).not.toContain('system_open');
+    expect(tools).toContain('index_read');
+    child.stdin.end();
   }, 20_000);
 });

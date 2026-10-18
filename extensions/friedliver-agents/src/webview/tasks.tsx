@@ -32,6 +32,8 @@ import {
   subagents,
   sortChats,
   statusOf,
+  turnsOf,
+  turnsText,
   type Badge,
   type CardLine,
   type CardModel,
@@ -53,6 +55,7 @@ import { AgentMap } from './map';
 import { Gallery } from './gallery';
 import { Inbox } from './inbox';
 import { inbox } from '../shared/inbox';
+import { preselectAgents } from '../shared/accounts';
 import type { OutsideImages } from '../shared/gallery';
 import { chatName, chatTip } from '../shared/names';
 
@@ -366,6 +369,11 @@ function Manager() {
               <span class="count-item">
                 <Dot state="working" still={tally.working === 0} /> {tally.working} working
               </span>
+              {tally.problem > 0 && (
+                <span class="count-item">
+                  <Dot state="error" /> {tally.problem} problem{tally.problem === 1 ? '' : 's'}
+                </span>
+              )}
               <span class="count-item">
                 <Dot state="done" /> {tally.done} done
               </span>
@@ -467,11 +475,18 @@ function Manager() {
 }
 
 function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefaults>> }) {
-  const shown = useRoster().agents;
-  const [saved, setAgents] = usePersisted<AgentKey[]>('agents', ['claude']);
-  // A hidden agent (Demo, once turned off) drops out of a saved choice.
+  const roster = useRoster();
+  const shown = roster.agents;
+  const [saved, setSaved] = usePersisted<AgentKey[]>('agents', ['claude']);
+  // Until you pick, the choice leaves out agents the Accounts page found not installed (and hidden ones,
+  // like Demo once turned off); an agent you pick yourself stays picked whatever its status.
+  const [touched, setTouched] = useState(false);
   const kept = saved.filter((a) => shown.includes(a));
-  const agents: AgentKey[] = kept.length ? kept : [shown[0] ?? 'claude'];
+  const agents: AgentKey[] = touched && kept.length ? kept : preselectAgents(roster, saved);
+  const setAgents = (next: AgentKey[]) => {
+    setTouched(true);
+    setSaved(next);
+  };
   const [worktree, setWorktree] = useState<boolean | null>(null);
   const [prompt, setPrompt] = useState('');
   // Model and effort per agent, and how much the task may do without asking; Full auto is confirmed by the editor.
@@ -717,8 +732,8 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         ))}
       <Decide chat={chat} line={line} />
       {progress && <Steps progress={progress} />}
-      <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${chat.turns} turn${chat.turns === 1 ? '' : 's'} · started ${model.age} ago`}>
-        {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, chat.turns > 0 ? `${chat.turns} turn${chat.turns === 1 ? '' : 's'}` : undefined, model.age].filter(Boolean).join(' · ')}
+      <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${turnsText(chat)} · started ${model.age} ago`}>
+        {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, turnsOf(chat) > 0 ? turnsText(chat) : undefined, model.age].filter(Boolean).join(' · ')}
       </div>
       {(chat.branch || badges.length > 0 || conflicts.length > 0) && (
         <div class="card-pills">
@@ -842,7 +857,7 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                   <span class="hint">{DOT_LABEL[status]}</span>
                   <span class="spacer" />
                   <span class="compare-stats">
-                    {c.turns} turn{c.turns === 1 ? '' : 's'} · {c.files.length} file{c.files.length === 1 ? '' : 's'} · {ago(c.lastActivity, now)}
+                    {turnsText(c)} · {c.files.length} file{c.files.length === 1 ? '' : 's'} · {ago(c.lastActivity, now)}
                   </span>
                 </div>
                 <p class="compare-reply">{reply || <span class="hint">No reply yet.</span>}</p>

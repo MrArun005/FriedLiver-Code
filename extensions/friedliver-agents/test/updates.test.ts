@@ -16,6 +16,7 @@ import {
   installScript,
   isAllowedDownload,
   manualCheckMessage,
+  versionLabel,
   readInstallResult,
   resolveRealApp,
   parseRelease,
@@ -254,6 +255,11 @@ describe('surfacing results', () => {
   });
   it('a manual check always says something unless the offer toast does', () => {
     expect(manualCheckMessage('up-to-date', '1.142.0-2')).toBe("You're up to date: FriedLiver 1.142.0-2.");
+    // A build off main names its commit; the version it compares by stays friedliverVersion.
+    expect(versionLabel({ friedliverVersion: '1.142.0-7', friedliverBuild: '1.142.0-7+3.gd0cca9f1ae' }, '1.142.0')).toBe('1.142.0-7+3.gd0cca9f1ae');
+    expect(versionLabel({ friedliverVersion: '1.142.0-7' }, '1.142.0')).toBe('1.142.0-7');
+    expect(versionLabel({ friedliverBuild: 'x y; rm' }, '1.142.0')).toBe('1.142.0');
+    expect(versionLabel({}, '1.142.0')).toBe('1.142.0');
     expect(manualCheckMessage('already-told', '1.142.0-2')).toMatch(/up to date/);
     expect(manualCheckMessage('failed', '1.142.0-2')).toMatch(/Couldn't check/);
     expect(manualCheckMessage('newer', '1.142.0-2')).toBeNull();

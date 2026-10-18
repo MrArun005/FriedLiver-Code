@@ -270,7 +270,7 @@ function What({ a, item, chat, withChip }: { a: Approval; item: Approvable; chat
       </span>
       {a.where && <span class="apv-wh">{a.where}</span>}
       {withChip ? (
-        <Pill tone={a.risk.tone} dot={!(a.risk.lock && a.risk.tone !== 'careful')} icon={a.risk.lock && a.risk.tone !== 'careful' ? 'lock' : undefined} title={a.risk.lock}>
+        <Pill class="fl-pill--fit" tone={a.risk.tone} dot={!(a.risk.lock && a.risk.tone !== 'careful')} icon={a.risk.lock && a.risk.tone !== 'careful' ? 'lock' : undefined} title={a.risk.lock}>
           {a.risk.label}
         </Pill>
       ) : (

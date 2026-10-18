@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { estimateTokens } from '../shared/tokens';
-import { consultBrief, forwardText, handoffContext, handoffSummary, rewoundHistory } from './transcript';
+import { consultBrief, consultFollowUp, forwardText, handoffContext, handoffSummary, rewoundHistory } from './transcript';
 
 /** Forwards one pipe makes before it pauses, so two agents can't keep each other busy forever. */
 export const MAX_PIPE_FORWARDS = 20;
@@ -34,6 +34,8 @@ export interface NewChat {
   resume?: { sessionId: string; cwd: string };
   /** Answers only: no FriedLiver tools, and every write, read, command, permission and question is refused up front. */
   readOnly?: boolean;
+  /** A message is sent as soon as it exists (a new task): a failed warm start leaves the error to that turn, so it shows once. */
+  messageFollows?: boolean;
 }
 
 /** How a turn ended, and what the agent said in it. */
@@ -74,6 +76,8 @@ export class Connections {
   private readonly held = new Map<string, string>();
   /** Forwards each pipe made since it was last turned on. */
   private readonly used = new Map<string, number>();
+  /** Consulted chats that have had the asking chat's brief (this window), and what it said then. */
+  private readonly briefed = new Map<string, { from: string; reply: string; files: number }>();
 
   constructor(private readonly host: ChatHost) {}
 
@@ -122,8 +126,12 @@ export class Connections {
     const link = this.linkBetween(source.id, target.id, 'consult') ?? this.addLink('consult', source.id, target.id, by, 0);
     options.started?.(target.id);
     this.carry(link, source, target, 'asked', 'consulted', text, by);
+    // The full brief once per consultation; a follow-up carries only what changed in the asking chat since.
+    const briefed = this.briefed.get(target.id);
+    const brief = briefed?.from === source.id ? consultFollowUp(source, briefed) : consultBrief(source);
+    const seen = { from: source.id, reply: lastReply(source), files: source.files.length };
     const blocks: acp.ContentBlock[] = [
-      { type: 'text', text: consultBrief(source) },
+      { type: 'text', text: brief },
       { type: 'text', text },
       ...(options.images ?? []).map((img): acp.ContentBlock => ({ type: 'image', data: img.data, mimeType: img.mimeType })),
     ];
@@ -135,6 +143,8 @@ export class Connections {
       this.notice(source.id, `${chatRef(answered)} stopped without answering${why}.`);
       throw new Error(`${chatRef(answered)} stopped without answering${why}.`);
     }
+    // Briefed once it answered: a turn that failed before the agent read it gets the whole brief next time.
+    this.briefed.set(target.id, seen);
     this.items(source.id, [this.linkItem(link, answered, 'reply', result.reply, by)]);
     this.count(link.id);
     return result.reply;

@@ -76,11 +76,13 @@ describe('system tool schemas (mcp.ts)', () => {
     for (const t of system) for (const k of ['oneOf', 'anyOf', 'allOf']) expect(t.inputSchema).not.toHaveProperty(k);
   });
 
-  it('offers them, with the browser tools only, to the external client', () => {
-    expect(EXTERNAL_TOOLS.map((t) => t.name).sort()).toEqual(TOOLS.filter((t) => /^(browser|system)_/.test(t.name)).map((t) => t.name).sort());
+  it('keeps them from the external client, which gets the browser tools only', () => {
+    expect(EXTERNAL_TOOLS.map((t) => t.name).sort()).toEqual(TOOLS.filter((t) => /^browser_/.test(t.name)).map((t) => t.name).sort());
     const list = handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, true) as { reply: { result: { tools: { name: string }[] } } };
-    expect(list.reply.result.tools.map((t) => t.name)).toContain('system_open');
+    expect(list.reply.result.tools.map((t) => t.name)).not.toContain('system_open');
     expect(list.reply.result.tools.map((t) => t.name)).not.toContain('read_chat');
+    const call = handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'system_open', arguments: { app: 'Spotify' } } }, true);
+    expect(call).toMatchObject({ reply: { result: { isError: true, content: [{ text: expect.stringContaining('not found') }] } } });
   });
 
   it('turns away bad arguments before they reach the editor', () => {
