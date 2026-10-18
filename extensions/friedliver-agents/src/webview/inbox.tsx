@@ -131,7 +131,10 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
                 <span class="inbox-topic" title={chat.title}>
                   {chat.title}
                 </span>
-                <span class="inbox-who">{chat.label}</span>
+                <span class="inbox-who" title={chat.label}>
+                  <Glyph agent={chat.agent} size="sm" />
+                  {AGENT_FACES[chat.agent].name}
+                </span>
                 {waiting > 0 && <span class="col-count">{waiting}</span>}
               </div>
               {mine.map((e) => (
@@ -222,7 +225,7 @@ function Detail({ entry: e, chat, state, now, same, confirming, onBatch, onCance
       </header>
       <div class="inbox-meta">
         <Glyph agent={chat.agent} size="sm" />
-        <span>{chat.label}</span>
+        <span title={chat.label}>{AGENT_FACES[chat.agent].name}</span>
         <span class="sep">·</span>
         <span class="inbox-meta-topic" title={chat.title}>
           {chat.title}
@@ -354,7 +357,7 @@ function BridgeWhat({ entry: e, state }: { entry: InboxEntry; state: AppState })
         <div class="inbox-target">
           <Icon name="handoff" size={14} />
           <Glyph agent={agent} size="sm" />
-          <span>{other ? `${other.label} · ${other.title}` : `A new ${AGENT_FACES[agent].name} chat`}</span>
+          <span title={other?.label}>{other ? `${AGENT_FACES[other.agent].name} · ${other.title}` : `A new ${AGENT_FACES[agent].name} chat`}</span>
         </div>
       )}
       {i.text && (
@@ -410,7 +413,9 @@ function Confirm({ entries, state, now, onAnswer, onCancel }: { entries: InboxEn
           return (
             <li key={e.id}>
               {chat && <Glyph agent={chat.agent} size="sm" />}
-              <span class="inbox-confirm-chat">{chat ? `${chat.label} · ${chat.title}` : e.chatId}</span>
+              <span class="inbox-confirm-chat" title={chat?.label}>
+                {chat ? `${AGENT_FACES[chat.agent].name} · ${chat.title}` : e.chatId}
+              </span>
               {where && <span class="hint mono inbox-confirm-where">{where}</span>}
               {e.at !== undefined && <span class="inbox-age">{age(e.at, now)}</span>}
             </li>
