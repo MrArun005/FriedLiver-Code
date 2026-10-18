@@ -91,7 +91,6 @@ export class RemoteServer {
     if (!options.endpoints.length) throw new Error('No address to listen on.');
     for (const e of options.endpoints) check(e.host);
     const started: { server: Server; endpoint: Endpoint; port: number }[] = [];
-    let self: RemoteServer | undefined;
     try {
       for (const endpoint of options.endpoints) {
         const server = createServer({ cert: endpoint.cert, key: endpoint.key, minVersion: 'TLSv1.2' });
@@ -106,10 +105,10 @@ export class RemoteServer {
       for (const s of started) s.server.close();
       throw err;
     }
-    self = new RemoteServer(options, started);
+    const self = new RemoteServer(options, started);
     for (const s of started) {
-      s.server.on('request', (req, res) => void self!.request(s, req, res));
-      s.server.on('upgrade', (req, socket) => self!.upgrade(s, req, socket as Socket));
+      s.server.on('request', (req, res) => void self.request(s, req, res));
+      s.server.on('upgrade', (req, socket) => self.upgrade(s, req, socket as Socket));
       s.server.on('tlsClientError', () => {});
     }
     return self;

@@ -26,6 +26,8 @@ export interface Device {
 }
 type Saved = Device & { hash: string };
 
+const shown = (d: Saved): Device => ({ id: d.id, name: d.name, createdAt: d.createdAt, lastSeen: d.lastSeen });
+
 export const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 /** Equal secrets, in time that doesn't depend on where they differ. */
@@ -54,7 +56,7 @@ export class Devices {
   }
 
   list(): Device[] {
-    return this.saved.map(({ id, name, createdAt, lastSeen }) => ({ id, name, createdAt, lastSeen }));
+    return this.saved.map(shown);
   }
 
   /** A new device and its token; the token is shown to the phone once and never kept. The oldest goes past MAX_DEVICES. */
@@ -64,8 +66,7 @@ export class Devices {
     const device: Saved = { id: randomBytes(8).toString('hex'), name: deviceName(name), createdAt: at, lastSeen: at, hash: hashToken(token) };
     this.saved = [...this.saved, device].slice(-MAX_DEVICES);
     this.save();
-    const { hash: _, ...shown } = device;
-    return { token, device: shown };
+    return { token, device: shown(device) };
   }
 
   /** The device this token belongs to. Every stored hash is compared, each in constant time. */
@@ -81,8 +82,7 @@ export class Devices {
       this.written.set(found.id, at);
       this.save();
     }
-    const { hash: _, ...device } = found;
-    return device;
+    return shown(found);
   }
 
   has(id: string): boolean {
