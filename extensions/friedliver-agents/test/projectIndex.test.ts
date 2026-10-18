@@ -276,7 +276,7 @@ describe('the Merkle tree over the index', () => {
 
   it('on reopen reads only changed files and re-indexes only changed content', async () => {
     const files = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`d${i % 4}/f${i}.ts`, `export const v${i} = ${i};\n`]));
-    const root = await project(files);
+    const root = await project({ ...files, 'd0/logo.bin': 'PNG\0\0' });
     const first = await build(root);
     const saved = saveOf(first);
     const before = first.tree.root();
@@ -290,8 +290,8 @@ describe('the Merkle tree over the index', () => {
 
     const ix = await reopen(root, saved);
     // Every listed file once (the floor without a file-system journal), and again right before each read.
-    expect(ix.counts.stat).toBe(40 + 4);
-    expect(ix.counts.read).toBe(4); // two edits, the touched file, the new one
+    expect(ix.counts.stat).toBe(41 + 4);
+    expect(ix.counts.read).toBe(4); // two edits, the touched file, the new one: not the unchanged binary
     expect(ix.counts.reindex).toBe(3); // the touched file's content matched: not re-tokenized
     expect(ix.tree.base).toBe(before);
     expect(ix.changes()!.changes).toEqual([

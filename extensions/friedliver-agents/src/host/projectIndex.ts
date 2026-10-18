@@ -178,6 +178,8 @@ export class ProjectIndex {
   private rootReal?: string;
   /** The Merkle tree of the indexed files: always exactly the docs, by content hash. */
   readonly tree = new MerkleTree();
+  /** Listed files that were read but not indexed (binary): their `size:mtimeNs`, so they are not read again until they change. */
+  private readonly unreadable = new Map<string, string>();
   /** Files stat'ed, read, and re-indexed (read with new content). For tests and the bench. */
   readonly counts = { stat: 0, read: 0, reindex: 0 };
 
@@ -335,9 +337,12 @@ export class ProjectIndex {
     if (!st) return this.remove(rel), true;
     const old = this.docs.get(rel);
     if (old && old.mtimeNs === st.mtimeNs && old.size === st.size) return true;
+    const key = `${st.size}:${st.mtimeNs}`;
+    if (!old && this.unreadable.get(rel) === key) return true;
     if (!old && this.docs.size >= this.options.maxFiles) return (this.capped = true), false;
     const got = await this.readChecked(rel);
-    if (got === null) return true;
+    if (got === null) return this.unreadable.set(rel, key), true;
+    this.unreadable.delete(rel);
     // Stat changed, content did not (a checkout, a touch): keep the entry, note the new stat.
     if (old && old.hash === got.hash) {
       old.mtimeNs = st.mtimeNs;
@@ -400,6 +405,7 @@ export class ProjectIndex {
   /** Drops files that are no longer listed. */
   prune(keep: Set<string>): void {
     for (const rel of [...this.docs.keys()]) if (!keep.has(rel)) this.remove(rel);
+    for (const rel of [...this.unreadable.keys()]) if (!keep.has(rel)) this.unreadable.delete(rel);
   }
 
   /** Files ranked by BM25 over the query's tokens, boosted where a symbol or the path matches. */
@@ -496,7 +502,7 @@ export class ProjectIndex {
 
   /** The index as plain JSON, to keep between sessions: the docs (the tree's leaves) and the tree's kept roots. */
   toJSON(): object {
-    return { v: 2, docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })), merkle: this.tree };
+    return { v: 2, docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })), unreadable: [...this.unreadable], merkle: this.tree };
   }
 
   /**
@@ -527,6 +533,10 @@ export class ProjectIndex {
       for (let j = 0; j < batch.length && this.docs.size < this.options.maxFiles; j++) {
         if (passed[j] && !this.docs.has(batch[j].rel)) this.add({ ...batch[j], tokens: new Map(batch[j].tokens) });
       }
+    }
+    const unreadable = (saved as { unreadable?: unknown })?.unreadable;
+    if (Array.isArray(docs) && Array.isArray(unreadable)) {
+      for (const u of unreadable) if (Array.isArray(u) && typeof u[0] === 'string' && typeof u[1] === 'string' && /^\d+:\d+$/.test(u[1])) this.unreadable.set(u[0], u[1]);
     }
     if (docs.length && this.tree.load((saved as { merkle?: unknown }).merkle)) this.tree.base = this.tree.history.at(-1);
   }
