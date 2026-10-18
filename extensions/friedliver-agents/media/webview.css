@@ -5580,3 +5580,353 @@ button.primary .acct-kind {
 .acct-foot {
   padding: var(--sp-2) 0 var(--sp-5);
 }
+
+/* ---- Decision Inbox: the queue on the left, what answering does on the right (webview/inbox.tsx) ---- */
+
+.mgr-view[data-view='inbox'] {
+  flex: 1;
+  min-height: 0;
+}
+.inbox {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 36%) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+/* The queue: a menu's surface; one group per chat under a section header, rows inset 4 (r4 in r8). */
+.inbox-list,
+.inbox-history ul {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 6px 0 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--menu-bg);
+  outline: none;
+}
+.inbox-list:focus-visible {
+  border-color: var(--focus);
+}
+.inbox-group + .inbox-group {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--border);
+}
+.inbox-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--t-90);
+  color: var(--fg-50);
+}
+.inbox-topic {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-who {
+  flex: none;
+}
+.inbox-group-head .col-count {
+  margin-left: auto;
+}
+.inbox-row,
+button.inbox-history-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-height: 40px;
+  min-height: 28px;
+  margin: 2px var(--sp-1) 0;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--r-4);
+  color: var(--fg);
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+button.inbox-history-row {
+  width: calc(100% - 2 * var(--sp-1));
+  height: auto;
+  justify-content: flex-start;
+  font: inherit;
+  text-align: left;
+}
+.inbox-row:hover,
+button.inbox-history-row:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.inbox-row[aria-selected='true'] {
+  color: var(--sel-fg);
+  background: var(--sel-bg);
+}
+.inbox-row[aria-selected='true'] .inbox-kind,
+.inbox-row[aria-selected='true'] .inbox-age {
+  color: var(--sel-fg);
+}
+.inbox-kind {
+  flex: none;
+  display: inline-flex;
+  color: var(--fg-2);
+}
+.inbox-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-age {
+  flex: none;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+/* Answered: the row folds away. */
+.inbox-row[data-leaving] {
+  pointer-events: none;
+  animation: inbox-leave 0.2s ease-in forwards;
+}
+@keyframes inbox-leave {
+  to {
+    max-height: 0;
+    min-height: 0;
+    margin-top: 0;
+    padding-block: 0;
+    opacity: 0;
+  }
+}
+
+/* What answering does: the decision card's look (§2.11), as a pane. */
+.ask.inbox-detail {
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-2);
+}
+.inbox-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.inbox-detail-head .inbox-kind {
+  color: var(--fg-2);
+}
+button.inbox-open {
+  font-weight: 400;
+}
+.inbox-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.inbox-meta-topic {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-timeout {
+  color: var(--warn);
+}
+.inbox-what {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  color: var(--fg);
+}
+.inbox-what .hint.mono,
+.inbox-path {
+  font-size: var(--t-85);
+  overflow-wrap: anywhere;
+}
+.inbox-what .file-line {
+  flex-wrap: wrap;
+}
+.inbox-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+.inbox-target .icon {
+  color: var(--fg-2);
+}
+.inbox-options {
+  margin: 0;
+  padding-inline-start: 2em;
+  color: var(--fg-2);
+}
+.inbox-option {
+  color: var(--fg);
+}
+.inbox-more {
+  display: flex;
+  gap: var(--sp-2);
+}
+/* Several identical requests: one line in the decision tint, and the way to answer them together. */
+.inbox-batch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 6px var(--sp-2);
+  border-radius: var(--r-4);
+  background: var(--decision-soft);
+  color: var(--fg);
+  font-size: var(--t-90);
+}
+.inbox-batch kbd {
+  font-size: var(--t-85);
+}
+.inbox-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--decision-line);
+  border-radius: var(--r-4);
+  background: var(--input-bg);
+}
+.inbox-confirm-head {
+  font-weight: 700;
+}
+.inbox-confirm-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-90);
+}
+.inbox-confirm-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.inbox-confirm-chat,
+.inbox-confirm-where {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-confirm-where {
+  flex: 1;
+}
+.ask .inbox-confirm .actions {
+  margin-top: 0;
+}
+.inbox-detail .actions > button.link,
+.inbox-detail .actions .pop:has(> button.always-allow) {
+  align-self: flex-start;
+  margin: var(--sp-1) 0 0 var(--sp-2);
+}
+.inbox-key {
+  white-space: nowrap;
+}
+.inbox-keys {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+  font-size: var(--t-85);
+}
+
+/* Nothing waits: say so, and what was answered lately (history only). */
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.inbox-empty-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--menu-bg);
+}
+.inbox-empty-head > .icon {
+  flex: none;
+  color: var(--tl-success);
+}
+.inbox-empty-head h2 {
+  font-size: var(--t-title);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--fg);
+}
+.inbox-empty-head p {
+  margin: var(--sp-1) 0 0;
+}
+.inbox-history h3 {
+  padding: 0 var(--sp-3) var(--sp-2);
+  font-size: var(--t-90);
+  font-weight: 400;
+  color: var(--fg-50);
+}
+.inbox-history > p {
+  padding: 0 var(--sp-3);
+}
+.inbox-outcome {
+  flex: none;
+  display: inline-flex;
+  color: var(--error);
+}
+.inbox-outcome[data-allowed] {
+  color: var(--tl-success);
+}
+.inbox-history-outcome {
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+.inbox-history-topic {
+  flex: none;
+  max-width: 28%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-85);
+  color: var(--fg-50);
+}
+
+/* The count beside Inbox, in the view switch and the chat list: the decision colour while something waits. */
+.seg-count {
+  color: var(--decision);
+}
+button.seg-item[aria-selected='true'] .seg-count {
+  color: inherit;
+}
+button.inbox-entry[data-waiting] {
+  color: var(--decision);
+}
+
+/* Narrow: the queue above, what answering does below. */
+@media (max-width: 720px) {
+  .inbox {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(96px, 36%) minmax(0, 1fr);
+  }
+  .inbox-history-topic {
+    display: none;
+  }
+}
