@@ -11,7 +11,7 @@ import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
 import { extractPage, PageMemory, toSelector, type PageData } from './pageText';
-import { clampBrowserWidth, ownTab, saveScreenshot, relaxLocalhostCors, type PausedResponse } from './browserRules';
+import { clampBrowserWidth, imageTokens, ownTab, saveScreenshot, shotParams, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
 const URL_KEY = 'friedliver.browser.lastUrl';
@@ -284,11 +284,26 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'browser_screenshot': {
         const cdp = await this.page();
-        const { data } = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
+        // One element: scrolled into view, then its box (viewport coordinates); the capture is cropped to it.
+        const rect = call.selector
+          ? await cdp.evaluate<{ x: number; y: number; width: number; height: number } | null>(
+              `((s) => { const el = document.querySelector(s); if (!el) return null; el.scrollIntoView({ block: 'center', inline: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })(${JSON.stringify(toSelector(call.selector))})`,
+            )
+          : undefined;
+        if (rect === null) throw new Error(`Nothing on the page matches ${call.selector}. Use browser_snapshot with elements: true to see what is there.`);
+        const view = await cdp.evaluate<{ width: number; height: number; dpr: number; scrollX: number; scrollY: number }>(
+          '({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio || 1, scrollX, scrollY })',
+        );
+        const shot = shotParams(view, { rect, maxWidth: call.maxWidth });
+        const { data } = (await cdp.send('Page.captureScreenshot', { format: shot.format, quality: shot.quality, clip: shot.clip })) as { data: string };
         const base = this.context.globalStorageUri.fsPath;
         await mkdir(base, { recursive: true, mode: 0o700 });
-        const file = await saveScreenshot(base, Buffer.from(data, 'base64'));
-        return `${await this.where(cdp, 'Screenshot of')}\nSaved to ${file}. Read that file to see it.`;
+        const file = await saveScreenshot(base, Buffer.from(data, 'base64'), 'jpg');
+        const { width, height } = shot.size;
+        return (
+          `${await this.where(cdp, call.selector ? `Screenshot of ${call.selector} on` : 'Screenshot of')}\n` +
+          `${width}×${height} JPEG, about ${imageTokens(width, height)} image tokens. Saved to ${file}. Read that file to see it; browser_snapshot costs far fewer tokens when text answers the question.`
+        );
       }
       case 'browser_console': {
         const lines = (await this.page()).console;

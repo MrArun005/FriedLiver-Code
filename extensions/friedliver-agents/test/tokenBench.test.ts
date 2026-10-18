@@ -13,6 +13,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex, STAT_BATCH, type IndexCall, type IndexContext } from '../src/host/projectIndex';
+import { imageTokens, shotParams } from '../src/host/browserRules';
 import { extractPage, PageMemory, renderPage, SNAPSHOT_LIMITS } from '../src/host/pageText';
 import { estimateTokens } from '../src/shared/tokens';
 import { fakeVisible, oldSnapshot, parseHtml } from './fakeDom';
@@ -352,5 +353,21 @@ describe('token bench: browser', () => {
       const { old, data } = pageBoth(await readFile(path.join(dir, f), 'utf8'), 'https://example.invalid/');
       row(`Read ${f.replace(/\.html$/, '')} (archived page)`, old, renderPage(data, { budget: SNAPSHOT_LIMITS.maxBudget }));
     }
+  });
+});
+
+describe('token bench: screenshots', () => {
+  it('costs fewer image tokens (Claude: w×h/750 after its own fit) at the default size and cropped to an element', () => {
+    // A 1280×800 viewport on a 2× screen: the old capture was a full-resolution PNG, 2560×1600.
+    const view = { width: 1280, height: 800, dpr: 2 };
+    const old = imageTokens(2560, 1600);
+    const whole = shotParams(view, {}).size;
+    const button = shotParams(view, { rect: { x: 600, y: 400, width: 120, height: 36 } }).size;
+    const panel = shotParams(view, { rect: { x: 200, y: 150, width: 640, height: 360 } }).size;
+    const before = rows.length;
+    rows.push({ category: 'Screenshots (formula)', task: 'Screenshot of the page (1280×800 at 2×)', without: old, with: imageTokens(whole.width, whole.height), calls: [1, 1] });
+    rows.push({ category: 'Screenshots (formula)', task: 'Screenshot to check one button', without: old, with: imageTokens(button.width, button.height), calls: [1, 1] });
+    rows.push({ category: 'Screenshots (formula)', task: 'Screenshot to check one panel', without: old, with: imageTokens(panel.width, panel.height), calls: [1, 1] });
+    for (const r of rows.slice(before)) expect(r.with, r.task).toBeLessThan(r.without);
   });
 });

@@ -2,6 +2,7 @@
 // and the extension host, over a local socket: one JSON object per line.
 // The host treats every line as untrusted and checks it here first.
 import { READ_LIMITS } from '../host/indexReads';
+import { SHOT } from '../host/browserRules';
 import { SNAPSHOT_LIMITS } from '../host/pageText';
 import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
@@ -38,7 +39,8 @@ export type BridgeCall =
   | { tool: 'browser_click'; selector?: string; text?: string }
   | { tool: 'browser_type'; selector: string; text: string }
   | { tool: 'browser_snapshot'; elements?: boolean; budget?: number; full?: boolean }
-  | { tool: 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' }
+  | { tool: 'browser_screenshot'; selector?: string; maxWidth?: number }
+  | { tool: 'browser_console' | 'browser_back' | 'browser_reload' }
   | IndexCall;
 
 export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
@@ -112,7 +114,12 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       if ((elements !== undefined && typeof elements !== 'boolean') || (full !== undefined && typeof full !== 'boolean') || !int(budget, SNAPSHOT_LIMITS.minBudget, SNAPSHOT_LIMITS.maxBudget)) return null;
       return { tool, ...(elements !== undefined ? { elements } : {}), ...(budget !== undefined ? { budget: budget as number } : {}), ...(full !== undefined ? { full } : {}) };
     }
-    case 'browser_screenshot':
+    case 'browser_screenshot': {
+      const { selector } = a;
+      const maxWidth = a.max_width;
+      if ((selector !== undefined && !short(selector)) || !int(maxWidth, SHOT.minWidth, SHOT.maxMaxWidth)) return null;
+      return { tool, ...(selector !== undefined ? { selector: selector as string } : {}), ...(maxWidth !== undefined ? { maxWidth: maxWidth as number } : {}) };
+    }
     case 'browser_console':
     case 'browser_back':
     case 'browser_reload':
