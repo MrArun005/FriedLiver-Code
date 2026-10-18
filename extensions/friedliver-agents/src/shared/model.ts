@@ -266,7 +266,26 @@ export interface ChatView {
   queue?: QueuedMessage[];
   /** Tokens: what FriedLiver's compact answers would have cost the naive way, what they did, and the agent's cache use. */
   tokens?: TokenTally;
+  /** The agent's own token counts, one entry per finished turn, newest last (at most MAX_USAGE_LOG). Kept on this machine only. */
+  usageLog?: TurnUsage[];
 }
+
+/** One turn's tokens as the agent reported them: its prompt response's usage, and the context and cost from its last usage_update. */
+export interface TurnUsage {
+  at: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  context?: { used: number; size: number };
+  cost?: { amount: number; currency: string };
+}
+
+/** Turns kept in a chat's usage log. */
+export const MAX_USAGE_LOG = 200;
+
+/** A token count from outside: junk and negatives count as 0. */
+const count = (n: number | undefined): number => (Number.isFinite(n) && n! > 0 ? Math.round(n!) : 0);
 
 /** Running totals for the "tokens saved" readout; cacheRead and input come from the agent's own usage reports. */
 export interface TokenTally {
@@ -274,6 +293,9 @@ export interface TokenTally {
   sent: number;
   cacheRead: number;
   input: number;
+  /** From the per-turn usage log; absent in chats saved before it. */
+  output?: number;
+  cacheWrite?: number;
 }
 
 export interface QueuedMessage {
@@ -331,6 +353,7 @@ export type Action =
   | { t: 'queue'; chatId: string; queue: QueuedMessage[] }
   /** Adds to a chat's token totals. */
   | { t: 'tokens'; chatId: string; add: Partial<TokenTally> }
+  | { t: 'turnUsage'; chatId: string; usage: TurnUsage }
   /** The whole state at once: chats restored after a reload. */
   | { t: 'restore'; state: AppState };
 
@@ -466,8 +489,19 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'tokens':
       return editChat(state, action.chatId, (c) => {
         const t = c.tokens ?? { naive: 0, sent: 0, cacheRead: 0, input: 0 };
-        const add = (k: keyof TokenTally) => t[k] + (Number.isFinite(action.add[k]) && action.add[k]! > 0 ? Math.round(action.add[k]!) : 0);
-        return { ...c, tokens: { naive: add('naive'), sent: add('sent'), cacheRead: add('cacheRead'), input: add('input') } };
+        const add = (k: keyof TokenTally) => (t[k] ?? 0) + count(action.add[k]);
+        return { ...c, tokens: { ...t, naive: add('naive'), sent: add('sent'), cacheRead: add('cacheRead'), input: add('input') } };
+      });
+    case 'turnUsage':
+      return editChat(state, action.chatId, (c) => {
+        const u = action.usage;
+        const turn: TurnUsage = { at: u.at, input: count(u.input), output: count(u.output), cacheRead: count(u.cacheRead), cacheWrite: count(u.cacheWrite), ...(u.context ? { context: u.context } : {}), ...(u.cost ? { cost: u.cost } : {}) };
+        const t = c.tokens ?? { naive: 0, sent: 0, cacheRead: 0, input: 0 };
+        return {
+          ...c,
+          usageLog: [...(c.usageLog ?? []), turn].slice(-MAX_USAGE_LOG),
+          tokens: { ...t, input: t.input + turn.input, output: (t.output ?? 0) + turn.output, cacheRead: t.cacheRead + turn.cacheRead, cacheWrite: (t.cacheWrite ?? 0) + turn.cacheWrite },
+        };
       });
     case 'session':
       return editChat(state, action.chatId, (c) => ({ ...c, session: action.session }));
