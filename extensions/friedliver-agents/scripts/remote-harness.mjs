@@ -40,12 +40,12 @@ const s = (id, agent, label, title, status, folder, extra = {}) => ({ id, agent,
 const chats = {
   'chat-3': s('chat-3', 'claude', 'Claude', 'Add rate limiting to the pairing endpoint', 'needs-you', 'wt-remote', { waiting: 1, ago: 0.2, approval: 'edits' }),
   'chat-7': s('chat-7', 'codex', 'Codex', 'Fix flaky checkpoint test on CI', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 1 }),
-  'chat-8': s('chat-8', 'claude', 'Claude 4', 'Push the SQLite migration branch', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 3 }),
-  'chat-5': s('chat-5', 'claude', 'Claude 2', 'Profile transcript rendering at 10k items', 'working', 'FriedLiver-Code', { subagents: 3, ago: 0.1 }),
+  'chat-8': s('chat-8', 'claude', 'Claude', 'Push the SQLite migration branch', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 3 }),
+  'chat-5': s('chat-5', 'claude', 'Claude', 'Profile transcript rendering at 10k items', 'working', 'FriedLiver-Code', { subagents: 3, ago: 0.1 }),
   'chat-9': s('chat-9', 'gemini', 'Gemini', 'Review the WebSocket framing code', 'working', 'wt-remote', { ago: 0.5 }),
-  'chat-2': s('chat-2', 'codex', 'Codex 2', 'Bump esbuild to 0.28 and rebuild', 'error', 'FriedLiver-Code', { ago: 14 }),
-  'chat-1': s('chat-1', 'claude', 'Claude 3', 'Write docs/REMOTE.md setup guide', 'done', 'wt-remote', { ago: 42 }),
-  'chat-4': s('chat-4', 'gemini', 'Gemini 2', 'Summarise open dependabot PRs', 'done', 'FriedLiver-Code', { ago: 95 }),
+  'chat-2': s('chat-2', 'codex', 'Codex', 'Bump esbuild to 0.28 and rebuild', 'error', 'FriedLiver-Code', { ago: 14 }),
+  'chat-1': s('chat-1', 'claude', 'Claude', 'Write docs/REMOTE.md setup guide', 'done', 'wt-remote', { ago: 42 }),
+  'chat-4': s('chat-4', 'gemini', 'Gemini', 'Summarise open dependabot PRs', 'done', 'FriedLiver-Code', { ago: 95 }),
 };
 const groups = [
   ['needs-you', 'Needs you', ['chat-3', 'chat-7', 'chat-8']],

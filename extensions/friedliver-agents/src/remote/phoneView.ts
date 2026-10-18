@@ -41,7 +41,8 @@ export function summary(chat: ChatView): PhoneSummary {
   return {
     id: chat.id,
     agent: chat.agent,
-    label: chat.label,
+    // The agent's name, never "Claude 4": the topic tells chats apart.
+    label: AGENT_FACES[chat.agent].name,
     title: chat.title,
     status: statusOf(chat),
     folder: chat.branch ?? path.basename(chat.cwd),
@@ -186,7 +187,7 @@ function phoneItem(
     case 'changes':
       return { k: 'changes', files: i.files.length, ...(i.undone ? { undone: true } : {}) };
     case 'link':
-      return { k: 'link', label: i.label, text: clip(i.text, 2000), role: i.role };
+      return { k: 'link', label: AGENT_FACES[i.agent].name, text: clip(i.text, 2000), role: i.role };
     default:
       return null;
   }
