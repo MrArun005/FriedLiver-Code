@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { SeenFiles, symbolRange } from '../src/host/indexReads';
-import { answerIndex, outline, ProjectIndex, STAT_BATCH, type IndexCall, type IndexContext } from '../src/host/projectIndex';
+import { answerIndex, outline, ProjectIndex, projectPrimer, STAT_BATCH, type IndexCall, type IndexContext } from '../src/host/projectIndex';
 import { compactOutput } from '@friedliver/main/agents/terminals';
 import { handoffContext, rewoundHistory } from '../src/host/transcript';
 import { longChat } from './fixtures/chats';
@@ -41,6 +41,14 @@ export interface Row {
   calls: [number, number];
 }
 export const rows: Row[] = [];
+/** Wall time of the new work FriedLiver does, for the load-time table. */
+const timings: { what: string; ms: number }[] = [];
+const timed = async <T>(what: string, fn: () => T | Promise<T>): Promise<T> => {
+  const t = performance.now();
+  const out = await fn();
+  timings.push({ what, ms: performance.now() - t });
+  return out;
+};
 let tokens: Counter;
 
 /** One arm of a task: every tool result it got, counted. */
@@ -148,6 +156,10 @@ export interface CodeTasks {
 /** Runs the three code tasks on `root`, both arms, and records rows. Restores every file it edits. */
 async function codeTasks(root: string, t: CodeTasks): Promise<void> {
   const ix = await buildIndex(root);
+  await timed(`Project map for a first message (${t.label}, ${ix.size.toLocaleString('en-US')} files)`, () => projectPrimer([ix], `fix ${t.find} and update its tests`, 1500));
+  const defFile = locate(ix, t.find);
+  await timed(`index_read of one symbol (${t.label})`, () => answerIndex([ix], { tool: 'index_read', path: defFile, symbol: t.find }, false));
+  await timed(`index_search with windows (${t.label})`, () => answerIndex([ix], { tool: 'index_search', query: t.testQuery }, false));
   const files = [...ix.paths()].sort();
   const originals = new Map<string, string>();
   const keep = async (rel: string) => {
@@ -295,6 +307,7 @@ afterAll(async () => {
   }
   const all = { without: rows.reduce((n, r) => n + r.without, 0), with: rows.reduce((n, r) => n + r.with, 0) };
   lines.push(`| **Total** | ${fmt(all.without)} | ${fmt(all.with)} | ${fmt(all.without - all.with)} (${pct(all)}) |`);
+  if (timings.length) lines.push('', '| New work | Time |', '|---|---|', ...timings.map((t) => `| ${t.what} | ${t.ms.toFixed(1)} ms |`));
   const table = lines.join('\n');
   console.log(table);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `${table}\n`);
@@ -353,7 +366,8 @@ describe('token bench: browser', () => {
     tokens ??= await counter();
     const dir = process.env.FL_TOKEN_BENCH_PAGES!;
     for (const f of (await readdir(dir)).filter((n) => n.endsWith('.html')).sort()) {
-      const { old, data } = pageBoth(await readFile(path.join(dir, f), 'utf8'), 'https://example.invalid/');
+      const html = await readFile(path.join(dir, f), 'utf8');
+      const { old, data } = await timed(`Page text for ${f} (parse + extract, in Node; the browser skips the parse)`, () => pageBoth(html, 'https://example.invalid/'));
       row(`Read ${f.replace(/\.html$/, '')} (archived page)`, old, renderPage(data, { budget: SNAPSHOT_LIMITS.maxBudget }));
     }
   });

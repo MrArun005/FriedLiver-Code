@@ -309,3 +309,23 @@ describe('session primer', () => {
     expect(asked).toEqual(['hello there']);
   }, 30_000);
 });
+
+describe('prompt-cache-friendly order', () => {
+  afterEach(disposeCores);
+  it('puts the rules, then the map, then the message, the same way every session', async () => {
+    const root = await project({ 'a.ts': 'x' });
+    const core = makeCore(root, {
+      sharedRules: async () => ({ text: '<friedliver-rules>RULES</friedliver-rules>', files: ['Personal rules'], truncated: false }),
+      primer: async () => '<friedliver-project-map>MAP</friedliver-project-map>',
+    });
+    const replies: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const chat = await core.createChat('demo');
+      await core.send(chat.id, 'same first message');
+      replies.push(core.chat(chat.id)!.items.filter((it) => it.kind === 'agent').map((it) => (it as { text: string }).text).join(''));
+    }
+    expect(replies[0]).toMatch(/RULES[\s\S]*MAP[\s\S]*same first message/);
+    // Byte-identical prefix across sessions: a provider's prompt cache can reuse it.
+    expect(replies[1]).toBe(replies[0]);
+  }, 30_000);
+});
