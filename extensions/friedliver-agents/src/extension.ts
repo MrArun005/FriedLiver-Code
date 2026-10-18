@@ -108,6 +108,8 @@ export class Controller {
   private projectIndex?: ProjectIndexHost;
   private readonly autoItem = vscode.window.createStatusBarItem('friedliver.fullAuto', vscode.StatusBarAlignment.Right, 101);
   private shownStatus?: string;
+  /** Open Decision Inbox ran while the Agent Manager was loading. */
+  private inboxWanted = false;
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
@@ -260,7 +262,7 @@ export class Controller {
     });
     this.reviews = new ReviewUi(() => this.core);
     this.statusItem.name = 'FriedLiver decisions';
-    this.statusItem.command = 'friedliver.nextDecision';
+    this.statusItem.command = 'friedliver.openInbox';
     this.statusItem.color = new vscode.ThemeColor('friedliver.decision');
     this.workingItem.name = 'FriedLiver agents working';
     this.workingItem.command = 'friedliver.openTasks';
@@ -317,6 +319,7 @@ export class Controller {
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
     command('friedliver.nextDecision', () => this.nextDecision());
+    command('friedliver.openInbox', () => this.openInbox());
     command('friedliver.review.accept', (reviewId?: unknown) => {
       if (!this.reviews.accept(typeof reviewId === 'string' ? reviewId : undefined)) void vscode.window.showInformationMessage('No agent edit is waiting here.');
     });
@@ -587,6 +590,10 @@ export class Controller {
             defaults: this.core.agentDefaults(),
             roster: this.roster(),
           });
+          if (surface.kind === 'tasks' && this.inboxWanted) {
+            this.inboxWanted = false;
+            post(surface, { type: 'showInbox' });
+          }
           if (surface.kind !== 'chat') {
             if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
             this.refreshClaudeSessions();
@@ -718,6 +725,9 @@ export class Controller {
         }
         case 'moveToCenter':
           await this.moveToCenter();
+          return;
+        case 'openInbox':
+          this.openInbox();
           return;
         case 'openTasks':
           this.openTasks();
@@ -967,6 +977,14 @@ export class Controller {
     await vscode.commands.executeCommand('friedliver.agents.focus');
   }
 
+  /** Open Decision Inbox: the Agent Manager on its Inbox; a Manager still loading turns to it once ready. */
+  openInbox(): void {
+    const live = [...this.surfaces].find((s) => s.kind === 'tasks' && s.ready && s.visible());
+    this.openTasks();
+    if (live) post(live, { type: 'showInbox' });
+    else this.inboxWanted = true;
+  }
+
   openTasks(): void {
     if (this.tasksPanel) {
       this.tasksPanel.reveal();
@@ -1123,9 +1141,9 @@ export class Controller {
     if (n === 0) {
       this.statusItem.hide();
     } else {
-      this.statusItem.text = `$(bell-dot) ${n} decision${n === 1 ? '' : 's'} waiting`;
+      this.statusItem.text = `$(inbox) Inbox · ${n}`;
       this.statusItem.tooltip = new vscode.MarkdownString(['**Agents are waiting for you**', ...waiting.map((d) => `- ${d.title.replace(/[\\`*_[\]<>]/g, '\\$&')}`)].join('\n'));
-      this.statusItem.accessibilityInformation = { label: `${n} agent decision${n === 1 ? '' : 's'} waiting. Go to the next one.` };
+      this.statusItem.accessibilityInformation = { label: `${n} agent decision${n === 1 ? '' : 's'} waiting. Open the Inbox.` };
       this.statusItem.show();
     }
     // A zero badge hides it; clearing with undefined can leave the old count on the container.

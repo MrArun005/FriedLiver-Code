@@ -58,6 +58,8 @@ export type WebviewMessage =
   | { type: 'removeWorktree'; chatId: string }
   | { type: 'moveToCenter' }
   | { type: 'openTasks' }
+  /** The Agent Manager on its Inbox: everything any agent waits on. */
+  | { type: 'openInbox' }
   // Connections between chats and agents.
   /** Continue this chat with another agent, in a new chat that starts from its transcript. */
   | { type: 'handoff'; chatId: string; agent: AgentKey }
@@ -147,7 +149,9 @@ export type HostMessage =
   /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
   | ({ type: 'dictation'; chatId: string } & DictationUpdate)
   /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
-  | { type: 'roster'; roster: AgentRoster };
+  | { type: 'roster'; roster: AgentRoster }
+  /** The Agent Manager turns to its Inbox (FriedLiver: Open Decision Inbox). */
+  | { type: 'showInbox' };
 
 /** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
 export interface ClaudeSession {
@@ -280,6 +284,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'ready':
     case 'moveToCenter':
     case 'openTasks':
+    case 'openInbox':
     case 'otherAgents':
     case 'dictationSettings':
       return { type: m.type };
