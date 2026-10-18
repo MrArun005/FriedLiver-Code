@@ -1,5 +1,5 @@
 diff --git a/src/vs/base/browser/ui/menu/menu.ts b/src/vs/base/browser/ui/menu/menu.ts
-index f6b4122a..ece7a8ff 100644
+index f6b4122a..0d5c0172 100644
 --- a/src/vs/base/browser/ui/menu/menu.ts
 +++ b/src/vs/base/browser/ui/menu/menu.ts
 @@ -1163,11 +1163,11 @@ ${formatRule(Codicon.menuSubmenu)}
@@ -12,7 +12,7 @@ index f6b4122a..ece7a8ff 100644
  	position: relative;
  	margin: 0 4px;
 -	border-radius: var(--vscode-cornerRadius-medium);
-+	border-radius: var(--fl-r-row, var(--vscode-cornerRadius-medium)); /* FriedLiver: Menu §2.11 rows */
++	border-radius: var(--fl-r-row, var(--vscode-cornerRadius-medium)); /* FriedLiver: Menu §2.13 rows */
  }
  
  .monaco-menu .monaco-action-bar.vertical .action-menu-item:hover .keybinding,
@@ -30,7 +30,7 @@ index f6b4122a..ece7a8ff 100644
  
  .monaco-menu .monaco-action-bar.vertical .action-menu-item {
 -	height: 24px;
-+	height: var(--fl-h-md, 24px); /* FriedLiver: Menu §2.11 rows are 26 */
++	height: var(--fl-h-md, 24px); /* FriedLiver: Menu §2.13 rows are 26 */
  }
  
  .monaco-menu .monaco-action-bar.vertical .action-label:not(.separator),
@@ -39,12 +39,12 @@ index f6b4122a..ece7a8ff 100644
  .monaco-menu .monaco-action-bar.vertical .action-label.separator {
  	font-size: inherit;
 -	margin: 5px 0 !important;
-+	margin: var(--fl-sp-1, 5px) 0 !important; /* FriedLiver: Divider §2.24 */
++	margin: var(--fl-sp-1, 5px) 0 !important; /* FriedLiver: Divider §2.26 */
  	padding: 0;
  	border-radius: 0;
  }
 diff --git a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
-index 38e72282..92edbdd3 100644
+index 38e72282..cb47599b 100644
 --- a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
 +++ b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
 @@ -39,7 +39,7 @@ import { logNotificationInteraction } from '../../../common/notificationTelemetr
@@ -52,12 +52,12 @@ index 38e72282..92edbdd3 100644
  export class NotificationsCenter extends Themable implements INotificationsCenterController {
  
 -	private static readonly MAX_DIMENSIONS = new Dimension(450, 400);
-+	private static readonly MAX_DIMENSIONS = new Dimension(400, 400); // FriedLiver: Toast §2.13 width
++	private static readonly MAX_DIMENSIONS = new Dimension(400, 400); // FriedLiver: Toast §2.15 width
  
  	private static readonly MAX_NOTIFICATION_SOURCES = 10; // maximum number of notification sources to show in configure dropdown
  
 diff --git a/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts b/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
-index 0b62b580..600c14e7 100644
+index 0b62b580..3c7821e2 100644
 --- a/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
 +++ b/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
 @@ -47,7 +47,7 @@ enum ToastVisibility {
@@ -65,12 +65,12 @@ index 0b62b580..600c14e7 100644
  export class NotificationsToasts extends Themable implements INotificationsToastController {
  
 -	private static readonly MAX_WIDTH = 450;
-+	private static readonly MAX_WIDTH = 400; // FriedLiver: Toast §2.13
++	private static readonly MAX_WIDTH = 400; // FriedLiver: Toast §2.15
  	private static readonly MAX_NOTIFICATIONS = 3;
  
  	private static readonly PURGE_TIMEOUT: { [severity: number]: number } = {
 diff --git a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
-index ebb6b6f9..789518fe 100644
+index ebb6b6f9..9e7f6de6 100644
 --- a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
 +++ b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
 @@ -39,7 +39,7 @@ import { logNotificationInteraction, NotificationTelemetrySurface } from '../../
@@ -78,7 +78,7 @@ index ebb6b6f9..789518fe 100644
  
  /** Default height (px) of a single notification row. */
 -export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 42;
-+export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 38; // FriedLiver: Toast §2.13 (8 + 22 + 8)
++export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 38; // FriedLiver: Toast §2.15 (8 + 22 + 8)
  
  /** Compact height (px) of a single notification row. */
  export const COMPACT_NOTIFICATION_ROW_HEIGHT = 34;
@@ -87,7 +87,7 @@ index ebb6b6f9..789518fe 100644
  			actions++; // secondary actions
  		}
 -		this.offsetHelper.style.width = `${450 /* notifications container width */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
-+		this.offsetHelper.style.width = `${400 /* notifications container width (FriedLiver: Toast §2.13) */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
++		this.offsetHelper.style.width = `${400 /* notifications container width (FriedLiver: Toast §2.15) */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
  
  		// Render message into offset helper
  		const renderedMessage = NotificationMessageRenderer.render(notification.message);
