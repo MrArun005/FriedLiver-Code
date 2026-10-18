@@ -61,7 +61,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { Banner, Button, Card, CardHead, IconButton, MenuItem, Pill } from './ui';
+import { Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -236,28 +236,23 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
     <div class="switcher">
       <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
         {strip.map((c) => (
-          <span key={c.id} class="tab-wrap" role="presentation" data-active={c.id === active ? '' : undefined}>
-            <button
-              role="tab"
-              class="tab"
-              data-chat={c.id}
-              tabIndex={c.id === focusable ? 0 : -1}
-              aria-keyshortcuts="Delete"
-              aria-selected={c.id === active}
-              title={`${c.title} (${c.label})`}
-              onClick={() => onSelect(c.id)}
-              onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
-            >
-              <Glyph agent={c.agent} size="sm" />
-              <span class="tab-title">{c.title}</span>
-              <AutoBadge chat={c} short />
-              <Dot state={statusOf(c)} />
-            </button>
-            {/* For the pointer; the keyboard closes the focused tab with Delete, so it is no Tab stop of its own. */}
-            <button type="button" class="tab-close" tabIndex={-1} aria-hidden="true" title={`Close tab (${shortcut} · Delete)`} onClick={() => onClose(c.id)}>
-              <Icon name="close" size={12} />
-            </button>
-          </span>
+          <Tab
+            key={c.id}
+            selected={c.id === active}
+            data-chat={c.id}
+            tabIndex={c.id === focusable ? 0 : -1}
+            aria-keyshortcuts="Delete"
+            title={`${c.title} (${c.label})`}
+            onSelect={() => onSelect(c.id)}
+            onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
+            onClose={() => onClose(c.id)}
+            closeTitle={`Close tab (${shortcut} · Delete)`}
+          >
+            <Glyph agent={c.agent} size="sm" />
+            <span class="fl-tab__label tab-title">{c.title}</span>
+            <AutoBadge chat={c} short />
+            <Dot state={statusOf(c)} />
+          </Tab>
         ))}
       </div>
       <Popover
@@ -450,17 +445,17 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
               {chat.title}
             </button>
             {chat.branch && (
-              <span class="chip branch-chip" title={`${chat.branch}\n${chat.cwd}`}>
+              <span class="fl-pill branch-chip" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
                 <Icon name="branch" />
-                <span class="chip-text">{chat.branch}</span>
+                <span class="fl-pill__text">{chat.branch}</span>
               </span>
             )}
-            {chat.merged && <span class="tag">merged</span>}
+            {chat.merged && <span class="fl-pill" data-tone="muted">merged</span>}
             {chat.session?.rules?.length ? (
               <Popover
                 label="Shared rules this session got"
-                buttonClass="chip rules-chip"
-                trigger={<span class="chip-text">Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}</span>}
+                buttonClass="fl-pill rules-chip"
+                trigger={<span class="fl-pill__text">Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}</span>}
               >
                 {(close) => (
                   <>
@@ -487,7 +482,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </div>
         </div>
         {images.length > 0 && (
-          <Popover label="Images in this chat" title="Images in this chat" kind="dialog" align="end" buttonClass="chip-btn images-pill" trigger={<span class="chip-text">Images · {images.length}</span>}>
+          <Popover label="Images in this chat" title="Images in this chat" kind="dialog" align="end" buttonClass="fl-pill fl-pill--md images-pill" trigger={<span class="fl-pill__text">Images · {images.length}</span>}>
             {() => (
               <div class="image-strip">
                 {images.map((img) => (
@@ -546,29 +541,28 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
         <div class="origin-banner" data-kind={chat.origin.kind}>
           <Icon name={chat.origin.kind === 'handoff' ? 'handoff' : 'ask'} />
           <span>{chat.origin.kind === 'handoff' ? 'Continues' : 'Asked by'}</span>
-          <button class="link-chip" title={parent.title} onClick={() => onSelect(parent.id)}>
-            <Glyph agent={parent.agent} size="sm" />
+          <ChipButton lead={<Glyph agent={parent.agent} size="sm" />} title={parent.title} onPress={() => onSelect(parent.id)}>
             {parent.label}
-          </button>
+          </ChipButton>
           <span class="origin-title">{parent.title}</span>
-          {chat.origin.by === 'agent' && <span class="tag">by agent</span>}
+          {chat.origin.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
         </div>
       )}
       {(chips.length > 0 || chat.archived) && (
         <div class="link-strip">
-          {chat.archived && <span class="tag">archived</span>}
+          {chat.archived && <span class="fl-pill" data-tone="muted">archived</span>}
           {chips.map((b) => (
-            <span key={b.text} class="badge" data-kind={b.kind}>
-              <button class="badge-btn" onClick={() => (b.chatId ? onSelect(b.chatId) : send({ type: 'openTasks' }))} title={b.chatId ? 'Open that chat' : 'Compare in the Agent Manager'}>
-                <Icon name={b.kind === 'pipe' ? 'pipe' : b.kind === 'consult' ? 'ask' : b.kind === 'group' ? 'compare' : 'handoff'} />
-                {b.text}
-              </button>
-              {b.linkId && (
-                <button class="badge-x" aria-label={`Stop: ${b.text}`} title="Stop the pipe" onClick={() => send({ type: 'unlink', linkId: b.linkId! })}>
-                  <Icon name="close" />
-                </button>
-              )}
-            </span>
+            <ChipButton
+              key={b.text}
+              class="badge"
+              icon={b.kind === 'pipe' ? 'pipe' : b.kind === 'consult' ? 'ask' : b.kind === 'group' ? 'compare' : 'handoff'}
+              title={b.chatId ? 'Open that chat' : 'Compare in the Agent Manager'}
+              onPress={() => (b.chatId ? onSelect(b.chatId) : send({ type: 'openTasks' }))}
+              onRemove={b.linkId ? () => send({ type: 'unlink', linkId: b.linkId! }) : undefined}
+              removeLabel={`Stop: ${b.text}`}
+            >
+              {b.text}
+            </ChipButton>
           ))}
         </div>
       )}
@@ -1031,9 +1025,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
           <CardHead icon="diff" title={item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`} />
           <div class="files">
             {item.files.map((f) => (
-              <button key={f} class="ref" title={f} onClick={() => send({ type: 'openFile', path: f })}>
-                {basename(f)}
-              </button>
+              <FileRef key={f} path={f} onOpen={() => send({ type: 'openFile', path: f })} />
             ))}
           </div>
           {!item.undone && (
@@ -1088,8 +1080,8 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
         <span class="link-title" title={other ? `${other.label}: ${other.title}` : item.label}>
           {head}
         </span>
-        {item.role.startsWith('piped') && <span class="tag">pipe</span>}
-        {item.by === 'agent' && <span class="tag">by agent</span>}
+        {item.role.startsWith('piped') && <span class="fl-pill" data-tone="muted">pipe</span>}
+        {item.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
         <span class="spacer" />
         {other && other.id !== chat.id && (
           <Button variant="quiet" size="sm" onClick={() => onSelect(other.id)}>
@@ -1152,7 +1144,7 @@ function ConflictChip({ item, chat, state, conflicts }: { item: ReviewItem; chat
   if (!hit) return null;
   const others = hit.chats.filter((id) => id !== chat.id).flatMap((id) => state.chats.find((c) => c.id === id)?.label ?? []);
   return (
-    <span class="badge conflict" title={`${file} is changed in ${others.join(', ')} too: they clash when merged`}>
+    <span class="fl-pill" data-tone="warn" title={`${file} is changed in ${others.join(', ')} too: they clash when merged`}>
       <Icon name="diff" />
       also in {others.join(', ')}
     </span>
@@ -1201,7 +1193,7 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
           <span class="prompt">$ </span>
           {shortCommand(item.commandLine, 200)}
         </code>
-        {item.auto && <span class="tag" title="Ran without asking">{item.auto}</span>}
+        {item.auto && <span class="fl-pill" data-tone="muted" title="Ran without asking">{item.auto}</span>}
         <span class="hint">{meta}</span>
       </div>
       {item.output && <pre class="output">{item.output}</pre>}

@@ -429,6 +429,9 @@
   --pill-h: var(--h-sm);
   --pill-fs: var(--t-90);
 }
+.fl-pill--mono {
+  font-family: var(--mono);
+}
 .fl-pill--touch {
   --pill-h: var(--h-lg);
   --pill-px: var(--sp-3);
@@ -503,8 +506,38 @@ button.fl-pill:focus-visible {
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
+/* A chip with its own × (ChipButton): the pill is the frame, its main part and the × are the buttons. */
+.fl-pill__main {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.fl-pill__main > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-pill:has(> .fl-pill__main:hover) {
+  background: var(--pill-fill-hover);
+}
+.fl-pill__main:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--sp-half);
+}
 .fl-pill__x {
   flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
   display: inline-grid;
   place-items: center;
   width: var(--i-sm);
@@ -744,12 +777,42 @@ button.fl-pill:focus-visible {
   border-color: var(--button-bg);
   box-shadow: inset 0 0 0 4px var(--button-bg);
 }
+.fl-radio--btn {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+.fl-radio--btn:focus-visible {
+  outline: var(--line) solid var(--focus);
+  outline-offset: -1px;
+}
+/* A ChoiceRow's dot or box draws the state the row carries. */
+.fl-radio__dot[data-on] {
+  border-color: var(--button-bg);
+  box-shadow: inset 0 0 0 4px var(--button-bg);
+}
+.fl-check__box[data-on] {
+  border-color: var(--button-bg);
+  background: var(--button-bg);
+}
+.fl-check__box[data-on]::after {
+  transform: rotate(-45deg) scale(1);
+}
+.fl-radio__key {
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+}
 .fl-radio:hover {
   background: var(--hover-bg);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
-.fl-radio:has(:checked) {
+.fl-radio:has(:checked),
+.fl-radio[data-on] {
   background: var(--sel-bg);
   color: var(--sel-fg);
   outline: var(--sel-outline);
@@ -766,7 +829,7 @@ button.fl-pill:focus-visible {
   font-size: var(--t-85);
   color: var(--fg-2);
 }
-.fl-radio:has(:checked) .fl-radio__desc {
+.fl-radio:is(:has(:checked), [data-on]) .fl-radio__desc {
   color: inherit;
   opacity: 0.7;
 }
@@ -1398,6 +1461,50 @@ textarea.fl-input {
   background: var(--sel-bg);
   outline: var(--sel-outline);
   outline-offset: -1px;
+}
+.fl-tab > .fl-avatar,
+.fl-tab > .fl-dot {
+  flex: none;
+}
+/* A closable tab: the × sits inside its end, shown on hover, on the open tab and on keyboard focus. */
+.fl-tab-wrap {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 220px;
+}
+.fl-tab-wrap > .fl-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.fl-tab-wrap:has(> .fl-tab__x) > .fl-tab {
+  padding-right: calc(var(--sp-1) * 2 + var(--i-md));
+}
+.fl-tab__x {
+  position: absolute;
+  right: var(--sp-1);
+  display: inline-grid;
+  place-items: center;
+  width: var(--i-md);
+  height: var(--i-md);
+  border: 0;
+  border-radius: var(--r-row);
+  background: none;
+  color: var(--fg-2);
+  opacity: 0;
+  cursor: pointer;
+}
+.fl-tab-wrap:hover > .fl-tab__x,
+.fl-tab-wrap[data-active] > .fl-tab__x,
+.fl-tab-wrap:focus-within > .fl-tab__x {
+  opacity: 1;
+}
+.fl-tab__x:hover {
+  color: var(--fg);
+  background: var(--ghost-hover);
 }
 .fl-tab__label {
   min-width: 0;

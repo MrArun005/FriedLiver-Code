@@ -405,7 +405,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
       </div>
       {chat.branch && (
         <div>
-          <span class="chip">
+          <span class="fl-pill" data-tone="muted">
             <Icon name="branch" />
             {chat.branch}
           </span>
@@ -414,7 +414,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
       {badges.length > 0 && (
         <div class="tip-badges">
           {badges.map((b) => (
-            <span key={b.text} class="badge" data-kind={b.kind}>
+            <span key={b.text} class="fl-pill" data-tone="muted">
               {b.text}
             </span>
           ))}

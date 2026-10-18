@@ -21,7 +21,7 @@ import { AGENT_FACES, age, formatDuration, type AppState, type ChatView } from '
 import { oneClickQuestion, recommended } from '../shared/questions';
 import { Glyph, Icon, Markdown, isTyping, send, type IconName } from './common';
 import { ApprovalCard, cardKeys } from './approval';
-import { Button, Pill, Textarea } from './ui';
+import { Button, ChoiceRow, Pill, Textarea } from './ui';
 
 const KIND: Record<InboxKind, { icon: IconName; label: string }> = {
   command: { icon: 'terminal', label: 'Run a command' },
@@ -338,20 +338,24 @@ function QuestionWhat({ entry: e }: { entry: InboxEntry }) {
       {field ? (
         <div class="q-options" role="listbox" aria-label={field.title}>
           {options.map(({ o, label, recommended: rec }, n) => (
-            <button key={o.value} type="button" class="q-opt" role="option" aria-selected={false} onClick={() => send(actions.choices[n].message)}>
-              <span class="q-opt-text">
-                <span class="q-opt-label">
-                  {label}
+            <ChoiceRow
+              key={o.value}
+              class="q-opt"
+              selected={false}
+              onPick={() => send(actions.choices[n].message)}
+              label={
+                <>
+                  {label}{' '}
                   {rec && (
                     <Pill tone="info" class="q-rec">
                       Recommended
                     </Pill>
                   )}
-                </span>
-                {o.description && <span class="q-opt-desc">{o.description}</span>}
-              </span>
-              {n < 9 && <kbd class="q-key">{n + 1}</kbd>}
-            </button>
+                </>
+              }
+              desc={o.description}
+              kbd={n < 9 ? String(n + 1) : undefined}
+            />
           ))}
         </div>
       ) : (

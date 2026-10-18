@@ -192,9 +192,7 @@ export function Viewer({ images, start, state, now, chatOf, onClose }: Props) {
           </div>
         </header>
         <div class="preview-stage">
-          <button type="button" class="preview-nav" data-dir="prev" aria-label="Previous image (←)" title="Previous (←)" disabled={at === 0} onClick={() => go(at - 1)}>
-            <Icon name="chevron" size={20} />
-          </button>
+          <IconButton round variant="secondary" size="lg" icon="back" class="preview-nav" data-dir="prev" label="Previous image (←)" title="Previous (←)" disabled={at === 0} onClick={() => go(at - 1)} />
           <div
             class="viewer-canvas"
             ref={canvas}
@@ -225,9 +223,7 @@ export function Viewer({ images, start, state, now, chatOf, onClose }: Props) {
               <div class="preview-none">{src === null ? `${img.path ? humanTitle(img.path) : img.title} can’t be shown here. Open it in the editor.` : ''}</div>
             )}
           </div>
-          <button type="button" class="preview-nav" data-dir="next" aria-label="Next image (→)" title="Next (→)" disabled={at === images.length - 1} onClick={() => go(at + 1)}>
-            <Icon name="chevron" size={20} />
-          </button>
+          <IconButton round variant="secondary" size="lg" icon="forward" class="preview-nav" data-dir="next" label="Next image (→)" title="Next (→)" disabled={at === images.length - 1} onClick={() => go(at + 1)} />
         </div>
         {images.length > 1 && (
           <div class="viewer-strip" ref={strip} role="listbox" aria-label="Images" aria-orientation="horizontal">

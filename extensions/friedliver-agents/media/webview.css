@@ -81,49 +81,6 @@ h3 {
 
 /* ---- Small things: tags, chips, badges, counts ---- */
 
-.tag {
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  font-size: var(--t-85);
-  color: var(--fg-2);
-  background: var(--pill-bg);
-  white-space: nowrap;
-}
-.tag.loud {
-  color: var(--decision-fg);
-  background: var(--decision);
-}
-.tag.on {
-  color: var(--status-working);
-  background: color-mix(in srgb, var(--status-working) 14%, transparent);
-}
-.tag.ok {
-  color: var(--tl-success);
-  background: color-mix(in srgb, var(--tl-success) 14%, transparent);
-}
-.tag.bad {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 14%, transparent);
-}
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  height: 18px;
-  min-width: 0;
-  max-width: 220px;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  font-size: var(--t-85);
-  color: var(--fg-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .chip .icon {
   width: 12px;
   height: 12px;
@@ -189,88 +146,16 @@ button.ref:hover:not(:disabled) {
   color: var(--fg-2);
 }
 /* Badges: links between chats, shared files. */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  height: 18px;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  color: var(--fg-2);
-  font-size: var(--t-85);
-  white-space: nowrap;
-}
-.badge:has(.badge-btn:hover) {
-  background: var(--pill-hover);
-  color: var(--fg);
-}
+
 .badge .icon {
   width: 12px;
   height: 12px;
 }
-.badge-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 .badge[data-kind='pipe'] .icon {
   color: var(--status-working);
 }
-.badge.conflict {
-  color: var(--decision);
-  background: var(--decision-soft);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-.badge-btn,
-.badge-x {
-  height: 18px;
-  padding: 0;
-  border: 0;
-  background: none;
-  gap: var(--sp-1);
-}
-.badge-x {
-  justify-content: center;
-  width: 14px;
-  margin-right: -4px;
-  border-radius: var(--r-pill);
-  color: var(--fg-2);
-}
-.badge-x:hover:not(:disabled) {
-  color: var(--fg);
-}
-.mode-badge,
-.auto-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: var(--r-pill);
-  font-size: var(--t-85);
-  white-space: nowrap;
-  color: var(--fg-2);
-  background: var(--pill-bg);
-}
-.mode-badge[data-tone='edits'] {
-  color: var(--fg);
-}
-.mode-badge[data-tone='plan'] {
-  color: var(--focus);
-  background: color-mix(in srgb, var(--focus-border) 14%, transparent);
-}
-.mode-badge[data-tone='auto'],
-.mode-badge[data-tone='full'],
-.auto-badge {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 14%, transparent);
-}
+
 .auto-badge .icon {
   width: 12px;
   height: 12px;
@@ -611,47 +496,15 @@ button.count-item .icon {
   list-style: none;
   border-left: 1px solid var(--border);
 }
-.sub-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-/* "34 done · show": the folded done ones, quieter than a card. */
-.sub-card.sub-fold {
-  border-style: dashed;
-  color: var(--fg-2);
-}
-button.sub-fold.link {
-  color: var(--fg-2);
-}
 .map-fold .box {
   stroke-dasharray: 4 3;
 }
 .map-fold .node-label {
   fill: var(--fg-2);
 }
-.sub-card:hover {
-  border-color: var(--border);
-}
-.sub-card .sub-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .sub-row {
   cursor: pointer;
 }
-.sub-card.static,
 .sub-row.static {
   cursor: default;
 }
@@ -678,20 +531,7 @@ button.sub-fold.link {
 .card-top > span:not(.chip) {
   white-space: nowrap;
 }
-.card-top .mode-badge {
-  display: inline-block;
-  line-height: 18px;
-  white-space: nowrap;
-}
-.card-top .chip,
-.card-top .mode-badge,
-.card-top .auto-badge {
-  flex: none;
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 .card-who {
   color: var(--fg-2);
   font-weight: 500;
@@ -1086,16 +926,7 @@ td.c-act > * + * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cell-title .chip {
-  flex: 0 1 auto;
-  min-width: 32px;
-  height: 18px;
-}
-.chip-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 .cell-line {
   display: flex;
   align-items: center;
@@ -1588,22 +1419,11 @@ svg[data-lit] .map-file-line:not(.lit) {
 .mgr-view .gallery {
   height: auto;
 }
-/* The chat strip's tabs (.tabs, .tab-wrap, .tab), with a count where the × would be. */
+/* The image tabs: Tab components, each with its count where a × would be. */
 .gallery-tabs {
   flex: none;
   padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--border);
-}
-.gallery-tabs button.tab {
-  padding: 0 6px 0 var(--sp-1);
-}
-.tab-count {
-  flex: none;
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-button.tab[aria-selected='true'] .tab-count {
-  color: var(--sel-fg);
 }
 .gallery-bar {
   flex: none;
@@ -1620,32 +1440,7 @@ button.tab[aria-selected='true'] .tab-count {
   flex: 1;
   min-width: 0;
 }
-button.filter-chip {
-  height: 22px;
-  gap: 6px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: transparent;
-  color: var(--fg-2);
-  font-size: var(--t-90);
-}
-button.filter-chip:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--hover-bg);
-}
-button.filter-chip[aria-pressed='true'] {
-  border-color: transparent;
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-}
-.filter-count {
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-button.filter-chip[aria-pressed='true'] .filter-count {
-  color: var(--sel-fg);
-}
+
 .gallery-search {
   width: min(280px, 100%);
 }
@@ -1950,29 +1745,7 @@ button.viewer-thumb[aria-selected='true'] {
   justify-self: center;
   color: var(--fg-2);
 }
-button.preview-nav {
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-round);
-  background: var(--menu-bg);
-  color: var(--fg-2);
-}
-button.preview-nav:disabled {
-  opacity: 0.3;
-}
-button.preview-nav:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--hover-bg);
-}
-button.preview-nav[data-dir='prev'] .icon {
-  transform: rotate(90deg);
-}
-button.preview-nav[data-dir='next'] .icon {
-  transform: rotate(-90deg);
-}
+
 @media (prefers-reduced-motion: reduce) {
   .gallery-thumb[data-state='wait'] {
     animation: none;
@@ -3590,80 +3363,12 @@ button.file-row .icon {
   gap: 2px;
   min-width: 0;
 }
-button.q-opt {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: var(--sp-2);
-  width: 100%;
-  height: auto;
-  padding: 6px var(--sp-2);
-  border: 0;
-  border-radius: var(--r-4);
-  background: transparent;
-  color: var(--fg);
-  font-weight: 400;
-  line-height: 1.5;
-  text-align: left;
-  white-space: normal;
-}
-button.q-opt:hover {
-  background: var(--hover-bg);
-}
-button.q-opt[data-picked] {
-  background: var(--sel-bg);
-  color: var(--sel-fg);
-}
-button.q-opt:focus-visible {
-  outline: 1px solid var(--focus);
-  outline-offset: -1px;
-}
-.q-check {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  border: 1px solid var(--fg-2);
-  border-radius: var(--r-3);
-}
-.q-key {
-  flex: none;
-  margin-left: auto;
-  align-self: center;
-  font-size: var(--t-85);
-}
-button.q-opt[data-picked] .q-key {
-  color: var(--sel-fg);
-}
+
 .q-check .icon {
   width: 14px;
   height: 14px;
 }
-.q-opt-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.q-opt-label {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-.q-opt-desc {
-  color: var(--fg-2);
-  font-size: var(--t-85);
-}
-button.q-opt[data-picked] .q-opt-desc {
-  color: inherit;
-  opacity: 0.8;
-}
-.q-opt-other .q-opt-label {
-  color: var(--fg-2);
-}
+
 .q-other {
   padding: 2px 0;
 }
@@ -3807,18 +3512,7 @@ button.q-opt[data-picked] .q-opt-desc {
   overflow: hidden;
   mask-image: linear-gradient(black 55%, transparent);
 }
-button.link-chip {
-  flex: none;
-  height: 18px;
-  padding: 0 var(--sp-2) 0 2px;
-  gap: var(--sp-1);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  font-size: var(--t-85);
-}
-button.link-chip:hover {
-  background: var(--pill-hover);
-}
+
 /* A command FriedLiver ran: the command line and its output, the tool body's look. */
 .command {
   margin: var(--sp-2) 0;
@@ -3916,62 +3610,7 @@ code.command-line {
 .tabs[data-overflow] {
   mask-image: linear-gradient(to right, transparent, black var(--sp-4), black calc(100% - var(--sp-4)), transparent);
 }
-/* A tab and its ×: the × shows on hover, on the open tab and on keyboard focus. */
-.tab-wrap {
-  position: relative;
-  flex: none;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  max-width: 200px;
-}
-button.tab {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 200px;
-  height: var(--tab-h);
-  gap: 6px;
-  padding: 0 calc(var(--sp-1) + 16px + var(--sp-1)) 0 var(--sp-2);
-  border-radius: var(--r-5);
-  color: var(--fg-2);
-  font-size: var(--t-90);
-}
-button.tab:hover {
-  color: var(--fg);
-  background: var(--hover-bg);
-}
-button.tab[aria-selected='true'] {
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-}
-button.tab-close {
-  position: absolute;
-  right: var(--sp-1);
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--r-4);
-  color: var(--fg-2);
-  opacity: 0;
-}
-.tab-wrap:hover .tab-close,
-.tab-wrap[data-active] .tab-close,
-.tab-wrap:focus-within .tab-close {
-  opacity: 1;
-}
-button.tab-close:hover {
-  color: var(--fg);
-  background: var(--ghost-hover);
-}
-.tab-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tab .auto-badge {
-  padding: 0 var(--sp-1);
-}
+
 button.all-btn {
   width: auto;
   gap: var(--sp-1);
@@ -4024,16 +3663,7 @@ button.chat-head-title:hover {
 button[aria-pressed='true'] .icon path {
   fill: currentColor;
 }
-button.rules-chip {
-  font: inherit;
-  font-size: var(--t-85);
-  border: 0;
-  cursor: pointer;
-}
-button.rules-chip:hover,
-button.rules-chip[aria-expanded='true'] {
-  background: var(--pill-hover);
-}
+
 .chat-head-row > .pop {
   display: inline-flex;
   min-width: 0;
@@ -4043,18 +3673,7 @@ button.rules-chip[aria-expanded='true'] {
     display: none;
   }
 }
-button.images-pill {
-  height: 18px;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  color: var(--fg);
-  font-size: var(--t-85);
-}
-button.images-pill:hover,
-button.images-pill[aria-expanded='true'] {
-  background: var(--pill-hover);
-}
+
 .origin-banner {
   display: flex;
   align-items: center;

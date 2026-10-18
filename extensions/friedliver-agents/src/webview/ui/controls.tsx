@@ -279,6 +279,52 @@ export function RadioRow({
   );
 }
 
+/**
+ * A choice as a button in a listbox or group (an agent's question): the Radio row's look, its dot (or a
+ * checkbox when several may be picked), the label, a description under it, and its number key at the end.
+ */
+export function ChoiceRow({
+  multi,
+  selected,
+  label,
+  desc,
+  kbd,
+  onPick,
+  action,
+  class: className,
+  ...rest
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'class' | 'label' | 'role'> & {
+  multi?: boolean;
+  selected: boolean;
+  label: ComponentChildren;
+  desc?: ComponentChildren;
+  kbd?: string;
+  onPick(): void;
+  /** Not a choice but an action in the list ("Other…" in a multi-select): a plain button, no dot. */
+  action?: boolean;
+  class?: string;
+}) {
+  return (
+    <button
+      {...rest}
+      type="button"
+      role={action && multi ? 'button' : multi ? 'checkbox' : 'option'}
+      aria-checked={multi && !action ? selected : undefined}
+      aria-selected={multi ? undefined : selected}
+      class={cx('fl-radio fl-radio--btn', className)}
+      data-on={selected ? '' : undefined}
+      onClick={onPick}
+    >
+      {!action && <span class={multi ? 'fl-check__box' : 'fl-radio__dot'} data-on={selected ? '' : undefined} aria-hidden="true" />}
+      <span class="fl-radio__text">
+        <span>{label}</span>
+        {desc && <span class="fl-radio__desc">{desc}</span>}
+      </span>
+      {kbd && <kbd class="fl-kbd fl-radio__key">{kbd}</kbd>}
+    </button>
+  );
+}
+
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'size' | 'class' | 'type' | 'role'> & {
   size?: 'sm' | 'md' | 'touch';
   type?: 'text' | 'search' | 'number' | 'url' | 'email' | 'password';
