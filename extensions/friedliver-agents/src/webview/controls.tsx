@@ -17,6 +17,7 @@ import { DecisionTargets } from '../shared/decisionTarget';
 import { questionGroups, recommended, type QuestionField } from '../shared/questions';
 import { denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
 import { ClampedText, LiveState, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
+import { agentName } from '../shared/names';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -199,7 +200,7 @@ export function QueueList({ chat }: { chat: ChatView }) {
             </span>
             <span class="spacer" />
             {now && (
-              <button class="ghost sm" title={chat.busy ? `Give it to ${chat.label} while it works` : 'Send it now'} onClick={() => send({ type: 'steer', chatId: chat.id, id: q.id })}>
+              <button class="ghost sm" title={chat.busy ? `Give it to ${agentName(chat.agent)} while it works` : 'Send it now'} onClick={() => send({ type: 'steer', chatId: chat.id, id: q.id })}>
                 <Icon name="send" /> {now}
               </button>
             )}
@@ -551,7 +552,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
     skip();
   };
   return (
-    <section class="fl-card apv question" data-on={on ? '' : undefined} id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
+    <section class="fl-card apv question" data-on={on ? '' : undefined} id={`item-${item.requestId}`} aria-label={`${agentName(chat.agent)} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
       <div class="q-head">
         <span class="fl-chip q-chip">{g.field.title}</span>
         {groups.length > 1 && (

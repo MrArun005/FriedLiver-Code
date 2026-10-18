@@ -21,6 +21,7 @@
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
+//   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -284,8 +285,8 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  if (opts.only === 'images' || opts.only === 'inbox' || opts.only === 'approvals') {
-    await (opts.only === 'inbox' ? inboxChecks : opts.only === 'approvals' ? approvalsChecks : imagesChecks)({ open, check, posted });
+  if (opts.only === 'images' || opts.only === 'inbox' || opts.only === 'approvals' || opts.only === 'labels') {
+    await (opts.only === 'inbox' ? inboxChecks : opts.only === 'approvals' ? approvalsChecks : opts.only === 'labels' ? labelChecks : imagesChecks)({ open, check, posted });
     await browser.close();
     if (problems.length) {
       console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1300,6 +1301,7 @@ async function shoot() {
 
   await imagesChecks({ open, check, posted });
   await inboxChecks({ open, check, posted });
+  await labelChecks({ open, check, posted });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1488,6 +1490,61 @@ async function imagesChecks({ open, check, posted }) {
     await p.fill('.gallery-search input', 'pair');
     check((await p.locator('.gallery-card').count()) === all.filter((i) => /pair/i.test(i.title) || /pair/i.test(i.path ?? '')).length, 'the side view searches by name');
     check(await p.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth), 'no sideways scroll at 300px');
+    await p.close();
+  }
+}
+
+// ---- No numbered agent labels ("Claude 9") anywhere a person reads, tooltips aside ----
+
+/** Text nodes and the attributes people read or hear (aria-label, placeholder, alt); `title` tooltips and SVG <title> are left out. */
+async function numberedLabels(p) {
+  return p.evaluate(() => {
+    const re = /\b(Claude|Codex|Gemini|Demo) \d+\b/;
+    const hits = [];
+    const walker = document.createTreeWalker(document.body, 4 /* NodeFilter.SHOW_TEXT */);
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (n.parentElement?.closest('title, script, style, textarea')) continue;
+      if (re.test(n.textContent ?? '')) hits.push((n.textContent ?? '').trim().slice(0, 80));
+    }
+    for (const el of document.querySelectorAll('[aria-label], [placeholder], [alt], [aria-description], [aria-valuetext]')) {
+      for (const a of ['aria-label', 'placeholder', 'alt', 'aria-description', 'aria-valuetext']) {
+        const v = el.getAttribute(a);
+        if (v && re.test(v)) hits.push(`${a}="${v.slice(0, 80)}"`);
+      }
+    }
+    return hits;
+  });
+}
+
+async function labelChecks({ open, check }) {
+  // The fixtures keep numbered labels, as an older version saved them: none may reach the screen.
+  const chats = fixture().state.chats.map((c) => c.id);
+  const pages = [
+    ...['board', 'list', 'map', 'inbox'].map((v) => `surface=tasks&theme=dark-2026&view=${v}`),
+    'surface=tasks&theme=dark-2026&view=images&fixture=images',
+    'surface=tasks&theme=dark-2026&view=inbox&fixture=inbox',
+    'surface=chat&theme=dark-2026&side=1&list=1&fixture=inbox',
+    ...chats.map((id) => `surface=chat&theme=dark-2026&select=${id}`),
+    'surface=chat&theme=dark-2026&fixture=approvals&select=chat-shop',
+    'surface=chat&theme=dark-2026&select=chat-pay&fixture=subagents',
+    'surface=chat&theme=dark-2026&fixture=permissions&select=chat-trip',
+    'surface=chat&theme=dark-2026&side=1&fixture=steps',
+    'surface=accounts&theme=dark-2026',
+    'surface=images&theme=dark-2026&side=1&fixture=images',
+  ];
+  for (const query of pages) {
+    const p = await open(query, 1200, 900);
+    const hits = await numberedLabels(p);
+    // The menus that list chats or name one: all chats, Hand off, Pipe to.
+    for (const opener of ['.all-btn', 'button:has-text("Hand off")', 'button:has-text("Pipe to")']) {
+      const b = p.locator(opener).first();
+      if (!(await b.count()) || !(await b.isVisible())) continue;
+      await b.click();
+      hits.push(...(await numberedLabels(p)).map((h) => `${opener}: ${h}`));
+      await p.keyboard.press('Escape');
+    }
+    check(hits.length === 0, `no numbered agent label on ${query}${hits.length ? ` [${[...new Set(hits)].slice(0, 5).join(' | ')}]` : ''}`);
     await p.close();
   }
 }

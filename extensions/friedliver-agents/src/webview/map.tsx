@@ -7,6 +7,7 @@ import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '
 import type { ClaudeSession } from '../shared/messages';
 import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
+import { chatName, chatTip } from '../shared/names';
 
 const TIP_W = 288;
 
@@ -245,7 +246,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 class="map-file"
                 transform={`translate(${f.x} ${f.y})`}
                 tabindex={-1}
-                aria-label={`${f.file}, changed in ${f.chats.map((id) => chats.find((c) => c.id === id)?.label).join(' and ')}`}
+                aria-label={`${f.file}, changed in ${f.chats.map((id) => { const c = chats.find((x) => x.id === id); return c ? chatName(c) : 'a closed chat'; }).join(' and ')}`}
               >
                 <title>{f.file}</title>
                 <rect width={MAP.fileW} height={MAP.fileH} rx="8" />
@@ -333,7 +334,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       transform={`translate(${node.x} ${node.y})`}
       tabindex={tabbable ? 0 : -1}
       role="button"
-      aria-label={`${chat.label}: ${chat.title}. ${DOT_LABEL[status] ?? status}`}
+      aria-label={`${chatTip(chat)}. ${DOT_LABEL[status] ?? status}`}
       onClick={open}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -349,7 +350,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       {(status === 'working' || status === 'needs-you') && <rect class="ring" x="-3.5" y="-3.5" width={MAP.nodeW + 7} height={MAP.nodeH + 7} rx="11" />}
       <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
       <SvgGlyph agent={chat.agent} x={10} y={10} size={20} />
-      <title>{`${chat.title} (${chat.label})`}</title>
+      <title>{chatTip(chat)}</title>
       <text class="node-label" x="40" y="17">
         {node.title}
       </text>
@@ -389,7 +390,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
     >
       <div class="tip-head">
         <Glyph agent={chat.agent} size="sm" />
-        <b title={chat.label}>{AGENT_FACES[chat.agent].name}</b>
+        <b title={chatTip(chat)}>{AGENT_FACES[chat.agent].name}</b>
         <span class="spacer" />
         <Dot state={status} />
         <span class="hint">{DOT_LABEL[status]}</span>
@@ -484,7 +485,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         </button>
       </div>
       <div class="tip-title">{info?.title ?? sub.title}</div>
-      <div class="tip-meta" title={chat?.label}>of {chat ? chat.title : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
+      <div class="tip-meta" title={chat ? chatTip(chat) : undefined}>of {chat ? chat.title : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
       {steps.length > 0 && (
         <ol class="map-detail-steps" aria-label="Steps">
           {steps.slice(-8).map((t) => (

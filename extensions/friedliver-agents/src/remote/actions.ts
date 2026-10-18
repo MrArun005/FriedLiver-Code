@@ -5,6 +5,7 @@
 import type { AgentCore } from '../host/core';
 import { parseMention, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { approvalOf } from '../shared/approval';
+import { agentName, chatRef } from '../shared/names';
 import { primaryOption } from '../shared/tools';
 import { commandRisk, requestRisk } from './risk';
 import { phoneChats } from './phoneView';
@@ -76,14 +77,14 @@ export class RemoteActions {
    * ones that change permissions or settings are refused, anything else (advertised or not) needs the
    * Mac's OK naming the command. Undefined: go ahead.
    */
-  private async slashAllowed(text: string, chat: Pick<ChatView, 'agent' | 'label' | 'session'>, confirm: (ask: { title: string; detail: string; button: string }) => Promise<boolean>): Promise<ActionResult | undefined> {
+  private async slashAllowed(text: string, chat: Pick<ChatView, 'agent' | 'title' | 'session'>, confirm: (ask: { title: string; detail: string; button: string }) => Promise<boolean>): Promise<ActionResult | undefined> {
     const name = slashCommand(text);
     if (!name || HARMLESS_SLASH.has(name)) return undefined;
     if (SETTINGS_SLASH.test(name)) return refused(`Run /${name} on your Mac: from a phone, commands that change permissions or settings are refused.`);
     const known = chat.session?.commands.some((c) => c.name.replace(/^\//, '').toLowerCase() === name);
     const ok = await confirm({
-      title: `Send /${name} to ${chat.label}?`,
-      detail: known ? `It is one of ${chat.label}'s own commands and may change the chat or its settings.` : `${chat.label} didn't list this command; it may still run one.`,
+      title: `Send /${name} to ${chatRef(chat)}?`,
+      detail: known ? `It is one of ${agentName(chat.agent)}'s own commands and may change the chat or its settings.` : `${agentName(chat.agent)} didn't list this command; it may still run one.`,
       button: 'Send',
     });
     return ok ? undefined : refused('Not confirmed on the Mac.');
@@ -123,8 +124,8 @@ export class RemoteActions {
         // Only the plain one-time yes goes ahead: every other allow keeps allowing or changes how the agent asks.
         if (option && allows && option !== primaryOption(found.item.options)) {
           const ok = await confirm({
-            title: `Answer “${option.name}” for ${found.chat.label}?`,
-            detail: `${found.item.title}. This answer keeps allowing, or changes how ${found.chat.label} asks from now on.`,
+            title: `Answer “${option.name}” in ${chatRef(found.chat)}?`,
+            detail: `${found.item.title}. This answer keeps allowing, or changes how ${agentName(found.chat.agent)} asks from now on.`,
             button: 'Allow',
           });
           if (!ok) return refused('Not confirmed on the Mac.');
@@ -159,8 +160,8 @@ export class RemoteActions {
         if (a.answer === 'allowAlways' || a.answer === 'allowChat') {
           const ok = await confirm(
             a.answer === 'allowAlways'
-              ? { title: `Always allow ${found.item.always}?`, detail: `${found.chat.label}'s request, and the same again later, without asking.`, button: 'Always allow' }
-              : { title: `Allow ${found.chat.label} this for the rest of the chat?`, detail: 'Requests like this one in that chat would go ahead without asking.', button: 'Allow for this chat' },
+              ? { title: `Always allow ${found.item.always}?`, detail: `The request in ${chatRef(found.chat)}, and the same again later, without asking.`, button: 'Always allow' }
+              : { title: `Allow this for the rest of ${chatRef(found.chat)}?`, detail: 'Requests like this one in that chat would go ahead without asking.', button: 'Allow for this chat' },
           );
           if (!ok) return refused('Not confirmed on the Mac.');
         }
@@ -186,7 +187,7 @@ export class RemoteActions {
       case 'newChat': {
         if (!this.deps.agents().includes(a.agent)) return refused('That agent is not available.');
         if (!this.deps.folders().includes(a.folder)) return refused('Pick one of the window’s folders.');
-        const slash = await this.slashAllowed(a.text, { agent: a.agent, label: a.agent } as ChatView, confirm);
+        const slash = await this.slashAllowed(a.text, { agent: a.agent, title: 'a new chat' } as ChatView, confirm);
         if (slash) return slash;
         const chat = await core.createChat(a.agent, { cwd: a.folder, ...(a.text.trim() ? { title: a.text } : {}) });
         if (a.text.trim()) void core.send(chat.id, a.text).catch((err: unknown) => this.deps.error?.(err));

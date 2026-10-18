@@ -53,6 +53,7 @@ import { Gallery } from './gallery';
 import { Inbox } from './inbox';
 import { inbox } from '../shared/inbox';
 import type { OutsideImages } from '../shared/gallery';
+import { chatName, chatTip } from '../shared/names';
 
 type View = 'board' | 'list' | 'map' | 'images' | 'inbox';
 const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' | 'grid' | 'inbox' }[] = [
@@ -676,7 +677,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       data-status={status}
       data-nav={chat.id}
       tabIndex={tabbable ? 0 : -1}
-      aria-label={`${chat.label}: ${chat.title}. ${DOT_LABEL[status]}`}
+      aria-label={`${chatTip(chat)}. ${DOT_LABEL[status]}`}
       onFocus={(e) => e.target === e.currentTarget && onFocus(chat.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target === e.currentTarget) open(chat.id);
@@ -684,7 +685,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
     >
       <div class="card-top">
         <Glyph agent={chat.agent} size="sm" />
-        <span class="card-who" title={chat.label}>
+        <span class="card-who" title={chatTip(chat)}>
           {agentName(chat.agent)}
         </span>
         <span class="spacer" />
@@ -736,7 +737,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
             </span>
           )}
           {conflicts.slice(0, 2).map((c) => (
-            <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${o.label})`).join(', ')}: they clash when merged`}>
+            <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${agentName(o.agent)})`).join(', ')}: they clash when merged`}>
               <Icon name="diff" />
               <span class="badge-text">{conflictText(c)}</span>
             </span>
@@ -853,7 +854,7 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
               <article key={c.id} class="compare-col" data-status={status}>
                 <div class="compare-top">
                   <Glyph agent={c.agent} size="sm" />
-                  <span class="compare-agent" title={c.label}>
+                  <span class="compare-agent" title={chatTip(c)}>
                     {agentName(c.agent)}
                   </span>
                   <button class="title-btn compare-topic" title={c.title} onClick={() => open(c.id)}>
@@ -947,7 +948,7 @@ function List({
                 </tr>
               )}
               <Row chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
-              <SubRows subs={subagents(c)} parent={c.label} onOpen={(id) => openSub(c.id, id)} />
+              <SubRows subs={subagents(c)} parent={chatName(c)} onOpen={(id) => openSub(c.id, id)} />
             </Fragment>
           ))}
           {outside.map((s) => (
@@ -974,7 +975,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       data-status={status}
       data-nav={c.id}
       tabIndex={tabbable ? 0 : -1}
-      aria-label={`${c.label}: ${c.title}. ${DOT_LABEL[status]}`}
+      aria-label={`${chatTip(c)}. ${DOT_LABEL[status]}`}
       onFocus={(e) => e.target === e.currentTarget && onFocus(c.id)}
       onClick={(e) => !(e.target as HTMLElement).closest('button') && open(c.id)}
       onKeyDown={(e) => {
@@ -988,7 +989,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       </td>
       <td class="c-agent">
         <span class="cell-agent">
-          <Glyph agent={c.agent} size="sm" /> <span title={c.label}>{agentName(c.agent)}</span>
+          <Glyph agent={c.agent} size="sm" /> <span title={chatTip(c)}>{agentName(c.agent)}</span>
         </span>
       </td>
       <td class="c-task">
@@ -1095,7 +1096,7 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
           {sorted.map((c) => (
             <li key={c.id} class="history-row">
               <Glyph agent={c.agent} size="sm" />
-              <span class="history-label" title={c.label}>{agentName(c.agent)}</span>
+              <span class="history-label" title={chatTip(c)}>{agentName(c.agent)}</span>
               <button class="title-btn history-title" title={c.title} onClick={() => open(c.id)}>
                 {c.title}
               </button>

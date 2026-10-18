@@ -127,7 +127,7 @@ describe('the FriedLiver tools, used by the demo agent', () => {
     await core.cancel(b.id);
     await busy;
 
-    expect(await call({ tool: 'send_to_chat', chatId: b.id, message: 'from a' })).toMatch(/^Sent to Gemini/);
+    expect(await call({ tool: 'send_to_chat', chatId: b.id, message: 'from a' })).toMatch(/^Sent to “wait” \(chat-/);
     await waitFor(() => core.chat(b.id)!.turns === 2);
     expect(core.chat(b.id)!.items.find((i) => i.kind === 'link')).toMatchObject({ role: 'piped-in', chatId: a.id, by: 'agent', text: 'from a' });
     expect(await call({ tool: 'read_chat', chatId: b.id, last: 1 })).toContain('From Demo');

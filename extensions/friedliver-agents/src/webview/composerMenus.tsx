@@ -7,6 +7,7 @@ import { AGENT_FACES, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
+import { agentName, chatTip } from '../shared/names';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
@@ -181,7 +182,7 @@ export function ModelMenu({ chat, close }: MenuProps) {
             {pick.current === c.value && <Icon name="check" size={16} />}
           </button>
         ))}
-        {!pick && <div class="cc-empty">{chat.session?.live ? `${chat.label} offers no model choice` : `${chat.label} is starting…`}</div>}
+        {!pick && <div class="cc-empty">{chat.session?.live ? `${agentName(chat.agent)} offers no model choice` : `${agentName(chat.agent)} is starting…`}</div>}
       </div>
       <Divider />
       <EffortRow chat={chat} />
@@ -418,7 +419,7 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
     ...linked.map((c) => ({
       key: c.id,
       title: c.title,
-      tip: `${c.label}: ${c.title}`,
+      tip: chatTip(c),
       state: c.busy ? 'working' : 'done',
       meta: [shortDuration(Math.max(0, (c.busy ? now : c.lastActivity) - c.createdAt)), c.session?.usage ? `${formatTokens(c.session.usage.used)} tokens` : c.origin?.kind === 'consult' ? 'consultation' : 'hand-off'].join(' · '),
       go: () => {
@@ -460,7 +461,7 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
                 <Dot state={chat.busy ? 'working' : 'idle'} still={!chat.busy} />
                 {chat.title}
               </span>
-              <span class="cc-map-meta">{[model, usage ? `${formatTokens(usage.used)} tokens in context` : undefined].filter(Boolean).join(' · ') || chat.label}</span>
+              <span class="cc-map-meta">{[model, usage ? `${formatTokens(usage.used)} tokens in context` : undefined].filter(Boolean).join(' · ') || agentName(chat.agent)}</span>
             </div>
             {rows.length > 0 && (
               <div class="cc-map-children">

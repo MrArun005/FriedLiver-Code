@@ -10,6 +10,7 @@ import { describeGrant, siteOrigin, type Grant } from './permissions';
 import { agentToolRisk, browserRisk, commandRisk, filesRisk, type DroppedCommits, type Risk } from './risk';
 import { ruleCandidates, ruleSafe } from './rules';
 import { isSystemTool, SYSTEM_VERBS } from './system';
+import { chatRef } from './names';
 import { denyOption, primaryOption } from './tools';
 import { clip, relativePath } from './view';
 
@@ -226,7 +227,7 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
       : item.tool === 'send_to_chat'
         ? ['its task']
         : item.tool === 'read_chat'
-          ? [`${other?.label ?? 'that chat'}’s latest messages`]
+          ? [`${other ? `${chatRef(other)}` : 'that chat'}’s latest messages`]
           : item.tool === 'remember'
             ? ['.friedliver/memory.md, for every agent']
             : undefined;
