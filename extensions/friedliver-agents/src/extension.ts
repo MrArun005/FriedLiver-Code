@@ -114,6 +114,8 @@ export class Controller {
   private projectIndex?: ProjectIndexHost;
   private readonly autoItem = vscode.window.createStatusBarItem('friedliver.fullAuto', vscode.StatusBarAlignment.Right, 101);
   private shownStatus?: string;
+  /** Open Decision Inbox ran while the Agent Manager was loading. */
+  private inboxWanted = false;
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
@@ -215,6 +217,8 @@ export class Controller {
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
       approvalDefault: () => this.approvalDefault(),
+      // User settings only: a repository must not make requests allow themselves.
+      autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {
         const folder = this.folders()[0];
@@ -268,7 +272,7 @@ export class Controller {
     });
     this.reviews = new ReviewUi(() => this.core);
     this.statusItem.name = 'FriedLiver decisions';
-    this.statusItem.command = 'friedliver.nextDecision';
+    this.statusItem.command = 'friedliver.openInbox';
     this.statusItem.color = new vscode.ThemeColor('friedliver.decision');
     this.workingItem.name = 'FriedLiver agents working';
     this.workingItem.command = 'friedliver.openTasks';
@@ -328,6 +332,7 @@ export class Controller {
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
     command('friedliver.nextDecision', () => this.nextDecision());
+    command('friedliver.openInbox', () => this.openInbox());
     command('friedliver.review.accept', (reviewId?: unknown) => {
       if (!this.reviews.accept(typeof reviewId === 'string' ? reviewId : undefined)) void vscode.window.showInformationMessage('No agent edit is waiting here.');
     });
@@ -599,6 +604,10 @@ export class Controller {
             defaults: this.core.agentDefaults(),
             roster: this.roster(),
           });
+          if (surface.kind === 'tasks' && this.inboxWanted) {
+            this.inboxWanted = false;
+            post(surface, { type: 'showInbox' });
+          }
           if (surface.kind !== 'chat') {
             if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
             this.refreshClaudeSessions();
@@ -737,6 +746,9 @@ export class Controller {
         case 'moveToCenter':
           await this.moveToCenter();
           return;
+        case 'openInbox':
+          this.openInbox();
+          return;
         case 'openTasks':
           this.openTasks();
           return;
@@ -802,6 +814,9 @@ export class Controller {
           return;
         case 'permissionDiff':
           if (!this.core.showProposal(m.requestId, m.path)) void vscode.window.showInformationMessage("FriedLiver couldn't build the whole file for this change. The card shows the agent's own diff.");
+          return;
+        case 'stopAuto':
+          this.core.stopAuto(m.id);
           return;
         case 'allowAlways':
           await this.core.allowAlways(m.requestId !== undefined ? { requestId: m.requestId } : { commandId: m.commandId! }, m.grant);
@@ -988,6 +1003,14 @@ export class Controller {
     await vscode.commands.executeCommand('friedliver.agents.focus');
   }
 
+  /** Open Decision Inbox: the Agent Manager on its Inbox; a Manager still loading turns to it once ready. */
+  openInbox(): void {
+    const live = [...this.surfaces].find((s) => s.kind === 'tasks' && s.ready && s.visible());
+    this.openTasks();
+    if (live) post(live, { type: 'showInbox' });
+    else this.inboxWanted = true;
+  }
+
   openTasks(): void {
     if (this.tasksPanel) {
       this.tasksPanel.reveal();
@@ -1144,9 +1167,9 @@ export class Controller {
     if (n === 0) {
       this.statusItem.hide();
     } else {
-      this.statusItem.text = `$(bell-dot) ${n} decision${n === 1 ? '' : 's'} waiting`;
+      this.statusItem.text = `$(inbox) Inbox · ${n}`;
       this.statusItem.tooltip = new vscode.MarkdownString(['**Agents are waiting for you**', ...waiting.map((d) => `- ${d.title.replace(/[\\`*_[\]<>]/g, '\\$&')}`)].join('\n'));
-      this.statusItem.accessibilityInformation = { label: `${n} agent decision${n === 1 ? '' : 's'} waiting. Go to the next one.` };
+      this.statusItem.accessibilityInformation = { label: `${n} agent decision${n === 1 ? '' : 's'} waiting. Open the Inbox.` };
       this.statusItem.show();
     }
     // A zero badge hides it; clearing with undefined can leave the old count on the container.
@@ -1223,8 +1246,9 @@ export class Controller {
   }
 
   /** Commands wait in the chat; a notification offers Run only when it shows the whole command exactly as it will run. */
-  private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string }): void {
-    const shown = commandNotice(ask.commandLine);
+  private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string; careful?: boolean }): void {
+    // A careful command is allowed only by holding on its card: no Run here.
+    const shown = { ...commandNotice(ask.commandLine), ...(ask.careful ? { runnable: false } : {}) };
     if (shown.runnable) this.runnable.add(ask.commandId);
     const buttons = [
       ...(shown.runnable ? [{ title: 'Run', run: () => this.runnable.has(ask.commandId) && this.core.decideCommand(ask.commandId, true) }] : []),
@@ -1232,7 +1256,7 @@ export class Controller {
       ...(ask.chatId ? [{ title: 'Show', run: () => void this.showChat(ask.chatId!, ask.commandId) }] : []),
       this.manageButton,
     ];
-    const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${shown.runnable ? '' : ' (open the chat to see all of it)'}`;
+    const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${ask.careful ? ' (careful: allow it in the chat)' : shown.runnable ? '' : ' (open the chat to see all of it)'}`;
     this.notifyDecision(ask.commandId, ask.chatId, text, buttons);
   }
 
@@ -1258,13 +1282,13 @@ export class Controller {
   /** On every approval toast: the remembered "Always allow" answers, to look over or revoke. */
   private readonly manageButton = { title: 'Manage', run: () => this.managePermissions() };
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void {
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean }): void {
     if (isExternal(ask.chatId)) {
-      // No chat holds this request, so it always gets its own popup, whatever else is waiting.
+      // No chat holds this request, so it always gets its own popup, whatever else is waiting. Careful: once only.
       const buttons: Record<string, BridgeAnswer | 'manage'> = {
         Allow: 'allow',
-        'Allow for this session': 'allowChat',
-        ...(ask.always ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
+        ...(ask.careful ? {} : { 'Allow for this session': 'allowChat' as const }),
+        ...(ask.always && !ask.careful ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
         Deny: 'deny',
         Manage: 'manage',
       };
@@ -1277,10 +1301,15 @@ export class Controller {
       return;
     }
     const always = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId)?.always;
+    // A careful one (a purchase, a form submit) is allowed only by holding on its card.
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
-      { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
-      { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
-      ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
+      ...(ask.careful
+        ? []
+        : [
+            { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
+            { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
+            ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
+          ]),
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
       this.manageButton,
