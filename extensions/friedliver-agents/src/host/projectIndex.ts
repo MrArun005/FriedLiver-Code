@@ -4,9 +4,11 @@
 // editor side (projectIndexHost.ts) feeds it files and watches for changes.
 // ponytail: keywords only. Semantic embeddings would go beside the token index if keyword search falls short.
 import { execFile, spawn } from 'node:child_process';
-import { constants, type Stats } from 'node:fs';
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { MerkleTree } from './merkle';
 
 export const INDEX_LIMITS = {
   /** Files larger than this are not indexed. */
@@ -19,7 +21,12 @@ export const INDEX_LIMITS = {
   output: 20_000,
   /** Characters of one snippet line. */
   line: 200,
+  /** Paths index_changes lists at most. */
+  changes: 200,
 };
+
+/** Files whose stat checks run at once. */
+export const STAT_BATCH = 256;
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.hg', '.svn', 'out', '.next', '__pycache__', '.venv', 'venv', 'target', 'build', 'coverage']);
 const SECRET =
@@ -134,8 +141,11 @@ export function imports(file: string, text: string): string[] {
 
 interface Doc {
   rel: string;
-  mtime: number;
+  /** The file's mtime in nanoseconds, with its size the quick check before any read. */
+  mtimeNs: string;
   size: number;
+  /** SHA-256 of the content: the file's leaf in the Merkle tree. */
+  hash: string;
   len: number;
   tokens: Map<string, number>;
   symbols: Sym[];
@@ -166,6 +176,10 @@ export class ProjectIndex {
   /** Set once a cap stopped files from being indexed. */
   capped = false;
   private rootReal?: string;
+  /** The Merkle tree of the indexed files: always exactly the docs, by content hash. */
+  readonly tree = new MerkleTree();
+  /** Files stat'ed, read, and re-indexed (read with new content). For tests and the bench. */
+  readonly counts = { stat: 0, read: 0, reindex: 0 };
 
   constructor(
     readonly root: string,
@@ -287,37 +301,51 @@ export class ProjectIndex {
    * size cap, and its real path inside the folder's real path. Checked before every read, since the
    * file can change after it was indexed.
    */
-  private async check(rel: string): Promise<Stats | null> {
+  private async check(rel: string): Promise<{ size: number; mtimeNs: string } | null> {
     if (!this.allowed(rel)) return null;
     const abs = path.join(this.root, rel);
-    const st = await lstat(abs).catch(() => null);
+    this.counts.stat++;
+    const st = await lstat(abs, { bigint: true }).catch(() => null);
     if (!st || !st.isFile() || st.size > INDEX_LIMITS.fileBytes) return null;
     // A symlinked directory on the way out of the folder: lstat sees only the last part.
     this.rootReal ??= await realpath(this.root).catch(() => this.root);
     const real = await realpath(abs).catch(() => null);
-    return real && real.startsWith(this.rootReal + path.sep) ? st : null;
+    return real && real.startsWith(this.rootReal + path.sep) ? { size: Number(st.size), mtimeNs: st.mtimeNs.toString() } : null;
+  }
+
+  /** The text and content hash of an indexed file, re-checked first; drops the entry when anything is off. */
+  private async readChecked(rel: string): Promise<{ text: string; hash: string } | null> {
+    const got = (await this.check(rel)) ? (this.counts.read++, await readText(path.join(this.root, rel))) : null;
+    if (got === null) this.remove(rel);
+    return got;
   }
 
   /** The text of an indexed file, re-checked first; drops the entry when anything is off. */
   async read(rel: string): Promise<string | null> {
-    const text = (await this.check(rel)) ? await readText(path.join(this.root, rel)) : null;
-    if (text === null) this.remove(rel);
-    return text;
+    return (await this.readChecked(rel))?.text ?? null;
   }
 
   /**
    * Indexes (or re-indexes) one file, or drops it when it is gone, a symlink, outside the folder,
    * binary or too big. Returns false when a cap stopped it.
    */
-  async update(rel: string): Promise<boolean> {
+  async update(rel: string, checked?: Awaited<ReturnType<ProjectIndex['check']>>): Promise<boolean> {
     rel = rel.split(path.sep).join('/');
-    const st = await this.check(rel);
+    const st = checked === undefined ? await this.check(rel) : checked;
     if (!st) return this.remove(rel), true;
     const old = this.docs.get(rel);
-    if (old && old.mtime === st.mtimeMs && old.size === st.size) return true;
+    if (old && old.mtimeNs === st.mtimeNs && old.size === st.size) return true;
     if (!old && this.docs.size >= this.options.maxFiles) return (this.capped = true), false;
-    const text = await this.read(rel);
-    if (text === null) return true;
+    const got = await this.readChecked(rel);
+    if (got === null) return true;
+    // Stat changed, content did not (a checkout, a touch): keep the entry, note the new stat.
+    if (old && old.hash === got.hash) {
+      old.mtimeNs = st.mtimeNs;
+      old.size = st.size;
+      return true;
+    }
+    this.counts.reindex++;
+    const text = got.text;
     const tokens = new Map<string, number>();
     let len = 0;
     for (const t of tokenize(text)) {
@@ -326,7 +354,7 @@ export class ProjectIndex {
       else if (tokens.size < INDEX_LIMITS.tokensPerFile) tokens.set(t, 1);
     }
     for (const t of tokenize(rel)) tokens.set(t, (tokens.get(t) ?? 0) + 1);
-    const doc: Doc = { rel, mtime: st.mtimeMs, size: st.size, len, tokens, symbols: outline(rel, text), imports: imports(rel, text) };
+    const doc: Doc = { rel, mtimeNs: st.mtimeNs, size: st.size, hash: got.hash, len, tokens, symbols: outline(rel, text), imports: imports(rel, text) };
     this.remove(rel);
     if (this.bytes + cost(doc) > this.options.maxBytes) return (this.capped = true), false;
     this.add(doc);
@@ -337,6 +365,7 @@ export class ProjectIndex {
     const doc = this.docs.get(rel);
     if (!doc) return;
     this.docs.delete(rel);
+    this.tree.delete(rel);
     this.totalLen -= doc.len;
     this.bytes -= cost(doc);
     for (const t of doc.tokens.keys()) {
@@ -348,6 +377,7 @@ export class ProjectIndex {
 
   private add(doc: Doc): void {
     this.docs.set(doc.rel, doc);
+    this.tree.set(doc.rel, doc.hash);
     this.totalLen += doc.len;
     this.bytes += cost(doc);
     for (const [t, tf] of doc.tokens) {
@@ -355,6 +385,16 @@ export class ProjectIndex {
       if (!p) this.postings.set(t, (p = new Map()));
       p.set(doc.rel, tf);
     }
+  }
+
+  /**
+   * update() for many files: their checks (lstat, realpath) run concurrently, then each is applied in
+   * order, so caps hold exactly as one at a time. Stops at a cap; returns false then.
+   */
+  async updateBatch(rels: string[]): Promise<boolean> {
+    const checked = await Promise.all(rels.map((r) => this.check(r.split(path.sep).join('/'))));
+    for (let i = 0; i < rels.length; i++) if (!(await this.update(rels[i], checked[i])) && this.capped) return false;
+    return true;
   }
 
   /** Drops files that are no longer listed. */
@@ -454,22 +494,51 @@ export class ProjectIndex {
     return undefined;
   }
 
-  /** The index as plain JSON, to keep between sessions. */
+  /** The index as plain JSON, to keep between sessions: the docs (the tree's leaves) and the tree's kept roots. */
   toJSON(): object {
-    return { v: 1, docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })) };
+    return { v: 2, docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })), merkle: this.tree };
   }
 
-  /** Takes back a saved index; files that changed since are refreshed by the next update(). */
+  /**
+   * Takes back a saved index; files that changed since are refreshed by the next update(). Anything
+   * not version 2 or not well formed is left out, so the next build reads those files again. The
+   * last saved root becomes the tree's base: what "changed since the last open" compares with.
+   */
   async load(saved: unknown): Promise<void> {
-    const docs = (saved as { v?: number; docs?: unknown[] })?.v === 1 ? (saved as { docs: unknown[] }).docs : [];
-    for (const raw of Array.isArray(docs) ? docs : []) {
-      const d = raw as Doc & { tokens: [string, number][] };
-      if (typeof d?.rel !== 'string' || !Array.isArray(d.tokens) || !Array.isArray(d.symbols) || !Array.isArray(d.imports)) continue;
-      if (this.docs.size >= this.options.maxFiles) break;
+    const docs = (saved as { v?: number; docs?: unknown[] })?.v === 2 ? (saved as { docs: unknown[] }).docs : [];
+    const ok = (Array.isArray(docs) ? docs : []).filter((raw): raw is Doc & { tokens: [string, number][] } => {
+      const d = raw as Doc & { tokens: unknown };
+      return (
+        typeof d?.rel === 'string' &&
+        Array.isArray(d.tokens) &&
+        Array.isArray(d.symbols) &&
+        Array.isArray(d.imports) &&
+        typeof d.hash === 'string' &&
+        /^[0-9a-f]{64}$/.test(d.hash) &&
+        typeof d.mtimeNs === 'string' &&
+        /^\d+$/.test(d.mtimeNs) &&
+        typeof d.size === 'number'
+      );
+    });
+    for (let i = 0; i < ok.length && this.docs.size < this.options.maxFiles; i += STAT_BATCH) {
+      const batch = ok.slice(i, i + STAT_BATCH);
       // The saved file may be stale or tampered with: an entry is used only if its file passes today's checks.
-      if (!(await this.check(d.rel))) continue;
-      this.add({ ...d, tokens: new Map(d.tokens) });
+      const passed = await Promise.all(batch.map((d) => this.check(d.rel)));
+      for (let j = 0; j < batch.length && this.docs.size < this.options.maxFiles; j++) {
+        if (passed[j] && !this.docs.has(batch[j].rel)) this.add({ ...batch[j], tokens: new Map(batch[j].tokens) });
+      }
     }
+    if (docs.length && this.tree.load((saved as { merkle?: unknown }).merkle)) this.tree.base = this.tree.history.at(-1);
+  }
+
+  /**
+   * The files changed between a kept root (a full hash or a unique 8+ hex prefix; by default the
+   * tree as the project was last opened) and now. Null when there is no such root.
+   */
+  changes(since?: string, cap: number = INDEX_LIMITS.changes): { from: string; changes: { path: string; change: 'A' | 'M' | 'D' }[]; total: number } | null {
+    const from = since ? this.tree.resolve(since) : this.tree.base;
+    const d = from ? this.tree.diff(from, cap) : null;
+    return d && from ? { from, ...d } : null;
   }
 
   /** Matching lines of an indexed file for a search result: up to `max`, each cut to INDEX_LIMITS.line. */
@@ -479,21 +548,32 @@ export class ProjectIndex {
   }
 }
 
+/** Bytes per read, each fed to the hash as it arrives. */
+const CHUNK = 64 * 1024;
+
 /**
- * A regular file's text, or null when it looks binary, is too big, or can't be read. Opened without
- * following a symlink and checked on the open handle, so a swap after check() reads nothing.
+ * A regular file's text and the SHA-256 of exactly those bytes, or null when it looks binary, is too
+ * big, or can't be read. Opened without following a symlink and checked on the open handle, so a
+ * swap after check() reads nothing. Read in chunks, each hashed as it comes.
  */
-async function readText(abs: string): Promise<string | null> {
+async function readText(abs: string): Promise<{ text: string; hash: string } | null> {
   try {
     const fh = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const st = await fh.stat();
       if (!st.isFile() || st.size > INDEX_LIMITS.fileBytes) return null;
       const buf = Buffer.alloc(st.size);
-      const { bytesRead } = await fh.read(buf, 0, st.size, 0);
-      const data = buf.subarray(0, bytesRead);
+      const hash = createHash('sha256');
+      let off = 0;
+      while (off < st.size) {
+        const { bytesRead } = await fh.read(buf, off, Math.min(CHUNK, st.size - off), off);
+        if (!bytesRead) break;
+        hash.update(buf.subarray(off, off + bytesRead));
+        off += bytesRead;
+      }
+      const data = buf.subarray(0, off);
       if (data.subarray(0, 8192).includes(0)) return null;
-      return data.toString('utf8');
+      return { text: data.toString('utf8'), hash: hash.digest('hex') };
     } finally {
       await fh.close();
     }
@@ -501,6 +581,26 @@ async function readText(abs: string): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * Saves an index where only the user can read it: the folder 0700, the file 0600, written whole to
+ * a temporary file and renamed over the old one, so a crash never leaves half a file.
+ */
+export async function saveIndexFile(file: string, ix: ProjectIndex): Promise<void> {
+  const dir = path.dirname(file);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
+  const tmp = `${file}.${process.pid}.tmp`;
+  await rm(tmp, { force: true });
+  await writeFile(tmp, JSON.stringify(ix), { mode: 0o600, flag: 'wx' });
+  await rename(tmp, file);
+}
+
+/** A saved index as parsed JSON, or undefined when it is missing or not JSON; load() checks the rest. */
+export const readIndexFile = (file: string): Promise<unknown> =>
+  readFile(file, 'utf8')
+    .then((text) => JSON.parse(text) as unknown)
+    .catch(() => undefined);
 
 function matchingLines(text: string, query: string, max: number): { line: number; text: string }[] {
   const terms = [...new Set(query.toLowerCase().match(/[\w$]{2,}/g) ?? [])];
@@ -523,7 +623,8 @@ export type IndexCall =
   | { tool: 'index_search'; query: string; limit?: number }
   | { tool: 'index_symbols'; name: string }
   | { tool: 'index_outline'; path: string }
-  | { tool: 'index_related'; path: string };
+  | { tool: 'index_related'; path: string }
+  | { tool: 'index_changes'; since?: string };
 
 const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice(0, INDEX_LIMITS.output)}\n… (cut at ${INDEX_LIMITS.output} characters)` : text);
 
@@ -584,6 +685,32 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       const list = (xs: string[]) => (xs.length ? xs.slice(0, INDEX_LIMITS.results).map((x) => `  ${x}`).join('\n') : '  (none found)');
       const imp = r.imports.map((x) => (x.endsWith('(external)') ? x : shown(at[0], x)));
       return cap(`${call.path}\nImports:\n${list(imp)}\nImported by:\n${list(r.importedBy.map((x) => shown(at[0], x)))}`);
+    }
+    case 'index_changes': {
+      const id = (h: string) => h.slice(0, 12);
+      const parts: string[] = [];
+      for (const ix of indexes) {
+        const r = ix.changes(call.since);
+        const head = multi ? `${path.basename(ix.root)}: ` : '';
+        if (!r) {
+          if (!call.since) parts.push(`${head}No earlier project hash to compare with yet (the folder's first index). Now ${id(ix.tree.root())}.`);
+          continue;
+        }
+        const from = r.from === ix.tree.base ? `${id(r.from)} (when the project was opened)` : id(r.from);
+        const now = id(ix.tree.root());
+        if (!r.total) {
+          parts.push(`${head}Project hash ${now}, the same as ${r.from === ix.tree.base ? 'when the project was opened' : id(r.from)}. No files changed.`);
+          continue;
+        }
+        const lines = r.changes.map((c) => `${c.change} ${shown(ix, c.path)}`);
+        if (r.total > r.changes.length) lines.push(`… and ${r.total - r.changes.length} more`);
+        parts.push(`${head}Project hash ${now}: ${r.total} file${r.total === 1 ? '' : 's'} changed since ${from} (A added, M modified, D deleted)\n${lines.join('\n')}`);
+      }
+      if (!parts.length) {
+        const kept = indexes.flatMap((ix) => ix.tree.history.map((h) => (multi ? `${path.basename(ix.root)}: ` : '') + id(h)));
+        return `No kept project hash starts with ${call.since}. Kept: ${kept.join(', ') || 'none'}.`;
+      }
+      return cap(note + parts.join('\n\n'));
     }
   }
 }

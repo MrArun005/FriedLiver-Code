@@ -282,7 +282,7 @@
       },
       {
         "command": "friedliver.index.rebuild",
-        "title": "Rebuild Project Index",
+        "title": "Rebuild Project Index (full)",
         "category": "FriedLiver"
       }
     ],
