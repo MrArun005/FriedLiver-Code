@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer, type Server } from 'node:https';
 import type { AddressInfo, Socket } from 'node:net';
 import type { ActionResult } from './actions';
-import { sameSecret, type Device, type Devices, type Lockout, type Pairing } from './auth';
+import { deviceName, sameSecret, type Device, type Devices, type Lockout, type Pairing } from './auth';
 import { checkBindHost } from './net';
 import { parseRemoteAction, type PhoneChat, type PhoneEvent, type PhoneList, type RemoteAction } from './protocol';
 
@@ -20,6 +20,11 @@ const MAX_BODY = 256 * 1024;
 const TICKET_MS = 30_000;
 const PING_MS = 25_000;
 const MAX_SOCKETS = 20;
+/** Open connections in all, and from one address: a host on the network can't exhaust the extension host's sockets. */
+const MAX_CONNECTIONS = 64;
+const MAX_PER_IP = 16;
+/** A socket that buffers more than this for a phone that doesn't read is dropped. */
+const MAX_BUFFERED = 256 * 1024;
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 export interface RemoteHostApi {
@@ -54,6 +59,12 @@ export interface RemoteServerOptions {
   host: RemoteHostApi;
   assets: Assets;
   onPaired?(device: Device): void;
+  /** The Mac's OK for a phone that has the right code, before it gets a token. Without it: allowed. */
+  approvePairing?(name: string, ip: string): Promise<boolean>;
+  /** A device used this server for the first time since it started (HTTP or WebSocket). */
+  onSeen?(device: Device): void;
+  /** The port to try first (the last one used, so the phone's address stays the same). */
+  port?: number;
   /** Open sockets changed: who is connected now. */
   onConnections?(devices: Device[]): void;
   log?(line: string): void;
@@ -65,7 +76,8 @@ export interface RemoteServerOptions {
 interface Phone {
   socket: Socket;
   device: Device;
-  alive: boolean;
+  /** A ping is out and unanswered. */
+  pinged: boolean;
 }
 
 const json = (res: ServerResponse, status: number, body: unknown) => {
@@ -76,6 +88,8 @@ const json = (res: ServerResponse, status: number, body: unknown) => {
 export class RemoteServer {
   private readonly phones = new Set<Phone>();
   private readonly tickets = new Map<string, { deviceId: string; expires: number }>();
+  private readonly seen = new Set<string>();
+  private readonly perIp = new Map<string, number>();
   private pinger?: ReturnType<typeof setInterval>;
 
   private constructor(
@@ -93,12 +107,13 @@ export class RemoteServer {
     const started: { server: Server; endpoint: Endpoint; port: number }[] = [];
     try {
       for (const endpoint of options.endpoints) {
-        const server = createServer({ cert: endpoint.cert, key: endpoint.key, minVersion: 'TLSv1.2' });
+        const server = createServer({ cert: endpoint.cert, key: endpoint.key, minVersion: 'TLSv1.2', handshakeTimeout: 10_000 });
+        server.maxConnections = MAX_CONNECTIONS;
         server.headersTimeout = 10_000;
         server.requestTimeout = 15_000;
         server.keepAliveTimeout = 5_000;
         server.maxHeadersCount = 50;
-        const port = await listen(server, endpoint.host, started[0]?.port ?? 0);
+        const port = await listen(server, endpoint.host, started[0]?.port ?? options.port ?? 0);
         started.push({ server, endpoint, port });
       }
     } catch (err) {
@@ -107,6 +122,7 @@ export class RemoteServer {
     }
     const self = new RemoteServer(options, started);
     for (const s of started) {
+      s.server.on('connection', (socket: Socket) => self.connection(socket));
       s.server.on('request', (req, res) => void self.request(s, req, res));
       s.server.on('upgrade', (req, socket) => self.upgrade(s, req, socket as Socket));
       s.server.on('tlsClientError', () => {});
@@ -134,11 +150,13 @@ export class RemoteServer {
   /** The device's token stops working and its sockets close. */
   revoke(deviceId: string): void {
     this.options.devices.revoke(deviceId);
+    this.seen.delete(deviceId);
     this.drop((p) => p.device.id === deviceId);
   }
 
   revokeAll(): void {
     this.options.devices.revokeAll();
+    this.seen.clear();
     this.drop(() => true);
   }
 
@@ -158,6 +176,22 @@ export class RemoteServer {
   }
 
   // ---- HTTP ----
+
+  /** Before TLS: a locked-out address, or one with too many sockets open, is dropped at once. */
+  private connection(socket: Socket): void {
+    const ip = socket.remoteAddress ?? '';
+    const n = (this.perIp.get(ip) ?? 0) + 1;
+    if (this.options.lockout.blocked(ip) || n > MAX_PER_IP) {
+      socket.destroy();
+      return;
+    }
+    this.perIp.set(ip, n);
+    socket.once('close', () => {
+      const left = (this.perIp.get(ip) ?? 1) - 1;
+      if (left > 0) this.perIp.set(ip, left);
+      else this.perIp.delete(ip);
+    });
+  }
 
   private now(): number {
     return this.options.now?.() ?? Date.now();
@@ -195,6 +229,8 @@ export class RemoteServer {
       if (!this.sameSite(s, req, false)) return json(res, 421, { error: 'Wrong host.' });
       this.headers(s, req, res);
       if (this.options.lockout.blocked(ip)) return json(res, 429, { error: 'Too many failed attempts. Wait a few minutes.' });
+      // Another site's page (an <img>, a form) never reaches the API or the pairing.
+      if (req.headers['sec-fetch-site'] === 'cross-site') return json(res, 403, { error: 'Cross-site requests are refused.' });
       const url = new URL(req.url ?? '/', 'https://remote.invalid');
       const route = `${req.method} ${url.pathname}`;
       const asset = this.asset(url.pathname);
@@ -260,21 +296,34 @@ export class RemoteServer {
     // A browser always sends Origin on a POST from the page; anything else is refused.
     if (!this.sameSite(s, req, true)) return json(res, 403, { error: 'Pair from the page the QR code opens.' });
     const body = (await readJson(req)) as { code?: unknown; name?: unknown };
-    const paired = typeof body?.code === 'string' && body.code.length <= 64 ? this.options.pairing.redeem(body.code, typeof body.name === 'string' ? body.name : '') : undefined;
-    if (!paired) {
+    if (typeof body?.code !== 'string' || body.code.length > 64 || !this.options.pairing.claim(body.code)) {
       this.options.lockout.fail(ip);
       return json(res, 403, { error: 'That pairing code is wrong or has expired. Show a new QR code on your Mac.' });
     }
-    this.options.log?.(`Remote: paired ${paired.device.name}`);
+    const name = deviceName(body.name);
+    if (this.options.approvePairing && !(await this.options.approvePairing(name, ip))) {
+      return json(res, 403, { error: 'Your Mac didn’t allow this phone. Show a new QR code to try again.' });
+    }
+    const paired = this.options.devices.add(name);
+    this.options.log?.(`Remote: paired ${paired.device.name} from ${ip}`);
     this.options.onPaired?.(paired.device);
     json(res, 200, { token: paired.token, device: paired.device });
   }
 
+  /** The device whose token the request carries. A wrong token counts against the address; no token at all doesn't (a page's <img> could send that). */
   private authenticate(req: IncomingMessage, ip: string): Device | undefined {
-    const m = /^Bearer ([A-Za-z0-9_-]{1,256})$/.exec(req.headers.authorization ?? '');
+    if (req.headers.authorization === undefined) return undefined;
+    const m = /^Bearer ([A-Za-z0-9_-]{1,256})$/.exec(req.headers.authorization);
     const device = m ? this.options.devices.authenticate(m[1]) : undefined;
     if (!device) this.options.lockout.fail(ip);
+    else this.saw(device);
     return device;
+  }
+
+  private saw(device: Device): void {
+    if (this.seen.has(device.id)) return;
+    this.seen.add(device.id);
+    this.options.onSeen?.(device);
   }
 
   private ticket(device: Device): string {
@@ -318,10 +367,11 @@ export class RemoteServer {
       return refuse('401 Unauthorized');
     }
     if (this.phones.size >= MAX_SOCKETS) return refuse('503 Service Unavailable');
+    this.saw(device);
     const accept = createHash('sha1').update(key + WS_GUID).digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     socket.setNoDelay(true);
-    const phone: Phone = { socket, device, alive: true };
+    const phone: Phone = { socket, device, pinged: false };
     this.phones.add(phone);
     this.options.onConnections?.(this.connected());
     let buffered = Buffer.alloc(0);
@@ -334,7 +384,7 @@ export class RemoteServer {
         buffered = buffered.subarray(frame.size);
         if (frame.op === 0x8) return void socket.end(encodeFrame(0x8, Buffer.from([0x03, 0xe8])));
         if (frame.op === 0x9) socket.write(encodeFrame(0xa, frame.payload));
-        else if (frame.op === 0xa) phone.alive = true;
+        else if (frame.op === 0xa) phone.pinged = false;
         // The phone sends its actions over HTTPS; data frames here are refused.
         else return void socket.end(encodeFrame(0x8, Buffer.from([0x03, 0xeb])));
       }
@@ -348,7 +398,11 @@ export class RemoteServer {
 
   private broadcast(event: PhoneEvent, only?: (p: Phone) => boolean): void {
     const frame = encodeFrame(0x1, Buffer.from(JSON.stringify(event)));
-    for (const p of this.phones) if (!only || only(p)) p.socket.write(frame);
+    for (const p of this.phones) {
+      if (only && !only(p)) continue;
+      if (p.socket.writableLength > MAX_BUFFERED) p.socket.destroy();
+      else p.socket.write(frame);
+    }
   }
 
   private drop(which: (p: Phone) => boolean): void {
@@ -360,11 +414,11 @@ export class RemoteServer {
   /** A phone that missed the last ping is gone (asleep, out of range). */
   private ping(): void {
     for (const p of [...this.phones]) {
-      if (!p.alive) {
+      if (p.pinged) {
         p.socket.destroy();
         continue;
       }
-      p.alive = false;
+      p.pinged = true;
       p.socket.write(encodeFrame(0x9, Buffer.alloc(0)));
     }
   }
