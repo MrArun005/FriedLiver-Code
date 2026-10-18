@@ -161,6 +161,8 @@ export interface LinkItem {
   label: string;
   text: string;
   by: 'user' | 'agent';
+  /** When it arrived, by the host's clock (absent in chats saved before it was kept). */
+  at?: number;
 }
 
 /**
@@ -177,8 +179,8 @@ export type Item =
   /** `refs` (optional, added with the editor commands) is the code the message points at. */
   /** `checkpoint` (optional): the turn this message started, when its files were snapshotted ("Rewind to here"). */
   | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[]; at?: number; checkpoint?: string }
-  /** `at` (optional, on user and agent messages): when it was sent or began, by the host's clock. */
-  | { kind: 'agent'; text: string; at?: number }
+  /** `at` (optional, on user and agent messages): when it was sent or began, by the host's clock. `end`: when the reply's last words came. */
+  | { kind: 'agent'; text: string; at?: number; end?: number }
   | { kind: 'thought'; text: string }
   /**
    * `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short.
@@ -369,8 +371,8 @@ export const MAX_ITEM_TEXT = 512 * 1024;
 /** Transcript items kept per chat. Past it the oldest replies and steps go; nothing that waits for you does. */
 export const MAX_ITEMS = 2000;
 
-/** Items that keep when they arrived: your messages, and everything that waits for you. */
-const STAMPED = new Set<Item['kind']>(['user', 'permission', 'review', 'command', 'bridge', 'question']);
+/** Items that keep when they arrived: your messages, messages between chats, and everything that waits for you. */
+const STAMPED = new Set<Item['kind']>(['user', 'link', 'permission', 'review', 'command', 'bridge', 'question']);
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.t) {
@@ -583,9 +585,9 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate, at?: numbe
       const kind = update.sessionUpdate === 'agent_message_chunk' ? 'agent' : 'thought';
       if (last?.kind === kind) {
         if (last.text.length > MAX_ITEM_TEXT) return items; // Already cut off.
-        return [...items.slice(0, -1), { ...last, text: capText(last.text + update.content.text) }];
+        return [...items.slice(0, -1), { ...last, text: capText(last.text + update.content.text), ...(last.kind === 'agent' && at !== undefined ? { end: at } : {}) }];
       }
-      return [...items, { kind, text: capText(update.content.text), ...(kind === 'agent' && at !== undefined ? { at } : {}) }];
+      return [...items, { kind, text: capText(update.content.text), ...(kind === 'agent' && at !== undefined ? { at, end: at } : {}) }];
     }
     case 'tool_call': {
       const streamed = streamedOutput(update._meta);

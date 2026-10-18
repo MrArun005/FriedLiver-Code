@@ -2240,6 +2240,11 @@ button.rewind-btn {
 .rewind-btn:focus-visible {
   opacity: 1;
 }
+/* Its time (§2.32), left of Rewind on the first line; floated, so it never adds a line. */
+.user-msg .msg-when {
+  float: right;
+  margin-left: var(--sp-2);
+}
 
 /* The agent's reply: plain text, Claude Code's paragraph rhythm. */
 .prose {
@@ -2361,6 +2366,11 @@ button.rewind-btn {
 .prose:hover .msg-tools .copy-btn,
 .msg-tools .copy-btn:focus-visible {
   opacity: 1;
+}
+/* Left of Copy, floated so it sits on the reply's first line as the box's corner time does, not centred on the button. */
+.msg-tools .msg-when {
+  float: left;
+  margin-right: var(--sp-1);
 }
 
 /* Code blocks: the code on its own tone, no border, no header; the tools show on hover. */

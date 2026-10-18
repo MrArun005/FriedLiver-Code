@@ -1177,6 +1177,24 @@ textarea.fl-input {
   margin-left: var(--sp-1);
 }
 
+/* ---- Timestamp (§2.32): when a message was sent; shown while its message is hovered or focused ---- */
+
+.fl-time {
+  color: var(--fg-2);
+  /* --t-85 of the base size, not of the text around it: 11px in a smaller card head too. */
+  font-size: calc(var(--fs) * 0.85);
+  font-weight: 400;
+  line-height: var(--lh);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+[data-stamp]:hover .fl-time,
+[data-stamp]:focus-within .fl-time {
+  opacity: 1;
+}
+
 /* ---- Toast (§2.13): glass r8, elevation 3, bottom right; a draining bar while it counts down ---- */
 
 .fl-toasts {
@@ -2724,6 +2742,9 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   .fl-dot[data-state='working'],
   .fl-progress[data-indeterminate] > i {
     animation: none;
+  }
+  .fl-time {
+    transition: none;
   }
 }
 
