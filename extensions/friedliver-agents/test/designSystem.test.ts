@@ -4,7 +4,7 @@
 //     colours, raw px for radius / height / padding / font-size, or box-shadow / backdrop-filter
 //     values that aren't a token; and may not restyle a button, pill, field or component — only
 //     place it (margin, flex, grid, position, width, display).
-//  2. Webview TSX outside src/webview/ui/ may not draw a raw <button>, <input>, <textarea> or <select>.
+//  2. Webview and phone-app TSX outside src/webview/ui/ may not draw a raw <button>, <input>, <textarea> or <select>.
 //
 // What the code did before the rule is the baseline (test/fixtures/ds-baseline.json). It is a
 // ratchet: a count above it fails, and so does one below it until the baseline is lowered to
@@ -18,7 +18,9 @@ import { describe, expect, it } from 'vitest';
 
 const root = path.join(__dirname, '..');
 const media = path.join(root, 'media');
-const webview = path.join(root, 'src/webview');
+const src = path.join(root, 'src');
+// Every surface's TSX: the webviews and the phone app (FriedLiver Remote).
+const SURFACES = [path.join(src, 'webview'), path.join(src, 'remote/phone')];
 const baselineFile = path.join(__dirname, 'fixtures/ds-baseline.json');
 const SYSTEM = new Set(['tokens.css', 'components.css']);
 
@@ -126,8 +128,8 @@ function current() {
       .map((f) => [f, cssReport(f)]),
   );
   const tsx = Object.fromEntries(
-    tsxFiles(webview)
-      .map((f) => [path.relative(webview, f), rawControls(f)] as const)
+    SURFACES.flatMap(tsxFiles)
+      .map((f) => [path.relative(src, f), rawControls(f)] as const)
       .filter(([, n]) => n > 0)
       .sort(([a], [b]) => a.localeCompare(b)),
   );
