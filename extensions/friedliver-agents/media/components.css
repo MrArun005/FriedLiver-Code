@@ -73,21 +73,25 @@
   height: var(--i-sm);
   margin: 0;
 }
-/* A key: the text's own size, 1px 4px, r3 on the code tone. */
+/* A key: the text's own size on a 16px line, so 18 tall with its border; r3 on the code tone. */
 :where(kbd),
 .fl-kbd {
-  padding: 1px var(--sp-1);
+  display: inline-block;
+  min-width: var(--h-xs);
+  padding: 0 var(--sp-1);
   border: var(--line) solid var(--border);
   border-radius: var(--r-3);
   background: var(--code-bg);
   color: var(--fg-2);
   font: inherit;
+  line-height: var(--h-2xs);
+  text-align: center;
   white-space: nowrap;
 }
 /* A key inside a button: no box, 55%, after the label ("Allow ⏎"). */
 .fl-kbd--inline {
   min-width: 0;
-  height: auto;
+  line-height: inherit;
   padding: 0;
   border: 0;
   background: none;
@@ -1331,7 +1335,7 @@ textarea.fl-input {
   text-overflow: ellipsis;
 }
 
-/* ---- List row / tree row (§2.17): 26 tall, r4; indent 16 a level ---- */
+/* ---- List row / tree row (§2.17): 26 tall, r4; indent 12 a level ---- */
 
 .fl-row {
   --level: 1;
@@ -1340,7 +1344,7 @@ textarea.fl-input {
   gap: var(--sp-2);
   min-width: 0;
   min-height: var(--h-md);
-  padding: var(--sp-1) var(--sp-2) var(--sp-1) calc(var(--sp-2) + (var(--level) - 1) * var(--sp-4));
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) calc(var(--sp-2) + (var(--level) - 1) * var(--sp-3));
   border: 0;
   border-radius: var(--r-row);
   background: none;

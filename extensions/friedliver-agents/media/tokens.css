@@ -232,6 +232,9 @@ body.vscode-high-contrast-light {
   --overlay: #00000066;
   --glass-alpha: 80%;
   --seg-on: var(--bg);
+  /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
+  --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+  --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
 }
 /* High Contrast: every control and container shows the theme's contrast border; the active one its
    active border. No glass, no shadows, no tints standing in for edges. */
@@ -260,11 +263,20 @@ body.vscode-high-contrast-light {
   --elev-4: none;
   --primary-bg: var(--fg);
   --primary-fg: var(--bg);
+  --seg-on: transparent;
+  --ghost-hover: transparent;
+  /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
+  --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+  --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
 }
 @media (prefers-reduced-transparency: reduce) {
-  :root {
+  :root,
+  body {
     --glass-alpha: 100%;
     --glass-blur: none;
+    /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
+    --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+    --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
   }
 }
 
