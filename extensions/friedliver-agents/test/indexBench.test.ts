@@ -20,7 +20,9 @@ const opts = { maxFiles: 1_000_000, maxBytes: 8 * 1024 ** 3 };
 async function open(file: string, saved: boolean) {
   const t = performance.now();
   const ix = new ProjectIndex(repo!, opts);
-  if (saved) ix.load(await readIndexFile(file));
+  const parsed = saved ? await readIndexFile(file) : undefined;
+  const read = performance.now() - t;
+  if (saved) ix.load(parsed);
   const ready = performance.now() - t;
   let searchReady = 0;
   let verified = 0;
@@ -30,7 +32,8 @@ async function open(file: string, saved: boolean) {
   ]);
   if (!saved) searchReady = verified;
   const indexed = (await ix.list()).filter((r) => ix.has(r));
-  const out = { mode, ready, searchReady, verified, counts: { ...ix.counts }, size: ix.size, root: ix.tree.root(), changed: ix.changes()?.total, indexed };
+  const timings = { readTreeFile: read, ...ix.timings };
+  const out = { mode, ready, searchReady, verified, counts: { ...ix.counts }, size: ix.size, root: ix.tree.root(), changed: ix.changes()?.total, indexed, timings };
   ix.tree.snapshot();
   await saveIndexFile(file, ix);
   return out; // the index itself is dropped: three of TypeScript's at once do not fit a runner
@@ -70,6 +73,8 @@ describe.skipIf(!repo)('project index re-open bench', () => {
       ...rows.map(([name, r]) => `| ${name} | ${name === 'Full build' ? '–' : ms(r.ready)} | ${ms(r.searchReady)} | ${ms(r.verified)} | ${r.mode} | ${r.counts.stat} | ${r.counts.read} | ${r.counts.reindex} |`),
       '',
       `Changed since the open (edited run): ${edited.changed}`,
+      '',
+      ...rows.map(([name, r]) => `${name} phases: ${Object.entries(r.timings).map(([k, v]) => `${k} ${v.toFixed(0)} ms`).join(', ')}`),
     ].join('\n');
     console.log(table);
     if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, table + '\n');
