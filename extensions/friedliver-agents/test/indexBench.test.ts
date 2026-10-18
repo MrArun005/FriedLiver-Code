@@ -25,7 +25,10 @@ describe.skipIf(!repo)('project index re-open bench', () => {
     const json = JSON.stringify(full.ix);
     const saved = JSON.parse(json);
 
-    const ts = (await full.ix.list()).filter((r) => r.startsWith('src/') && r.endsWith('.ts') && full.ix.has(r));
+    // Any indexed files, spread over the tree.
+    const indexed = (await full.ix.list()).filter((r) => full.ix.has(r));
+    const ts = Array.from({ length: 20 }, (_, i) => indexed[Math.floor((i * indexed.length) / 20)]);
+    expect(new Set(ts).size).toBe(20);
     for (const r of ts.slice(0, 10)) await appendFile(path.join(repo!, r), '\n// touched by the index bench\n');
     const edited = await open(saved);
 
