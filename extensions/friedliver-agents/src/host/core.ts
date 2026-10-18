@@ -159,6 +159,8 @@ export interface CoreOptions {
   bridgeScript?: string;
   /** Does the browser_* tools' calls (browser.ts); without it they say there is no browser. */
   browser?: ToolHost['browser'];
+  /** Whether read_chat between linked chats skips the user's OK (friedliver.chat.autoAllowLinkedReads). */
+  autoAllowLinkedReads?: () => boolean;
   /** Whether the external client's browser actions skip the user's OK (friedliver.browser.externalAutoApprove). */
   externalAutoApprove?: () => boolean;
   /** The browser page's origin and whether a selector there is a password field (browser.ts). */
@@ -370,6 +372,7 @@ export class AgentCore {
       cancel: (chatId) => this.cancel(chatId),
       browser: options.browser,
       externalAutoApprove: options.externalAutoApprove,
+      autoAllowLinkedReads: options.autoAllowLinkedReads,
       browserPage: options.browserPage,
       index: options.index,
       system: options.system,

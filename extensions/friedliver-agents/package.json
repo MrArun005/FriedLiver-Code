@@ -637,6 +637,12 @@
     "configuration": {
       "title": "FriedLiver Agents",
       "properties": {
+        "friedliver.chat.autoAllowLinkedReads": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Lets an agent read the chat that handed it its task, or that consulted it, without asking each time. Off by default: reading another chat waits for your OK. Read from your user settings only."
+        },
         "friedliver.chat.fontFamily": {
           "type": "string",
           "default": "",

@@ -229,6 +229,7 @@ export class Controller {
       agentToAgent: () => this.agentToAgent(),
       browser: (chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin, chatId),
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
+      autoAllowLinkedReads: () => userSetting(vscode.workspace.getConfiguration('friedliver.chat').inspect<unknown>('autoAllowLinkedReads')).value === true,
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
       indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),

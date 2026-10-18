@@ -22,7 +22,7 @@ describe('hand-off context', () => {
 });
 
 describe('read_chat between linked chats', () => {
-  function host(links: AppState['links']) {
+  function host(links: AppState['links'], autoAllow?: boolean) {
     let state: AppState = [chat('chat-1'), chat('chat-2'), chat('chat-3')].reduce((s, c) => reduce(s, { t: 'created', chat: c }), EMPTY_STATE);
     for (const link of links) state = reduce(state, { t: 'link', link });
     let n = 0;
@@ -38,13 +38,29 @@ describe('read_chat between linked chats', () => {
       consult: async () => '',
       message: () => {},
       cancel: async () => {},
+      ...(autoAllow === undefined ? {} : { autoAllowLinkedReads: () => autoAllow }),
     };
     return h;
   }
   const link = (kind: 'handoff' | 'consult' | 'pipe', from: string, to: string) => ({ id: `${from}-${to}`, kind, from, to, by: 'user' as const, createdAt: 0, active: true, count: 0 });
 
-  it('needs no OK to read the chat that handed off to or consulted this one, and still asks otherwise', async () => {
-    const r = new BridgeRequests(host([link('handoff', 'chat-1', 'chat-2'), link('consult', 'chat-3', 'chat-2')]));
+  const pending = async (p: Promise<unknown>) => {
+    let settled = false;
+    void p.then(() => (settled = true), () => (settled = true));
+    await new Promise((res) => setTimeout(res, 50));
+    return !settled;
+  };
+
+  it('asks as before unless friedliver.chat.autoAllowLinkedReads is on', async () => {
+    const signal = new AbortController().signal;
+    for (const auto of [undefined, false]) {
+      const r = new BridgeRequests(host([link('handoff', 'chat-1', 'chat-2')], auto));
+      expect(await pending(r.call('chat-2', { tool: 'read_chat', chatId: 'chat-1' }, signal))).toBe(true);
+    }
+  });
+
+  it('with the setting on, needs no OK to read the chat that handed off to or consulted this one, and still asks otherwise', async () => {
+    const r = new BridgeRequests(host([link('handoff', 'chat-1', 'chat-2'), link('consult', 'chat-3', 'chat-2')], true));
     const signal = new AbortController().signal;
     await expect(r.call('chat-2', { tool: 'read_chat', chatId: 'chat-1' }, signal)).resolves.toContain('chat-1');
     await expect(r.call('chat-2', { tool: 'read_chat', chatId: 'chat-3' }, signal)).resolves.toContain('chat-3');

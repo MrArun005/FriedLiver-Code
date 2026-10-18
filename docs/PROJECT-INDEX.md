@@ -185,8 +185,10 @@ of a file that still passes them.
   privately and named.
 - A hand-off carries a summary (task, the user's asks, where the agent
   stopped, open questions, plan, commands, files with their hash) instead of
-  the transcript; `read_chat` brings the conversation, without asking when the
-  user linked the two chats.
+  the transcript; `read_chat` brings the conversation. It asks first, as any
+  read of another chat does, unless `friedliver.chat.autoAllowLinkedReads`
+  (user settings, default off) lets it read a chat linked by that hand-off or
+  consultation without asking.
 - Near a full context (85%) a chat is offered the agent's own `/compact`.
 - Prompt caching: rules (Claude: system prompt), then the map, then the
   message, byte-identical across sessions with the same rules; tools and
