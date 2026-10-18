@@ -570,6 +570,9 @@ BLOCKS.F19 = async () => {
   c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'Run this:\n\n```ts\nexport const SESSION_STORE_CONNECTION_STRING = process.env.SESSION_STORE_URL ?? \'redis://localhost:6379/0?pool=16&timeout=2500\';\n```' }];
   await snapshot(p, state, 'chat-c5');
   await p.waitForTimeout(200);
+  // Wrap is on by default; with it off, a long line scrolls.
+  await p.locator('.prose .code-block').last().hover();
+  await p.locator('.prose .code-block').last().locator('button.wrap-btn').click();
   const pre = p.locator('pre.code').last();
   const info = await pre.evaluate((el) => ({ over: el.scrollWidth > el.clientWidth, tab: el.tabIndex, bg: window.getComputedStyle(el).backgroundImage, attach: window.getComputedStyle(el).backgroundAttachment }));
   check(info.over && info.tab === 0, `code that scrolls can be focused to scroll by keyboard [${JSON.stringify({ over: info.over, tab: info.tab })}]`);
@@ -931,6 +934,228 @@ BLOCKS.ACCOUNTS = async () => {
       if (width === 1200) await p.screenshot({ path: path.join(review, `accounts-${theme}.png`), fullPage: false });
       await p.close();
     }
+  }
+};
+
+// ---- FULLWIDTH: your message's box spans the transcript, however short (like Claude Code's prompt box) ----
+BLOCKS.FULLWIDTH = async () => {
+  const content = (p) =>
+    p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      const cs = window.getComputedStyle(t);
+      return t.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    });
+  const width = (p, sel) => p.locator(sel).first().evaluate((e) => e.getBoundingClientRect().width);
+  for (const w of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', w, 800);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    const filler = { kind: 'agent', at: Date.now(), text: Array.from({ length: 40 }, (_, n) => `Line ${n + 1}.`).join('\n\n') };
+    c5.items = [{ kind: 'user', text: 'Fix the login bug.', images: [], checkpoint: 'turn-1' }, filler, ...c5.items];
+    await snapshot(p, state, 'chat-c5');
+    await p.waitForTimeout(200);
+    const want = await content(p);
+    const left = await p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      return t.getBoundingClientRect().left + parseFloat(window.getComputedStyle(t).paddingLeft);
+    });
+    const box = await p.locator('.user-msg .bubble').first().evaluate((e) => e.getBoundingClientRect().toJSON());
+    check(Math.abs(box.width - want) <= 0.5 && Math.abs(box.left - left) <= 0.5, `at ${w}px a 4-word message's box spans the transcript [${Math.round(box.width)} of ${Math.round(want)}]`);
+    const text = await p.locator('.user-msg .bubble-text').first().evaluate((e) => window.getComputedStyle(e).textAlign);
+    check(/start|left/.test(text), 'its text stays left');
+    // The sticky copy, once scrolled past.
+    await p.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
+    await p.waitForTimeout(100);
+    await p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      t.scrollTop = document.querySelector('.user-msg').getBoundingClientRect().bottom - t.getBoundingClientRect().top + 300;
+    });
+    await p.waitForTimeout(200);
+    const sticky = await width(p, '.sticky-prompt .bubble').catch(() => -1);
+    check(Math.abs(sticky - want) <= 0.5, `at ${w}px the sticky copy spans it too [${Math.round(sticky)}]`);
+    await p.close();
+  }
+  const q = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 800);
+  const want = await content(q);
+  const queued = await width(q, '.bubble.queued').catch(() => -1);
+  check(Math.abs(queued - want) <= 0.5, `a queued message spans it too [${Math.round(queued)} of ${Math.round(want)}]`);
+  await q.close();
+};
+
+// ---- VIEWER: one image viewer from every entry point, with the whole set: arrows, filmstrip, counter, zoom, Esc ----
+BLOCKS.VIEWER = async () => {
+  const review = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  const count = (p) => p.locator('.viewer-count').innerText().then((t) => t.replace(/\s+/g, ' ').trim());
+  const title = (p) => p.locator('.viewer .preview-title').innerText();
+  for (const width of [1200, 640]) {
+    // A step's thumbnail: the chat's images, in transcript order.
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 800);
+    await p.waitForSelector('.step-image img');
+    const thumb = p.locator('.step-image .image-thumb').nth(1);
+    await thumb.click();
+    await p.waitForSelector('.viewer .preview-img');
+    check((await count(p)) === '2 / 2' && (await title(p)) === 'Login page mockup', `${width}: a step thumbnail opens the viewer on it, with the chat's set [${await count(p)}]`);
+    check((await p.locator('.viewer-strip .viewer-thumb').count()) === 2 && (await p.locator('.viewer-thumb[aria-selected="true"]').count()) === 1, `${width}: the filmstrip shows the set, the current one marked`);
+    await p.keyboard.press('ArrowLeft');
+    check((await count(p)) === '1 / 2' && (await title(p)) === 'Screenshot of localhost:3000/login', `${width}: ← goes to the previous image`);
+    await p.keyboard.press('ArrowLeft');
+    check((await count(p)) === '1 / 2', `${width}: and stops at the first`);
+    await p.keyboard.press('End');
+    check((await count(p)) === '2 / 2', `${width}: End goes to the last`);
+    await p.keyboard.press('Home');
+    check((await count(p)) === '1 / 2', `${width}: Home to the first`);
+    await p.locator('.viewer-thumb').nth(1).click();
+    check((await count(p)) === '2 / 2', `${width}: a filmstrip thumbnail jumps to it`);
+    await p.waitForFunction(() => document.querySelector('.viewer .preview-img')?.complete);
+    // Zoom: + in, − out, 0 back to fit; double-click toggles 100%.
+    const scale = () => p.locator('.viewer-scale').innerText().then((t) => t.trim());
+    await p.keyboard.press('+');
+    const zin = await scale();
+    await p.keyboard.press('+');
+    const zin2 = await scale();
+    await p.keyboard.press('-');
+    const zout = await scale();
+    await p.keyboard.press('0');
+    check(zin !== 'Fit' && parseInt(zin2) > parseInt(zin) && zout === zin && (await scale()) === 'Fit', `${width}: + zooms in, − out, 0 fits [${zin} ${zin2} ${zout}]`);
+    await p.locator('.viewer-canvas').dblclick();
+    const hundred = await scale();
+    await p.locator('.viewer-canvas').dblclick();
+    check(/^(100|200)%$/.test(hundred) && (await scale()) === 'Fit', `${width}: double-click toggles 100% (2× for a small image) and fit [${hundred}]`);
+    if (width === 1200 || width === 640) await p.screenshot({ path: path.join(review, `viewer-${width}.png`) });
+    await p.keyboard.press('Escape');
+    check(!(await p.locator('.viewer').count()), `${width}: Esc closes it`);
+    await p.waitForTimeout(50);
+    check(await thumb.evaluate((t) => document.activeElement === t), `${width}: focus goes back to the thumbnail`);
+    // The header's Images strip opens the same viewer.
+    await p.click('.images-pill');
+    await p.locator('.image-strip .image-thumb').first().click();
+    check((await count(p)) === '1 / 2', `${width}: the header's Images strip opens it too`);
+    await p.keyboard.press('Escape');
+    await p.close();
+  }
+  // The Images view: its tab, filter and search order.
+  const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', 1200, 900);
+  await p.waitForSelector('.gallery-card');
+  const n = await p.locator('.gallery-card').count();
+  await p.locator('.gallery-card').nth(2).click();
+  await p.waitForSelector('.viewer');
+  check((await count(p)) === `3 / ${n}` && (await p.locator('.viewer-thumb').count()) === n, `the Images view opens it on the card with its whole result [${await count(p)}]`);
+  await p.keyboard.press('ArrowRight');
+  const shown = (await p.locator('.gallery-card .gallery-title').allInnerTexts())[3];
+  check((await title(p)) === shown, `→ follows the view’s order [${await title(p)} | ${shown}]`);
+  await p.close();
+};
+
+// ---- WRAP: long lines wrap in a step's IN/OUT; code blocks wrap too, with a Wrap toggle; output opens in a wrapping editor tab ----
+BLOCKS.WRAP = async () => {
+  const long = 'echo ' + 'a-very-long-argument '.repeat(30);
+  for (const width of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 900);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    c5.items = [
+      ...c5.items,
+      { kind: 'tool', id: 'wrap-1', title: long, tool: 'Bash', toolKind: 'execute', status: 'completed', locations: [], cmd: { line: long }, out: [{ t: 'text', text: 'OUT ' + 'x'.repeat(600) }] },
+      { kind: 'agent', at: Date.now(), text: 'Here:\n\n```sh\n' + long + '\n```' },
+    ];
+    await snapshot(p, state, 'chat-c5');
+    const step = p.locator('#item-wrap-1');
+    await step.waitFor();
+    if (!(await step.locator('.tool-body').count())) await step.locator('.step-main').click();
+    const wide = (sel) => p.locator(sel).evaluateAll((els) => els.map((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 })));
+    const io = await wide('#item-wrap-1 .tool-cell pre.code');
+    check(io.length >= 2 && io.every((r) => r.ws === 'pre-wrap' && !r.over), `at ${width}px IN and OUT wrap long lines [${JSON.stringify(io)}]`);
+    const block = p.locator('.prose .code-block').last();
+    const before = await block.locator('pre.code').evaluate((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 }));
+    check(before.ws === 'pre-wrap' && !before.over, `at ${width}px a code block wraps by default [${JSON.stringify(before)}]`);
+    await block.hover();
+    const toggle = block.locator('button.wrap-btn');
+    check((await toggle.getAttribute('aria-pressed')) === 'true', 'its toolbar has Wrap, on');
+    await toggle.click();
+    const after = await block.locator('pre.code').evaluate((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 }));
+    check(after.ws === 'pre' && after.over && (await toggle.getAttribute('aria-pressed')) === 'false', `at ${width}px Wrap off scrolls it sideways [${JSON.stringify(after)}]`);
+    // Open in editor: the host opens it as friedliver-output, which wraps.
+    await step.locator('.step-output .tool-cell').hover();
+    await step.locator('.step-output button[aria-label="Open in editor"]').click();
+    const sent = (await posted(p)).filter((m) => m.type === 'openText').at(-1);
+    check(sent?.text?.startsWith('OUT xxx'), 'Open in editor sends the output to an editor tab');
+    await p.close();
+  }
+};
+
+// ---- LINKS: a web link clicked in any view goes to the host to open (FriedLiver's browser or, with Cmd/Ctrl, the system's); other schemes don't open ----
+BLOCKS.LINKS = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  const state = fixture(Date.now()).state;
+  const c5 = state.chats.find((c) => c.id === 'chat-c5');
+  c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'See [the docs](https://example.com/docs?a=1) and [bad](javascript:alert(1)) and [data](data:text/html,x).' }];
+  await snapshot(p, state, 'chat-c5');
+  const reply = p.locator('.prose').last();
+  await reply.locator('a:has-text("the docs")').click();
+  let last = (await posted(p)).filter((m) => m.type === 'openLink').at(-1);
+  check(last?.url === 'https://example.com/docs?a=1' && last.modifier === false, `a click on a web link asks the host to open it [${JSON.stringify(last)}]`);
+  await reply.locator('a:has-text("the docs")').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
+  last = (await posted(p)).filter((m) => m.type === 'openLink').at(-1);
+  check(last?.modifier === true, 'Cmd/Ctrl-click says so, for the other browser');
+  const before = (await posted(p)).length;
+  for (const name of ['bad', 'data']) if (await reply.locator(`a:has-text("${name}")`).count()) await reply.locator(`a:has-text("${name}")`).click();
+  const after = (await posted(p)).slice(before);
+  check(!after.some((m) => m.type === 'openLink') && p.url().startsWith('http://127.0.0.1'), `javascript: and data: links open nothing [${JSON.stringify(after)}]`);
+  await p.close();
+  // The Accounts page: "Open links in" as a two-way choice.
+  const a = await open('surface=accounts&theme=dark-2026', 1200, 900);
+  const seg = a.locator('.acct-links [role="radio"]');
+  check((await seg.allInnerTexts()).join('|') === 'FriedLiver browser|System browser' && (await a.locator('.acct-links [aria-checked="true"]').innerText()) === 'FriedLiver browser', 'Agents & Accounts shows where links open');
+  await seg.nth(1).click();
+  check((await posted(a)).some((m) => m.type === 'setLinks' && m.mode === 'external'), 'choosing System browser sets it');
+  await a.close();
+};
+
+// ---- DETAIL: the map's detail panel stays in view wherever you scrolled; a bottom sheet when narrow ----
+BLOCKS.DETAIL = async () => {
+  for (const width of [1200, 640]) {
+    const p = await open('surface=tasks&theme=dark-2026&view=map', width, 800);
+    await p.evaluate((ss) => window.postMessage({ type: 'claudeSessions', sessions: ss }, '*'), [bigSession(Date.now())]);
+    await p.locator('.map-fold').last().waitFor();
+    await p.locator('.map-fold').last().click();
+    await p.waitForTimeout(150);
+    // Scroll to the bottom, then pick the last agent.
+    await p.evaluate(() => {
+      const m = document.querySelector('.manager');
+      m.scrollTop = m.scrollHeight;
+    });
+    // SVG takes the attribute in lower case: with "tabIndex" the nodes were never focusable.
+    check(await p.locator('.map-sub').first().evaluate((g) => g.getAttribute('tabindex') === '0' && (g.focus(), document.activeElement === g)), 'map nodes take keyboard focus');
+    const last = p.locator('.map-sub:not(.map-fold)').last();
+    const name = (await last.getAttribute('aria-label')).replace('Subagent: ', '');
+    await last.click();
+    const panel = p.locator('.map-detail');
+    await panel.waitFor();
+    await p.waitForTimeout(300);
+    const r = await panel.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: window.innerHeight, w: Math.round(b.width), vw: window.innerWidth, pos: window.getComputedStyle(el).position, radius: window.getComputedStyle(el).borderTopLeftRadius };
+    });
+    const shown = await panel.locator('.tip-title').innerText();
+    check(r.top >= 0 && r.top < r.h && shown === name, `at ${width}px the panel is in view and shows the agent clicked at the bottom [${JSON.stringify(r)} ${shown}]`);
+    if (width === 640) check(r.pos === 'fixed' && r.bottom === r.h && r.w === r.vw && r.radius === '12px' && (await panel.locator('.sheet-handle').count()) === 1, `at 640px it is a bottom sheet with a handle [${JSON.stringify(r)}]`);
+    else check(r.pos === 'sticky' && r.bottom <= r.h, `at 1200px it sticks in the right column [${r.pos}]`);
+    check(await p.evaluate(() => !!document.activeElement?.closest('.map-detail')), 'focus moves into it');
+    // Another agent updates it in place; the page doesn't jump.
+    const prev = p.locator('.map-sub:not(.map-fold)').nth(-2);
+    // Above the sheet when narrow.
+    await prev.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    const scroll = await p.evaluate(() => document.querySelector('.manager').scrollTop);
+    const prevName = (await prev.getAttribute('aria-label')).replace('Subagent: ', '');
+    await prev.click({ force: true });
+    const now2 = { title: await panel.locator('.tip-title').innerText(), scroll: await p.evaluate(() => document.querySelector('.manager').scrollTop) };
+    check(now2.title === prevName && Math.abs(now2.scroll - scroll) < 2, `picking another agent updates it in place [${now2.title} vs ${prevName}; ${scroll} -> ${now2.scroll}]`);
+    await p.screenshot({ path: path.join(os.homedir(), `code/FriedLiver-Code-design/review/detail-${width === 640 ? 'sheet-640' : 'panel-1200'}.png`) }).catch(() => {});
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(100);
+    const back = await p.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    check(!(await p.locator('.map-detail').count()) && back === `Subagent: ${prevName}`, `Esc closes it and focus goes back to the agent [${back}]`);
+    await p.close();
   }
 };
 

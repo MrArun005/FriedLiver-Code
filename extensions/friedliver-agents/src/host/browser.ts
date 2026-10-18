@@ -6,6 +6,7 @@
 // integrated browser's own persistent session (workbench.browser.dataStorage),
 // never the user's system browser. It opens only when the user asks
 // (FriedLiver: Open Browser) or allows an agent's browser_open.
+import { linkDestination, linkTarget } from '../shared/links';
 import { mkdir } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
@@ -239,6 +240,41 @@ export class BrowserPanel implements vscode.Disposable {
       return;
     }
     await this.openTab(this.context.globalState.get<string>(URL_KEY) ?? 'about:blank', false);
+  }
+
+  /** A link the user clicked: a new tab of the browser on the right, never the agents' own tab. */
+  async openUserTab(url: string): Promise<void> {
+    const first = !vscode.window.browserTabs.length;
+    await vscode.window.openBrowserTab(url, { viewColumn: vscode.ViewColumn.Two });
+    if (first) await this.layout(clampBrowserWidth(this.context.globalState.get(WIDTH_KEY)));
+  }
+
+  /**
+   * Links opened anywhere in the editor (Markdown previews, hovers, the editor, the terminal) come here
+   * while friedliver.links.openIn is builtin. Needs the externalUriOpener proposal; without it nothing changes.
+   * The editor still applies a per-site choice from workbench.externalUriOpeners first.
+   */
+  registerLinkOpener(mode: () => unknown): void {
+    if (!this.supported()) return;
+    try {
+      const preferred = vscode.ExternalUriOpenerPriority?.Preferred ?? 3;
+      const none = vscode.ExternalUriOpenerPriority?.None ?? 0;
+      this.subscriptions.push(
+        vscode.window.registerExternalUriOpener(
+          'friedliver.browser',
+          {
+            canOpenExternalUri: (uri) => (linkTarget(uri.toString(true))?.kind === 'web' && linkDestination(mode(), false) === 'builtin' ? preferred : none),
+            openExternalUri: (uri) => {
+              const t = linkTarget(uri.toString(true));
+              return t?.kind === 'web' ? this.openUserTab(t.url) : undefined;
+            },
+          },
+          { schemes: ['http', 'https'], label: 'FriedLiver browser' },
+        ),
+      );
+    } catch (err) {
+      this.log(`Links keep opening in the system browser outside chats: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** One agent tool call (bridgeRequests.ts already checked the URL and got the user's OK). */

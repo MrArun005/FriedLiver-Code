@@ -1,5 +1,6 @@
+import { linkTarget } from '../shared/links';
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
@@ -19,6 +20,22 @@ const vscode = acquireVsCodeApi();
 export function send(message: WebviewMessage | AccountsMessage): void {
   vscode.postMessage(message);
 }
+
+// Links, in every view: a web link goes to the host, which opens it in FriedLiver's browser or the system's
+// (friedliver.links.openIn, the other way with Cmd/Ctrl); a file: link opens in the editor if it is in the
+// workspace; any other scheme (javascript:, data:, vscode:, …) opens nothing. In-page "#" links keep their own handlers.
+function onLink(e: MouseEvent): void {
+  if (e.button > 1) return;
+  const a = (e.target as Element | null)?.closest?.('a[href]');
+  const href = a?.getAttribute('href') ?? '';
+  if (!a || href.startsWith('#')) return;
+  e.preventDefault();
+  const t = linkTarget(href);
+  if (t?.kind === 'web') send({ type: 'openLink', url: t.url, modifier: e.metaKey || e.ctrlKey });
+  else if (t?.kind === 'file') send({ type: 'openFile', path: t.path });
+}
+document.addEventListener('click', onLink, true);
+document.addEventListener('auxclick', onLink, true);
 
 /** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
 let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
@@ -398,11 +415,16 @@ export const longTitle = (title: string) => title.includes('\n') || title.length
 /** A fenced code block: the code on its own tone; its language, Run in terminal (shell code), Insert and Copy show on hover. */
 function CodeBlock({ lang, code, chatId }: { lang: string; code: string; chatId?: string }) {
   const run = chatId ? runnableCode(lang, code) : undefined;
+  // Long lines wrap; Wrap off keeps them whole, to scroll sideways.
+  const [wrap, setWrap] = useState(true);
   return (
-    <div class="code-block">
+    <div class="code-block" data-wrap={wrap ? '' : undefined}>
       <Code code={code} lang={lang} />
       <div class="code-tools">
         <span class="code-lang">{lang || 'code'}</span>
+        <button type="button" class="ghost sm wrap-btn" aria-pressed={wrap} title={wrap ? 'Long lines wrap: click to keep them whole' : 'Wrap long lines'} onClick={() => setWrap(!wrap)}>
+          Wrap
+        </button>
         {run && chatId && <RunButton chatId={chatId} command={run} />}
         <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
           Insert
@@ -485,7 +507,7 @@ function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
           </PathLink>
         );
       case 'link':
-        // VS Code opens webview links through its own link protection.
+        // A click goes through onLink above: the host opens it (FriedLiver's browser or the system's).
         return (
           <a key={i} href={p.href} title={p.href}>
             {p.v}
@@ -499,6 +521,7 @@ function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
 
 const ICONS = {
   plus: 'M8 3v10M3 8h10',
+  minus: 'M3 8h10',
   hand: 'M5 8.5V3.25a1.1 1.1 0 0 1 2.2 0V7.5M7.2 7V2.25a1.1 1.1 0 0 1 2.2 0V7.5M9.4 7.5V3.25a1.1 1.1 0 0 1 2.2 0v6c0 3-2 5-4.6 5-1.8 0-3-1-3.9-2.5L1.9 9.2a1.1 1.1 0 0 1 1.9-1.1L5 9.75',
   slash: 'M2.5 2.5h11v11h-11zM9.5 4.75l-3 6.5',
   clock: 'M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM8 5v3.25l2 1.25',
@@ -849,9 +872,13 @@ export function useNearScreen(ref: { current: Element | null }): boolean {
 }
 
 /** A step's image with its title; click opens the editor's image preview. Name only when it can't be shown. */
+/** Opens the image viewer on a file, with its chat's images around it; a surface without a viewer opens the editor's preview. */
+export const OpenImage = createContext<((path: string, from: HTMLElement) => void) | null>(null);
+
 export function ImageThumb({ path, title }: { path: string; title: string }) {
   const src = useHostImage('imageThumb', path);
-  const open = () => send({ type: 'openImage', path });
+  const viewer = useContext(OpenImage);
+  const open = (e: Event) => (viewer ? viewer(path, e.currentTarget as HTMLElement) : send({ type: 'openImage', path }));
   if (src === null) {
     return (
       <span class="image-thumb missing" title={path}>

@@ -102,6 +102,8 @@
   --r-5: 5px;
   --r-6: 6px;
   --r-8: 8px;
+  /* Sheets that rise from the bottom edge. */
+  --r-12: 12px;
   --r-pill: 9999px;
   --r-round: 50%;
   --sp-1: 4px;
@@ -120,6 +122,7 @@
   --shadow-thumb: 0 1px 2px #0003;
   --shadow-ctx: 0 2px 8px #00000026;
   --shadow-tip: 0 2px 6px #00000026;
+  --shadow-sheet: 0 -8px 24px #00000059;
 
   /* Layers */
   --z-content: 1;
@@ -2421,16 +2424,94 @@ button.gallery-card:focus-visible {
   min-height: 0;
   padding: var(--sp-4) var(--sp-2);
 }
+/* The image fits the canvas; zoomed, it is its scaled size, centred plus the pan, and drags. */
+.viewer-canvas {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+.viewer-canvas[data-zoomed] {
+  cursor: grab;
+}
+.viewer-canvas[data-zoomed]:active {
+  cursor: grabbing;
+}
 .preview-img {
-  justify-self: center;
   max-width: 100%;
   max-height: 100%;
   min-height: 0;
   object-fit: contain;
   border-radius: var(--r-4);
+  user-select: none;
 }
-.preview-stage .preview-img {
-  max-height: calc(100vh - 160px);
+.viewer-canvas[data-zoomed] .preview-img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+.viewer-count {
+  flex: none;
+  min-width: 48px;
+  color: var(--fg-2);
+  font-size: var(--t-90);
+  font-variant-numeric: tabular-nums;
+}
+.viewer-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: var(--sp-2);
+}
+button.viewer-scale {
+  min-width: 48px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+/* The filmstrip: the set along the bottom, the current one ringed. */
+.viewer-strip {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+button.viewer-thumb {
+  flex: none;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  background: var(--input-bg);
+  overflow: hidden;
+  opacity: 0.7;
+}
+button.viewer-thumb:hover {
+  opacity: 1;
+}
+button.viewer-thumb[aria-selected='true'] {
+  border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
+  opacity: 1;
+}
+.viewer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.viewer-thumb-name {
+  color: var(--fg-2);
+  font-size: var(--t-75);
 }
 .preview-none {
   justify-self: center;
@@ -2445,6 +2526,9 @@ button.preview-nav {
   border-radius: var(--r-round);
   background: var(--menu-bg);
   color: var(--fg-2);
+}
+button.preview-nav:disabled {
+  opacity: 0.3;
 }
 button.preview-nav:hover:not(:disabled) {
   color: var(--fg);
@@ -2523,19 +2607,72 @@ button.mini-select {
   flex: 1;
   min-width: 0;
 }
+/* The detail panel stays in view wherever the page is scrolled: sticky in the right column, its own scroll. */
 .map-detail {
+  position: sticky;
+  top: var(--sp-3);
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
   width: 300px;
-  max-height: 70vh;
+  max-height: calc(100vh - 2 * var(--sp-3));
   overflow: auto;
-  padding: 10px var(--sp-3);
+  padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--menu-bg);
   font-size: var(--t-90);
+  outline: none;
+}
+.sheet-handle {
+  display: none;
+}
+/* Narrow: a bottom sheet over the page, 60% high, rounded on top, with a handle to drag it away. */
+@media (max-width: 900px) {
+  .map-detail {
+    position: fixed;
+    z-index: var(--z-overlay);
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: 60vh;
+    max-height: 60vh;
+    padding-top: 0;
+    border-width: 1px 0 0;
+    border-radius: var(--r-12) var(--r-12) 0 0;
+    box-shadow: var(--shadow-sheet);
+    animation: sheet-up 0.2s ease-out;
+  }
+  /* Room under the page for the sheet, so the agents it covers can still scroll above it. */
+  .manager:has(.map-detail) {
+    padding-bottom: calc(60vh + var(--sp-5));
+  }
+  .sheet-handle {
+    display: block;
+    flex: none;
+    align-self: center;
+    width: 36px;
+    height: 4px;
+    margin: var(--sp-2) 0;
+    border-radius: var(--r-pill);
+    background: var(--fg-2);
+    opacity: 0.5;
+    cursor: grab;
+    touch-action: none;
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-detail {
+    animation: none;
+  }
 }
 .map-detail-steps {
   margin: 0;
@@ -3302,9 +3439,10 @@ body[data-surface='chat'] {
 .transcript > * + .user-msg {
   margin-top: var(--turn-gap);
 }
+/* Your message's box spans the transcript, however short, like Claude Code's prompt box. */
 .user-msg .bubble {
   position: relative;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   margin: var(--sp-1) 0;
   padding: var(--sp-1) 6px;
@@ -3375,9 +3513,10 @@ button.msg-more {
   max-width: 120px;
   border-radius: var(--r-4);
 }
+/* In the box's top-right corner: floated so text wraps around it, with negative margins so a one-line box doesn't grow. */
 button.rewind-btn {
-  flex: none;
-  margin-top: 6px;
+  float: right;
+  margin: -2px -4px -6px var(--sp-2);
   color: var(--fg-2);
   opacity: 0;
 }
@@ -3544,6 +3683,14 @@ pre.code {
     linear-gradient(to left, var(--code-bg) 40%, transparent) right / var(--sp-5) 100% no-repeat local,
     linear-gradient(to left, color-mix(in srgb, var(--fg) 14%, transparent), transparent) right / var(--sp-4) 100% no-repeat scroll,
     var(--code-bg);
+}
+/* A code block in a reply wraps unless its Wrap is off. */
+.code-block[data-wrap] pre.code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+button.wrap-btn[aria-pressed='true'] {
+  color: var(--fg);
 }
 pre.code:focus-visible {
   outline: 1px solid var(--focus);
@@ -3797,10 +3944,6 @@ button.step-main:active {
   font-size: var(--t-100);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.tool-cell pre.code.keep {
-  white-space: pre;
-  overflow-wrap: normal;
 }
 .tool-cell pre.code.capped {
   max-height: 60px;
@@ -5373,6 +5516,22 @@ button.cc-mic[data-state='stopping']::after {
   border-radius: var(--r-8);
   background: var(--input-bg);
   scroll-margin-top: var(--sp-3);
+}
+/* "Open links in": a setting row on the page's own card style, the choice as a segmented control. */
+.acct-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.acct-links h2 {
+  font-size: var(--t-100);
+  font-weight: 600;
+  color: var(--sel-fg);
+}
+.acct-links .hint {
+  margin: 2px 0 0;
 }
 .acct-card[data-focused] {
   border-color: var(--focus);
