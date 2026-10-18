@@ -891,6 +891,13 @@
           "default": false,
           "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
         },
+        "friedliver.usage.dailyTokenWarning": {
+          "scope": "machine",
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Warns once a day when the tokens the agents report for today, across the chats in a window, pass this many. Counted on this computer only; nothing is sent anywhere. `0` (the default) turns it off."
+        },
         "friedliver.system.enabled": {
           "type": "boolean",
           "default": true,
