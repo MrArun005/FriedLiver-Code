@@ -6,8 +6,10 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Store } from '../host/permissions';
 
 export const PAIRING_TTL_MS = 2 * 60_000;
-/** Wrong codes, from anywhere, before the code on screen stops working. */
-export const MAX_BAD_CODES = 10;
+/** Wrong codes, from anywhere, before the code on screen stops working: a backstop; each address is locked out after five. */
+export const MAX_BAD_CODES = 30;
+/** A device unused this long is forgotten: its token stops working. */
+export const IDLE_DAYS = 30;
 export const MAX_DEVICES = 10;
 export const DEVICES_KEY = 'friedliver.remote.devices';
 
@@ -42,21 +44,30 @@ export function deviceName(raw: unknown): string {
   return name || 'Phone';
 }
 
-/** Paired devices, by token hash, in the user's own storage (globalState). */
+/**
+ * Paired devices, by token hash, in the user's own storage (globalState, which every window shares).
+ * Read fresh for every check and changed read-modify-write, so a device revoked in one window is
+ * revoked in all, and a window never writes back a stale list.
+ */
 export class Devices {
-  private saved: Saved[];
   private written = new Map<string, number>();
 
   constructor(
     private readonly store: Store,
     private readonly now: () => number = Date.now,
-  ) {
-    const raw = store.get<Saved[]>(DEVICES_KEY);
-    this.saved = Array.isArray(raw) ? raw.filter((d) => d && typeof d.hash === 'string' && /^[0-9a-f]{64}$/.test(d.hash) && typeof d.id === 'string') : [];
+  ) {}
+
+  /** The stored devices, without any unused for IDLE_DAYS. */
+  private load(): Saved[] {
+    const raw = this.store.get<Saved[]>(DEVICES_KEY);
+    const at = this.now();
+    return Array.isArray(raw)
+      ? raw.filter((d) => d && typeof d.hash === 'string' && /^[0-9a-f]{64}$/.test(d.hash) && typeof d.id === 'string' && at - (Number(d.lastSeen) || 0) < IDLE_DAYS * 86_400_000)
+      : [];
   }
 
   list(): Device[] {
-    return this.saved.map(shown);
+    return this.load().map(shown);
   }
 
   /** A new device and its token; the token is shown to the phone once and never kept. The oldest goes past MAX_DEVICES. */
@@ -64,8 +75,7 @@ export class Devices {
     const token = randomBytes(32).toString('base64url');
     const at = this.now();
     const device: Saved = { id: randomBytes(8).toString('hex'), name: deviceName(name), createdAt: at, lastSeen: at, hash: hashToken(token) };
-    this.saved = [...this.saved, device].slice(-MAX_DEVICES);
-    this.save();
+    this.save([...this.load(), device].slice(-MAX_DEVICES));
     return { token, device: shown(device) };
   }
 
@@ -73,34 +83,33 @@ export class Devices {
   authenticate(token: string): Device | undefined {
     if (typeof token !== 'string' || !token || token.length > 256) return undefined;
     const hash = Buffer.from(hashToken(token), 'hex');
+    const saved = this.load();
     let found: Saved | undefined;
-    for (const d of this.saved) if (timingSafeEqual(hash, Buffer.from(d.hash, 'hex'))) found = d;
+    for (const d of saved) if (timingSafeEqual(hash, Buffer.from(d.hash, 'hex'))) found = d;
     if (!found) return undefined;
     const at = this.now();
     found.lastSeen = at;
     if (at - (this.written.get(found.id) ?? -Infinity) >= SEEN_WRITE_MS) {
       this.written.set(found.id, at);
-      this.save();
+      this.save(saved);
     }
     return shown(found);
   }
 
   has(id: string): boolean {
-    return this.saved.some((d) => d.id === id);
+    return this.load().some((d) => d.id === id);
   }
 
   revoke(id: string): void {
-    this.saved = this.saved.filter((d) => d.id !== id);
-    this.save();
+    this.save(this.load().filter((d) => d.id !== id));
   }
 
   revokeAll(): void {
-    this.saved = [];
-    this.save();
+    this.save([]);
   }
 
-  private save(): void {
-    void Promise.resolve(this.store.update(DEVICES_KEY, this.saved)).catch(() => {});
+  private save(list: Saved[]): void {
+    void Promise.resolve(this.store.update(DEVICES_KEY, list)).catch(() => {});
   }
 }
 
@@ -127,19 +136,24 @@ export class Pairing {
     this.current = undefined;
   }
 
-  /** A new device for the right code, in time; the code is gone either way once it worked. */
-  redeem(code: string, name: string): { token: string; device: Device } | undefined {
+  /** True for the right code, in time; the code is gone once it worked. */
+  claim(code: string): boolean {
     const c = this.current;
     if (!c || this.now() >= c.expires) {
       this.current = undefined;
-      return undefined;
+      return false;
     }
     if (!sameSecret(code, c.code)) {
       if (++c.bad >= MAX_BAD_CODES) this.current = undefined;
-      return undefined;
+      return false;
     }
     this.current = undefined;
-    return this.devices.add(name);
+    return true;
+  }
+
+  /** claim, then a new device. */
+  redeem(code: string, name: string): { token: string; device: Device } | undefined {
+    return this.claim(code) ? this.devices.add(name) : undefined;
   }
 }
 

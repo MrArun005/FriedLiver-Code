@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICES_KEY, Devices, Lockout, MAX_BAD_CODES, PAIRING_TTL_MS, Pairing, deviceName, hashToken } from '../src/remote/auth';
+import { DEVICES_KEY, Devices, IDLE_DAYS, Lockout, MAX_BAD_CODES, PAIRING_TTL_MS, Pairing, deviceName, hashToken } from '../src/remote/auth';
 import { memoryStore } from './helpers';
 
 describe('pairing codes', () => {
@@ -30,6 +30,16 @@ describe('pairing codes', () => {
     expect(pairing.redeem(old, 'x')).toBeUndefined();
     for (const bad of ['', code.slice(1), `${code}x`, code.toUpperCase() === code ? code.toLowerCase() : code.toUpperCase()]) expect(pairing.redeem(bad, 'x')).toBeUndefined();
     expect(pairing.redeem(code, 'x')).toBeDefined();
+  });
+
+  it('can be claimed without adding a device, for the Mac to approve first', () => {
+    const devices = new Devices(memoryStore());
+    const pairing = new Pairing(devices, () => 0);
+    const code = pairing.start().code;
+    expect(pairing.claim('nope')).toBe(false);
+    expect(pairing.claim(code)).toBe(true);
+    expect(pairing.claim(code)).toBe(false);
+    expect(devices.list()).toEqual([]);
   });
 
   it('burns the code after too many wrong guesses, wherever they come from', () => {
@@ -84,6 +94,33 @@ describe('device tokens', () => {
     again.revokeAll();
     expect(again.authenticate(b.token)).toBeUndefined();
     expect(new Devices(store).list()).toEqual([]);
+  });
+
+  it('are revoked for every window at once, and a stale window never brings one back', () => {
+    let now = 0;
+    const store = memoryStore();
+    const a = new Devices(store, () => now);
+    const b = new Devices(store, () => now);
+    const phone = a.add('Phone');
+    const other = b.add('Other');
+    expect(a.authenticate(other.token)).toBeDefined();
+    a.revoke(phone.device.id);
+    expect(b.authenticate(phone.token)).toBeUndefined();
+    // B writes lastSeen for its own device: the revoked one stays gone, A's devices stay.
+    now += 120_000;
+    expect(b.authenticate(other.token)).toBeDefined();
+    expect(new Devices(store, () => now).list().map((d) => d.name)).toEqual(['Other']);
+  });
+
+  it('expire after a month unused', () => {
+    let now = 0;
+    const devices = new Devices(memoryStore(), () => now);
+    const { token } = devices.add('A');
+    now += (IDLE_DAYS - 1) * 86_400_000;
+    expect(devices.authenticate(token)).toBeDefined();
+    now += (IDLE_DAYS + 1) * 86_400_000;
+    expect(devices.authenticate(token)).toBeUndefined();
+    expect(devices.list()).toEqual([]);
   });
 
   it('say when a device was last seen', () => {
