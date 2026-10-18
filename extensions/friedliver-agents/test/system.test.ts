@@ -460,3 +460,14 @@ describe('PowerShell templates', () => {
     }
   });
 });
+
+describe('settings (friedliver.system.*)', () => {
+  it('come from the user only: a workspace can neither turn them on nor let Full auto cover them', async () => {
+    const { systemSettings } = await import('../src/host/system');
+    expect(systemSettings(() => undefined)).toEqual({ enabled: true, fullAutoAllowed: false, tools: Object.fromEntries(SYSTEM_TOOLS.map((t) => [t, true])) });
+    const fromWorkspace = systemSettings((k) => ({ defaultValue: k === 'fullAutoAllowed' ? false : k === 'enabled' ? true : {}, workspaceValue: k === 'fullAutoAllowed' ? true : k === 'enabled' ? true : {} }));
+    expect(fromWorkspace.fullAutoAllowed).toBe(false);
+    const user = systemSettings((k) => ({ globalValue: k === 'enabled' ? false : k === 'fullAutoAllowed' ? true : { system_clipboard_read: false, system_open: 'yes' } }));
+    expect(user).toMatchObject({ enabled: false, fullAutoAllowed: true, tools: { system_clipboard_read: false, system_open: true } });
+  });
+});

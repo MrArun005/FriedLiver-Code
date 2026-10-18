@@ -298,6 +298,11 @@
         "command": "friedliver.index.rebuild",
         "title": "Rebuild Project Index",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.system.showLog",
+        "title": "Show System Actions Log",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
@@ -784,6 +789,82 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
+        },
+        "friedliver.system.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Let agents ask to act on your Mac or Windows PC through the `system_*` tools: open apps, files and links, bring apps to the front, use the clipboard, show notifications, change the volume, run Shortcuts and screenshot a window. Each action asks you first and is logged in **FriedLiver: System Actions**. Not available on Linux. See docs/SYSTEM-CONTROL.md."
+        },
+        "friedliver.system.fullAutoAllowed": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Let chats on Full auto use the `system_*` tools without asking. Off: they still ask. Reading the clipboard, window screenshots and terminal-like apps ask every time either way. Only your user settings count."
+        },
+        "friedliver.system.tools": {
+          "type": "object",
+          "scope": "machine",
+          "markdownDescription": "Turn single `system_*` tools on or off.",
+          "properties": {
+            "system_open": {
+              "type": "boolean",
+              "default": true,
+              "description": "Open apps, files and links"
+            },
+            "system_apps": {
+              "type": "boolean",
+              "default": true,
+              "description": "List apps and windows"
+            },
+            "system_focus": {
+              "type": "boolean",
+              "default": true,
+              "description": "Bring an app to the front"
+            },
+            "system_shortcut": {
+              "type": "boolean",
+              "default": true,
+              "description": "Run an Apple Shortcut (macOS)"
+            },
+            "system_clipboard_read": {
+              "type": "boolean",
+              "default": true,
+              "description": "Read the clipboard (asked every time)"
+            },
+            "system_clipboard_write": {
+              "type": "boolean",
+              "default": true,
+              "description": "Copy text to the clipboard"
+            },
+            "system_notify": {
+              "type": "boolean",
+              "default": true,
+              "description": "Show a notification"
+            },
+            "system_volume": {
+              "type": "boolean",
+              "default": true,
+              "description": "Read or change the volume"
+            },
+            "system_screenshot_window": {
+              "type": "boolean",
+              "default": true,
+              "description": "Screenshot a window (asked every time)"
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "system_open": true,
+            "system_apps": true,
+            "system_focus": true,
+            "system_shortcut": true,
+            "system_clipboard_read": true,
+            "system_clipboard_write": true,
+            "system_notify": true,
+            "system_volume": true,
+            "system_screenshot_window": true
+          }
         },
         "friedliver.inlineEdit.agent": {
           "type": "string",

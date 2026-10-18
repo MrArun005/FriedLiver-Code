@@ -112,5 +112,7 @@ export function accountsFixture(now = Date.now()) {
       chosen: {},
     },
   ];
-  return { cards, showDemo: true };
+  const tools = ['system_open', 'system_apps', 'system_focus', 'system_shortcut', 'system_clipboard_read', 'system_clipboard_write', 'system_notify', 'system_volume', 'system_screenshot_window'];
+  const system = { supported: true, platform: 'mac', enabled: true, fullAutoAllowed: false, tools: Object.fromEntries(tools.map((t) => [t, t !== 'system_volume'])) };
+  return { cards, showDemo: true, system };
 }

@@ -271,7 +271,8 @@ export class BridgeRequests {
         requestId: this.host.id('bridge'),
         tool: call.tool,
         target: { system: shown },
-        text: prepared.text,
+        // The title already names an app or a Shortcut.
+        text: prepared.text === shown ? '' : prepared.text,
         state: 'awaiting',
         ...(once ? { once: true as const } : {}),
         ...(remembered ? { auto: `Always allowed${prepared.target ? `: ${shown}` : ''}` } : fullAuto ? { auto: 'Full auto' } : {}),
