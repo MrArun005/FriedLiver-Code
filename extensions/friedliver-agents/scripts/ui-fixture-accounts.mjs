@@ -112,5 +112,5 @@ export function accountsFixture(now = Date.now()) {
       chosen: {},
     },
   ];
-  return { cards, showDemo: true };
+  return { cards, showDemo: true, links: 'builtin' };
 }

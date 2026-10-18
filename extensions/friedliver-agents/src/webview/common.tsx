@@ -1,3 +1,4 @@
+import { linkTarget } from '../shared/links';
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { highlight } from '../shared/highlight';
@@ -19,6 +20,22 @@ const vscode = acquireVsCodeApi();
 export function send(message: WebviewMessage | AccountsMessage): void {
   vscode.postMessage(message);
 }
+
+// Links, in every view: a web link goes to the host, which opens it in FriedLiver's browser or the system's
+// (friedliver.links.openIn, the other way with Cmd/Ctrl); a file: link opens in the editor if it is in the
+// workspace; any other scheme (javascript:, data:, vscode:, …) opens nothing. In-page "#" links keep their own handlers.
+function onLink(e: MouseEvent): void {
+  if (e.button > 1) return;
+  const a = (e.target as Element | null)?.closest?.('a[href]');
+  const href = a?.getAttribute('href') ?? '';
+  if (!a || href.startsWith('#')) return;
+  e.preventDefault();
+  const t = linkTarget(href);
+  if (t?.kind === 'web') send({ type: 'openLink', url: t.url, modifier: e.metaKey || e.ctrlKey });
+  else if (t?.kind === 'file') send({ type: 'openFile', path: t.path });
+}
+document.addEventListener('click', onLink, true);
+document.addEventListener('auxclick', onLink, true);
 
 /** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
 let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
@@ -490,7 +507,7 @@ function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
           </PathLink>
         );
       case 'link':
-        // VS Code opens webview links through its own link protection.
+        // A click goes through onLink above: the host opens it (FriedLiver's browser or the system's).
         return (
           <a key={i} href={p.href} title={p.href}>
             {p.v}

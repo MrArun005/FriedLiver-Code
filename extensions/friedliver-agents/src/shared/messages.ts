@@ -4,6 +4,7 @@ import type { AgentRoster } from './accounts';
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import type { DictationUpdate } from './dictation';
 import type { OutsideImages } from './gallery';
+import { linkTarget } from './links';
 import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
 import { typeable } from './steps';
@@ -48,6 +49,8 @@ export type WebviewMessage =
   | { type: 'revealImage'; path: string }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
+  /** A web link you clicked: where it opens is the friedliver.links.openIn setting, the other way with Cmd/Ctrl. */
+  | { type: 'openLink'; url: string; modifier: boolean }
   /** A step's input or output, or an agent's text, in an editor tab of its own (word-wrapped, see package.json). */
   | { type: 'openText'; text: string }
   /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
@@ -317,6 +320,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'unqueue':
     case 'steer':
       return id(m.chatId) && id(m.id) ? { type: m.type, chatId: m.chatId, id: m.id } : null;
+    case 'openLink': {
+      const t = typeof m.url === 'string' ? linkTarget(m.url) : null;
+      return t?.kind === 'web' ? { type: 'openLink', url: t.url, modifier: m.modifier === true } : null;
+    }
     case 'openText':
       return str(m.text, LIMITS.copy) && m.text ? { type: 'openText', text: m.text } : null;
     case 'copy':

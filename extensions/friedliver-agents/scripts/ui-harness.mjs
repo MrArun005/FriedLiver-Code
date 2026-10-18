@@ -349,7 +349,7 @@ async function shoot() {
     const p = await open('surface=accounts&focus=gemini', 900, 700);
     await p.waitForTimeout(50);
     check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
-    check((await p.locator('.acct-card').count()) === 4, 'a card per agent, Demo included when shown');
+    check((await p.locator('.acct-card:not(.acct-links)').count()) === 4, 'a card per agent, Demo included when shown');
     const codex = p.locator('#card-codex');
     check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
     await codex.locator('button:has-text("ChatGPT")').click();

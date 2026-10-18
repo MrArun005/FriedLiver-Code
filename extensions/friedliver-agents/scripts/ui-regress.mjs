@@ -1083,6 +1083,34 @@ BLOCKS.WRAP = async () => {
   }
 };
 
+// ---- LINKS: a web link clicked in any view goes to the host to open (FriedLiver's browser or, with Cmd/Ctrl, the system's); other schemes don't open ----
+BLOCKS.LINKS = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  const state = fixture(Date.now()).state;
+  const c5 = state.chats.find((c) => c.id === 'chat-c5');
+  c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'See [the docs](https://example.com/docs?a=1) and [bad](javascript:alert(1)) and [data](data:text/html,x).' }];
+  await snapshot(p, state, 'chat-c5');
+  const reply = p.locator('.prose').last();
+  await reply.locator('a:has-text("the docs")').click();
+  let last = (await posted(p)).filter((m) => m.type === 'openLink').at(-1);
+  check(last?.url === 'https://example.com/docs?a=1' && last.modifier === false, `a click on a web link asks the host to open it [${JSON.stringify(last)}]`);
+  await reply.locator('a:has-text("the docs")').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
+  last = (await posted(p)).filter((m) => m.type === 'openLink').at(-1);
+  check(last?.modifier === true, 'Cmd/Ctrl-click says so, for the other browser');
+  const before = (await posted(p)).length;
+  for (const name of ['bad', 'data']) if (await reply.locator(`a:has-text("${name}")`).count()) await reply.locator(`a:has-text("${name}")`).click();
+  const after = (await posted(p)).slice(before);
+  check(!after.some((m) => m.type === 'openLink') && p.url().startsWith('http://127.0.0.1'), `javascript: and data: links open nothing [${JSON.stringify(after)}]`);
+  await p.close();
+  // The Accounts page: "Open links in" as a two-way choice.
+  const a = await open('surface=accounts&theme=dark-2026', 1200, 900);
+  const seg = a.locator('.acct-links [role="radio"]');
+  check((await seg.allInnerTexts()).join('|') === 'FriedLiver browser|System browser' && (await a.locator('.acct-links [aria-checked="true"]').innerText()) === 'FriedLiver browser', 'Agents & Accounts shows where links open');
+  await seg.nth(1).click();
+  check((await posted(a)).some((m) => m.type === 'setLinks' && m.mode === 'external'), 'choosing System browser sets it');
+  await a.close();
+};
+
 await run();
 await browser.close();
 server.kill();

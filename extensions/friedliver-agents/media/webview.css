@@ -5461,6 +5461,22 @@ button.cc-mic[data-state='stopping']::after {
   background: var(--input-bg);
   scroll-margin-top: var(--sp-3);
 }
+/* "Open links in": a setting row on the page's own card style, the choice as a segmented control. */
+.acct-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.acct-links h2 {
+  font-size: var(--t-100);
+  font-weight: 600;
+  color: var(--sel-fg);
+}
+.acct-links .hint {
+  margin: 2px 0 0;
+}
 .acct-card[data-focused] {
   border-color: var(--focus);
 }
