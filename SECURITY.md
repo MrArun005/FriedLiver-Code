@@ -240,7 +240,13 @@ What remains: an action you approve does what it says, with your rights. A
 document you let an agent open is opened by its usual app (a PDF reader, a
 spreadsheet), with that app's own risks. A Shortcut you let it run does
 whatever that Shortcut does. Screenshots and clipboard text go to the agent's
-vendor like anything else the agent reads.
+vendor like anything else the agent reads. The installed-app list includes
+per-user folders (`~/Applications`, the Start Menu in `%APPDATA%`) that any
+program running as you can add to; system folders are listed first, so a new
+entry can't take an existing app's name, but a new name can be anything, and
+an agent that can write files could also register an app that claims a document
+type. Those writes are the agent's own and are what FriedLiver's approvals
+and the agent's permission prompts are for.
 
 ### What a malicious agent can and can't do
 
