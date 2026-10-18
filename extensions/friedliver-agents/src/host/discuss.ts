@@ -129,11 +129,29 @@ export class Discussions {
     return d && d.state !== 'done' && this.live.has(d.id) ? d : undefined;
   }
 
-  /** Something the user says between turns: everyone hears it from the next turn on. */
+  /**
+   * A point the user adds while it runs: it waits for the round to end, then everyone hears it from the
+   * next round on ("It goes in before round N"); after the last round, the summing up hears it.
+   */
   interject(chatId: string, text: string): void {
     const d = this.runningIn(chatId);
-    if (!d || !text.trim()) return;
-    this.patch(d, { turns: [...d.turns, { by: 'you', round: d.round, text: text.trim().slice(0, MAX_TURN_TEXT) }] });
+    const point = text.trim().slice(0, MAX_TURN_TEXT);
+    if (!d || !point) return;
+    // Summing up already: too late for anyone to hear it, but it stays on the card.
+    if (d.state === 'summarizing') this.patch(d, { turns: [...d.turns, { by: 'you', round: d.round + 1, text: point }] });
+    else this.patch(d, { points: [...(d.points ?? []), point] });
+  }
+
+  /** A point typed on the card (its id), as interject. */
+  addPoint(id: string, text: string): void {
+    const found = this.locate(id);
+    if (found) this.interject(found.chat.id, text);
+  }
+
+  /** The waiting points into the transcript, as said before `round`. */
+  private flushPoints(d: DiscussionItem, round: number): void {
+    if (!d.points?.length) return;
+    this.patch(d, { turns: [...d.turns, ...d.points.map((text) => ({ by: 'you' as const, round, text }))], points: undefined });
   }
 
   /** Stops after the turn being spoken (which is cancelled); FriedLiver sums up what was said. */
@@ -243,6 +261,7 @@ export class Discussions {
       if (d.turns.filter((t) => t.round === d.round && t.by !== 'you' && !t.failed).length < 2) return 'failed';
       if (d.round === d.maxRounds) return 'rounds';
       this.patch(d, { round: d.round + 1 });
+      this.flushPoints(this.get(chatId, id)!, d.round + 1);
     }
     return 'rounds';
   }
@@ -255,6 +274,7 @@ export class Discussions {
 
   /** The starting agent writes the conclusion; FriedLiver does when it was stopped or that fails. */
   private async conclude(chatId: string, id: string, live: Live, ended: DiscussEnd): Promise<void> {
+    this.flushPoints(this.get(chatId, id)!, this.get(chatId, id)!.round + 1);
     let d = this.get(chatId, id)!;
     const agents = d.participants.map((p) => p.agent);
     let conclusion = undefined as DiscussionItem['conclusion'];
@@ -325,10 +345,20 @@ export class Discussions {
 const STANCE_ASK = [
   'End with your stance as a fenced block, exactly:',
   '```stance',
-  '{"position": "<your answer in one line>", "agree": ["<points of the others you accept>"], "disagree": ["<points you still dispute>"], "confidence": 0.8}',
+  '{"position": "<your answer in one line>", "side": "<the position you hold, named in 1 to 4 words>", "replyTo": "<the agent whose point you mainly answer, or empty>", "quote": "<their few words you answer>", "agree": ["<points of the others you accept>"], "disagree": ["<points you still dispute>"], "confidence": 0.8}',
   '```',
   'Leave "disagree" empty only when you have nothing left to dispute.',
 ].join('\n');
+
+/** The positions named so far, so an agent holding one reuses its name ("side") and the card groups them. */
+function sidesSoFar(d: DiscussionItem): string {
+  const seen = new Map<string, string>();
+  for (const t of d.turns) {
+    const side = t.stance?.side;
+    if (side && !seen.has(side.toLowerCase())) seen.set(side.toLowerCase(), side);
+  }
+  return seen.size ? `Positions named so far: ${[...seen.values()].map((x) => `"${x}"`).join(', ')}. If you hold one, use its exact name as "side".` : '';
+}
 
 function rendered(turns: DiscussTurn[]): string {
   return turns
@@ -369,6 +399,8 @@ export function turnPrompt(d: DiscussionItem, agent: AgentKey): string {
     `Round ${d.round} of ${d.maxRounds}. In under 250 words: weigh the trade-offs for this project, answer the others' points, and change your mind when they convince you.`,
     STANCE_ASK,
   );
+  const sides = sidesSoFar(d);
+  if (sides) lines.push(sides);
   return lines.join('\n');
 }
 
@@ -386,9 +418,9 @@ export function summaryPrompt(d: DiscussionItem, ended: DiscussEnd): string {
   return [
     `[FriedLiver discussion] The discussion has ended: ${WHY[ended]}.`,
     news.length ? `\nNew since your last turn:\n\n${rendered(news)}\n` : '',
-    'Write its conclusion for the user, fairly, from the whole discussion: what everyone agreed on, where anyone still disagrees (each side with its reason), and the one recommended next step. Reply with only this fenced block:',
+    'Write its conclusion for the user, fairly, from the whole discussion: what everyone agreed on, where anyone still disagrees (each side with its reason), the one recommended next step, and how each round moved: converging (closer together), diverging (further apart) or stuck, and on what, in 2 to 5 words. Reply with only this fenced block:',
     '```conclusion',
-    `{"agreed": ["..."], "disagreed": [{"point": "...", "sides": [{"agent": "${agents[0]}", "view": "... because ..."}]}], "next": "...", "carryOut": "${agents.join('|')}"}`,
+    `{"agreed": ["..."], "disagreed": [{"point": "...", "sides": [{"agent": "${agents[0]}", "view": "... because ..."}]}], "next": "...", "carryOut": "${agents.join('|')}", "rounds": [{"round": 1, "trend": "converging|diverging|stuck", "on": "..."}]}`,
     '```',
   ].join('\n');
 }

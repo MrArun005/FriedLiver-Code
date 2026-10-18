@@ -17,6 +17,10 @@ export interface Stance {
   disagree: string[];
   /** 0..1, when the agent gave one. */
   confidence?: number;
+  /** The position's short name (1 to 4 words), shared by everyone who holds it: the board's column, the meter's end. */
+  side?: string;
+  /** Whose point the turn mainly answers, and the words of theirs it answers. */
+  re?: { agent: AgentKey; quote: string };
   parsed: boolean;
 }
 
@@ -38,6 +42,16 @@ export interface Conclusion {
   by: AgentKey | 'friedliver';
   /** The agent the summary suggests should carry it out. */
   carryOut?: AgentKey;
+  /** How each round moved, from the summary; missing in older discussions (the card then works it out). */
+  rounds?: RoundTrend[];
+}
+
+export type Trend = 'converging' | 'diverging' | 'stuck';
+export interface RoundTrend {
+  round: number;
+  trend?: Trend;
+  /** What it turned on, in a few words ("indexing"). */
+  on?: string;
 }
 
 export type DiscussEnd = 'agreed' | 'rounds' | 'budget' | 'stopped' | 'failed';
@@ -56,6 +70,8 @@ export interface DiscussionItem {
   ended?: DiscussEnd;
   /** Who is speaking now. */
   speaking?: AgentKey;
+  /** Points the user added while it runs, heard from the next round on (or by the summing up after the last). */
+  points?: string[];
   turns: DiscussTurn[];
   tokens: number;
   budget: number;
@@ -119,7 +135,18 @@ function stanceFrom(o: unknown): Stance | undefined {
   if (!('agree' in r || 'disagree' in r || 'position' in r)) return undefined;
   const position = typeof r.position === 'string' ? r.position.trim().slice(0, 300) : '';
   const confidence = confidenceOf(r.confidence);
-  return { position, agree: asList(r.agree), disagree: asList(r.disagree), ...(confidence !== undefined ? { confidence } : {}), parsed: true };
+  const side = typeof r.side === 'string' ? r.side.trim().slice(0, 60) : '';
+  const to = typeof r.replyTo === 'string' ? MENTIONS[r.replyTo.trim().replace(/^@/, '').toLowerCase()] : undefined;
+  const quote = typeof r.quote === 'string' ? r.quote.trim().replace(/^["“”']+|["“”']+$/g, '').slice(0, 120) : '';
+  return {
+    position,
+    agree: asList(r.agree),
+    disagree: asList(r.disagree),
+    ...(confidence !== undefined ? { confidence } : {}),
+    ...(side ? { side } : {}),
+    ...(to && quote ? { re: { agent: to, quote } } : {}),
+    parsed: true,
+  };
 }
 
 /** Every top-level {...} in the text, last first, that parses as JSON. */
@@ -144,7 +171,7 @@ function jsonObjects(text: string): unknown[] {
 }
 
 const FENCE = /```[ \t]*(stance|json|conclusion)?[ \t]*\n([\s\S]*?)```/gi;
-const LINE = /^\s*[*_]*\s*(position|agree(?:s|ment)?|disagree(?:s|ment)?|confidence)\s*[*_]*\s*:\s*[*_]*\s*(.*)$/i;
+const LINE = /^\s*[*_]*\s*(position|side|agree(?:s|ment)?|disagree(?:s|ment)?|confidence)\s*[*_]*\s*:\s*[*_]*\s*(.*)$/i;
 
 /**
  * The stance a turn ends with: a ```stance JSON block (asked for), any JSON object with its keys,
@@ -165,7 +192,7 @@ export function parseStance(text: string): Stance | undefined {
   }
   if (!('agree' in fields || 'disagree' in fields)) return undefined;
   const confidence = confidenceOf(fields.confidence);
-  return { position: (fields.position ?? '').slice(0, 300), agree: asList(fields.agree ?? ''), disagree: asList(fields.disagree ?? ''), ...(confidence !== undefined ? { confidence } : {}), parsed: true };
+  return { position: (fields.position ?? '').slice(0, 300), ...(fields.side ? { side: fields.side.slice(0, 60) } : {}), agree: asList(fields.agree ?? ''), disagree: asList(fields.disagree ?? ''), ...(confidence !== undefined ? { confidence } : {}), parsed: true };
 }
 
 /** A turn's stance, or one guessed from its first sentence (no points, not parsed) when it gave none. */
@@ -194,6 +221,8 @@ export function allAgree(turns: DiscussTurn[], round: number): boolean {
 
 // ---- The conclusion ----
 
+const TRENDS: Trend[] = ['converging', 'diverging', 'stuck'];
+
 /** The summary the starting agent wrote: a ```conclusion (or any) JSON object with these keys. */
 export function parseConclusion(text: string, by: AgentKey, agents: AgentKey[]): Conclusion | undefined {
   const fenced = [...text.matchAll(FENCE)].reverse().flatMap((f) => jsonObjects(f[2]));
@@ -214,12 +243,20 @@ export function parseConclusion(text: string, by: AgentKey, agents: AgentKey[]):
       return point ? [{ point, sides }] : [];
     });
     const carry = typeof r.carryOut === 'string' ? MENTIONS[r.carryOut.toLowerCase()] : undefined;
+    const rounds = (Array.isArray(r.rounds) ? r.rounds : []).slice(0, 40).flatMap((x): RoundTrend[] => {
+      const y = (x ?? {}) as Record<string, unknown>;
+      if (typeof y.round !== 'number' || !Number.isInteger(y.round) || y.round < 1) return [];
+      const trend = TRENDS.find((t) => t === y.trend);
+      const on = trend && typeof y.on === 'string' ? y.on.trim().slice(0, 60) : '';
+      return [{ round: y.round, ...(trend ? { trend } : {}), ...(on ? { on } : {}) }];
+    });
     return {
       agreed: asList(r.agreed),
       disagreed: disagreed.slice(0, 6),
       next: r.next.trim().slice(0, 600),
       by,
       ...(carry && agents.includes(carry) ? { carryOut: carry } : {}),
+      ...(rounds.length ? { rounds } : {}),
     };
   }
   return undefined;
@@ -296,7 +333,9 @@ const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slic
 const nat = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : d);
 
 function savedStance(v: unknown): Stance | undefined {
-  const s = stanceFrom(v);
+  // Kept as `re: {agent, quote}`; read through the same checks as an agent's replyTo/quote.
+  const re = ((v ?? {}) as { re?: { agent?: unknown; quote?: unknown } }).re;
+  const s = stanceFrom(v && typeof v === 'object' && re && typeof re === 'object' ? { ...v, replyTo: re.agent, quote: re.quote } : v);
   return s && { ...s, parsed: (v as Record<string, unknown>).parsed === true };
 }
 

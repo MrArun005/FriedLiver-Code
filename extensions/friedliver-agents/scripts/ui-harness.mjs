@@ -21,7 +21,7 @@
 //        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
-//   --only discuss   run only the /discuss card's checks (screenshots discuss-*-{1200,640}-dark.png to --out)
+//   --only discuss   run only the /discuss card's checks (screenshots {board-meter,board,meter,timeline}-{running,split,agreed}-{1200,640}-{dark,light}.png to --out)
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
@@ -192,7 +192,7 @@ function page(params) {
   const snapshot =
     surface === 'accounts'
       ? { type: 'accounts', view: { ...accountsFixture(Date.now()), ...(focus ? { focus: { agent: focus, n: 1 } } : {}) } }
-      : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
+      : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults, ...(params.get('discussLayout') ? { discussLayout: params.get('discussLayout') } : {}) };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))], ['imagesTab', params.get('imagesTab')], ['openTabs', openTabs]].filter(([, v]) => v);
   const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
@@ -1996,41 +1996,58 @@ async function discussChecks({ open, check }) {
     await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
     console.log(`  ${file}`);
   };
-  const noScroll = (p) => p.evaluate(() => [...document.querySelectorAll('.transcript, body')].every((e) => e.scrollWidth <= e.clientWidth + 1));
+  const noScroll = (p) => p.evaluate(() => [...document.querySelectorAll('.transcript, body, .fl-discuss')].every((e) => e.scrollWidth <= e.clientWidth + 1));
+  const errors = [];
+  const watch = (p, what) => {
+    p.on('pageerror', (e) => errors.push(`${what}: ${e.message}`));
+    p.on('console', (m) => m.type() === 'error' && errors.push(`${what}: ${m.text()}`));
+  };
   // The header's status pill follows the discussion, not the starter's last turn (never "Done" while another agent speaks).
   for (const width of [900, 480]) {
     const p = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main', width, 900, 2);
     await p.waitForSelector('.fl-discuss');
-    await p.waitForTimeout(500);
+    await p.waitForTimeout(300);
     check((await p.locator('.chat-head .status-pill').innerText()) === 'Discussing · Codex speaking', `${width}: the running discussion's header says who is speaking`);
-    await shot(p, `discuss-header-${width}-dark`);
     await p.close();
     const done = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-agreed', width, 900, 2);
     await done.waitForSelector('.fl-discuss');
     check((await done.locator('.chat-head .status-pill').innerText()) === 'Done', `${width}: once it ends the header is back to the chat's own status`);
     await done.close();
   }
-  for (const width of [1200, 640]) {
-    const before = await open(`surface=chat&theme=dark-2026&fixture=discuss-before&select=chat-main`, width, 1400, 2);
-    await before.waitForSelector('.link-card');
-    await before.waitForTimeout(500);
-    await shot(before, `discuss-chat-${width}-dark-before`);
-    await before.close();
-    for (const [chat, name] of [['chat-main', 'running'], ['chat-split', 'split'], ['chat-agreed', 'agreed']]) {
-      const p = await open(`surface=chat&theme=dark-2026&fixture=discuss&select=${chat}`, width, 1400, 2);
-      await p.waitForSelector('.fl-discuss');
-      await p.waitForTimeout(500);
-      check(await noScroll(p), `${width} ${name}: no sideways scroll`);
-      check((await p.locator('.transcript .prose').count()) === 1, `${width} ${name}: the starting agent's discussion turns fold into the card`);
-      await shot(p, `discuss-${name}-${width}-dark`);
-      await shot(p, `discuss-${name}-card-${width}-dark`, '.fl-discuss');
-      await p.close();
-    }
-  }
+  // Every layout × state × width × theme, the card alone: <layout>-<state>-<width>-<theme>.png.
+  for (const layout of ['board+meter', 'board', 'meter', 'timeline'])
+    for (const [chat, name] of [['chat-main', 'running'], ['chat-split', 'split'], ['chat-agreed', 'agreed']])
+      for (const width of [1200, 640])
+        for (const theme of ['dark', 'light']) {
+          const what = `${layout} ${name} ${width} ${theme}`;
+          const p = await open(`surface=chat&theme=${theme}-2026&fixture=discuss&select=${chat}&discussLayout=${encodeURIComponent(layout)}`, width, 1600, 2);
+          watch(p, what);
+          await p.waitForSelector(`.fl-discuss[data-layout="${layout}"]`);
+          await p.waitForTimeout(300);
+          check(await noScroll(p), `${what}: no sideways scroll`);
+          check((await p.locator('.transcript .prose').count()) === 1, `${what}: the starting agent's discussion turns fold into the card`);
+          const primaries = await p.locator('.fl-discuss .fl-btn--primary:not(.fl-split-caret)').count();
+          check(primaries === (name === 'running' ? 0 : 1), `${what}: ${name === 'running' ? 'no primary while it runs' : 'one primary: Carry out'}`);
+          await shot(p, `${layout.replace('+', '-')}-${name}-${width}-${theme}`, '.fl-discuss');
+          await p.close();
+        }
+  check(!errors.length, `no page errors (${errors.slice(0, 3).join(' | ')})`);
+  // Live: the setting changes, the open card redraws.
+  const live = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main&discussLayout=board', 1200, 1400);
+  await live.waitForSelector('.fl-discuss[data-layout="board"]');
+  await live.evaluate(() => window.postMessage({ type: 'discussLayout', layout: 'timeline' }, '*'));
+  await live.waitForSelector('.fl-discuss[data-layout="timeline"] .fl-discuss__thread');
+  check(true, 'changing friedliver.discuss.layout redraws the open card');
+  // Add a point: Enter sends it; Stop asks the host to stop.
+  await live.evaluate(() => (window.__posted.length = 0));
+  await live.getByPlaceholder('Add a point. It goes in before round 3.').fill('Budget is two days.');
+  await live.getByPlaceholder('Add a point. It goes in before round 3.').press('Enter');
+  await live.getByRole('button', { name: 'Stop' }).click();
+  const sent = await live.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
+  check(sent.length === 2 && sent[0].act === 'point' && sent[0].text === 'Budget is two days.' && sent[1].act === 'stop', 'the inline field adds a point, Stop stops');
+  await live.close();
   const p = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-split', 1200, 1400);
   await p.waitForSelector('.fl-discuss');
-  check((await p.locator('.fl-discuss .fl-btn--primary:not(.fl-split-caret)').count()) === 1, 'one primary on the card: Carry out (its split caret aside)');
-  check(!(await p.locator('.fl-discuss__log').evaluate((e) => e.open)), 'the transcript is folded once there is a conclusion');
   await p.evaluate(() => (window.__posted.length = 0));
   await p.locator('.fl-discuss .fl-split > .fl-btn--primary').click();
   const carried = await p.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
@@ -2038,14 +2055,6 @@ async function discussChecks({ open, check }) {
   await p.locator('.fl-discuss .fl-split-caret').click();
   check((await p.locator('.fl-menu [role^="menuitem"]').count()) === 3, 'the split menu lists every participant');
   await p.close();
-  const r = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main', 1200, 1400);
-  await r.waitForSelector('.fl-discuss');
-  check((await r.locator('.fl-discuss .fl-btn--primary').count()) === 0, 'no primary while it runs');
-  await r.evaluate(() => (window.__posted.length = 0));
-  await r.getByRole('button', { name: 'Stop' }).click();
-  const stop = await r.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
-  check(stop.length === 1 && stop[0].act === 'stop', 'Stop asks the host to stop the discussion');
-  await r.close();
 }
 
 async function approvalsChecks({ open, check }) {

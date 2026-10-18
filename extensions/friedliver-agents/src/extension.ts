@@ -34,6 +34,7 @@ import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
 import { isVendor, rosterOf, shownAgents } from './shared/accounts';
+import { discussLayoutOf, type DiscussLayout } from './shared/discussView';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
@@ -651,6 +652,7 @@ export class Controller {
             now: Date.now(),
             defaults: this.core.agentDefaults(),
             roster: this.roster(),
+            discussLayout: this.discussLayout(),
           });
           if (surface.kind === 'tasks' && this.inboxWanted) {
             this.inboxWanted = false;
@@ -812,6 +814,7 @@ export class Controller {
           void this.core.discuss(m.chatId, m.agents, m.text).catch((err: unknown) => this.error(err));
           return;
         case 'discussion':
+          if (m.act === 'point') return this.core.discussions.addPoint(m.id, m.text!);
           void (m.act === 'stop' ? this.core.discussions.stop(m.id) : m.act === 'continue' ? this.core.discussions.continue(m.id) : this.core.discussions.carryOut(m.id, m.agent!)).catch((err: unknown) =>
             this.error(err),
           );
@@ -1537,6 +1540,10 @@ export class Controller {
     return rosterOf(this.showDemo(), this.accounts.records());
   }
 
+  private discussLayout(): DiscussLayout {
+    return discussLayoutOf(vscode.workspace.getConfiguration('friedliver.discuss').get<unknown>('layout'));
+  }
+
   private postRoster(): void {
     const message: HostMessage = { type: 'roster', roster: this.roster() };
     for (const s of this.surfaces) post(s, message);
@@ -1759,6 +1766,10 @@ export class Controller {
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
     if (e.affectsConfiguration('friedliver.browser.externalClients')) void this.connectClaude(false);
+    if (e.affectsConfiguration('friedliver.discuss.layout')) {
+      const message: HostMessage = { type: 'discussLayout', layout: this.discussLayout() };
+      for (const s of this.surfaces) post(s, message);
+    }
     if (e.affectsConfiguration('friedliver.showDemoAgent')) {
       this.accounts.refresh();
       this.postRoster();
