@@ -828,9 +828,10 @@ export class AgentCore {
   private async sessionStarted(chatId: string, start: SessionStart): Promise<void> {
     const chat = this.chat(chatId);
     if (!chat) return;
-    const prev = chat.session;
     const offered = sessionOptions(start);
     const hidden = hiddenModels(start, offered, await this.options.modelVisibility?.(chat.agent).catch(() => undefined));
+    // Read after the await: commands or usage the agent sent meanwhile stay.
+    const prev = this.chat(chatId)?.session;
     const session: ChatSession = {
       options: withoutModels(offered, hidden),
       ...(hidden.length ? { hiddenModels: hidden } : {}),
