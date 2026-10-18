@@ -140,7 +140,10 @@ describe('changes between roots', () => {
     const pinned = t.pin('chat-1');
     expect(t.history).toEqual([kept]);
     t.set('src/b.ts', h('3'));
-    for (let i = 0; i < 20; i++) (t.set('x.ts', h(String(i))), t.snapshot());
+    for (let i = 0; i < 20; i++) {
+      t.set('x.ts', h(String(i)));
+      t.snapshot();
+    }
     expect(t.diff(t.pins.get('chat-1')!)!.changes).toEqual([{ path: 'src/b.ts', change: 'M' }, { path: 'x.ts', change: 'A' }]);
     expect(pinned).toBe(t.pins.get('chat-1'));
     for (let i = 2; i <= 65; i++) t.pin(`chat-${i}`);

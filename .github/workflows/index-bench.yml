@@ -1,15 +1,20 @@
 name: Index bench
 
 # Re-open time of the agents extension's project index on microsoft/TypeScript after
-# touching 10 files, against a full build (test/indexBench.test.ts). Numbers go to
-# the run's summary. Runs on demand and when the index code changes.
+# touching 10 files, against a full build (test/indexBench.test.ts), and the token
+# bench (test/tokenBench.test.ts): scripted agent tasks with and without the index_*
+# tools, tokens counted with js-tiktoken's cl100k_base. Numbers go to the run's
+# summary. Runs on demand and when the index code changes.
 on:
   workflow_dispatch:
   push:
     paths:
       - extensions/friedliver-agents/src/host/projectIndex.ts
       - extensions/friedliver-agents/src/host/merkle.ts
+      - extensions/friedliver-agents/src/host/indexReads.ts
+      - extensions/friedliver-agents/src/shared/tokens.ts
       - extensions/friedliver-agents/test/indexBench.test.ts
+      - extensions/friedliver-agents/test/tokenBench.test.ts
       - .github/workflows/index-bench.yml
 
 permissions:
@@ -35,3 +40,9 @@ jobs:
         run: |
           npm ci
           FL_INDEX_BENCH_REPO="$RUNNER_TEMP/TypeScript" npx vitest run test/indexBench.test.ts
+      # The re-open bench appended a comment to 10 files; the token bench restores what it edits itself.
+      - name: Token bench
+        working-directory: extensions/friedliver-agents
+        run: |
+          npm install --no-save js-tiktoken@1.0.21
+          FL_TOKEN_BENCH_REPO="$RUNNER_TEMP/TypeScript" FL_TOKEN_BENCH_OUT="$RUNNER_TEMP/token-bench.md" npx vitest run test/tokenBench.test.ts
