@@ -211,6 +211,55 @@
 	--vscode-progressBar-background: var(--fl-status-working);
 }
 
+/* ---- Menu §2.13: context menus, menubar menus (elevation 2 in the workbench, spec §1.8) ---
+   Menus render in a shadow root (menu.ts); only variables cross it, so the host re-points the
+   theme's menu colours and shadow, and patch 0110 points menu.ts's sizes at the tokens. */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .shadow-root-host,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-menu-container {
+	--vscode-menu-border: var(--fl-border);
+	--vscode-menu-selectionBackground: var(--fl-hover-bg);
+	--vscode-menu-selectionForeground: var(--fl-fg);
+	--vscode-menu-selectionBorder: transparent;
+	--vscode-menu-separatorBackground: var(--fl-border);
+	--vscode-shadow-lg: var(--fl-elev-2);
+}
+
+/* ---- Menu §2.13, palette variant: command palette and quick open --------------------------
+   Rows stay 22 where the workbench virtualises them (spec §2.13): padding 2 8, radius 4; the
+   keyboard-active row takes the hover fill. */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget {
+	--vscode-quickInputList-focusBackground: var(--fl-hover-bg);
+	--vscode-quickInputList-focusForeground: var(--fl-fg);
+	--vscode-quickInputList-focusIconForeground: var(--fl-fg);
+	--vscode-list-focusOutline: transparent;
+	--vscode-list-focusAndSelectionOutline: transparent;
+	--vscode-pickerGroup-foreground: var(--fl-fg-50);
+	--vscode-pickerGroup-border: var(--fl-border);
+	border: var(--fl-line) solid var(--fl-border);
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+	padding-bottom: var(--fl-sp-1);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox {
+	border-radius: var(--fl-r-ctl);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .monaco-list-row {
+	border-radius: var(--fl-r-row);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .quick-input-list-entry {
+	padding: 0 var(--fl-sp-2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .quick-input-list-separator {
+	color: var(--fl-fg-50);
+	font-size: var(--fl-t-85);
+}
+
 /* ---- Splitters: invisible until hovered, still grabbable --------------------------------- */
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-sash::before {

@@ -1,3 +1,48 @@
+diff --git a/src/vs/base/browser/ui/menu/menu.ts b/src/vs/base/browser/ui/menu/menu.ts
+index f6b4122a..ece7a8ff 100644
+--- a/src/vs/base/browser/ui/menu/menu.ts
++++ b/src/vs/base/browser/ui/menu/menu.ts
+@@ -1163,11 +1163,11 @@ ${formatRule(Codicon.menuSubmenu)}
+ .monaco-menu .monaco-action-bar.vertical .action-menu-item {
+ 	flex: 1 1 auto;
+ 	display: flex;
+-	height: 24px;
++	height: var(--fl-h-md, 24px);
+ 	align-items: center;
+ 	position: relative;
+ 	margin: 0 4px;
+-	border-radius: var(--vscode-cornerRadius-medium);
++	border-radius: var(--fl-r-row, var(--vscode-cornerRadius-medium)); /* FriedLiver: Menu §2.11 rows */
+ }
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-menu-item:hover .keybinding,
+@@ -1346,7 +1346,7 @@ ${formatRule(Codicon.menuSubmenu)}
+ 			pointer-events: none;
+ 			transform-origin: inherit;
+ 			background-color: color-mix(in srgb, var(--modern-ui-solid-menu-background) var(${CONTEXT_VIEW_MENU_MOTION_BACKDROP_OPACITY_VARIABLE}, 0%), var(--modern-ui-glass-menu-background));
+-			backdrop-filter: blur(12px);
++			backdrop-filter: var(--fl-glass-blur, blur(12px)); /* FriedLiver: spec glass */
+ 		}
+ 	}
+ }
+@@ -1399,7 +1399,7 @@ ${formatRule(Codicon.menuSubmenu)}
+ }
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-menu-item {
+-	height: 24px;
++	height: var(--fl-h-md, 24px); /* FriedLiver: Menu §2.11 rows are 26 */
+ }
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-label:not(.separator),
+@@ -1416,7 +1416,7 @@ ${formatRule(Codicon.menuSubmenu)}
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-label.separator {
+ 	font-size: inherit;
+-	margin: 5px 0 !important;
++	margin: var(--fl-sp-1, 5px) 0 !important; /* FriedLiver: Divider §2.24 */
+ 	padding: 0;
+ 	border-radius: 0;
+ }
 diff --git a/src/vs/workbench/browser/style.ts b/src/vs/workbench/browser/style.ts
 index 9250ef3f..b3e411a0 100644
 --- a/src/vs/workbench/browser/style.ts
