@@ -47,7 +47,7 @@ describe('tokenizer and ranking', () => {
     expect(hits[0].symbols.map((s) => s.name)).toContain('refreshToken');
     const out = await answerIndex([ix], { tool: 'index_search', query: 'refreshToken' }, false);
     expect(out).toMatch(/^src\/auth\/refresh\.ts/);
-    expect(out).toContain('1: export function refreshToken');
+    expect(out).toContain('1\texport function refreshToken');
     expect(out).not.toContain(root);
   });
 
@@ -62,7 +62,7 @@ describe('tokenizer and ranking', () => {
     const root = await project({ 'src/a.ts': "import { b } from './b';\nexport class Alpha {}\n", 'src/b.ts': 'export function b() {}\n' });
     const ix = await build(root);
     expect(await answerIndex([ix], { tool: 'index_symbols', name: 'alpha' }, false)).toBe('src/a.ts:2  class Alpha');
-    expect(await answerIndex([ix], { tool: 'index_outline', path: 'src/b.ts' }, false)).toContain('function b  (line 1)');
+    expect(await answerIndex([ix], { tool: 'index_outline', path: 'src/b.ts' }, false)).toContain('1: export function b()');
     const related = await answerIndex([ix], { tool: 'index_related', path: 'src/b.ts' }, false);
     expect(related).toContain('Imported by:\n  src/a.ts');
     expect(await answerIndex([ix], { tool: 'index_related', path: 'src/a.ts' }, false)).toContain('Imports:\n  src/b.ts');
