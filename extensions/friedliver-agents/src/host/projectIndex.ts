@@ -158,13 +158,14 @@ interface Doc {
   /** The content hash this doc was made from: a saved doc is used only while its leaf still has it. */
   hash: string;
   len: number;
-  tokens: Map<string, number>;
+  /** Distinct tokens and their counts. An array, not a Map: loading 80k saved docs builds no Map per doc. */
+  tokens: [string, number][];
   symbols: Sym[];
   imports: string[];
 }
 
 /** What one file costs the index, roughly, in bytes. */
-const cost = (d: Doc) => 200 + d.rel.length * 2 + d.tokens.size * 40 + d.symbols.length * 60 + d.imports.length * 60;
+const cost = (d: Doc) => 200 + d.rel.length * 2 + d.tokens.length * 40 + d.symbols.length * 60 + d.imports.length * 60;
 
 export interface IndexOptions {
   maxFiles: number;
@@ -201,6 +202,8 @@ export class ProjectIndex {
   private readonly unreadable = new Map<string, string>();
   /** Files stat'ed, read, and re-indexed (read with new content). For tests and the bench. */
   readonly counts = { stat: 0, read: 0, reindex: 0 };
+  /** Milliseconds per phase of the last load and catch-up. For the bench. */
+  readonly timings: Record<string, number> = {};
 
   constructor(
     readonly root: string,
@@ -386,7 +389,7 @@ export class ProjectIndex {
       else if (tokens.size < INDEX_LIMITS.tokensPerFile) tokens.set(t, 1);
     }
     for (const t of tokenize(rel)) tokens.set(t, (tokens.get(t) ?? 0) + 1);
-    const doc: Doc = { rel, hash: got.hash, len, tokens, symbols: outline(rel, text), imports: imports(rel, text) };
+    const doc: Doc = { rel, hash: got.hash, len, tokens: [...tokens], symbols: outline(rel, text), imports: imports(rel, text) };
     this.remove(rel);
     if (this.bytes + cost(doc) > this.options.maxBytes) return (this.capped = true), false;
     this.leaves.set(rel, { size: st.size, mtimeNs: st.mtimeNs, hash: got.hash });
@@ -406,7 +409,7 @@ export class ProjectIndex {
     this.docs.delete(rel);
     this.totalLen -= doc.len;
     this.bytes -= cost(doc);
-    for (const t of doc.tokens.keys()) {
+    for (const [t] of doc.tokens) {
       const p = this.postings.get(t);
       p?.delete(rel);
       if (p && p.size === 0) this.postings.delete(t);
@@ -497,9 +500,17 @@ export class ProjectIndex {
    * its directory. Returns how, or undefined when `onBatch` stopped it.
    */
   async catchUp(journal?: Journal, onBatch?: () => Promise<boolean>): Promise<'journal' | 'full' | undefined> {
+    let t = performance.now();
+    const lap = (name: string) => {
+      this.timings[name] = performance.now() - t;
+      t = performance.now();
+    };
     const hint = await this.gitHint();
+    lap('gitHint');
     if (hint.paths.length) await this.updateMany(hint.paths);
+    lap('hinted');
     const got = this.mark && journal ? await journal.since(this.root, this.mark) : null;
+    lap('journal');
     let mode: 'journal' | 'full';
     if (got) {
       const changed = [...got.files, ...hint.paths];
@@ -511,12 +522,14 @@ export class ProjectIndex {
       if (dirs.length && !(await this.rescan(dirs, onBatch))) return undefined;
       this.mark = got.next;
       mode = 'journal';
+      lap('journaled');
     } else {
       // Taken before the check: whatever changes during it is seen by the watcher and by the next open.
       const next = await journal?.now(this.root);
       if (!(await this.syncAll(onBatch))) return undefined;
       this.mark = next;
       mode = 'full';
+      lap('fullCheck');
     }
     if (hint.head) this.gitHead = hint.head;
     return mode;
@@ -634,7 +647,7 @@ export class ProjectIndex {
 
   /** The heavy half of a save, one JSON doc per line, streamed in after the tree. */
   *docLines(): Generator<string> {
-    for (const d of this.docs.values()) yield JSON.stringify({ ...d, tokens: [...d.tokens] });
+    for (const d of this.docs.values()) yield JSON.stringify(d);
   }
 
   /**
@@ -645,6 +658,12 @@ export class ProjectIndex {
    * what "changed since the last open" compares with.
    */
   load(saved: unknown): void {
+    const t = performance.now();
+    this.loadTree(saved);
+    this.timings.tree = performance.now() - t;
+  }
+
+  private loadTree(saved: unknown): void {
     const s = saved as { v?: unknown; leaves?: unknown; unreadable?: unknown; merkle?: unknown; mark?: unknown; gitHead?: unknown } | null;
     if (!s || s.v !== 3 || !Array.isArray(s.leaves)) return;
     for (const l of s.leaves as unknown[]) {
@@ -672,6 +691,7 @@ export class ProjectIndex {
    * have moved on meanwhile). Leaves left without a doc are then read. Returns the docs taken.
    */
   async loadDocs(file: string, onChunk?: () => Promise<boolean>): Promise<number> {
+    const t = performance.now();
     let taken = 0;
     if (this.docsPending) {
       let fh: FileHandle | undefined;
@@ -681,7 +701,8 @@ export class ProjectIndex {
         for await (const line of fh.readLines({ encoding: 'utf8' })) {
           if (!this.docsPending) break;
           if (this.addSaved(line)) taken++;
-          if (++n % 1000 === 0) {
+          // Small chunks: catchUp() runs between them, and its checks should not wait behind the docs.
+          if (++n % 100 === 0) {
             await new Promise((r) => setImmediate(r));
             if (onChunk && !(await onChunk())) return taken;
           }
@@ -693,6 +714,7 @@ export class ProjectIndex {
       }
     }
     this.docsPending = false;
+    this.timings.docs = performance.now() - t;
     const missing = [...this.leaves.keys()].filter((rel) => !this.docs.has(rel));
     for (let i = 0; i < missing.length; i += STAT_BATCH) {
       if (!(await this.updateBatch(missing.slice(i, i + STAT_BATCH)))) break;
@@ -710,7 +732,7 @@ export class ProjectIndex {
     }
     if (typeof d?.rel !== 'string' || typeof d.hash !== 'string' || typeof d.len !== 'number' || !Array.isArray(d.tokens) || !Array.isArray(d.symbols) || !Array.isArray(d.imports)) return false;
     if (this.docs.has(d.rel) || this.leaves.get(d.rel)?.hash !== d.hash) return false;
-    const doc: Doc = { ...d, tokens: new Map(d.tokens as [string, number][]) };
+    const doc = d as Doc;
     // Over the memory cap: the file leaves the tree too (the tree holds exactly what is indexed).
     if (this.bytes + cost(doc) > this.options.maxBytes) {
       this.capped = true;
