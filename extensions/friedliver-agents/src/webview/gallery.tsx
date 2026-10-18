@@ -1,10 +1,28 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
-import { IMAGE_SOURCES, SOURCE_LABEL, collectGallery, filterGallery, sourceCounts, type GalleryChat, type GalleryImage, type ImageSource, type OutsideImages } from '../shared/gallery';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import {
+  IMAGE_SOURCES,
+  SOURCE_LABEL,
+  UNDO_SECONDS,
+  bytesText,
+  collectGallery,
+  doneScope,
+  filterGallery,
+  sourceCounts,
+  type GalleryChat,
+  type GalleryImage,
+  type ImageSource,
+  type ImageStoreInfo,
+  type OutsideImages,
+} from '../shared/gallery';
 import type { AppState } from '../shared/model';
 import { ago } from '../shared/view';
-import { Glyph, Icon, useNearScreen, usePersisted, useTabStrip } from './common';
+import { Glyph, Icon, send, useNearScreen, usePersisted, useTabStrip } from './common';
 import { Viewer, useSrc } from './viewer';
-import { FilterPill, Tab } from './ui';
+import { Button, FilterPill, IconButton, Progress, Tab, Toast, ToastRegion } from './ui';
+
+const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+/** Done looking's key: Shift+Cmd+Backspace (Ctrl on Windows and Linux). */
+const DONE_KEY = MAC ? '⇧⌘⌫' : 'Ctrl+Shift+Backspace';
 
 
 interface Props {
@@ -13,6 +31,8 @@ interface Props {
   now: number;
   /** The Agent Manager's own search box; the side view draws its own. */
   query?: string;
+  /** The host's copies: space used, pinned and hidden images. */
+  store?: ImageStoreInfo;
 }
 
 /**
@@ -20,8 +40,18 @@ interface Props {
  * per chat that has any (All first), filters by how it came, a search, a grid of
  * thumbnails loaded as they near the screen, and a large preview.
  */
-export function Gallery({ state, outside, now, query: outerQuery }: Props) {
-  const { images, chats } = useMemo(() => collectGallery(state, outside), [state, outside]);
+export function Gallery({ state, outside, now, query: outerQuery, store }: Props) {
+  const { images, chats } = useMemo(() => {
+    // Images you were done looking at are gone from every tab.
+    const hidden = new Set(store?.hidden);
+    const all = collectGallery(state, outside);
+    if (!hidden.size) return all;
+    const images = all.images.filter((i) => !hidden.has(i.key));
+    const left = new Map<string, number>();
+    for (const i of images) left.set(i.chatId, (left.get(i.chatId) ?? 0) + 1);
+    return { images, chats: all.chats.flatMap((c) => (left.get(c.id) ? [{ ...c, count: left.get(c.id)! }] : [])) };
+  }, [state, outside, store?.hidden]);
+  const pinned = useMemo(() => new Set(store?.pinned), [store?.pinned]);
   const [savedTab, setTab] = usePersisted<string>('imagesTab', '');
   const [sources, setSources] = usePersisted<ImageSource[]>('imagesSources', []);
   const [ownQuery, setQuery] = useState('');
@@ -38,13 +68,62 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
   const over = useTabStrip(strip, chats.length, tab);
   const toggle = (s: ImageSource) => setSources(sources.includes(s) ? sources.filter((x) => x !== s) : [...sources, s]);
 
+  // Done looking: this tab's images (every image on All) hide now; their copies and temp files go when the undo time ends.
+  const scope = doneScope(images, pinned, tab || undefined).length;
+  const [toast, setToast] = useState<{ n: number; id: number; chat?: string }>();
+  const undone = useRef(false);
+  const done = () => {
+    if (!scope) return;
+    undone.current = false;
+    send({ type: 'imagesDone', ...(tab ? { chatId: tab } : {}) });
+    setToast({ n: scope, id: Date.now(), chat: tab ? chatOf.get(tab)?.title : undefined });
+  };
+  const undo = () => {
+    undone.current = true;
+    send({ type: 'imagesUndo' });
+  };
+  const keys = useRef({ done, undo, toast });
+  keys.current = { done, undo, toast };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = MAC ? e.metaKey : e.ctrlKey;
+      if (mod && e.shiftKey && e.key === 'Backspace') {
+        e.preventDefault();
+        keys.current.done();
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'z' && keys.current.toast && !(e.target as HTMLElement | null)?.closest?.('input, textarea')) {
+        e.preventDefault();
+        keys.current.undo();
+        setToast(undefined);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  const toasts = toast && (
+    <ToastRegion>
+      <Toast
+        key={toast.id}
+        tone="success"
+        title={`Done looking at ${toast.n} image${toast.n === 1 ? '' : 's'}`}
+        text={`${toast.chat ? `From “${toast.chat}”. ` : ''}Their copies and temp files go when this closes. Pinned images stay.`}
+        action={{ label: `Undo (${MAC ? '⌘Z' : 'Ctrl+Z'})`, run: undo }}
+        seconds={UNDO_SECONDS}
+        onClose={() => {
+          if (!undone.current) send({ type: 'imagesCommit' });
+          setToast(undefined);
+        }}
+      />
+    </ToastRegion>
+  );
+
   if (!images.length) {
     return (
       <div class="gallery">
         <div class="gallery-empty">
-          <h2>No images yet</h2>
+          <h2>{store?.hidden.length ? 'All done' : 'No images yet'}</h2>
           <p>Screenshots and image files agents read or make, and images you attach, show up here, by chat.</p>
         </div>
+        {toasts}
       </div>
     );
   }
@@ -91,11 +170,39 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
             <input type="search" value={ownQuery} placeholder="Search images" aria-label="Search images" onInput={(e) => setQuery(e.currentTarget.value)} />
           </label>
         )}
+        <div class="gallery-store">
+          {store && (
+            <span class="gallery-used" title="FriedLiver keeps one copy of each image, so it still shows after its temp file is gone. Unpinned copies past the limit or older than the keep time are removed (Settings: FriedLiver › Images).">
+              <span class="gallery-used-text">
+                {bytesText(store.used)} of {bytesText(store.cap)}
+              </span>
+              <Progress value={Math.min(store.used, store.cap)} max={store.cap} label="Space the image copies use" />
+            </span>
+          )}
+          <Button
+            size="sm"
+            icon="check"
+            kbd={DONE_KEY}
+            disabled={!scope}
+            title={tab ? `Done with this chat's ${scope} unpinned image${scope === 1 ? '' : 's'}: hide them and remove their copies and temp files` : `Done with all ${scope} unpinned images: hide them and remove their copies and temp files`}
+            onClick={done}
+          >
+            Done looking
+          </Button>
+        </div>
       </div>
       {shown.length ? (
         <ul class="gallery-grid" aria-label={`${shown.length} image${shown.length === 1 ? '' : 's'}`}>
           {shown.map((img) => (
-            <Card key={img.key} img={img} chat={tab ? undefined : chatOf.get(img.chatId)} state={state} now={now} onOpen={() => setOpenKey(img.key)} />
+            <Card
+              key={img.key}
+              img={img}
+              chat={tab ? undefined : chatOf.get(img.chatId)}
+              state={state}
+              now={now}
+              pinned={pinned.has(img.key)}
+              onOpen={() => setOpenKey(img.key)}
+            />
           ))}
         </ul>
       ) : (
@@ -116,11 +223,12 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
           }}
         />
       )}
+      {toasts}
     </div>
   );
 }
 
-function Card({ img, chat, state, now, onOpen }: { img: GalleryImage; chat?: GalleryChat; state: AppState; now: number; onOpen(): void }) {
+function Card({ img, chat, state, now, pinned, onOpen }: { img: GalleryImage; chat?: GalleryChat; state: AppState; now: number; pinned: boolean; onOpen(): void }) {
   const ref = useRef<HTMLLIElement>(null);
   const near = useNearScreen(ref);
   const src = useSrc(img, state, 'imageThumb', near);
@@ -142,6 +250,15 @@ function Card({ img, chat, state, now, onOpen }: { img: GalleryImage; chat?: Gal
           <span class="gallery-time">{ago(img.at, now)}</span>
         </span>
       </button>
+      <IconButton
+        icon="star"
+        size="sm"
+        muted={!pinned}
+        class="gallery-pin"
+        aria-pressed={pinned}
+        label={pinned ? 'Unpin' : 'Pin: Done looking and the storage limit keep it'}
+        onClick={() => send({ type: 'imagePin', key: img.key, pinned: !pinned })}
+      />
     </li>
   );
 }

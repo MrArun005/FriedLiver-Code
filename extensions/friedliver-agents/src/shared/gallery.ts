@@ -9,6 +9,31 @@ export type ImageSource = 'read' | 'screenshot' | 'attached' | 'created';
 export const IMAGE_SOURCES: readonly ImageSource[] = ['read', 'screenshot', 'attached', 'created'];
 export const SOURCE_LABEL: Record<ImageSource, string> = { read: 'Read', screenshot: 'Screenshot', attached: 'Attached', created: 'Created by tool' };
 
+/** What the host tells the Images view about its copies (see host/imageStore.ts). */
+export interface ImageStoreInfo {
+  /** Bytes the copies use, and the limit (the friedliver.images.storageLimitMB setting). */
+  used: number;
+  cap: number;
+  pinned: string[];
+  hidden: string[];
+}
+
+/** How long "Done looking" can be undone, in seconds. */
+export const UNDO_SECONDS = 8;
+
+/** The images a tab's Done looking covers: its chat's (or every one), less the pinned. */
+export function doneScope(images: readonly GalleryImage[], pinned: ReadonlySet<string>, chatId?: string): GalleryImage[] {
+  return images.filter((i) => (!chatId || i.chatId === chatId) && !pinned.has(i.key));
+}
+
+/** "212 MB", "1 GB": storage at a glance. */
+export function bytesText(n: number): string {
+  if (n < 1024 * 1024) return `${Math.max(0, Math.round(n / 1024))} KB`;
+  if (n < 1024 ** 3) return `${Math.round(n / 1024 / 1024)} MB`;
+  const gb = n / 1024 ** 3;
+  return `${gb < 10 ? Number(gb.toFixed(1)) : Math.round(gb)} GB`;
+}
+
 /** At most this many images in one view, the newest. */
 export const MAX_GALLERY = 2000;
 
