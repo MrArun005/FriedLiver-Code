@@ -257,8 +257,6 @@ function AskHead({ agent, verb, target, tone, label }: { agent?: AgentKey; verb:
   );
 }
 
-const SCOPE_NAMES: Record<Scope, string> = { once: 'Once', chat: 'This chat', always: 'Always' };
-
 /** Press and hold for 600 ms (Enter or Space held from a keyboard): a careful allow is never a reflex tap. */
 function HoldButton({ label, onDone }: { label: string; onDone(): void }) {
   const [holding, setHolding] = useState(false);
@@ -313,13 +311,50 @@ interface AskProps {
 }
 
 function Ask(p: AskProps) {
+  // The chosen answer: a scope, and for Always which of its rules.
   const [scope, setScope] = useState<Scope>('once');
   const [pick, setPick] = useState(0);
+  const [menu, setMenu] = useState(false);
   const careful = p.tone === 'careful';
+  const routine = p.tone === 'routine';
   const word = p.allowWord ?? 'Allow';
   const chosen = p.scopes[scope];
   const primary = scope === 'once' ? `${word} once` : scope === 'chat' ? `${word} for this chat` : `Always ${word.toLowerCase()}`;
   const run = () => (chosen?.choices ? chosen.choices[pick]?.run() : chosen?.run());
+  const more = !careful && (p.scopes.chat || p.scopes.always);
+  // The scope menu's rows: each names the exact rule; anything beyond once is confirmed on the Mac.
+  const rows: { scope: Scope; pick: number; title: string; rule: string }[] = [
+    ...(p.scopes.once ? [{ scope: 'once' as Scope, pick: 0, title: 'Once', rule: 'Just this request' }] : []),
+    ...(p.scopes.chat ? [{ scope: 'chat' as Scope, pick: 0, title: 'For this chat', rule: p.scopes.chat.rule }] : []),
+    ...(p.scopes.always ? (p.scopes.always.choices ?? [{ label: p.scopes.always.rule }]).map((c, i) => ({ scope: 'always' as Scope, pick: i, title: 'Always', rule: c.label })) : []),
+  ];
+  const actions = (
+    <div class="ask__actions">
+      {p.deny ? (
+        <button class="quiet" onClick={p.deny.run}>
+          {p.deny.label}
+        </button>
+      ) : null}
+      {chosen && !p.onMac ? (
+        careful ? (
+          <HoldButton label={primary} onDone={run} />
+        ) : (
+          <span class="split">
+            <button class="primary split__main" onClick={run}>
+              {primary}
+            </button>
+            {more ? (
+              <button class="primary split__more" aria-label="More ways to allow" aria-haspopup="dialog" onClick={() => setMenu(true)}>
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                  <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            ) : null}
+          </span>
+        )
+      ) : null}
+    </div>
+  );
   return (
     <section class={`ask ask--${p.tone}`}>
       <AskHead agent={p.agent} verb={p.verb} target={p.target} tone={p.tone} label={p.label} />
@@ -332,48 +367,17 @@ function Ask(p: AskProps) {
         </ul>
       ) : null}
       {p.onMac ? <p class="ask__note ask__note--warn">{p.onMac}</p> : null}
-      <div class="ask__bar">
+      <div class={`ask__bar${routine ? ' ask__bar--row' : ''}`}>
         {careful ? (
           <p class="ask__note">
             <LockIcon /> Once only
           </p>
-        ) : p.scopes.once ? (
-          <div class="seg" role="radiogroup" aria-label="How long">
-            {(['once', 'chat', 'always'] as Scope[]).map((s) => (
-              <button key={s} role="radio" aria-checked={scope === s} disabled={!p.scopes[s]} class={`seg__item${scope === s ? ' seg__item--on' : ''}`} onClick={() => (setScope(s), setPick(0))}>
-                {SCOPE_NAMES[s]}
-              </button>
-            ))}
-          </div>
+        ) : scope !== 'once' ? (
+          <p class="ask__note">
+            {rows.find((r) => r.scope === scope && r.pick === pick)?.rule} · Confirm on Mac
+          </p>
         ) : null}
-        {!careful && scope !== 'once' && chosen ? (
-          <div class="ask__rule">
-            {chosen.choices && chosen.choices.length > 1 ? (
-              <div class="rows" role="radiogroup">
-                {chosen.choices.map((c, i) => (
-                  <button key={c.label} role="radio" aria-checked={pick === i} class={`row-choice${pick === i ? ' row-choice--on' : ''}`} onClick={() => setPick(i)}>
-                    {c.label}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p class="ask__note">{chosen.rule}</p>
-            )}
-            <p class="ask__note">Confirm on Mac: it asks before this is allowed.</p>
-          </div>
-        ) : null}
-        <div class="ask__actions">
-          {p.deny ? (
-            <button class="quiet" onClick={p.deny.run}>
-              {p.deny.label}
-            </button>
-          ) : null}
-          {chosen && !p.onMac ? careful ? <HoldButton label={primary} onDone={run} /> : (
-            <button class="primary" onClick={run}>
-              {primary}
-            </button>
-          ) : null}
-        </div>
+        {actions}
         {p.extra?.length ? (
           <div class="ask__more">
             {p.extra.map((x) => (
@@ -384,6 +388,44 @@ function Ask(p: AskProps) {
           </div>
         ) : null}
       </div>
+      {menu ? (
+        <div class="sheet" role="dialog" aria-modal="true" aria-label="How long to allow" onClick={(e) => e.target === e.currentTarget && setMenu(false)}>
+          <div class="sheet__panel">
+            <header class="sheet__head">
+              <h2>
+                {p.verb} {p.target ? <span class="mono">{p.target}</span> : null}
+              </h2>
+              <button class="link" onClick={() => setMenu(false)}>
+                Cancel
+              </button>
+            </header>
+            <div class="rows" role="radiogroup">
+              {rows.map((r) => {
+                const on = r.scope === scope && r.pick === pick;
+                return (
+                  <button
+                    key={`${r.scope}${r.pick}`}
+                    role="radio"
+                    aria-checked={on}
+                    class={`row-choice row-choice--scope${on ? ' row-choice--on' : ''}`}
+                    onClick={() => {
+                      setScope(r.scope);
+                      setPick(r.pick);
+                      setMenu(false);
+                    }}
+                  >
+                    <span class="row-choice__top">
+                      <span class="row-choice__title">{r.title}</span>
+                      {r.scope === 'once' ? null : <span class="tag-mac">Confirm on Mac</span>}
+                    </span>
+                    <span class="row-choice__desc">{r.rule}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -537,7 +579,7 @@ function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: Agen
           onMac={item.onMac ? 'Too long or hidden characters: allow this one on your Mac. You can still deny it here.' : undefined}
           scopes={{
             ...(item.once ? { once: { rule: '', run: answer(item.once) } } : {}),
-            ...(item.chat ? { chat: { rule: `${item.verb} ${item.target ?? ''} without asking until the chat ends.`, run: answer(item.chat) } } : {}),
+            ...(item.chat ? { chat: { rule: `${item.verb}${item.target ? ` ${item.target}` : ''} again without asking, until this chat ends`, run: answer(item.chat) } } : {}),
             ...(item.always.length
               ? { always: { rule: item.always[0].label, run: () => void act({ type: 'allowAlways', requestId: item.id, grant: item.always[0].grant }), choices: item.always.map((c) => ({ label: c.label.replace(/^Always allow (\w)/, (_, ch: string) => ch.toUpperCase()), run: () => void act({ type: 'allowAlways', requestId: item.id, grant: c.grant }) })) } }
               : {}),
@@ -582,7 +624,7 @@ function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: Agen
           onMac={item.onMac ? 'Too long or hidden characters: run this one from your Mac. You can still deny it here.' : undefined}
           scopes={{
             once: { rule: '', run: () => void act({ type: 'command', commandId: item.id, approve: true }) },
-            ...(item.outside || item.onMac ? {} : { always: { rule: `Always run ${first}, exactly, in every chat.`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line } }) } }),
+            ...(item.outside || item.onMac ? {} : { always: { rule: `${first}, exactly, in every chat`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line } }) } }),
           }}
           deny={{ label: 'Deny', run: () => void act({ type: 'command', commandId: item.id, approve: false }) }}
         >
@@ -619,8 +661,8 @@ function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: Agen
           label="Agent request"
           scopes={{
             once: { rule: '', run: answer('allow') },
-            chat: { rule: 'Requests like this one in that chat go ahead without asking until it ends.', run: answer('allowChat') },
-            ...(item.always ? { always: { rule: `Always allow ${item.always}.`, run: answer('allowAlways') } } : {}),
+            chat: { rule: 'Requests like this one in this chat, without asking, until it ends', run: answer('allowChat') },
+            ...(item.always ? { always: { rule: `${item.always}`, run: answer('allowAlways') } } : {}),
           }}
           deny={{ label: 'Deny', run: () => void act({ type: 'bridge', requestId: item.id, answer: 'deny' }) }}
         >
