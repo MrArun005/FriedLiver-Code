@@ -7,13 +7,15 @@
 // It always runs on a copy of this extension's own sources (small, local). With FL_TOKEN_BENCH_REPO
 // set (CI: .github/workflows/index-bench.yml clones microsoft/TypeScript v6.0.3) it also runs on that
 // repo. It edits files in the repo it runs on: point it at a throwaway clone only.
-import { cp, mkdtemp, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex, STAT_BATCH, type IndexCall, type IndexContext } from '../src/host/projectIndex';
+import { extractPage, PageMemory, renderPage, SNAPSHOT_LIMITS } from '../src/host/pageText';
 import { estimateTokens } from '../src/shared/tokens';
+import { fakeVisible, oldSnapshot, parseHtml } from './fakeDom';
 
 type Counter = { name: string; count(text: string): number };
 
@@ -315,4 +317,40 @@ describe('token bench: code', () => {
     await codeTasks(process.env.FL_TOKEN_BENCH_REPO!, TYPESCRIPT);
     for (const r of rows.slice(before)) expect(r.with, r.task).toBeLessThan(r.without);
   }, 900_000);
+});
+
+/** A parsed page both ways: what the old browser_snapshot returned, and the new one's data. */
+function pageBoth(html: string, url: string) {
+  const { document, title } = parseHtml(html);
+  const old = oldSnapshot(document, title, url);
+  return { old, data: extractPage(document as never, fakeVisible as never, { title, url, start: 0 }) };
+}
+
+describe('token bench: browser', () => {
+  const row = (task: string, without: string, withText: string) => rows.push({ category: 'Browser', task, without: tokens.count(without), with: tokens.count(withText), calls: [1, 1] });
+
+  it('reads pages, re-reads a changed one, and finds what to click with fewer tokens', async () => {
+    tokens ??= await counter();
+    const html = await readFile(path.join(__dirname, 'fixtures/pages/docs-webhooks.html'), 'utf8');
+    const url = 'https://docs.example.com/guides/webhooks';
+    const a = pageBoth(html, url);
+    const before = rows.length;
+    // The whole main content (the largest budget), not the default cut.
+    row('Read a docs page (fixture)', a.old, renderPage(a.data, { budget: SNAPSHOT_LIMITS.maxBudget }));
+    const mem = new PageMemory();
+    mem.answer('bench', a.data, {});
+    const b = pageBoth(html.replace('every 6 hours for up to 3 days', 'every 12 hours for up to 5 days'), url);
+    row('Re-read it after one paragraph changed', b.old, mem.answer('bench', b.data, {}));
+    row('Find the button to click', a.old, renderPage(a.data, { elements: true }));
+    for (const r of rows.slice(before)) expect(r.with, r.task).toBeLessThan(r.without);
+  });
+
+  it.skipIf(!process.env.FL_TOKEN_BENCH_PAGES)('reads pinned real pages (web.archive.org snapshots) with fewer tokens', async () => {
+    tokens ??= await counter();
+    const dir = process.env.FL_TOKEN_BENCH_PAGES!;
+    for (const f of (await readdir(dir)).filter((n) => n.endsWith('.html')).sort()) {
+      const { old, data } = pageBoth(await readFile(path.join(dir, f), 'utf8'), 'https://example.invalid/');
+      row(`Read ${f.replace(/\.html$/, '')} (archived page)`, old, renderPage(data, { budget: SNAPSHOT_LIMITS.maxBudget }));
+    }
+  });
 });

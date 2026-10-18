@@ -80,7 +80,7 @@ export function parseHtml(html: string): { document: FakeNode; title: string } {
       if (RAW.has(name)) {
         const close = html.toLowerCase().indexOf(`</${name.toLowerCase()}`, i);
         const raw = html.slice(i, close < 0 ? html.length : close);
-        if (name === 'TITLE') title = decode(raw).trim();
+        if (name === 'TITLE') title ||= decode(raw).trim();
         else if (raw) {
           const t = node(3, '#text', name === 'TEXTAREA' ? decode(raw) : raw);
           t.parentNode = el;

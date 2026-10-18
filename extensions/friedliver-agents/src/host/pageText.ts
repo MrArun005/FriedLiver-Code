@@ -216,8 +216,8 @@ export function extractPage(doc: El, visible: (el: El) => boolean, info: { title
           .trim()
           .slice(0, 80);
         const checked = type === 'checkbox' || type === 'radio' ? (c.getAttribute('checked') !== null ? ' [x]' : ' [ ]') : '';
-        const h = c.nodeName === 'A' ? href(c) : '';
-        elements.push(`e${id} ${kind}${checked} "${name}"${h ? ` → ${h}` : ''}`);
+        // No link targets: the agent clicks by id, and the content has the links it reads.
+        elements.push(`e${id} ${kind}${checked} "${name}"`);
       }
       scan(c, on);
     }
@@ -255,10 +255,9 @@ export function renderPage(page: PageData, opts: { elements?: boolean; budget?: 
     line
       .replace(/\]\(([^)\s]+)\)/g, (_m, h: string) => `](${shortUrl(h, page.url)})`)
       .replace(/\[([^\]]*)\]\(\)/g, '$1');
-  const target = (line: string) => line.replace(/ → (\S+)$/, (_m, h: string) => (shortUrl(h, page.url) ? ` → ${shortUrl(h, page.url)}` : ''));
   const head = `# ${page.title || '(untitled)'}\nURL: ${page.url}`;
   const body = opts.elements
-    ? [`Elements (${page.elements.length}${page.elements.length >= SNAPSHOT_LIMITS.elements ? '+' : ''}), for browser_click and browser_type as selector:`, ...page.elements.map(target)]
+    ? [`Elements (${page.elements.length}${page.elements.length >= SNAPSHOT_LIMITS.elements ? '+' : ''}), for browser_click and browser_type as selector:`, ...page.elements]
     : [...page.lines.map(link), '', `Interactive: ${page.elements.length} elements (browser_snapshot with elements: true lists them)`];
   const out = [head];
   let used = estimateTokens(head) + 30;

@@ -13,6 +13,7 @@ on:
       - extensions/friedliver-agents/src/host/merkle.ts
       - extensions/friedliver-agents/src/host/indexReads.ts
       - extensions/friedliver-agents/src/shared/tokens.ts
+      - extensions/friedliver-agents/src/host/pageText.ts
       - extensions/friedliver-agents/test/indexBench.test.ts
       - extensions/friedliver-agents/test/tokenBench.test.ts
       - .github/workflows/index-bench.yml
@@ -45,4 +46,9 @@ jobs:
         working-directory: extensions/friedliver-agents
         run: |
           npm install --no-save js-tiktoken@1.0.21
-          FL_TOKEN_BENCH_REPO="$RUNNER_TEMP/TypeScript" FL_TOKEN_BENCH_OUT="$RUNNER_TEMP/token-bench.md" npx vitest run test/tokenBench.test.ts
+          # Pinned web.archive.org captures (id_: the page as served), for the browser rows.
+          mkdir -p "$RUNNER_TEMP/pages"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/mdn-429.html" "https://web.archive.org/web/20250530112150id_/https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/wikipedia-merkle-tree.html" "https://web.archive.org/web/20250602014058id_/https://en.wikipedia.org/wiki/Merkle_tree"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/github-typescript.html" "https://web.archive.org/web/20250601105140id_/https://github.com/microsoft/TypeScript"
+          FL_TOKEN_BENCH_PAGES="$RUNNER_TEMP/pages" FL_TOKEN_BENCH_REPO="$RUNNER_TEMP/TypeScript" FL_TOKEN_BENCH_OUT="$RUNNER_TEMP/token-bench.md" npx vitest run test/tokenBench.test.ts
