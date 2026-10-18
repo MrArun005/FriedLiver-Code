@@ -480,7 +480,8 @@ export class ProjectIndex {
       const dirs = [...got.dirs];
       for (const f of changed) if (f === '.gitignore' || f.endsWith('/.gitignore')) dirs.push(path.posix.dirname(f) === '.' ? '' : path.posix.dirname(f));
       if (changed.includes('.git/info/exclude')) dirs.push('');
-      await this.updateMany(got.files);
+      const hinted = new Set(hint.paths);
+      await this.updateMany(got.files.filter((f) => !hinted.has(f)));
       if (dirs.length && !(await this.rescan(dirs, onBatch))) return undefined;
       this.mark = got.next;
       mode = 'journal';
