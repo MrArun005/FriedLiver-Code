@@ -102,7 +102,7 @@ async function run(themeKey, out, failures) {
 		executablePath: executable(path.resolve(values.app)),
 		args: [
 			ws,
-			// Opened as editors at startup: README, package.json, cart.ts, then format.ts in front.
+			// Opened as editors at startup, as four tabs.
 			...['README.md', 'package.json', 'src/cart.ts', 'src/format.ts'].map((f) => path.join(ws, f)),
 			`--user-data-dir=${path.join(dir, 'data')}`,
 			`--extensions-dir=${path.join(dir, 'ext')}`,
@@ -159,7 +159,8 @@ async function run(themeKey, out, failures) {
 	await cmd('notifications.clearAll', 300);
 	await step('01-workbench', async () => {
 		await cmd('workbench.view.explorer');
-		await win.locator('.tabs-container .tab', { hasText: 'format.ts' }).first().waitFor({ timeout: 30_000 });
+		// The first file on the command line opens in front; bring format.ts forward (the explorer reveals it).
+		await win.locator('.tabs-container .tab', { hasText: 'format.ts' }).first().click({ timeout: 30_000 });
 		await wait(1500);
 		await shot('01-workbench');
 	});
