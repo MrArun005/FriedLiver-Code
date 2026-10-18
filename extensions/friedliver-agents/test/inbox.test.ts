@@ -161,7 +161,7 @@ describe('identical requests', () => {
   });
 
   it('never batches edits, messages to agents or questions', () => {
-    const edit: Item = { kind: 'permission', requestId: 'e', title: 'Edit a.ts', toolKind: 'edit', options: OPTIONS, detail: { files: [{ path: '/w/a.ts', added: 1, removed: 0, isNew: false, lines: [], more: 0 }] }, at: 1 };
+    const edit: Item = { kind: 'permission', requestId: 'e', title: 'Edit a.ts', toolKind: 'edit', options: OPTIONS, detail: { files: [{ path: '/w/a.ts', added: 1, removed: 0, isNew: false, full: false, lines: [], more: 0 }] }, at: 1 };
     const ask: Item = { kind: 'bridge', requestId: 'q', tool: 'ask_agent', target: { agent: 'codex' }, text: 'same', state: 'awaiting', at: 2 };
     const s = state(chat('a', { items: [edit, ask] }), chat('b', { items: [{ ...edit, requestId: 'e2' } as Item, { ...ask, requestId: 'q2' } as Item] }));
     const box = inbox(s);
@@ -396,5 +396,15 @@ describe('what was answered lately', () => {
       ['p1', 'Yes', true],
     ]);
     expect(answered(s, 2)).toHaveLength(2);
+  });
+});
+
+describe('the way in', () => {
+  it('is a command, "FriedLiver: Open Decision Inbox", on Cmd+Shift+I', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(pkg.contributes.commands).toContainEqual(expect.objectContaining({ command: 'friedliver.openInbox', title: 'Open Decision Inbox', category: 'FriedLiver' }));
+    expect(pkg.contributes.keybindings).toContainEqual(expect.objectContaining({ command: 'friedliver.openInbox', mac: 'cmd+shift+i' }));
+    expect(parseWebviewMessage({ type: 'openInbox' })).toEqual({ type: 'openInbox' });
   });
 });

@@ -4,7 +4,7 @@
 // the same checks (an option the agent offered, a grant the request offered, the origin again).
 import { DecisionTargets, KEY_GRACE_MS } from './decisionTarget';
 import type { WebviewMessage } from './messages';
-import { BRIDGE_TIMEOUT_MS, decisionOf, waitingItems, type AppState, type ChatView, type Item } from './model';
+import { BRIDGE_TIMEOUT_MS, bridgeTitle, decisionOf, shortCommand, waitingItems, type AppState, type ChatView, type Item } from './model';
 import { describeGrant, siteOrigin, type Grant } from './permissions';
 import { oneClickQuestion, recommended } from './questions';
 import { ruleCandidates } from './rules';
@@ -73,6 +73,13 @@ export function sameKey(chat: ChatView, i: Waiting): string | undefined {
   return undefined;
 }
 
+/** A row's words under its chat's header: a bridge request without the chat's own topic, a command as "Run …". */
+function rowTitle(state: Pick<AppState, 'chats'>, chat: ChatView, i: Waiting, title: string): string {
+  if (i.kind === 'bridge') return bridgeTitle(state, chat, i, true);
+  const line = i.kind === 'permission' ? i.detail?.command?.line : undefined;
+  return line && i.kind === 'permission' && line.trim() === i.title.trim() ? `Run ${shortCommand(line)}` : title;
+}
+
 const isWaitingKind = (i: Item): i is Waiting => i.kind === 'permission' || i.kind === 'review' || i.kind === 'command' || i.kind === 'bridge' || i.kind === 'question';
 
 /** Every request waiting in an open chat, oldest first, grouped by chat. Read-only chats ask nothing, so they are left out. */
@@ -88,7 +95,7 @@ export function inbox(state: Pick<AppState, 'chats'>): Inbox {
         id: d.id,
         chatId: chat.id,
         kind: kindOf(item),
-        title: d.title,
+        title: rowTitle(state, chat, item, d.title),
         item,
         ...(item.at !== undefined ? { at: item.at } : {}),
         ...(item.kind === 'bridge' && item.at !== undefined ? { timeoutAt: item.at + BRIDGE_TIMEOUT_MS } : {}),
@@ -351,7 +358,7 @@ export function answered(state: Pick<AppState, 'chats'>, limit = 8): Answered[] 
       const o = outcome(i);
       const d = o && decisionOf(state, chat, i);
       if (!o || !d) continue;
-      out.push({ id: d.id, chatId: chat.id, kind: kindOf(i), title: d.title, outcome: o.text, allowed: o.allowed, ...(i.at !== undefined ? { at: i.at } : {}) });
+      out.push({ id: d.id, chatId: chat.id, kind: kindOf(i), title: rowTitle(state, chat, i, d.title), outcome: o.text, allowed: o.allowed, ...(i.at !== undefined ? { at: i.at } : {}) });
     }
   }
   return out.sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, limit);
