@@ -1,5 +1,5 @@
 import { Fragment, render } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   AGENT_FACES,
   age,
@@ -8,7 +8,6 @@ import {
   lastReply,
   type AgentKey,
   type AppState,
-  type BridgeItem,
   type ChatView,
   type ChatStatus,
 } from '../shared/model';
@@ -45,7 +44,9 @@ import type { ClaudeSession, TaskChoices } from '../shared/messages';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
-import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
+import { AutoBadge, ModeBadge, TaskOptions, decisionId } from './controls';
+import { ApprovalCard } from './approval';
+import { approvalOf, type Approvable } from '../shared/approval';
 import { AgentMap } from './map';
 import { Gallery } from './gallery';
 import { Inbox } from './inbox';
@@ -600,37 +601,11 @@ function Board({ state, chats, outside, now, focusId, onFocus }: { state: AppSta
   );
 }
 
-/** Inline answers to whatever the chat waits on, so most decisions take one click from the board. */
+/** Inline answers to whatever the chat waits on: the approval card, compact; a question opens the chat. */
 function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
   const d = line.decision;
+  const state = useContext(LiveState);
   if (!d) return null;
-  if (d.kind === 'review') {
-    return (
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
-          Review edit
-        </button>
-        <button class="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'accept' })}>
-          <Icon name="check" /> Accept
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'reject' })}>
-          Reject
-        </button>
-      </div>
-    );
-  }
-  if (d.kind === 'command') {
-    return (
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
-          <Icon name="play" /> Run
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'command', commandId: d.id, approve: false })}>
-          Deny
-        </button>
-      </div>
-    );
-  }
   if (d.kind === 'question') {
     return (
       <div class="actions">
@@ -640,41 +615,8 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
       </div>
     );
   }
-  if (d.kind === 'bridge') {
-    const bridge = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === d.id);
-    return (
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
-          Allow
-        </button>
-        <button class="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowChat' })}>
-          Allow for this chat
-        </button>
-        {bridge?.always && (
-          <button class="sm" title={`Don't ask again for ${bridge.always}, in any chat`} onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowAlways' })}>
-            Always allow
-          </button>
-        )}
-        <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'deny' })}>
-          Deny
-        </button>
-      </div>
-    );
-  }
-  const item = chat.items.find((i) => i.kind === 'permission' && i.requestId === d.id);
-  if (item?.kind !== 'permission') return null;
-  // A diff or a plan needs reading: the chat shows it in full.
-  const read = !!item.detail?.plan || (item.detail?.files?.length ?? 0) > 0;
-  return (
-    <div class="actions">
-      {read && (
-        <button class="sm" onClick={() => open(chat.id)}>
-          {item.detail?.plan ? 'Read the plan' : 'See the diff'}
-        </button>
-      )}
-      <PermissionOptions item={item} compact />
-    </div>
-  );
+  const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
+  return item ? <ApprovalCard item={item} chat={chat} state={state} compact /> : null;
 }
 
 function Steps({ progress }: { progress: Progress }) {
@@ -1098,6 +1040,15 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
   if (d.kind === 'review') {
     return (
       <button class="decide sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
+        Review
+      </button>
+    );
+  }
+  // A careful request is allowed by holding on its card, never in one click from a row.
+  const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
+  if (item && approvalOf(item, chat).hold) {
+    return (
+      <button class="decide sm" onClick={() => open(chat.id)}>
         Review
       </button>
     );

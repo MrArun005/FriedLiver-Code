@@ -54,7 +54,7 @@ import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, 
 import { Viewer } from './viewer';
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
+import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -1101,7 +1101,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
     case 'link':
       return <LinkView item={item} chat={chat} state={state} onSelect={onSelect} />;
     case 'bridge':
-      return <BridgeView item={item} chat={chat} state={state} onSelect={onSelect} />;
+      return <BridgeView item={item} chat={chat} state={state} />;
     case 'question':
       return <QuestionCard item={item} chat={chat} />;
   }
@@ -1173,23 +1173,9 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   );
 }
 
-const BRIDGE_TOOL: Record<BridgeItem['tool'], string> = {
-  remember: 'Fact',
-  ask_agent: 'Question',
-  send_to_chat: 'Message',
-  read_chat: 'Read the transcript',
-  browser_open: 'Open',
-  browser_click: 'Click',
-  browser_type: 'Type',
-  browser_back: 'Back',
-  browser_reload: 'Reload',
-};
-
 /** An agent asks to reach another agent or chat through the FriedLiver tools: a decision. */
-function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: ChatView; state: AppState; onSelect: Select }) {
+function BridgeView({ item, chat, state }: { item: BridgeItem; chat: ChatView; state: AppState }) {
   const title = bridgeTitle(state, chat, item);
-  const target = 'chatId' in item.target ? state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId) : undefined;
-  const targetAgent = 'agent' in item.target ? item.target.agent : target?.agent;
   if (item.state !== 'awaiting') {
     return (
       <div class="answered">
@@ -1201,56 +1187,7 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
       </div>
     );
   }
-  return (
-    <section class="ask bridge" id={`item-${item.requestId}`} aria-label={title} {...chooseOn(chat, item.requestId)}>
-      <div class="ask-head">
-        <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" />
-        <span>{title}</span>
-        {targetAgent && (
-          <>
-            <Icon name="handoff" />
-            <Glyph agent={targetAgent} size="sm" />
-          </>
-        )}
-      </div>
-      {target && (
-        <button class="link-chip" onClick={() => onSelect(target.id)} title={target.title}>
-          <Glyph agent={target.agent} size="sm" />
-          {target.label}
-          <span class="hint">{clip(target.title, 40)}</span>
-        </button>
-      )}
-      {item.text && (
-        <div class="bridge-text">
-          <div class="bridge-label">{BRIDGE_TOOL[item.tool]}</div>
-          {item.text}
-        </div>
-      )}
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allow' })}>
-          <span class="opt-num">1.</span>Allow
-        </button>
-        <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
-          <span class="opt-num">2.</span>Allow for this chat
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
-          <span class="opt-num">3.</span>Deny
-        </button>
-        {/* Last and a link, as on a permission card: not one more numbered choice. */}
-        {item.always && (
-          <button
-            class="link always-allow"
-            title={`Don't ask again for ${item.always}: every chat, every agent, after restarts. Revoke in Manage Permissions.`}
-            onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowAlways' })}
-          >
-            Always allow <span class="always-scope">{item.always}</span>
-          </button>
-        )}
-      </div>
-      <KeyHint chat={chat} id={item.requestId} n={3} />
-    </section>
-  );
+  return <WaitingCard item={item} chat={chat} state={state} />;
 }
 
 function Stats({ item }: { item: ReviewItem }) {
@@ -1291,64 +1228,17 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
     );
   }
   return (
-    <section class="ask" id={`item-${item.reviewId}`} aria-label="Edit to review" {...chooseOn(chat, item.reviewId)}>
-      <div class="ask-head">
-        <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" /> {item.isNew ? 'New file to review' : 'Edit to review'}
-      </div>
-      <div class="file-line">
-        <button class="file-row" title={`${item.path}: open the diff`} onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
-          <Icon name="file" /> <span class="file-name">{name}</span> <Stats item={item} />
-        </button>
-        <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
-      </div>
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'accept' })}>
-          <span class="opt-num">1.</span>Accept
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'reject' })}>
-          <span class="opt-num">2.</span>Reject
-        </button>
-        <button class="ghost sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
-          Open diff
-        </button>
-      </div>
-      <KeyHint chat={chat} id={item.reviewId} n={2} />
-    </section>
+    <>
+      <WaitingCard item={item} chat={chat} />
+      <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
+    </>
   );
 }
 
 const COMMAND_STATE: Record<CommandItem['state'], string> = { awaiting: 'needs-you', running: 'working', denied: 'idle', exited: 'done' };
 
 function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
-  if (item.state === 'awaiting') {
-    return (
-      <section class="ask" id={`item-${item.commandId}`} aria-label="Command to approve" {...chooseOn(chat, item.commandId)}>
-        <div class="ask-head">
-          <Dot state="needs-you" />
-          <Glyph agent={chat.agent} size="sm" /> {chat.label} wants to run a command
-        </div>
-        <pre class="cmdline">
-          <span class="prompt">$ </span>
-          {item.commandLine}
-        </pre>
-        <div class="hint mono" title={item.cwd}>
-          in {item.cwd}
-        </div>
-        {item.outside && <div class="warn">This folder is outside the workspace.</div>}
-        <div class="actions">
-          <button class="decide sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: true })}>
-            <span class="opt-num">1.</span>Run
-          </button>
-          <button class="ghost danger sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: false })}>
-            <span class="opt-num">2.</span>Deny
-          </button>
-          {!item.outside && <AlwaysAllow line={item.commandLine} target={{ commandId: item.commandId }} />}
-        </div>
-        <KeyHint chat={chat} id={item.commandId} n={2} />
-      </section>
-    );
-  }
+  if (item.state === 'awaiting') return <WaitingCard item={item} chat={chat} />;
   const failed = item.state === 'exited' && item.exitCode !== 0;
   const meta =
     item.state === 'denied'
@@ -1497,8 +1387,14 @@ function Composer({
       if (e.defaultPrevented || isTyping(e.target)) return;
       decisionKey(e, live.current, true);
     };
+    // Enter let go anywhere (the message box included) ends a hold that hasn't finished.
+    const onUp = (e: KeyboardEvent) => decisionKeyUp(e, live.current);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onUp);
+    };
   }, []);
 
   const addFiles = (files: File[]) => {

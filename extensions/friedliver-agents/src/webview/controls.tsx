@@ -1,11 +1,12 @@
 // The chat's session controls (approval level, model, effort, the agent's own
 // modes), the usage meter, and the cards that show what an agent asks to do
 // and what its tools did. Shared by the chat view and the Agent Manager.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { batchMessages, batchable, inbox } from '../shared/inbox';
 import type { DiffLine } from '../shared/diff';
-import { AGENT_FACES, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
-import { ruleCandidates } from '../shared/rules';
-import { describeGrant, grantId, type Grant } from '../shared/permissions';
+import { AGENT_FACES, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
+import { approvalOf, type Approvable } from '../shared/approval';
+import { ApprovalCard, cardKeys } from './approval';
 import {
   optionKey,
   reportedMode,
@@ -14,8 +15,8 @@ import {
 } from '../shared/session';
 import { DecisionTargets } from '../shared/decisionTarget';
 import { questionGroups, recommended, type QuestionField } from '../shared/questions';
-import { ESCALATING, OPTION_KINDS, denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
-import { ClampedText, Dot, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
+import { denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
+import { ClampedText, LiveState, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -144,78 +145,6 @@ export function PermissionDetailView({ detail, requestId, open }: { detail?: Per
   );
 }
 
-/** Buttons for an agent's options: the first plain one-time allow is the loud one; mode changes never are. */
-export function PermissionOptions({ item, compact }: { item: Permission; compact?: boolean }) {
-  const primary = primaryOption(item.options);
-  return (
-    <>
-      {item.options.map((o, i) => {
-        const escalates = ESCALATING.test(o.name) || o.kind === 'allow_always';
-        const cls = o === primary ? 'decide' : o.kind.startsWith('reject') ? 'ghost danger' : escalates ? 'escalate' : '';
-        const always = o.kind.endsWith('_always') && !/always|again|don['’]t ask/i.test(o.name);
-        return (
-          <button
-            key={o.optionId}
-            class={`sm ${cls}`}
-            title={`${OPTION_KINDS[o.kind] ?? o.kind}${escalates && o.kind.startsWith('allow') ? `. ${ESCALATING.test(o.name) ? 'Changes how the agent asks from now on.' : ''}` : ''}${o === primary && !compact ? ' (Ctrl+Enter)' : ''}`}
-            onClick={() => send({ type: 'permission', requestId: item.requestId, optionId: o.optionId })}
-          >
-            {!compact && i < 9 && <span class="opt-num">{i + 1}.</span>}
-            {o.name}
-            {always && <span class="tag">always</span>}
-          </button>
-        );
-      })}
-    </>
-  );
-}
-
-/**
- * "Always allow", remembered for every chat and later session: for a command, the exact line or the
- * program and its subcommand (never chained lines); for files, the folders the host offered (most
- * specific first); for a fetch, its website. Manage Permissions lists and revokes them.
- */
-export function AlwaysAllow({ line, grants = [], target }: { line?: string; grants?: Grant[]; target: { requestId: string } | { commandId: string } }) {
-  const choices: Grant[] = [...(line ? ruleCandidates(line) : []), ...grants];
-  if (!choices.length) return null;
-  return (
-    <Popover label="Always allow" title="Don't ask again: in every chat, for every agent, after restarts" buttonClass="link always-allow" trigger={<>Always allow…</>}>
-      {(close) => (
-        <>
-          <div class="pop-title" aria-hidden="true">
-            Always allow, in every chat
-          </div>
-          {choices.map((grant) => {
-            const d = describeGrant(grant);
-            return (
-              <button
-                key={grantId(grant)}
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  send({ type: 'allowAlways', ...target, grant });
-                }}
-              >
-                <span class="menu-label mono">{d.scope}</span>
-                <span class="menu-sub">{grant.kind === 'folder' ? `${grant.access === 'read' ? 'read files here' : 'change files here'} and below` : d.what.toLowerCase()}</span>
-              </button>
-            );
-          })}
-          <button
-            role="menuitem"
-            onClick={() => {
-              close();
-              send({ type: 'managePermissions' });
-            }}
-          >
-            <span class="menu-label">Manage permissions…</span>
-          </button>
-        </>
-      )}
-    </Popover>
-  );
-}
-
 /** A permission request: what it would do, and the agent's own answers. */
 export function PermissionCard({ item, chat }: { item: Permission; chat: ChatView }) {
   if (item.answer) {
@@ -237,30 +166,23 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
       </div>
     );
   }
-  const command = item.detail?.command?.line;
-  const deny = denyOption(item.options);
-  return (
-    <section class="ask" id={`item-${item.requestId}`} aria-label={`${chat.label} asks`} {...chooseOn(chat, item.requestId)}>
-      <div class="ask-head">
-        <Dot state="needs-you" />
-        Needs your OK
-        {item.toolKind && <span class="tag">{KIND_WORDS[item.toolKind] ?? item.toolKind}</span>}
-      </div>
-      {/* The command shows in full below; a title that only repeats it says what it is instead. */}
-      <div class="ask-body">
-        {command && command.trim() === item.title.trim() ? 'Run this command' : longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}
-      </div>
-      <PermissionDetailView detail={item.detail} requestId={item.requestId} open />
-      <div class="actions">
-        <PermissionOptions item={item} />
-        <AlwaysAllow line={command && item.toolKind === 'execute' ? command : undefined} grants={item.detail?.always} target={{ requestId: item.requestId }} />
-      </div>
-      {deny && <KeyHint chat={chat} id={item.requestId} n={item.options.length} yes={!!primaryOption(item.options)} />}
-    </section>
-  );
+  return <WaitingCard item={item} chat={chat} />;
 }
 
-const KIND_WORDS: Record<string, string> = { execute: 'command', edit: 'edit', switch_mode: 'plan', read: 'read', fetch: 'web', delete: 'delete', move: 'move', search: 'search', think: 'think' };
+/** A request waiting in the chat at its weight, ringed when the keys act on it; a routine one offers Allow all for its identical twins. */
+export function WaitingCard({ item, chat, state }: { item: Approvable; chat: ChatView; state?: Pick<AppState, 'chats'> }) {
+  const id = decisionId(item)!;
+  const on = useDecisionTarget(chat) === id;
+  const live = useContext(LiveState);
+  const batch = useMemo(() => {
+    const box = inbox(live);
+    const entry = box.entries.find((e) => e.id === id);
+    const same = entry ? batchable(box.entries, entry) : [];
+    return same.length >= 2 ? { count: same.length, chats: new Set(same.map((e) => e.chatId)).size, messages: batchMessages(same, 'allow') } : undefined;
+  }, [live, id]);
+  return <ApprovalCard item={item} chat={chat} state={state ?? live} on={on} batch={batch} frame={chooseOn(chat, id)} />;
+}
+
 
 /** Messages waiting for the agent to finish; Send now joins the running turn where the agent allows it. */
 export function QueueList({ chat }: { chat: ChatView }) {
@@ -363,17 +285,6 @@ export function useDecisionTarget(chat: ChatView): string | undefined {
 
 const MAC = /Mac/.test(navigator.platform);
 
-/** Where the keys act: the hint shows on that card only. `n` options are numbered 1–n. */
-export function KeyHint({ chat, id, n, yes = true, no = 'no' }: { chat: ChatView; id: string; n: number; yes?: boolean; no?: string }) {
-  // Always laid out, shown only on the marked card: marking another card never moves anything under the pointer.
-  const on = useDecisionTarget(chat) === id;
-  return (
-    <div class="hint keys" data-on={on ? '' : undefined} aria-hidden="true">
-      Press 1–{Math.min(9, n)} to choose{yes ? ` · ${MAC ? '⌘↩' : 'Ctrl+Enter'} yes` : ''} · {MAC ? '⌘⇧⌫' : 'Ctrl+Shift+Backspace'} {no}
-    </div>
-  );
-}
-
 /** A decision card's frame: clicking or focusing in it makes it the one the keys act on. */
 export function chooseOn(chat: ChatView, id: string) {
   return { onMouseDown: () => chooseDecision(chat, id), onFocusIn: () => chooseDecision(chat, id) };
@@ -415,26 +326,64 @@ export function waitingActions(chat: ChatView): { approve(): void; deny(): void;
 }
 
 /**
- * Keys for the waiting decision: Ctrl/Cmd+Enter says the loud yes,
- * Ctrl/Cmd+Shift+Backspace says no, 1–9 (or Alt+1–9) picks an agent's option. Only
- * while the message box is empty, so typing is never taken over.
+ * Keys for the waiting decision, only while the message box is empty so typing is never taken over:
+ * Enter (or Ctrl/Cmd+Enter) allows with the card's scope, and a careful request only while held;
+ * Esc (or Ctrl/Cmd+Shift+Backspace) says no; Tab moves the scope; Ctrl/Cmd+D opens the full diff.
+ * A question keeps 1–9 to pick and Ctrl/Cmd+Enter to confirm.
  */
 export function decisionKey(e: KeyboardEvent, chat: ChatView, composerEmpty: boolean): boolean {
-  if (!composerEmpty) return false;
+  if (!composerEmpty || e.isComposing) return false;
+  const target = decisionTarget(chat);
   const actions = waitingActions(chat);
-  if (!actions) return false;
+  if (!target || !actions) return false;
+  const id = decisionId(target)!;
+  const card = cardKeys.get(id);
+  const question = target.kind === 'question';
   const mod = e.ctrlKey || e.metaKey;
   // A digit is the character typed (any layout), or Alt+digit by its key position (macOS turns Alt+1 into ¡).
-  const digit = !mod && /^[1-9]$/.test(e.key) ? Number(e.key) : !mod && e.altKey && /^Digit[1-9]$/.test(e.code) ? Number(e.code.slice(5)) : 0;
-  const kind = mod && !e.shiftKey && e.key === 'Enter' ? 'approve' : mod && e.shiftKey && e.key === 'Backspace' ? 'deny' : digit ? 'pick' : null;
+  const digit = question && !mod && /^[1-9]$/.test(e.key) ? Number(e.key) : question && !mod && e.altKey && /^Digit[1-9]$/.test(e.code) ? Number(e.code.slice(5)) : 0;
+  const kind =
+    e.key === 'Enter' && e.shiftKey && !mod && !e.altKey && card && !question
+      ? 'batch'
+      : e.key === 'Enter' && !e.shiftKey && !e.altKey && (mod || !question)
+      ? 'approve'
+      : (e.key === 'Escape' && !mod && !e.shiftKey && !e.altKey) || (mod && e.shiftKey && e.key === 'Backspace')
+        ? 'deny'
+        : e.key === 'Tab' && !e.shiftKey && !mod && !e.altKey && card
+          ? 'scope'
+          : mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd' && card
+            ? 'diff'
+            : digit
+              ? 'pick'
+              : null;
   if (!kind) return false;
-  // While a decision waits, the key is for it, never typed. Just after the marked card changed, it does nothing.
+  // While a decision waits, the key is for it, never typed.
   e.preventDefault();
+  if (kind === 'scope') return card!.cycle(), true;
+  if (kind === 'diff') return card!.diff(), true;
+  // A held Enter repeats: the hold is already running (or the request was already answered).
+  if (e.repeat) return true;
+  // Just after the marked card changed, the answer keys do nothing.
   if (!targets.armed(chat.id, waitingIds(chat), Date.now())) return true;
-  if (kind === 'approve') actions.approve();
-  else if (kind === 'deny') actions.deny();
+  if (kind === 'batch') card!.batch();
+  else if (kind === 'approve') {
+    if (card && !question) card.press();
+    // Without its card on screen, only what isn't careful: a careful request is allowed by holding on its card.
+    else if (question || !approvalOf(target as Approvable, chat).hold) actions.approve();
+  } else if (kind === 'deny') {
+    if (card && !question) card.deny();
+    else actions.deny();
+  }
   else actions.pick(digit - 1);
   return true;
+}
+
+/** Enter let go: a hold not yet done drains back. */
+export function decisionKeyUp(e: KeyboardEvent, chat: ChatView): void {
+  if (e.key !== 'Enter') return;
+  const target = decisionTarget(chat);
+  const id = target && decisionId(target);
+  if (id) cardKeys.get(id)?.release();
 }
 
 // ---- The Agent Manager's new task ----
@@ -520,6 +469,7 @@ const questionKeys = new Map<string, { pick(n: number): boolean; confirm(): void
  */
 export function QuestionCard({ item, chat }: { item: Question; chat: ChatView }) {
   const groups = useMemo(() => questionGroups(item.fields), [item.fields]);
+  const on = useDecisionTarget(chat) === item.requestId;
   const [values, setValues] = useState<Values>({});
   const [step, setStep] = useState(0);
   const [other, setOther] = useState<string | null>(null);
@@ -601,9 +551,9 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
     skip();
   };
   return (
-    <section class="ask question" id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
+    <section class="fl-card apv question" data-on={on ? '' : undefined} id={`item-${item.requestId}`} aria-label={`${chat.label} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
       <div class="q-head">
-        <span class="chip q-chip">{g.field.title}</span>
+        <span class="fl-chip q-chip">{g.field.title}</span>
         {groups.length > 1 && (
           <span class="q-step" aria-live="polite">
             {step + 1} of {groups.length}
@@ -629,23 +579,24 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
                 onFocus={() => setActive(n)}
                 onClick={() => pick(o.value)}
               >
-                {g.field.type === 'multi' ? <span class="q-check">{picked(o.value) && <Icon name="check" />}</span> : <span class="q-num">{n < 9 ? n + 1 : ''}</span>}
+                {g.field.type === 'multi' && <span class="q-check">{picked(o.value) && <Icon name="check" size={12} />}</span>}
                 <span class="q-opt-text">
                   <span class="q-opt-label">
                     {label}
-                    {rec && <span class="tag q-rec">Recommended</span>}
+                    {rec && <span class="fl-chip q-rec">Recommended</span>}
                   </span>
                   {o.description && <span class="q-opt-desc">{o.description}</span>}
                 </span>
+                {n < 9 && <kbd class="q-key">{n + 1}</kbd>}
               </button>
             ))}
             {g.other &&
               (other === null ? (
                 <button type="button" class="q-opt q-opt-other" role={g.field.type === 'multi' ? 'button' : 'option'} onClick={() => setOther('')}>
-                  <span class="q-num">{options.length < 9 ? options.length + 1 : ''}</span>
                   <span class="q-opt-text">
                     <span class="q-opt-label">Other…</span>
                   </span>
+                  {options.length < 9 && <kbd class="q-key">{options.length + 1}</kbd>}
                 </button>
               ) : (
                 <div class="q-other">
@@ -682,21 +633,20 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
       </div>
       <div class="q-foot">
         {step > 0 && (
-          <button type="button" class="ghost sm" onClick={() => (setStep(step - 1), setOther(null), setActive(0))}>
+          <button type="button" class="fl-btn fl-btn--ghost" onClick={() => (setStep(step - 1), setOther(null), setActive(0))}>
             Back
           </button>
         )}
         <span class="spacer" />
-        <button type="button" class="ghost sm" onClick={skip} title="Esc">
-          Skip
+        <button type="button" class="fl-btn fl-btn--ghost" onClick={skip}>
+          Skip <span class="k">Esc</span>
         </button>
         {(!last || g.field.type !== 'choice') && (
-          <button type="button" class="primary sm" onClick={() => next(values)}>
-            {last ? 'Submit' : 'Next'}
+          <button type="button" class={`fl-btn ${on ? 'fl-btn--brand' : 'fl-btn--quiet'}`} onClick={() => next(values)}>
+            {last ? 'Submit' : 'Next'} <span class="k">{MAC ? '⌘⏎' : 'Ctrl+⏎'}</span>
           </button>
         )}
       </div>
-      <KeyHint chat={chat} id={item.requestId} n={options.length + (g.other ? 1 : 0)} yes={false} no="skip" />
     </section>
   );
 }

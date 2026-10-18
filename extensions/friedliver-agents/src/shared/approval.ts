@@ -206,7 +206,9 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
       ? clip(item.text, 120)
       : 'agent' in item.target
         ? AGENT_FACES[item.target.agent].name
-        : (other?.label ?? 'another chat');
+        : other
+          ? clip(other.title, 60)
+          : 'another chat';
   // What the host sends along (transcript.ts consultBrief, forwardText, renderChat).
   const files = chat.files?.length ?? 0;
   const shares =
@@ -227,7 +229,7 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
     verb: words,
     target,
     mono: browser,
-    ...(browser && item.tool !== 'browser_open' && origin ? { where: `on ${host(origin)}` } : other && !('agent' in item.target) ? { where: clip(other.title, 60) } : {}),
+    ...(browser && item.tool !== 'browser_open' && origin ? { where: `on ${host(origin)}` } : {}),
     risk,
     locked,
     grants: [],
@@ -294,32 +296,31 @@ export function grantText(g: Grant): string {
 }
 
 /**
- * One line that says exactly what gets remembered, before it is saved. Undefined for Once (nothing
- * is). Parts in backticks are machine text (the webview sets them in mono).
+ * What a scope remembers, named exactly, for its row in the Allow menu and the scope token. Parts in
+ * backticks are machine text (the webview sets them in mono). Undefined for a locked scope.
  */
-export function scopeNote(a: Approval, item: Approvable, chat: Pick<ChatView, 'agent' | 'cwd'>, scope: Scope, grant = 0): string | undefined {
-  if (scope === 'once' || a.locked[scope]) return undefined;
-  const agent = AGENT_FACES[chat.agent].name;
+export function scopeRule(a: Approval, item: Approvable, chat: Pick<ChatView, 'cwd'>, scope: Scope, grant = 0): string | undefined {
+  if (scope === 'once') return 'Just this time; ask again next time';
+  if (a.locked[scope]) return undefined;
   if (scope === 'chat') {
-    if (item.kind === 'permission') return `${agent} won't ask again for this until the chat ends: its own “${(a.chatOption ?? '').replace(/^yes,?\s*(and\s*)?/i, '')}”.`;
+    if (item.kind === 'permission') return `Until this chat ends: “${(a.chatOption ?? '').replace(/^yes,?\s*(and\s*)?/i, '')}”`;
     if (item.kind === 'bridge') {
-      if ('browser' in item.target) return `${agent} may open, click and type on any site in the browser, without asking, until this chat ends.`;
-      if ('memory' in item.target) return `${agent} may add to project memory without asking until this chat ends.`;
-      return `${agent} may ask other agents, and message and read other chats, without asking until this chat ends.`;
+      if ('browser' in item.target) return 'Any site in the browser, until this chat ends';
+      if ('memory' in item.target) return 'Project memory, until this chat ends';
+      return 'Other agents and chats, until this chat ends';
     }
     return undefined;
   }
-  const undo = ' Undo in Manage Permissions.';
   if (item.kind === 'bridge') {
     const origin = bridgeOrigin(item);
-    if (origin) return `\`${origin}\` in the browser, for every agent, in every chat.${undo}`;
-    return `Any agent may ${TOOL_NOTE[item.tool] ?? 'use this tool'} without asking, in every chat.${undo}`;
+    if (origin) return `\`${origin}\` in the browser, every agent, every chat`;
+    return `${(TOOL_NOTE[item.tool] ?? 'This tool').replace(/^./, (c) => c.toUpperCase())}, every agent, every chat`;
   }
   const g = a.grants[grant] ?? a.grants[0];
   if (!g) return undefined;
-  if (g.kind === 'exact' || g.kind === 'prefix') return `\`${grantText(g)}\` in \`${tilde(chat.cwd)}\`, every chat and agent.${undo}`;
-  if (g.kind === 'folder') return `${g.access === 'read' ? 'Reading' : 'Changing'} files in \`${grantText(g)}\` and below, every chat.${undo}`;
-  if (g.kind === 'site') return `Fetching pages on \`${g.origin}\`, every chat.${undo}`;
+  if (g.kind === 'exact' || g.kind === 'prefix') return `\`${grantText(g)}\` in \`${tilde(chat.cwd)}\`, every chat`;
+  if (g.kind === 'folder') return `${g.access === 'read' ? 'Reading files' : 'Changes'} in \`${grantText(g)}\` and below, every chat`;
+  if (g.kind === 'site') return `Pages on \`${g.origin}\`, every chat`;
   return undefined;
 }
 
