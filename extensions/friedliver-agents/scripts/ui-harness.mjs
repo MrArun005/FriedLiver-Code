@@ -108,7 +108,9 @@ function readTheme(name) {
   const kind = theme.type === 'light' ? 'light' : 'dark';
   const colors = { ...theme.colors };
   // Colors this extension contributes take their defaults unless the theme sets them.
-  for (const c of pkg.contributes.colors) colors[c.id] ??= c.defaults[kind];
+  colors['notificationsInfoIcon.foreground'] ??= kind === 'light' ? '#1a85ff' : '#3794ff';
+  // A contributed default may name another colour, as VS Code resolves it.
+  for (const c of pkg.contributes.colors) colors[c.id] ??= c.defaults[kind].startsWith('#') ? c.defaults[kind] : colors[c.defaults[kind]];
   const vars = Object.entries(colors).map(([k, v]) => `--vscode-${k.replace(/\./g, '-')}: ${v};`);
   vars.push(
     "--vscode-font-family: system-ui, 'Ubuntu', 'Droid Sans', sans-serif;",

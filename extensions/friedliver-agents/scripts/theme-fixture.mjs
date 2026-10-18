@@ -89,7 +89,12 @@ for (const [name, file, kind] of builds) {
   const c = colors(file);
   if (kind === 'hc') Object.assign(c, HC_DARK, c);
   else for (const [key, value] of Object.entries(REGISTERED)) c[key] ??= value(c, kind);
-  for (const contributed of pkg.contributes.colors) c[contributed.id] ??= contributed.defaults[kind === 'hc' ? 'highContrast' : kind] ?? contributed.defaults.dark;
+  // A contributed default may name another colour (VS Code resolves it); notificationsInfoIcon is editorInfo's blue.
+  c['notificationsInfoIcon.foreground'] ??= kind === 'light' ? '#1a85ff' : '#3794ff';
+  for (const contributed of pkg.contributes.colors) {
+    const v = contributed.defaults[kind === 'hc' ? 'highContrast' : kind] ?? contributed.defaults.dark;
+    c[contributed.id] ??= typeof v === 'string' && !v.startsWith('#') ? c[v] : v;
+  }
   const vars = Object.entries(c)
     .filter(([, v]) => typeof v === 'string' && v)
     .map(([k, v]) => `  --vscode-${k.replace(/\./g, '-')}: ${v};`);

@@ -76,15 +76,15 @@
   /* Tints: a tone at 14% (rest) and 22% (hover) over whatever is under it. */
   --tint: 14%;
   --tint-hover: 22%;
-  /* How much of a tone its text keeps (the rest is --fg): all of it on dark, half on light. */
-  --tone-ink: 100%;
+  /* How much of a tone its text keeps (the rest is --fg), so toned text reads 4.5:1 on its tint: 75% dark, 40% light. */
+  --tone-ink: 75%;
   /* The composer's mic: one brand blue in every theme, a white glyph (4.53:1, hover 5.2:1). */
   --mic-bg: #0078d4;
   --mic-hover: #026ec1;
   --mic-fg: #fff;
-  /* The one loud colour of the Agent Manager: "you must decide". */
-  --decision: var(--vscode-friedliver-decision, var(--focus-border));
-  --decision-fg: var(--vscode-friedliver-decisionForeground, var(--button-fg));
+  /* "You must decide": the theme's info blue, never the error red or the brand orange (the 10%). */
+  --decision: var(--vscode-friedliver-decision, var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue, #3794ff)));
+  --decision-fg: var(--vscode-friedliver-decisionForeground, var(--bg));
   --decision-soft: color-mix(in srgb, var(--decision) 12%, transparent);
   --decision-line: color-mix(in srgb, var(--decision) 45%, transparent);
   /* Focus rings drop the theme's transparency so they stay visible on any surface. */
@@ -94,9 +94,10 @@
   --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
 
   /* Status */
-  /* One status palette on every surface (QA F06): working blue, done green, problem red, needs you the accent. */
-  --status-working: var(--vscode-charts-blue, #57a3f8);
-  --status-done: var(--tl-success);
+  /* One status palette on every surface (QA F06, 2026-10-18): working green (it blinks), done neutral (a settled
+     check), needs you the info blue, failed red. Orange is only the brand accent. */
+  --status-working: var(--vscode-charts-green, #89d185);
+  --status-done: var(--fg-2);
   --status-failed: var(--error);
   --status-waiting: var(--decision);
   --dot-idle: color-mix(in srgb, var(--fg-2) 40%, transparent);
@@ -233,7 +234,7 @@ body.vscode-high-contrast-light {
   --elev-4: 0 24px 64px -12px #00000047;
   --overlay: #00000066;
   --glass-alpha: 80%;
-  --tone-ink: 50%;
+  --tone-ink: 40%;
   --seg-on: var(--bg);
   /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
   --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);

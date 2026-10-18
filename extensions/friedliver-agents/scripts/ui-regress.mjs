@@ -611,7 +611,7 @@ BLOCKS.F21 = async () => {
   };
   const thumb = await p.locator('.cc-thumb').evaluate((t) => window.getComputedStyle(t).backgroundColor);
   check(lum(thumb) > 0.9, `the effort thumb is light on a light theme [${thumb}]`);
-  const off = p.locator('button.cc-switch[aria-checked="false"]').first();
+  const off = p.locator('button.fl-toggle[aria-checked="false"]').first();
   if (await off.count()) {
     const knob = await off.evaluate((b) => window.getComputedStyle(b, '::after').backgroundColor);
     check(lum(knob) > 0.9, `an off switch's knob is light too [${knob}]`);
