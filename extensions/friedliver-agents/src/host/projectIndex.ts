@@ -10,6 +10,7 @@ import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, wri
 import path from 'node:path';
 import { Budget, compactOutline, findSymbol, numbered, READ_LIMITS, symbolRange, windows, type SeenFiles } from './indexReads';
 import { MerkleTree } from './merkle';
+import { unifiedDiff } from '../shared/diff';
 import { estimateTokens } from '../shared/tokens';
 
 export const INDEX_LIMITS = {
@@ -637,6 +638,8 @@ export type IndexCall =
   | { tool: 'index_symbols'; name: string }
   | { tool: 'index_outline'; path: string }
   | { tool: 'index_related'; path: string }
+  | { tool: 'index_diff'; path: string }
+  /** `since`: 8-64 hex of a kept project hash, or "last_turn" (this chat's). */
   | { tool: 'index_changes'; since?: string };
 
 const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice(0, INDEX_LIMITS.output)}\n… (cut at ${INDEX_LIMITS.output} characters)` : text);
@@ -764,23 +767,54 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       const imp = r.imports.map((x) => (x.endsWith('(external)') ? x : shown(at[0], x)));
       return cap(`${call.path}\nImports:\n${list(imp)}\nImported by:\n${list(r.importedBy.map((x) => shown(at[0], x)))}`);
     }
+    case 'index_diff': {
+      if (!ctx) return 'index_diff works only in a FriedLiver chat: it compares a file with what that chat was shown.';
+      const at = find(call.path);
+      if (!at) return missing;
+      const got = await at[0].readChecked(at[1]);
+      if (!got) return missing;
+      const abs = path.join(at[0].root, at[1]);
+      const was = ctx.seen.get(ctx.chatId, abs);
+      if (!was) return `You haven't been shown ${call.path} in this chat (by index_read, or a file read FriedLiver saw). Use index_read with a symbol or lines.`;
+      const ids = `#${was.hash.slice(0, 8)} → #${got.hash.slice(0, 8)}`;
+      if (was.hash === got.hash) return `${call.path} is unchanged since you last saw it (#${got.hash.slice(0, 8)}).`;
+      const d = unifiedDiff(was.text, got.text);
+      if (!d || d.text.length > Math.max(4000, got.text.length * 0.6)) return `${call.path} changed too much to diff usefully (${ids}); index_read the parts you need.`;
+      ctx.seen.set(ctx.chatId, abs, got.hash, got.text);
+      return cap(`${call.path}: +${d.added} -${d.removed} since you last saw it (${ids})\n${d.text}`);
+    }
     case 'index_changes': {
       const id = (h: string) => h.slice(0, 12);
+      const lastTurn = call.since === 'last_turn';
+      if (lastTurn && !ctx) return 'since: "last_turn" works only in a FriedLiver chat.';
       const parts: string[] = [];
       for (const ix of indexes) {
-        const r = ix.changes(call.since);
         const head = multi ? `${path.basename(ix.root)}: ` : '';
+        let r: ReturnType<ProjectIndex['changes']>;
+        if (lastTurn) {
+          const pin = ix.tree.pins.get(ctx!.chatId);
+          const d = pin ? ix.tree.diff(pin, INDEX_LIMITS.changes) : null;
+          if (!pin || !d) {
+            parts.push(`${head}No earlier turn of this chat to compare with yet. Now ${id(ix.tree.root())}; ask without since for the changes since the project was opened.`);
+            continue;
+          }
+          r = { from: pin, ...d };
+        } else r = ix.changes(call.since);
         if (!r) {
           if (!call.since) parts.push(`${head}No earlier project hash to compare with yet (the folder's first index). Now ${id(ix.tree.root())}.`);
           continue;
         }
-        const from = r.from === ix.tree.base ? `${id(r.from)} (when the project was opened)` : id(r.from);
+        const from = lastTurn ? 'your last turn' : r.from === ix.tree.base ? `${id(r.from)} (when the project was opened)` : id(r.from);
         const now = id(ix.tree.root());
         if (!r.total) {
-          parts.push(`${head}Project hash ${now}, the same as ${r.from === ix.tree.base ? 'when the project was opened' : id(r.from)}. No files changed.`);
+          parts.push(`${head}Project hash ${now}, the same as ${lastTurn ? 'at your last turn' : r.from === ix.tree.base ? 'when the project was opened' : id(r.from)}. No files changed.`);
           continue;
         }
-        const lines = r.changes.map((c) => `${c.change} ${shown(ix, c.path)}`);
+        const mark = (c: { path: string; change: string }) => {
+          const was = c.change === 'D' || !ctx ? undefined : ctx.seen.get(ctx.chatId, path.join(ix.root, c.path));
+          return was ? (was.hash === ix.tree.get(c.path) ? ' · you have this version' : ' · you saw an older version: index_diff') : '';
+        };
+        const lines = r.changes.map((c) => `${c.change} ${shown(ix, c.path)}${mark(c)}`);
         if (r.total > r.changes.length) lines.push(`… and ${r.total - r.changes.length} more`);
         parts.push(`${head}Project hash ${now}: ${r.total} file${r.total === 1 ? '' : 's'} changed since ${from} (A added, M modified, D deleted)\n${lines.join('\n')}`);
       }

@@ -127,10 +127,11 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       return query(a.name) ? { tool, name: a.name } : null;
     case 'index_outline':
     case 'index_related':
+    case 'index_diff':
       return relPath(a.path) ? { tool, path: a.path } : null;
     case 'index_changes':
       if (a.since === undefined) return { tool };
-      return typeof a.since === 'string' && /^[0-9a-fA-F]{8,64}$/.test(a.since) ? { tool, since: a.since } : null;
+      return typeof a.since === 'string' && /^([0-9a-fA-F]{8,64}|last_turn)$/.test(a.since) ? { tool, since: a.since } : null;
     default:
       return null;
   }

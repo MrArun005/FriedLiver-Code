@@ -17,6 +17,8 @@ export const sha256 = (data: string | Buffer): string => createHash('sha256').up
 const HASH = /^[0-9a-f]{64}$/;
 /** Roots kept for diffs, besides the base. */
 const KEEP = 16;
+/** Named roots kept besides the history (one per chat). */
+const MAX_PINS = 64;
 
 /** A directory node's hash. Entries are sorted by name; names hold no NUL and hashes are fixed-length, so the encoding is unambiguous. */
 export function nodeHash(entries: Entry[]): string {
@@ -118,19 +120,35 @@ export class MerkleTree {
 
   /** Keeps the current root and its nodes for later diffs, and returns it. */
   snapshot(): string {
-    const store = (dir: string): string => {
-      const h = this.dirHash(dir);
-      // A stored node means its whole subtree is stored.
-      if (this.nodes.has(h)) return h;
-      const e = this.entries(dir);
-      this.nodes.set(h, e);
-      for (const [name, , isDir] of e) if (isDir) store(join(dir, name));
-      return h;
-    };
-    const root = store('');
+    const root = this.store('');
     this.history = [...this.history.filter((r) => r !== root), root].slice(-KEEP);
     this.gc();
     return root;
+  }
+
+  /**
+   * Keeps the current root under a name (a chat's last turn) apart from the history, which it
+   * doesn't push out; at most MAX_PINS names, the oldest dropped. Not saved: pins live per window.
+   */
+  pin(key: string): string {
+    const root = this.store('');
+    this.pins.delete(key);
+    this.pins.set(key, root);
+    if (this.pins.size > MAX_PINS) this.pins.delete(this.pins.keys().next().value!);
+    this.gc();
+    return root;
+  }
+
+  readonly pins = new Map<string, string>();
+
+  private store(dir: string): string {
+    const h = this.dirHash(dir);
+    // A stored node means its whole subtree is stored.
+    if (this.nodes.has(h)) return h;
+    const e = this.entries(dir);
+    this.nodes.set(h, e);
+    for (const [name, , isDir] of e) if (isDir) this.store(join(dir, name));
+    return h;
   }
 
   private gc(): void {
@@ -140,7 +158,7 @@ export class MerkleTree {
       live.add(h);
       for (const [, child, dir] of this.nodes.get(h) ?? []) if (dir) mark(child);
     };
-    for (const r of [...this.history, ...(this.base ? [this.base] : [])]) mark(r);
+    for (const r of [...this.history, ...this.pins.values(), ...(this.base ? [this.base] : [])]) mark(r);
     for (const h of this.nodes.keys()) if (!live.has(h)) this.nodes.delete(h);
   }
 
