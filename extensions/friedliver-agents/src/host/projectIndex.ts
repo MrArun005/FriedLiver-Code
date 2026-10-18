@@ -368,6 +368,18 @@ export class ProjectIndex {
    */
   async update(rel: string, checked?: Awaited<ReturnType<ProjectIndex['check']>>): Promise<boolean> {
     rel = rel.split(path.sep).join('/');
+    // The watcher, catchUp() and loadDocs() can ask for the same file at once: one update at a time per
+    // file. A second ask waits, then checks again (a stat; it reads only if the file changed meanwhile).
+    const running = this.inflight.get(rel);
+    if (running) return running.then(() => this.update(rel));
+    const p = this.updateNow(rel, checked).finally(() => this.inflight.delete(rel));
+    this.inflight.set(rel, p);
+    return p;
+  }
+
+  private readonly inflight = new Map<string, Promise<boolean>>();
+
+  private async updateNow(rel: string, checked?: Awaited<ReturnType<ProjectIndex['check']>>): Promise<boolean> {
     const st = checked === undefined ? await this.check(rel) : checked;
     if (!st) return this.remove(rel), true;
     const leaf = this.leaves.get(rel);
