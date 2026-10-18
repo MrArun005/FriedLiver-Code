@@ -299,9 +299,10 @@ it('contributes four themes, with Black Blue as the default and Light Blue as th
 
 it('sets the modern editor defaults and keeps the memory-related ones (docs/DEFAULTS.md)', () => {
   const defaults = manifest.contributes.configurationDefaults;
-  // Upstream's `blink` (a 500 ms JS toggle); `smooth` ran a CSS animation for 10 s after every caret move.
-  expect(defaults['editor.cursorBlinking']).toBeUndefined();
   expect(defaults).toMatchObject({
+    // Not upstream's `blink`: its 500 ms timer runs as long as an editor has focus (+3.4 points idle CPU
+    // measured, editor-bench 2026-10-17 runs 3-7); `smooth` stops 10 s after the last caret move.
+    'editor.cursorBlinking': 'smooth',
     'editor.cursorSmoothCaretAnimation': 'on',
     'editor.smoothScrolling': true,
     'editor.guides.bracketPairs': 'active',

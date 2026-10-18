@@ -108,6 +108,7 @@ settings override all of them.
 | `editor.overviewRulerBorder` | `false` | language-overridable (`editorOptions.ts:6584`) | quieter |
 | `editor.guides.bracketPairs` | `active` | language-overridable (`editorOptions.ts:4915`) | a guide only for the bracket pair the cursor is in: shows structure where you work, nothing elsewhere |
 | `editor.renderLineHighlight` | `line` | language-overridable | pinned |
+| `editor.cursorBlinking` | `smooth` | language-overridable (`editorOptions.ts:6251`) | the caret fades instead of flashing, **and it is the cheap one at idle** (measured, see below) |
 | `editor.cursorSmoothCaretAnimation` | `on` | language-overridable (`editorOptions.ts:6258`) | the caret glides to its new position; a CSS transition, no extra rendering |
 | `editor.smoothScrolling` | `true` | language-overridable (`editorOptions.ts:6780`) | animated scrolling; only runs while scrolling |
 | `editor.stickyScroll.enabled` | `true` | language-overridable (`editorOptions.ts:3204`) | keeps the enclosing scopes in view; already the upstream default, pinned |
@@ -126,12 +127,18 @@ settings override all of them.
 | `workbench.startupEditor` | `none` | resource (`contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts:317`) | no Welcome editor in a window with nothing to restore: est. −5–15 MB renderer and the time to restore it (CORE-PERF C8). Walkthroughs stay under Help |
 | `extensions.experimental.deferredStartupFinishedActivation` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:312`) | `onStartupFinished` extensions activate in 50 ms slices (`api/common/extHostExtensionService.ts:622-645`) instead of all in one extension-host task: fewer long tasks and less input lag in the first seconds. Each such extension may activate a few hundred ms later (CORE-PERF C7) |
 
-`editor.cursorBlinking` is **not** set, so it is upstream's `blink`: a 500 ms
-JS interval toggles the caret (`editor/browser/viewParts/viewCursors/viewCursors.ts:262-270`).
-FriedLiver used to default it to `smooth`, which runs a CSS opacity animation
-for 10 s after every caret change (`viewCursors.css:42-52`), so the renderer and
-GPU process drew frames at display rate for 10 s each time you stopped typing
-(CORE-PERF C6). `phase` and `expand` are CSS animations too.
+Why `editor.cursorBlinking` stays `smooth` and not upstream's `blink`
+(CORE-PERF C6 tried `blink` and measured it worse). `blink` toggles the caret
+from a 500 ms JS interval **for as long as an editor has focus**, a renderer DOM
+update plus a GPU composite each time
+(`editor/browser/viewParts/viewCursors/viewCursors.ts`, `_updateBlinking`).
+`smooth` is a CSS animation of 20 × 0.5 s (`viewCursors.css`) that stops 10 s
+after the last caret change and leaves the caret visible. Both stop when the
+editor loses focus. On editor-bench (macOS CI, a `.ts` file focused, idle),
+the release with `blink` idled at 5.97 % of a core against 2.56 % with
+`smooth` (+3.41 points: renderer +2.29, GPU +1.29); the perf build went from
+7.10 % to 2.38 % when `smooth` was put back. Beyond noise in five runs
+(2026-10-17 runs 2–5 and 7; `FriedLiver-Code-design/PERF-RESULTS.md`).
 
 The editor and list defaults above cost no memory: smooth scrolling and the
 caret glide only run while something moves, and sticky scroll and the
