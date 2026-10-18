@@ -190,7 +190,7 @@ export interface CoreOptions {
   /** Starts a new chat's agent and session at once, before its first message. On unless false. */
   warmStart?: boolean;
   /** The shared rules for a new session (sharedRules.ts loadRules); none when absent. */
-  sharedRules?(): Promise<Rules | undefined>;
+  sharedRules?(agent?: AgentKey): Promise<Rules | undefined>;
   /** Appends to the project's memory for the remember tool; absent without a trusted folder. */
   remember?(fact: string): Promise<string>;
   ui: CoreUi;
@@ -1419,7 +1419,7 @@ export class AgentCore {
   }
 
   private async rulesFor(chatId: string): Promise<{ text: string; files: string[] } | undefined> {
-    const rules = await this.options.sharedRules?.();
+    const rules = await this.options.sharedRules?.(this.chat(chatId)?.agent);
     this.rulesBytes.set(chatId, rules ? Buffer.byteLength(rules.text) : 0);
     if (rules?.truncated) {
       this.items(chatId, [{ kind: 'notice', tone: 'error', text: `The shared rules are over ${RULES_CAP / 1024} KB, so this session got only the first ${RULES_CAP / 1024} KB. Shorten .friedliver/rules.md or memory.md.` }]);
