@@ -3,6 +3,7 @@
 // everywhere; folders and commands belong to this workspace. No vscode here, so all of it is tested.
 import path from 'node:path';
 import { cleanGrant, grantId, isGrant, type Access, type Grant, type Remembered, type ToolGrant } from '../shared/permissions';
+import type { SystemTool } from '../shared/system';
 import { isRule, type CommandRule } from '../shared/rules';
 import { realPath } from './paths';
 
@@ -110,6 +111,11 @@ export class Permissions {
     return this.list().find((r) => r.grant.kind === 'tool' && r.grant.tool === tool);
   }
 
+  /** The remembered OS action on exactly this target (list() already dropped any that may never be remembered). */
+  system(tool: SystemTool, target: string): Remembered | undefined {
+    return this.list().find((r) => r.grant.kind === 'system' && r.grant.tool === tool && r.grant.target === target);
+  }
+
   /**
    * The folder rule covering `file`, where it really is (every symlink resolved, `..` gone). Changing
    * implies reading. A write never matches in a sensitive place, whatever folder the rule names.
@@ -151,7 +157,7 @@ export class Permissions {
       if (!real || !this.allowedFolder(real, g.access)) return false;
       g = { ...g, folder: real };
     }
-    const key = g.kind === 'site' || g.kind === 'tool' ? USER : g.kind === 'folder' ? FOLDERS : COMMANDS;
+    const key = g.kind === 'site' || g.kind === 'tool' || g.kind === 'system' ? USER : g.kind === 'folder' ? FOLDERS : COMMANDS;
     const saved: Saved = { ...g, at: (this.opts.now ?? Date.now)(), ...(agent ? { agent } : {}) };
     const id = grantId(g);
     this.write(key, [...this.read(key).filter((s) => grantId(s) !== id), saved].slice(-MAX_PER_KEY));

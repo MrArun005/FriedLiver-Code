@@ -659,9 +659,11 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
         <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
           Allow
         </button>
-        <button class="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowChat' })}>
-          Allow for this chat
-        </button>
+        {!bridge?.once && (
+          <button class="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowChat' })}>
+            Allow for this chat
+          </button>
+        )}
         {bridge?.always && (
           <button class="sm" title={`Don't ask again for ${bridge.always}, in any chat`} onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowAlways' })}>
             Always allow
