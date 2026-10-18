@@ -774,7 +774,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
         <textarea
           class="composer__input"
           rows={1}
-          placeholder={chat.busy ? 'Queue a message' : `Message ${chat.label}`}
+          placeholder="Message…"
           value={text}
           onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
           aria-label="Message"
