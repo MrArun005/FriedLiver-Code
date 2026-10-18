@@ -421,7 +421,8 @@
 }
 /* Tones: the tone's colour on a 14% tint of itself. Risk uses neutral, warn and error with a dot. */
 .fl-pill[data-tone] {
-  --pill-c: var(--tone);
+  /* Tone text mixes toward the text colour in light themes (--tone-ink), so green and amber stay readable on white. */
+  --pill-c: color-mix(in srgb, var(--tone) var(--tone-ink), var(--fg));
   --pill-fill: color-mix(in srgb, var(--tone) var(--tint), transparent);
   --pill-fill-hover: color-mix(in srgb, var(--tone) var(--tint-hover), transparent);
 }
@@ -629,8 +630,11 @@ button.fl-pill:focus-visible {
   left: calc(var(--tg-w) - var(--tg-k) - (var(--tg-h) - var(--tg-k)) / 2);
 }
 .fl-toggle:hover:not(:disabled) {
-  filter: brightness(1.2);
+  background: color-mix(in srgb, var(--border) 75%, var(--fg));
   outline: var(--hover-outline);
+}
+.fl-toggle[aria-checked='true']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--toggle-on) 85%, var(--fg));
 }
 .fl-toggle:focus-visible {
   outline: var(--focus-w) solid var(--focus);

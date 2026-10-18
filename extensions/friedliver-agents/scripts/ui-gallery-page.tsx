@@ -80,13 +80,13 @@ function Matrix({ cols, rows }: { cols: string[]; rows: [string, ComponentChildr
   );
 }
 
-const VARIANTS: Variant[] = ['primary', 'secondary', 'quiet', 'danger', 'brand', 'link'];
+const VARIANTS: Variant[] = ['primary', 'secondary', 'quiet', 'danger', 'quiet-danger', 'brand', 'link', 'text'];
 const SIZES: Size[] = ['sm', 'md', 'lg', 'touch'];
 
 function buttonState(v: Variant, s: State, size: Size = 'md') {
   // Pressed is a toggle's "on": only quiet and secondary buttons toggle.
   if (s === 'pressed' && v !== 'secondary' && v !== 'quiet') return <span class="g-note">n/a</span>;
-  const label = v === 'danger' ? 'Delete' : v === 'link' ? 'Open diff' : v === 'brand' ? 'Send' : v === 'primary' ? 'Allow once' : 'Deny';
+  const label = v === 'danger' || v === 'quiet-danger' ? 'Delete' : v === 'link' ? 'Open diff' : v === 'text' ? 'Fix formatCents' : v === 'brand' ? 'Send' : v === 'primary' ? 'Allow once' : 'Deny';
   return (
     <Button variant={v} size={size} {...force(s)} aria-pressed={s === 'pressed' ? 'true' : undefined} disabled={s === 'disabled'} loading={s === 'loading'}>
       {label}
