@@ -316,7 +316,7 @@ export class Controller {
       this.statusItem,
       this.workingItem,
       this.autoItem,
-      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m))),
+      (this.projectIndex = new ProjectIndexHost(path.join(context.globalStorageUri.fsPath, 'index'), (m) => this.log.warn(m), context.extensionPath)),
       this.reviews,
       this.accounts,
       this.accountsPage,

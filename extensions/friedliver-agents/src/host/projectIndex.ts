@@ -4,9 +4,12 @@
 // editor side (projectIndexHost.ts) feeds it files and watches for changes.
 // ponytail: keywords only. Semantic embeddings would go beside the token index if keyword search falls short.
 import { execFile, spawn } from 'node:child_process';
-import { constants, type Stats } from 'node:fs';
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { chmod, type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { isMark, type Journal, type JournalMark } from './changeJournal';
+import { MerkleTree } from './merkle';
 
 export const INDEX_LIMITS = {
   /** Files larger than this are not indexed. */
@@ -19,7 +22,15 @@ export const INDEX_LIMITS = {
   output: 20_000,
   /** Characters of one snippet line. */
   line: 200,
+  /** Paths index_changes lists at most. */
+  changes: 200,
 };
+
+const GIT_OID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+const HASH = /^[0-9a-f]{64}$/;
+
+/** Files whose stat checks run at once. */
+export const STAT_BATCH = 256;
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.hg', '.svn', 'out', '.next', '__pycache__', '.venv', 'venv', 'target', 'build', 'coverage']);
 const SECRET =
@@ -132,18 +143,29 @@ export function imports(file: string, text: string): string[] {
   return [...out].slice(0, 200);
 }
 
+/** An indexed file as the Merkle tree and the quick check see it. Light: loads first, before any doc. */
+interface Leaf {
+  size: number;
+  /** The file's mtime in nanoseconds, with its size the quick check before any read. */
+  mtimeNs: string;
+  /** SHA-256 of the content: the file's leaf in the Merkle tree. */
+  hash: string;
+}
+
+/** What search, symbols, outline and related answer from. */
 interface Doc {
   rel: string;
-  mtime: number;
-  size: number;
+  /** The content hash this doc was made from: a saved doc is used only while its leaf still has it. */
+  hash: string;
   len: number;
-  tokens: Map<string, number>;
+  /** Distinct tokens and their counts. An array, not a Map: loading 80k saved docs builds no Map per doc. */
+  tokens: [string, number][];
   symbols: Sym[];
   imports: string[];
 }
 
 /** What one file costs the index, roughly, in bytes. */
-const cost = (d: Doc) => 200 + d.rel.length * 2 + d.tokens.size * 40 + d.symbols.length * 60 + d.imports.length * 60;
+const cost = (d: Doc) => 200 + d.rel.length * 2 + d.tokens.length * 40 + d.symbols.length * 60 + d.imports.length * 60;
 
 export interface IndexOptions {
   maxFiles: number;
@@ -159,6 +181,10 @@ export interface IndexOptions {
 /** The index of one workspace folder. */
 export class ProjectIndex {
   private readonly docs = new Map<string, Doc>();
+  /** Every indexed file. Equal to the docs' keys, except while saved docs stream in (loadDocs). */
+  private readonly leaves = new Map<string, Leaf>();
+  /** Saved docs are still streaming in: a leaf without its doc is not read for that alone. */
+  private docsPending = false;
   private readonly postings = new Map<string, Map<string, number>>();
   private totalLen = 0;
   private bytes = 0;
@@ -166,16 +192,41 @@ export class ProjectIndex {
   /** Set once a cap stopped files from being indexed. */
   capped = false;
   private rootReal?: string;
+  /** The Merkle tree of the indexed files: always exactly the docs, by content hash. */
+  readonly tree = new MerkleTree();
+  /** Where the change journal stood when this index was last known complete (saved with it). */
+  mark?: JournalMark;
+  /** git's HEAD at the last catch-up, for the hint's diff next time. */
+  gitHead?: string;
+  /** Listed files that were read but not indexed (binary): their `size:mtimeNs`, so they are not read again until they change. */
+  private readonly unreadable = new Map<string, string>();
+  /** Files stat'ed, read, and re-indexed (read with new content). For tests and the bench. */
+  readonly counts = { stat: 0, read: 0, reindex: 0 };
+  /** Milliseconds per phase of the last load and catch-up. For the bench. */
+  readonly timings: Record<string, number> = {};
 
   constructor(
     readonly root: string,
     private readonly options: IndexOptions,
   ) {
     this.exclude = (options.exclude ?? []).map(globToRegex);
+    this.rulesKey = createHash('sha256')
+      .update(JSON.stringify([SECRET.source, [...SKIP_DIRS], options.exclude ?? []]))
+      .digest('hex')
+      .slice(0, 16);
   }
 
+  /** The name rules in force (denylists and files.exclude), so a save made under the same rules is not re-checked by name on load. */
+  private readonly rulesKey: string;
+
+  /** Indexed files (the tree's leaves). */
   get size(): number {
-    return this.docs.size;
+    return this.leaves.size;
+  }
+
+  /** Whether saved docs are still loading: search, symbols and the like may be missing some files. */
+  get loading(): boolean {
+    return this.docsPending;
   }
 
   /** Whether a folder-relative path may be indexed at all, by name alone. */
@@ -287,37 +338,68 @@ export class ProjectIndex {
    * size cap, and its real path inside the folder's real path. Checked before every read, since the
    * file can change after it was indexed.
    */
-  private async check(rel: string): Promise<Stats | null> {
+  private async check(rel: string): Promise<{ size: number; mtimeNs: string } | null> {
     if (!this.allowed(rel)) return null;
     const abs = path.join(this.root, rel);
-    const st = await lstat(abs).catch(() => null);
+    this.counts.stat++;
+    const st = await lstat(abs, { bigint: true }).catch(() => null);
     if (!st || !st.isFile() || st.size > INDEX_LIMITS.fileBytes) return null;
     // A symlinked directory on the way out of the folder: lstat sees only the last part.
     this.rootReal ??= await realpath(this.root).catch(() => this.root);
     const real = await realpath(abs).catch(() => null);
-    return real && real.startsWith(this.rootReal + path.sep) ? st : null;
+    return real && real.startsWith(this.rootReal + path.sep) ? { size: Number(st.size), mtimeNs: st.mtimeNs.toString() } : null;
+  }
+
+  /** The text and content hash of an indexed file, re-checked first; drops the entry when anything is off. */
+  private async readChecked(rel: string): Promise<{ text: string; hash: string } | null> {
+    const got = (await this.check(rel)) ? (this.counts.read++, await readText(path.join(this.root, rel))) : null;
+    if (got === null) this.remove(rel);
+    return got;
   }
 
   /** The text of an indexed file, re-checked first; drops the entry when anything is off. */
   async read(rel: string): Promise<string | null> {
-    const text = (await this.check(rel)) ? await readText(path.join(this.root, rel)) : null;
-    if (text === null) this.remove(rel);
-    return text;
+    return (await this.readChecked(rel))?.text ?? null;
   }
 
   /**
    * Indexes (or re-indexes) one file, or drops it when it is gone, a symlink, outside the folder,
    * binary or too big. Returns false when a cap stopped it.
    */
-  async update(rel: string): Promise<boolean> {
+  async update(rel: string, checked?: Awaited<ReturnType<ProjectIndex['check']>>): Promise<boolean> {
     rel = rel.split(path.sep).join('/');
-    const st = await this.check(rel);
+    // The watcher, catchUp() and loadDocs() can ask for the same file at once: one update at a time per
+    // file. A second ask waits, then checks again (a stat; it reads only if the file changed meanwhile).
+    const running = this.inflight.get(rel);
+    if (running) return running.then(() => this.update(rel));
+    const p = this.updateNow(rel, checked).finally(() => this.inflight.delete(rel));
+    this.inflight.set(rel, p);
+    return p;
+  }
+
+  private readonly inflight = new Map<string, Promise<boolean>>();
+
+  private async updateNow(rel: string, checked?: Awaited<ReturnType<ProjectIndex['check']>>): Promise<boolean> {
+    const st = checked === undefined ? await this.check(rel) : checked;
     if (!st) return this.remove(rel), true;
-    const old = this.docs.get(rel);
-    if (old && old.mtime === st.mtimeMs && old.size === st.size) return true;
-    if (!old && this.docs.size >= this.options.maxFiles) return (this.capped = true), false;
-    const text = await this.read(rel);
-    if (text === null) return true;
+    const leaf = this.leaves.get(rel);
+    // A doc that is still streaming in counts as there.
+    const hasDoc = this.docs.has(rel) || this.docsPending;
+    if (leaf && hasDoc && leaf.mtimeNs === st.mtimeNs && leaf.size === st.size) return true;
+    const key = `${st.size}:${st.mtimeNs}`;
+    if (!leaf && this.unreadable.get(rel) === key) return true;
+    if (!leaf && this.leaves.size >= this.options.maxFiles) return (this.capped = true), false;
+    const got = await this.readChecked(rel);
+    if (got === null) return this.unreadable.set(rel, key), true;
+    this.unreadable.delete(rel);
+    // Stat changed, content did not (a checkout, a touch): keep the entry, note the new stat.
+    if (leaf && hasDoc && leaf.hash === got.hash) {
+      leaf.mtimeNs = st.mtimeNs;
+      leaf.size = st.size;
+      return true;
+    }
+    this.counts.reindex++;
+    const text = got.text;
     const tokens = new Map<string, number>();
     let len = 0;
     for (const t of tokenize(text)) {
@@ -326,26 +408,34 @@ export class ProjectIndex {
       else if (tokens.size < INDEX_LIMITS.tokensPerFile) tokens.set(t, 1);
     }
     for (const t of tokenize(rel)) tokens.set(t, (tokens.get(t) ?? 0) + 1);
-    const doc: Doc = { rel, mtime: st.mtimeMs, size: st.size, len, tokens, symbols: outline(rel, text), imports: imports(rel, text) };
+    const doc: Doc = { rel, hash: got.hash, len, tokens: [...tokens], symbols: outline(rel, text), imports: imports(rel, text) };
     this.remove(rel);
     if (this.bytes + cost(doc) > this.options.maxBytes) return (this.capped = true), false;
+    this.leaves.set(rel, { size: st.size, mtimeNs: st.mtimeNs, hash: got.hash });
+    this.tree.set(rel, got.hash);
     this.add(doc);
     return true;
   }
 
   remove(rel: string): void {
+    if (this.leaves.delete(rel)) this.tree.delete(rel);
+    this.dropDoc(rel);
+  }
+
+  private dropDoc(rel: string): void {
     const doc = this.docs.get(rel);
     if (!doc) return;
     this.docs.delete(rel);
     this.totalLen -= doc.len;
     this.bytes -= cost(doc);
-    for (const t of doc.tokens.keys()) {
+    for (const [t] of doc.tokens) {
       const p = this.postings.get(t);
       p?.delete(rel);
       if (p && p.size === 0) this.postings.delete(t);
     }
   }
 
+  /** A doc for a leaf already in place (the tree is the leaves' business). */
   private add(doc: Doc): void {
     this.docs.set(doc.rel, doc);
     this.totalLen += doc.len;
@@ -357,9 +447,132 @@ export class ProjectIndex {
     }
   }
 
+  /**
+   * update() for many files: their checks (lstat, realpath) run concurrently, then each is applied in
+   * order, so caps hold exactly as one at a time. Stops at a cap; returns false then.
+   */
+  async updateBatch(rels: string[]): Promise<boolean> {
+    const checked = await Promise.all(rels.map((r) => this.check(r.split(path.sep).join('/'))));
+    for (let i = 0; i < rels.length; i++) if (!(await this.update(rels[i], checked[i])) && this.capped) return false;
+    return true;
+  }
+
+  /** Every listed file through update(): a stat each, a read only where it changed. `onBatch` returning false stops it (and this returns false). */
+  async syncAll(onBatch?: () => Promise<boolean>): Promise<boolean> {
+    const files = await this.list();
+    this.prune(new Set(files));
+    for (let i = 0; i < files.length; i += STAT_BATCH) {
+      if (!(await this.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
+      if (onBatch && !(await onBatch())) return false;
+    }
+    return true;
+  }
+
+  /** Re-checks everything under these directories ('' is the whole folder): listed files updated, the rest dropped. */
+  async rescan(dirs: string[], onBatch?: () => Promise<boolean>): Promise<boolean> {
+    if (dirs.includes('')) return this.syncAll(onBatch);
+    const under = (r: string) => dirs.some((d) => r.startsWith(d + '/'));
+    const files = (await this.list()).filter(under);
+    const keep = new Set(files);
+    for (const rel of [...this.leaves.keys()]) if (under(rel) && !keep.has(rel)) this.remove(rel);
+    for (let i = 0; i < files.length; i += STAT_BATCH) {
+      if (!(await this.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
+      if (onBatch && !(await onBatch())) return false;
+    }
+    return true;
+  }
+
+  private gitOut(args: string[]): Promise<string | null> {
+    return new Promise((resolve) =>
+      execFile(this.git, ['--no-optional-locks', ...args], { cwd: this.root, maxBuffer: 256 * 1024 * 1024 }, (err, out) => resolve(err ? null : out)),
+    );
+  }
+
+  /**
+   * A fast guess at what changed, from git: `git status` (modified, staged, untracked, deleted) and the
+   * files that differ between the HEAD of the last session and now. Folder-relative. A hint only: the
+   * paths still go through every check, and the journal or the full check still runs.
+   */
+  async gitHint(): Promise<{ paths: string[]; head?: string }> {
+    const status = await this.gitOut(['status', '--porcelain', '-z', '--untracked-files=all', '--no-renames']);
+    if (status === null) return { paths: [] };
+    // No commit yet: no HEAD, status alone.
+    const out = (await this.gitOut(['rev-parse', 'HEAD']))?.trim();
+    const head = out && GIT_OID.test(out) ? out : undefined;
+    const prefix = (await this.gitOut(['rev-parse', '--show-prefix']))?.trim() ?? '';
+    const paths = new Set<string>();
+    const add = (p: string) => {
+      if (p && p.startsWith(prefix)) paths.add(p.slice(prefix.length));
+    };
+    for (const e of status.split('\0')) if (e.length > 3) add(e.slice(3));
+    if (head && this.gitHead && this.gitHead !== head) {
+      const diff = await this.gitOut(['diff', '--name-only', '-z', '--no-renames', this.gitHead, head, '--']);
+      for (const p of (diff ?? '').split('\0')) add(p);
+    }
+    return { paths: [...paths].filter((p) => !p.endsWith('/')), head };
+  }
+
+  /**
+   * Brings a loaded index up to date in the background: git's hint first (cheap, so likely changes
+   * show soon), then the journal's changes since the saved mark. Without a journal or a mark, or when
+   * the journal can't vouch for its history, every file is checked. A .gitignore that changed rescans
+   * its directory. Returns how, or undefined when `onBatch` stopped it.
+   */
+  async catchUp(journal?: Journal, onBatch?: () => Promise<boolean>, onVerified?: () => void): Promise<'journal' | 'full' | undefined> {
+    let t = performance.now();
+    const lap = (name: string) => {
+      this.timings[name] = performance.now() - t;
+      t = performance.now();
+    };
+    // git status walks the whole tree: it runs while the journal is read.
+    const hinting = this.gitHint();
+    const got = this.mark && journal ? await journal.since(this.root, this.mark) : null;
+    lap('journal');
+    /** Directories to rescan for a .gitignore or .git/info/exclude among `paths`. */
+    const ignoreDirs = (paths: string[]) => [
+      ...paths.filter((f) => f === '.gitignore' || f.endsWith('/.gitignore')).map((f) => (path.posix.dirname(f) === '.' ? '' : path.posix.dirname(f))),
+      ...(paths.includes('.git/info/exclude') ? [''] : []),
+    ];
+    let mode: 'journal' | 'full';
+    if (got) {
+      // The journal is complete for its span: once applied, the index is verified. git's hint follows.
+      await this.updateMany(got.files);
+      const dirs = [...got.dirs, ...ignoreDirs(got.files)];
+      if (dirs.length && !(await this.rescan(dirs, onBatch))) return undefined;
+      this.mark = got.next;
+      mode = 'journal';
+      lap('journaled');
+      onVerified?.();
+      const hint = await hinting;
+      lap('gitHint');
+      const seen = new Set(got.files);
+      await this.updateMany(hint.paths.filter((p) => !seen.has(p)));
+      const more = ignoreDirs(hint.paths.filter((p) => !seen.has(p)));
+      if (more.length && !(await this.rescan(more, onBatch))) return undefined;
+      lap('hinted');
+      if (hint.head) this.gitHead = hint.head;
+      return mode;
+    }
+    // No journal: git's hint first, so the likely changes show within moments; then every file.
+    const hint = await hinting;
+    lap('gitHint');
+    if (hint.paths.length) await this.updateMany(hint.paths);
+    lap('hinted');
+    // Taken before the check: whatever changes during it is seen by the watcher and by the next open.
+    const next = await journal?.now(this.root);
+    if (!(await this.syncAll(onBatch))) return undefined;
+    this.mark = next;
+    mode = 'full';
+    lap('fullCheck');
+    onVerified?.();
+    if (hint.head) this.gitHead = hint.head;
+    return mode;
+  }
+
   /** Drops files that are no longer listed. */
   prune(keep: Set<string>): void {
-    for (const rel of [...this.docs.keys()]) if (!keep.has(rel)) this.remove(rel);
+    for (const rel of [...this.leaves.keys()]) if (!keep.has(rel)) this.remove(rel);
+    for (const rel of [...this.unreadable.keys()]) if (!keep.has(rel)) this.unreadable.delete(rel);
   }
 
   /** Files ranked by BM25 over the query's tokens, boosted where a symbol or the path matches. */
@@ -454,22 +667,128 @@ export class ProjectIndex {
     return undefined;
   }
 
-  /** The index as plain JSON, to keep between sessions. */
-  toJSON(): object {
-    return { v: 1, docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })) };
+  /** The light half of a save, loaded first: the leaves, the tree's kept roots, the journal mark, git's HEAD. */
+  treeJSON(): object {
+    return {
+      v: 3,
+      rules: this.rulesKey,
+      leaves: [...this.leaves].map(([rel, l]) => [rel, l.size, l.mtimeNs, l.hash]),
+      unreadable: [...this.unreadable],
+      merkle: this.tree,
+      mark: this.mark,
+      gitHead: this.gitHead,
+    };
   }
 
-  /** Takes back a saved index; files that changed since are refreshed by the next update(). */
-  async load(saved: unknown): Promise<void> {
-    const docs = (saved as { v?: number; docs?: unknown[] })?.v === 1 ? (saved as { docs: unknown[] }).docs : [];
-    for (const raw of Array.isArray(docs) ? docs : []) {
-      const d = raw as Doc & { tokens: [string, number][] };
-      if (typeof d?.rel !== 'string' || !Array.isArray(d.tokens) || !Array.isArray(d.symbols) || !Array.isArray(d.imports)) continue;
-      if (this.docs.size >= this.options.maxFiles) break;
-      // The saved file may be stale or tampered with: an entry is used only if its file passes today's checks.
-      if (!(await this.check(d.rel))) continue;
-      this.add({ ...d, tokens: new Map(d.tokens) });
+  /** The heavy half of a save, one JSON doc per line, streamed in after the tree. */
+  *docLines(): Generator<string> {
+    for (const d of this.docs.values()) yield JSON.stringify(d);
+  }
+
+  /**
+   * Takes back a saved tree (treeJSON), at once: no file system, name rules only, so the tree, the
+   * status and index_changes are ready now. loadDocs() then streams the docs in, and catchUp() checks
+   * the files; until then every read still re-checks its file. Anything not version 3 or not well
+   * formed is left out (those files are read again). The last saved root becomes the tree's base:
+   * what "changed since the last open" compares with.
+   */
+  load(saved: unknown): void {
+    const t = performance.now();
+    this.loadTree(saved);
+    this.timings.tree = performance.now() - t;
+  }
+
+  private loadTree(saved: unknown): void {
+    const s = saved as { v?: unknown; leaves?: unknown; unreadable?: unknown; merkle?: unknown; mark?: unknown; gitHead?: unknown } | null;
+    if (!s || s.v !== 3 || !Array.isArray(s.leaves)) return;
+    // Saved under today's name rules (same denylists, same files.exclude): its paths passed them already.
+    // Every read still checks them again.
+    const sameRules = (s as { rules?: unknown }).rules === this.rulesKey;
+    for (const l of s.leaves as unknown[]) {
+      if (this.leaves.size >= this.options.maxFiles) break;
+      if (!Array.isArray(l) || l.length !== 4) continue;
+      const [rel, size, mtimeNs, hash] = l as unknown[];
+      if (typeof rel !== 'string' || typeof size !== 'number' || typeof mtimeNs !== 'string' || !/^\d+$/.test(mtimeNs) || typeof hash !== 'string' || !HASH.test(hash)) continue;
+      if ((!sameRules && !this.allowed(rel)) || this.leaves.has(rel)) continue;
+      this.leaves.set(rel, { size, mtimeNs, hash });
+      this.tree.set(rel, hash);
     }
+    if (!this.leaves.size) return;
+    this.docsPending = true;
+    if (isMark(s.mark)) this.mark = s.mark;
+    if (typeof s.gitHead === 'string' && GIT_OID.test(s.gitHead)) this.gitHead = s.gitHead;
+    if (Array.isArray(s.unreadable)) {
+      for (const u of s.unreadable) if (Array.isArray(u) && typeof u[0] === 'string' && typeof u[1] === 'string' && /^\d+:\d+$/.test(u[1])) this.unreadable.set(u[0], u[1]);
+    }
+    if (this.tree.load(s.merkle)) this.tree.base = this.tree.history.at(-1);
+  }
+
+  /**
+   * Streams saved docs in (docLines' format), a chunk at a time, yielding between chunks so the editor
+   * stays responsive. A doc is used only while its leaf still has the same content hash (catchUp may
+   * have moved on meanwhile). Leaves left without a doc are then read. Returns the docs taken.
+   */
+  async loadDocs(file: string, onChunk?: () => Promise<boolean>): Promise<number> {
+    const t = performance.now();
+    let taken = 0;
+    if (this.docsPending) {
+      let fh: FileHandle | undefined;
+      try {
+        fh = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        let n = 0;
+        for await (const line of fh.readLines({ encoding: 'utf8' })) {
+          if (!this.docsPending) break;
+          if (this.addSaved(line)) taken++;
+          // Small chunks: catchUp() runs between them, and its checks should not wait behind the docs.
+          if (++n % 100 === 0) {
+            await new Promise((r) => setImmediate(r));
+            if (onChunk && !(await onChunk())) return taken;
+          }
+        }
+      } catch {
+        // Missing or unreadable: the leaves without docs are read below.
+      } finally {
+        await fh?.close().catch(() => {});
+      }
+    }
+    this.docsPending = false;
+    this.timings.docs = performance.now() - t;
+    const missing = [...this.leaves.keys()].filter((rel) => !this.docs.has(rel));
+    for (let i = 0; i < missing.length; i += STAT_BATCH) {
+      if (!(await this.updateBatch(missing.slice(i, i + STAT_BATCH)))) break;
+      if (onChunk && !(await onChunk())) break;
+    }
+    return taken;
+  }
+
+  private addSaved(line: string): boolean {
+    let d: Doc & { tokens: unknown };
+    try {
+      d = JSON.parse(line);
+    } catch {
+      return false;
+    }
+    if (typeof d?.rel !== 'string' || typeof d.hash !== 'string' || typeof d.len !== 'number' || !Array.isArray(d.tokens) || !Array.isArray(d.symbols) || !Array.isArray(d.imports)) return false;
+    if (this.docs.has(d.rel) || this.leaves.get(d.rel)?.hash !== d.hash) return false;
+    const doc = d as Doc;
+    // Over the memory cap: the file leaves the tree too (the tree holds exactly what is indexed).
+    if (this.bytes + cost(doc) > this.options.maxBytes) {
+      this.capped = true;
+      this.remove(d.rel);
+      return false;
+    }
+    this.add(doc);
+    return true;
+  }
+
+  /**
+   * The files changed between a kept root (a full hash or a unique 8+ hex prefix; by default the
+   * tree as the project was last opened) and now. Null when there is no such root.
+   */
+  changes(since?: string, cap: number = INDEX_LIMITS.changes): { from: string; changes: { path: string; change: 'A' | 'M' | 'D' }[]; total: number } | null {
+    const from = since ? this.tree.resolve(since) : this.tree.base;
+    const d = from ? this.tree.diff(from, cap) : null;
+    return d && from ? { from, ...d } : null;
   }
 
   /** Matching lines of an indexed file for a search result: up to `max`, each cut to INDEX_LIMITS.line. */
@@ -479,21 +798,32 @@ export class ProjectIndex {
   }
 }
 
+/** Bytes per read, each fed to the hash as it arrives. */
+const CHUNK = 64 * 1024;
+
 /**
- * A regular file's text, or null when it looks binary, is too big, or can't be read. Opened without
- * following a symlink and checked on the open handle, so a swap after check() reads nothing.
+ * A regular file's text and the SHA-256 of exactly those bytes, or null when it looks binary, is too
+ * big, or can't be read. Opened without following a symlink and checked on the open handle, so a
+ * swap after check() reads nothing. Read in chunks, each hashed as it comes.
  */
-async function readText(abs: string): Promise<string | null> {
+async function readText(abs: string): Promise<{ text: string; hash: string } | null> {
   try {
     const fh = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const st = await fh.stat();
       if (!st.isFile() || st.size > INDEX_LIMITS.fileBytes) return null;
       const buf = Buffer.alloc(st.size);
-      const { bytesRead } = await fh.read(buf, 0, st.size, 0);
-      const data = buf.subarray(0, bytesRead);
+      const hash = createHash('sha256');
+      let off = 0;
+      while (off < st.size) {
+        const { bytesRead } = await fh.read(buf, off, Math.min(CHUNK, st.size - off), off);
+        if (!bytesRead) break;
+        hash.update(buf.subarray(off, off + bytesRead));
+        off += bytesRead;
+      }
+      const data = buf.subarray(0, off);
       if (data.subarray(0, 8192).includes(0)) return null;
-      return data.toString('utf8');
+      return { text: data.toString('utf8'), hash: hash.digest('hex') };
     } finally {
       await fh.close();
     }
@@ -501,6 +831,50 @@ async function readText(abs: string): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * Saves an index where only the user can read it: the folder 0700, the file 0600, written whole to
+ * a temporary file and renamed over the old one, so a crash never leaves half a file.
+ */
+export async function saveIndexFile(file: string, ix: ProjectIndex): Promise<void> {
+  const dir = path.dirname(file);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
+  const put = async (to: string, write: (fh: FileHandle) => Promise<void>) => {
+    const tmp = `${to}.${process.pid}.tmp`;
+    await rm(tmp, { force: true });
+    const fh = await open(tmp, 'wx', 0o600);
+    try {
+      await write(fh);
+    } finally {
+      await fh.close();
+    }
+    await rename(tmp, to);
+  };
+  // Docs first: a crash between the two leaves new docs with an old tree, and a doc is used only
+  // while its hash matches its leaf.
+  await put(docsFileOf(file), async (fh) => {
+    let chunk = '';
+    for (const line of ix.docLines()) {
+      chunk += line + '\n';
+      if (chunk.length > 1 << 20) {
+        await fh.write(chunk);
+        chunk = '';
+      }
+    }
+    await fh.write(chunk);
+  });
+  await put(file, (fh) => fh.write(JSON.stringify(ix.treeJSON())).then(() => {}));
+}
+
+/** Where saveIndexFile puts the docs that go with a saved tree. */
+export const docsFileOf = (file: string): string => file.replace(/\.json$/, '') + '.docs.ndjson';
+
+/** A saved tree as parsed JSON, or undefined when it is missing or not JSON; load() checks the rest. */
+export const readIndexFile = (file: string): Promise<unknown> =>
+  readFile(file, 'utf8')
+    .then((text) => JSON.parse(text) as unknown)
+    .catch(() => undefined);
 
 function matchingLines(text: string, query: string, max: number): { line: number; text: string }[] {
   const terms = [...new Set(query.toLowerCase().match(/[\w$]{2,}/g) ?? [])];
@@ -523,7 +897,8 @@ export type IndexCall =
   | { tool: 'index_search'; query: string; limit?: number }
   | { tool: 'index_symbols'; name: string }
   | { tool: 'index_outline'; path: string }
-  | { tool: 'index_related'; path: string };
+  | { tool: 'index_related'; path: string }
+  | { tool: 'index_changes'; since?: string };
 
 const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice(0, INDEX_LIMITS.output)}\n… (cut at ${INDEX_LIMITS.output} characters)` : text);
 
@@ -531,11 +906,16 @@ const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice
  * The answers to the index_* tools over every folder's index. Paths in and out are
  * relative to the folder; with more than one folder they start with its name.
  */
-export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean): Promise<string> {
+export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean | 'verifying'): Promise<string> {
   if (!indexes.length) return 'No project index: no trusted workspace folder is open, or friedliver.index.enabled is off. Search the files another way.';
   const multi = indexes.length > 1;
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
-  const note = building ? '(The index is still being built; results may be incomplete.)\n' : '';
+  const note =
+    building === 'verifying'
+      ? '(Loading the saved index and checking files changed since the last session; results may be incomplete or out of date for a moment.)\n'
+      : building
+        ? '(The index is still being built; results may be incomplete.)\n'
+        : '';
   const find = (p: string): [ProjectIndex, string] | undefined => {
     const rel = p.replace(/\\/g, '/').replace(/^\.\//, '');
     if (!multi) return indexes[0].has(rel) ? [indexes[0], rel] : undefined;
@@ -584,6 +964,32 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       const list = (xs: string[]) => (xs.length ? xs.slice(0, INDEX_LIMITS.results).map((x) => `  ${x}`).join('\n') : '  (none found)');
       const imp = r.imports.map((x) => (x.endsWith('(external)') ? x : shown(at[0], x)));
       return cap(`${call.path}\nImports:\n${list(imp)}\nImported by:\n${list(r.importedBy.map((x) => shown(at[0], x)))}`);
+    }
+    case 'index_changes': {
+      const id = (h: string) => h.slice(0, 12);
+      const parts: string[] = [];
+      for (const ix of indexes) {
+        const r = ix.changes(call.since);
+        const head = multi ? `${path.basename(ix.root)}: ` : '';
+        if (!r) {
+          if (!call.since) parts.push(`${head}No earlier project hash to compare with yet (the folder's first index). Now ${id(ix.tree.root())}.`);
+          continue;
+        }
+        const from = r.from === ix.tree.base ? `${id(r.from)} (when the project was opened)` : id(r.from);
+        const now = id(ix.tree.root());
+        if (!r.total) {
+          parts.push(`${head}Project hash ${now}, the same as ${r.from === ix.tree.base ? 'when the project was opened' : id(r.from)}. No files changed.`);
+          continue;
+        }
+        const lines = r.changes.map((c) => `${c.change} ${shown(ix, c.path)}`);
+        if (r.total > r.changes.length) lines.push(`… and ${r.total - r.changes.length} more`);
+        parts.push(`${head}Project hash ${now}: ${r.total} file${r.total === 1 ? '' : 's'} changed since ${from} (A added, M modified, D deleted)\n${lines.join('\n')}`);
+      }
+      if (!parts.length) {
+        const kept = indexes.flatMap((ix) => ix.tree.history.map((h) => (multi ? `${path.basename(ix.root)}: ` : '') + id(h)));
+        return `No kept project hash starts with ${call.since}. Kept: ${kept.join(', ') || 'none'}.`;
+      }
+      return cap(note + parts.join('\n\n'));
     }
   }
 }
