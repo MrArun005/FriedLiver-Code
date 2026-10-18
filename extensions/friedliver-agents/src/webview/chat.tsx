@@ -63,6 +63,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
+import { Banner, Button, Card, CardHead, IconButton, MenuItem, Pill } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -266,7 +267,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
         label="All chats"
         title="All chats"
         align="end"
-        buttonClass="ghost sm all-btn"
+        buttonClass="fl-btn fl-btn--quiet fl-btn--sm all-btn"
         trigger={
           <>
             <Icon name="grid" />
@@ -290,10 +291,10 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
           />
         )}
       </Popover>
-      <Popover label="New chat with" title="New chat" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="plus" />}>
+      <Popover label="New chat with" title="New chat" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" trigger={<Icon name="plus" />}>
         {(close) => (
           <>
-            <div class="pop-title" aria-hidden="true">New chat with</div>
+            <div class="fl-menu__title" aria-hidden="true">New chat with</div>
             {agents.map((agent) => (
               <button
                 key={agent}
@@ -309,17 +310,12 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                 <SignInMark agent={agent} />
               </button>
             ))}
-            <div class="pop-sep" role="separator" />
-            <button role="menuitem" onClick={() => (close(false), send({ type: 'openAccounts' }))}>
-              <Icon name="key" />
-              <span class="grow">Agents &amp; Accounts…</span>
-            </button>
+            <div class="fl-menu__sep" role="separator" />
+            <MenuItem icon="key" label="Agents &amp; Accounts…" onSelect={() => (close(false), send({ type: 'openAccounts' }))} />
           </>
         )}
       </Popover>
-      <button class="ghost icon-btn" aria-label="Agent Manager" title="Agent Manager" onClick={() => send({ type: 'openTasks' })}>
-        <Icon name="tasks" />
-      </button>
+      <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" onClick={() => send({ type: 'openTasks' })} />
     </div>
   );
 }
@@ -339,12 +335,12 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
   }, [current?.id]);
   return (
     <div class="all-chats">
-      <button class="primary new-chat" onClick={() => send({ type: 'newChat', agent: newAgent ?? 'claude' })} title="New chat">
+      <Button variant="primary" class="new-chat" onClick={() => send({ type: 'newChat', agent: newAgent ?? 'claude' })} title="New chat">
         <span>
           <Icon name="plus" /> New chat
         </span>
         <kbd>{IS_MAC ? '⌘N' : 'Ctrl+N'}</kbd>
-      </button>
+      </Button>
       <label class="search">
         <Icon name="search" />
         <input
@@ -397,36 +393,21 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
                 </span>
                 <span class="chat-item-time">{ago(c.lastActivity, now)}</span>
                 <span class="chat-item-more" onClick={(e) => e.stopPropagation()}>
-                  <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="ghost icon-btn sm" trigger={<Icon name="more" />}>
+                  <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm" trigger={<Icon name="more" />}>
                     {(close) => (
                       <>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
+                        <MenuItem icon="rename" label="Rename" onSelect={() => {
                             close();
                             send({ type: 'renameChat', chatId: c.id });
-                          }}
-                        >
-                          <Icon name="rename" /> Rename
-                        </button>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
+                          }} />
+                        <MenuItem icon="star" label={<>{c.starred ? 'Unstar' : 'Star'}</>} onSelect={() => {
                             close();
                             send({ type: 'star', chatId: c.id, starred: !c.starred });
-                          }}
-                        >
-                          <Icon name="star" /> {c.starred ? 'Unstar' : 'Star'}
-                        </button>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
+                          }} />
+                        <MenuItem icon="archive" label="Archive" onSelect={() => {
                             close();
                             send({ type: 'archive', chatId: c.id, archived: true });
-                          }}
-                        >
-                          <Icon name="archive" /> Archive
-                        </button>
+                          }} />
                       </>
                     )}
                   </Popover>
@@ -438,12 +419,12 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
         {!flat.length && <div class="pop-empty">{query ? 'No chat matches.' : 'No open chats.'}</div>}
       </div>
       <div class="pop-foot">
-        <button class="ghost sm inbox-entry" data-waiting={waiting ? '' : undefined} title={`Everything any agent waits on (${IS_MAC ? '⇧⌘I' : 'Ctrl+Alt+Shift+I'})`} onClick={() => send({ type: 'openInbox' })}>
-          <Icon name="inbox" /> Inbox{waiting ? ` · ${waiting}` : ''}
-        </button>
-        <button class="ghost sm" onClick={() => send({ type: 'openTasks' })}>
-          <Icon name="tasks" /> Agent Manager
-        </button>
+        <Button variant="quiet" size="sm" icon="inbox" class="inbox-entry" data-waiting={waiting ? '' : undefined} title={`Everything any agent waits on (${IS_MAC ? '⇧⌘I' : 'Ctrl+Alt+Shift+I'})`} onClick={() => send({ type: 'openInbox' })}>
+          Inbox{waiting ? ` · ${waiting}` : ''}
+        </Button>
+        <Button variant="quiet" icon="tasks" size="sm" onClick={() => send({ type: 'openTasks' })}>
+          Agent Manager
+        </Button>
         <span class="spacer" />
         {archived > 0 && <span class="hint">{archived} archived</span>}
       </div>
@@ -485,7 +466,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
               >
                 {(close) => (
                   <>
-                    <div class="pop-title" aria-hidden="true">Shared rules this session got</div>
+                    <div class="fl-menu__title" aria-hidden="true">Shared rules this session got</div>
                     {chat.session!.rules!.map((path) => (
                       <button
                         key={path}
@@ -518,24 +499,16 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             )}
           </Popover>
         )}
-        <span class="status-pill" data-state={status}>
+        <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
           {chat.session?.starting && status === 'idle' ? 'Starting' : DOT_LABEL[status]}
-        </span>
+        </Pill>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />
-          <button
-            class="ghost icon-btn"
-            title={chat.starred ? 'Unstar' : 'Star: keep it at the top of the list'}
-            aria-label={chat.starred ? 'Unstar' : 'Star'}
-            aria-pressed={!!chat.starred}
-            onClick={() => send({ type: 'star', chatId: chat.id, starred: !chat.starred })}
-          >
-            <Icon name="star" />
-          </button>
-          <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="more" />}>
+          <IconButton icon="star" label={chat.starred ? 'Unstar' : 'Star'} muted title={chat.starred ? 'Unstar' : 'Star: keep it at the top of the list'} aria-pressed={!!chat.starred} onClick={() => send({ type: 'star', chatId: chat.id, starred: !chat.starred })} />
+          <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" trigger={<Icon name="more" />}>
             {(close) => (
               <>
-                <div class="pop-title" aria-hidden="true">Hand off to</div>
+                <div class="fl-menu__title" aria-hidden="true">Hand off to</div>
                 {agents.map((agent) => (
                   <button
                     key={agent}
@@ -551,20 +524,12 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                   </button>
                 ))}
                 <PipeTargets chat={chat} close={close} />
-                <div class="pop-sep" role="separator" />
-                <button role="menuitem" onClick={() => (close(), send({ type: 'openRules' }))}>
-                  Rules…
-                </button>
-                <button
-                  role="menuitem"
-                  disabled={chat.busy}
-                  onClick={() => {
+                <div class="fl-menu__sep" role="separator" />
+                <MenuItem label="Rules…" onSelect={() => (close(), send({ type: 'openRules' }))} />
+                <MenuItem icon="history" label="Rewind…" disabled={chat.busy} onSelect={() => {
                     close();
                     send({ type: 'rewind', chatId: chat.id });
-                  }}
-                >
-                  <Icon name="history" /> Rewind…
-                </button>
+                  }} />
                 <button
                   role="menuitem"
                   onClick={() => {
@@ -639,9 +604,9 @@ function AskingBar({ chat }: { chat: ChatView }) {
       <span class="banner-text">
         {AGENT_FACES[chat.agent].name} is asking · {n} question{n === 1 ? '' : 's'}
       </span>
-      <button class="sm" onClick={show}>
+      <Button size="sm" onClick={show}>
         Show
-      </button>
+      </Button>
     </div>
   );
 }
@@ -667,9 +632,9 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
       </div>
       <p class="hint">
         {agents.some((a) => signIn[a] === 'signed-in') ? 'Sign-in, API keys and models' : 'Not signed in yet? Sign in, add an API key or install an agent'} in{' '}
-        <button class="link" onClick={() => send({ type: 'openAccounts' })}>
+        <Button variant="link" onClick={() => send({ type: 'openAccounts' })}>
           Agents &amp; Accounts
-        </button>
+        </Button>
         .
       </p>
       {agents.includes('demo') && (
@@ -678,13 +643,13 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         </p>
       )}
       <p class="hint">
-        <button class="link" onClick={() => send({ type: 'otherAgents' })}>
+        <Button variant="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…
-        </button>
+        </Button>
       </p>
       {recent.length > 0 && (
         <section class="reopen" aria-label="Reopen a chat">
-          <h3 class="pop-title">Reopen</h3>
+          <h3 class="fl-menu__title">Reopen</h3>
           {recent.map((c) => (
             <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={chatTip(c)} onClick={() => onSelect(c.id)}>
               <Glyph agent={c.agent} size="sm" />
@@ -979,15 +944,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
           {/* Not a button: it holds Show more and reference buttons (QA F19). */}
           <div class="bubble">
             {item.checkpoint && !chat.busy && (
-              <button
-                type="button"
-                class="ghost icon-btn sm rewind-btn"
-                title="Rewind to here"
-                aria-label="Rewind to here"
-                onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })}
-              >
-                <Icon name="history" />
-              </button>
+              <IconButton icon="history" label="Rewind to here" size="sm" muted class="rewind-btn" onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })} />
             )}
             {item.text && <ClampedText text={item.text} />}
             <RefList refs={refsOf(item)} cwd={chat.cwd} />
@@ -1027,11 +984,8 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       const doneCount = item.entries.filter((e) => e.status === 'completed').length;
       const current = item.entries.findIndex((e) => e.status !== 'completed');
       return (
-        <section class="card plan" aria-label="Plan">
-          <div class="card-head">
-            <span>Plan</span>
-            <span class="hint">{current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`}</span>
-          </div>
+        <Card size="sm" class="msg-card plan" label="Plan">
+          <CardHead icon="plan" title="Plan" meta={current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`} />
           <ol class="plan-steps">
             {item.entries.map((e, i) => {
               const s = PLAN_STATE[e.status] ?? 'next';
@@ -1048,7 +1002,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
               <i key={i} data-step={e.status === 'completed' ? 'done' : i === current ? 'working' : 'next'} />
             ))}
           </div>
-        </section>
+        </Card>
       );
     }
     case 'permission':
@@ -1059,26 +1013,24 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       return <Command item={item} chat={chat} />;
     case 'notice':
       return (
-        <div class="notice" data-tone={item.tone} role={item.tone === 'error' ? 'alert' : undefined}>
-          <div>{item.text}</div>
-          {item.detail && <code class="detail">{item.detail}</code>}
-          {item.actions && (
-            <div class="actions">
-              {item.actions.map((a) => (
-                <button key={a.label} class="sm" onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          )}
+        <div class="msg-card notice">
+          <Banner
+            tone={item.tone === 'error' ? 'error' : undefined}
+            actions={item.actions?.map((a) => (
+              <Button key={a.label} size="sm" onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
+                {a.label}
+              </Button>
+            ))}
+          >
+            <div>{item.text}</div>
+            {item.detail && <code class="notice-detail">{item.detail}</code>}
+          </Banner>
         </div>
       );
     case 'changes':
       return (
-        <section class="card changes" data-undone={item.undone ? 'true' : undefined}>
-          <div class="card-head">
-            <span>{item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`}</span>
-          </div>
+        <Card size="sm" class="msg-card changes" data-muted={item.undone ? '' : undefined}>
+          <CardHead icon="diff" title={item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`} />
           <div class="files">
             {item.files.map((f) => (
               <button key={f} class="ref" title={f} onClick={() => send({ type: 'openFile', path: f })}>
@@ -1087,18 +1039,18 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
             ))}
           </div>
           {!item.undone && (
-            <div class="actions">
+            <div class="fl-card__foot" data-start="">
               {canUndo && (
-                <button class="sm" onClick={() => send({ type: 'undo', chatId: chat.id, turnId: item.turnId })}>
-                  <Icon name="undo" /> Undo this turn
-                </button>
+                <Button size="sm" icon="undo" onClick={() => send({ type: 'undo', chatId: chat.id, turnId: item.turnId })}>
+                  Undo this turn
+                </Button>
               )}
-              <button class="ghost sm" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
-                <Icon name="diff" /> Changes
-              </button>
+              <Button variant="quiet" size="sm" icon="diff" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
+                Changes
+              </Button>
             </div>
           )}
-        </section>
+        </Card>
       );
     case 'link':
       return <LinkView item={item} chat={chat} state={state} onSelect={onSelect} />;
@@ -1142,9 +1094,9 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
         {item.by === 'agent' && <span class="tag">by agent</span>}
         <span class="spacer" />
         {other && other.id !== chat.id && (
-          <button class="ghost sm" onClick={() => onSelect(other.id)}>
+          <Button variant="quiet" size="sm" onClick={() => onSelect(other.id)}>
             Open <Icon name="open" />
-          </button>
+          </Button>
         )}
       </div>
       {item.text && (
@@ -1155,19 +1107,14 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
       {(long || item.role === 'reply') && (
         <div class="actions">
           {item.role === 'reply' && (
-            <button
-              class="sm"
-              disabled={!other}
-              title={other ? `Give this answer to ${agentName(chat.agent)} in ${chatRef(chat)} as a message` : 'That chat is gone'}
-              onClick={() => send({ type: 'forward', fromChatId: item.chatId, toChatId: chat.id })}
-            >
-              <Icon name="send" /> Send to {agentName(chat.agent)}
-            </button>
+            <Button icon="send" size="sm" disabled={!other} title={other ? `Give this answer to ${agentName(chat.agent)} in ${chatRef(chat)} as a message` : 'That chat is gone'} onClick={() => send({ type: 'forward', fromChatId: item.chatId, toChatId: chat.id })}>
+              Send to {agentName(chat.agent)}
+            </Button>
           )}
           {long && (
-            <button class="ghost sm" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            <Button variant="quiet" size="sm" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
               {expanded ? 'Show less' : 'Show all'}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -1223,9 +1170,9 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
     return (
       <div class="answered">
         <Icon name={item.state === 'accepted' ? 'check' : 'close'} /> {item.state === 'accepted' ? 'Accepted' : 'Rejected'} edit to{' '}
-        <button class="link" title={item.path} onClick={() => send({ type: 'openFile', path: item.path })}>
+        <Button variant="link" title={item.path} onClick={() => send({ type: 'openFile', path: item.path })}>
           {name}
-        </button>{' '}
+        </Button>{' '}
         <Stats item={item} />
         {item.auto && <span class="hint">· {item.auto}</span>}
         <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
@@ -1529,15 +1476,12 @@ function Composer({
           {removed && (
             <div class="banner" role="status">
               <span class="banner-text">Removed {removed.a.name}</span>
-              <button
-                class="sm"
-                onClick={() => {
+              <Button size="sm" onClick={() => {
                   setAttachments((list) => [...list.slice(0, removed.at), removed.a, ...list.slice(removed.at)].slice(0, 10));
                   setRemoved(null);
-                }}
-              >
+                }}>
                 Undo
-              </button>
+              </Button>
             </div>
           )}
           <EditsBar chat={chat} />

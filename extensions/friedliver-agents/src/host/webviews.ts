@@ -3,6 +3,12 @@ import * as vscode from 'vscode';
 import { parseWebviewMessage, type HostMessage, type WebviewMessage } from '../shared/messages';
 import type { ChatView } from '../shared/model';
 
+
+/**
+ * Tokens, the views' own layout, then the components last, so a component wins a tie with a view rule
+ * and the frozen composer keeps the precedence it had at the end of webview.css (COMPONENTS.md §1.9).
+ */
+export const STYLESHEETS = ['tokens.css', 'webview.css', 'components.css'];
 export type Script = 'chat' | 'tasks' | 'images';
 
 /** One webview showing agent state: the side view, the center chat, the task board or images. */
@@ -42,7 +48,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="${media('webview.css')}">
+${STYLESHEETS.map((f) => `<link rel="stylesheet" href="${media(f)}">`).join('\n')}
 <title>${escapeHtml(title)}</title>
 </head>
 <body data-surface="${script}"${list ? ' data-view="list"' : ''} data-platform="${process.platform}" data-font="${escapeHtml(chat.get<string>('fontFamily', ''))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}" data-font-size="${escapeHtml(String(chat.get<number>('fontSize', 13)))}">

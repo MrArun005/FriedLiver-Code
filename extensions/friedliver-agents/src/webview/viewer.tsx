@@ -7,6 +7,7 @@ import { humanTitle } from '../shared/stepImages';
 import { ago } from '../shared/view';
 import { clampPan, fitScale, MAX_SCALE, navTo, zoomTo } from '../shared/viewer';
 import { Glyph, Icon, send, useHostImage, useNearScreen } from './common';
+import { Button, IconButton } from './ui';
 
 const PLATFORM = document.body.dataset.platform;
 const REVEAL = PLATFORM === 'darwin' ? 'Reveal in Finder' : PLATFORM === 'win32' ? 'Reveal in File Explorer' : 'Open containing folder';
@@ -156,52 +157,38 @@ export function Viewer({ images, start, state, now, chatOf, onClose }: Props) {
           </div>
           <div class="preview-actions">
             <span class="viewer-zoom" role="group" aria-label="Zoom">
-              <button type="button" class="ghost icon-btn" aria-label="Zoom out (−)" title="Zoom out (−)" disabled={!zoom} onClick={() => zoomBy('out')}>
-                <Icon name="minus" />
-              </button>
-              <button type="button" class="ghost sm viewer-scale" title="Fit, or 100% (0, double-click)" onClick={() => zoomBy('toggle')}>
+              <IconButton icon="minus" label="Zoom out (−)" muted title="Zoom out (−)" disabled={!zoom} onClick={() => zoomBy('out')} />
+              <Button variant="quiet" size="sm" class="viewer-scale" title="Fit, or 100% (0, double-click)" onClick={() => zoomBy('toggle')}>
                 {zoom ? `${Math.round(zoom.s * 100)}%` : 'Fit'}
-              </button>
-              <button type="button" class="ghost icon-btn" aria-label="Zoom in (+)" title="Zoom in (+)" onClick={() => zoomBy('in')}>
-                <Icon name="plus" />
-              </button>
+              </Button>
+              <IconButton icon="plus" label="Zoom in (+)" muted title="Zoom in (+)" onClick={() => zoomBy('in')} />
             </span>
             {path && (
               <>
-                <button type="button" class="sm" onClick={() => send({ type: 'openImage', path })}>
-                  <Icon name="open" /> Open in editor
-                </button>
-                <button type="button" class="sm" onClick={() => send({ type: 'revealImage', path })}>
-                  <Icon name="file" /> {REVEAL}
-                </button>
-                <button
-                  type="button"
-                  class="sm"
-                  onClick={() => {
+                <Button icon="open" size="sm" onClick={() => send({ type: 'openImage', path })}>
+                  Open in editor
+                </Button>
+                <Button icon="file" size="sm" onClick={() => send({ type: 'revealImage', path })}>
+                  {REVEAL}
+                </Button>
+                <Button size="sm" onClick={() => {
                     send({ type: 'copy', text: path });
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1200);
-                  }}
-                >
+                  }}>
                   <Icon name={copied ? 'check' : 'copy'} /> {copied ? 'Copied' : 'Copy path'}
-                </button>
+                </Button>
               </>
             )}
             {!isOutside(img.chatId) && (
-              <button
-                type="button"
-                class="sm"
-                onClick={() => {
+              <Button icon="ask" size="sm" onClick={() => {
                   send({ type: 'openChat', chatId: img.chatId, ...(img.stepId ? { item: img.stepId } : {}) });
                   onClose(img.key);
-                }}
-              >
-                <Icon name="ask" /> {img.stepId ? 'Go to step in chat' : 'Go to chat'}
-              </button>
+                }}>
+                {img.stepId ? 'Go to step in chat' : 'Go to chat'}
+              </Button>
             )}
-            <button type="button" class="ghost icon-btn" aria-label="Close (Esc)" title="Close (Esc)" onClick={() => onClose(img.key)}>
-              <Icon name="close" />
-            </button>
+            <IconButton icon="close" label="Close (Esc)" muted title="Close (Esc)" onClick={() => onClose(img.key)} />
           </div>
         </header>
         <div class="preview-stage">

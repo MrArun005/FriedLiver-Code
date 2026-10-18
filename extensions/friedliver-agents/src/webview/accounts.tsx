@@ -8,6 +8,7 @@ import { age } from '../shared/model';
 import type { SessionOption } from '../shared/session';
 import { NEVER_ALWAYS, SYSTEM_TOOLS, SYSTEM_WORDS, unsupportedOn, type SystemSettingsView } from '../shared/system';
 import { Glyph, Icon, Popover, send } from './common';
+import { Button, IconButton, MenuItem, selectTrigger, Toggle } from './ui';
 
 const KIND_TEXT: Record<MethodView['kind'], string> = { browser: 'in your browser', terminal: 'in a terminal', key: 'API key' };
 
@@ -64,9 +65,9 @@ function Page() {
       {view.system && <SystemCard s={view.system} />}
       <footer class="acct-foot hint">
         {view.showDemo ? 'The Demo agent is shown: a fake local agent for trying FriedLiver with no account.' : 'The Demo agent, a fake local agent for trying FriedLiver with no account, is hidden.'}{' '}
-        <button class="link" onClick={() => send({ type: 'openSettings' })}>
+        <Button variant="link" onClick={() => send({ type: 'openSettings' })}>
           {view.showDemo ? 'Hide it' : 'Show it'} in Settings
-        </button>
+        </Button>
       </footer>
     </main>
   );
@@ -74,7 +75,7 @@ function Page() {
 
 /**
  * "Mac & Windows control": the system_* tools on or off, one by one, and whether Full auto covers them.
- * Built from the page's existing classes only (acct-card, acct-top, acct-key, acct-block, acct-tag, cc-switch).
+ * Built from the page's existing classes only (acct-card, acct-top, acct-key, acct-block, acct-tag) and the design system's Toggle.
  */
 function SystemCard({ s }: { s: SystemSettingsView }) {
   const on = s.supported && s.enabled;
@@ -109,9 +110,9 @@ function SystemCard({ s }: { s: SystemSettingsView }) {
         </div>
         <p class="hint">Off: chats on Full auto still ask before they touch your computer. Reading the clipboard, window screenshots and terminal-like apps always ask.</p>
         <p class="acct-note">
-          <button class="link" onClick={() => send({ type: 'systemLog' })}>
+          <Button variant="link" onClick={() => send({ type: 'systemLog' })}>
             Show the action log
-          </button>
+          </Button>
         </p>
       </div>
     </section>
@@ -119,7 +120,7 @@ function SystemCard({ s }: { s: SystemSettingsView }) {
 }
 
 function Switch({ label, on, disabled, onChange }: { label: string; on: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
-  return <button type="button" role="switch" class="cc-switch" aria-label={label} aria-checked={on} disabled={disabled} onClick={() => onChange(!on)} />;
+  return <Toggle checked={on} label={label} disabled={disabled} onChange={onChange} />;
 }
 
 function Card({ card, focused }: { card: AccountCard; focused: boolean }) {
@@ -141,9 +142,9 @@ function Card({ card, focused }: { card: AccountCard; focused: boolean }) {
           <span class="signin-mark" data-state={status} aria-hidden="true" />
           {card.checking ? 'Checking…' : !r ? 'Not checked' : !vendor && r.status === 'signed-in' ? 'Ready' : SIGN_IN_TEXT[r.status]}
         </span>
-        <button class="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })} title="Starts the agent and a short session, then stops using it">
-          <Icon name="history" /> Check
-        </button>
+        <Button icon="history" size="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })} title="Starts the agent and a short session, then stops using it">
+          Check
+        </Button>
       </div>
       {r && <div class="hint acct-when">Checked {age(r.at, Date.now())} ago</div>}
       {card.busy && <div class="acct-note" role="status">{card.busy}</div>}
@@ -177,9 +178,9 @@ function SignIn({ card }: { card: AccountCard }) {
       {card.signIn.length > 0 ? (
         <div class="actions">
           {card.signIn.map((m) => (
-            <button key={m.id} class={r?.status === 'needs-sign-in' ? 'sm primary' : 'sm'} title={m.description} onClick={() => send({ type: 'signIn', agent: card.agent, methodId: m.id })}>
-              {m.name} <span class="acct-kind">{KIND_TEXT[m.kind]}</span>
-            </button>
+            <Button key={m.id} size="sm" variant={r?.status === 'needs-sign-in' ? 'primary' : 'secondary'} title={m.description} onClick={() => send({ type: 'signIn', agent: card.agent, methodId: m.id })}>
+              {m.name} <span class="fl-btn__sub acct-kind">{KIND_TEXT[m.kind]}</span>
+            </Button>
           ))}
         </div>
       ) : (
@@ -218,13 +219,13 @@ function KeyRow({ card, k }: { card: AccountCard; k: KeyView }) {
           ))}
         </div>
       </div>
-      <button class="sm" onClick={() => send({ type: 'setKey', agent: card.agent as VendorKey, setup: k.id })}>
+      <Button size="sm" onClick={() => send({ type: 'setKey', agent: card.agent as VendorKey, setup: k.id })}>
         {set.length ? 'Change…' : 'Set…'}
-      </button>
+      </Button>
       {k.active && (
-        <button class="sm" onClick={() => send({ type: 'clearKey', agent: card.agent as VendorKey })}>
+        <Button size="sm" onClick={() => send({ type: 'clearKey', agent: card.agent as VendorKey })}>
           Remove
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -237,9 +238,9 @@ function SignOut({ card }: { card: AccountCard }) {
     <Block title="Sign out">
       {r.logout && (
         <div class="actions">
-          <button class="sm" disabled={!!card.busy} onClick={() => send({ type: 'signOut', agent: card.agent })}>
+          <Button size="sm" disabled={!!card.busy} onClick={() => send({ type: 'signOut', agent: card.agent })}>
             Sign out of {card.name}
-          </button>
+          </Button>
           <span class="hint">{card.name} signs itself out.</span>
         </div>
       )}
@@ -257,12 +258,10 @@ function Line({ agent, what, line }: { agent: VendorKey; what: CliWhat; line: Cl
   return (
     <span class="acct-line">
       <code>{line.command}</code>
-      <button class="ghost icon-btn sm" title="Copy" aria-label={`Copy ${line.command}`} onClick={() => send({ type: 'copy', agent, what })}>
-        <Icon name="copy" />
-      </button>
-      <button class="ghost sm" title="Runs it in a new terminal" onClick={() => send({ type: 'terminal', agent, what })}>
-        <Icon name="terminal" /> Run in terminal
-      </button>
+      <IconButton icon="copy" label={`Copy ${line.command}`} muted size="sm" title="Copy" onClick={() => send({ type: 'copy', agent, what })} />
+      <Button variant="quiet" icon="terminal" size="sm" title="Runs it in a new terminal" onClick={() => send({ type: 'terminal', agent, what })}>
+        Run in terminal
+      </Button>
       {line.then && <span class="hint">{line.then}</span>}
     </span>
   );
@@ -276,16 +275,16 @@ function Models({ card }: { card: AccountCard }) {
         <div class="acct-models">
           {card.model && <Choice card={card} option={card.model} k="model" label="Model" />}
           {card.effort && <Choice card={card} option={card.effort} k="thought_level" label="Effort" />}
-          <button class="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })} title="Starts the agent and a short session to read its models">
-            <Icon name="history" /> Refresh
-          </button>
+          <Button icon="history" size="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })} title="Starts the agent and a short session to read its models">
+            Refresh
+          </Button>
         </div>
       ) : (
         <div class="actions">
           <span class="hint">No models known yet. They come from the agent: start a chat, or</span>
-          <button class="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })}>
+          <Button size="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })}>
             Refresh
-          </button>
+          </Button>
         </div>
       )}
       {known && (
@@ -309,39 +308,31 @@ function Choice({ card, option, k, label }: { card: AccountCard; option: Session
       <Popover
         label={`${label} for ${card.name}`}
         title={`${card.name} ${label}: ${name}`}
-        buttonClass="mini-select"
-        trigger={
-          <>
-            <span class="chip-text">{name}</span>
-            <Icon name="chevron" />
-          </>
-        }
+        buttonClass="fl-select fl-select--sm"
+        trigger={selectTrigger(name)}
       >
         {(close) =>
           groups.map((g) => (
             <Fragment key={g ?? ''}>
               {g && (
-                <div class="pop-title" aria-hidden="true">
+                <div class="fl-menu__title" aria-hidden="true">
                   {g}
                 </div>
               )}
               {option.choices
                 .filter((c) => c.group === g)
                 .map((c) => (
-                  <button
+                  <MenuItem
                     key={c.value}
-                    role="menuitemradio"
-                    aria-checked={c.value === value}
-                    data-value={c.value}
+                    label={c.name}
+                    checked={c.value === value}
+                    value={c.value}
                     title={c.description}
-                    onClick={() => {
+                    onSelect={() => {
                       close();
                       send({ type: 'setDefault', agent: card.agent, key: k, value: c.value });
                     }}
-                  >
-                    <span class="grow">{c.name}</span>
-                    {c.value === value && <Icon name="check" />}
-                  </button>
+                  />
                 ))}
             </Fragment>
           ))

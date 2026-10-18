@@ -8,6 +8,7 @@ import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, 
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
 import { agentName, chatTip } from '../shared/names';
+import { IconButton, Toggle } from './ui';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
@@ -122,7 +123,7 @@ function ToggleRow({ chat, option, icon }: { chat: ChatView; option: SessionOpti
       <span class="cc-item-name" title={option.description}>
         {option.name}
       </span>
-      <button type="button" role="switch" aria-checked={on} aria-label={option.name} class="cc-switch" onClick={() => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value: !on })} />
+      <Toggle class="cc-toggle" checked={on} label={option.name} onChange={(value) => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value })} />
     </div>
   );
 }
@@ -434,21 +435,18 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
         <div class="cc-map-head">
           <div class="cc-map-title">Agent map</div>
           <span class="cc-map-actions">
-            <button
-              type="button"
-              class="ghost icon-btn sm cc-map-manager"
-              aria-label="Open Agent Manager"
-              title="Open Agent Manager"
+            <IconButton
+              icon="tasks"
+              label="Open Agent Manager"
+              size="sm"
+              muted
+              class="cc-map-manager"
               onClick={() => {
                 close();
                 send({ type: 'openTasks' });
               }}
-            >
-              <Icon name="tasks" />
-            </button>
-            <button type="button" class="ghost icon-btn sm cc-map-close" aria-label="Close" title="Close (Esc)" onClick={close}>
-              <Icon name="close" />
-            </button>
+            />
+            <IconButton icon="close" label="Close" muted size="sm" class="cc-map-close" title="Close (Esc)" onClick={close} />
           </span>
         </div>
         <div class="cc-map-sub">

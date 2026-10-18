@@ -1,189 +1,12 @@
 /*
- * FriedLiver's views on the editor's theme. Every colour, radius, size and shadow
- * below is a token from the one :root block; components use tokens only.
- * Values follow docs (DESIGN-SYSTEM.md, §1): the theme's own keys, with the
- * resolved Dark 2026 value as each fallback.
+ * FriedLiver's views: layout and the parts unique to one view. Colours, sizes, radii, shadows
+ * and blur come from tokens.css; every button, pill, field, menu and card is a component in
+ * components.css (spec: ~/code/FriedLiver-Code-design/COMPONENTS.md), which loads after this file.
+ * test/designSystem.test.ts counts what this file still does by hand; that count only goes down.
  */
-
-/* tokens:start */
-:root {
-  /* Surfaces */
-  --bg: var(--vscode-editor-background, #121314);
-  --input-bg: var(--vscode-input-background, #191a1b);
-  --field-border: transparent;
-  --thumb: var(--fg);
-  --menu-bg: var(--vscode-menu-background, #202122);
-  --dialog-bg: var(--vscode-sideBar-background, #191a1b);
-  --code-bg: var(--vscode-textCodeBlock-background, #242526);
-  --inline-code-bg: var(--vscode-textPreformat-background, #262626);
-  --tool-bg: var(--bg);
-  --sel-bg: var(--vscode-list-activeSelectionBackground, #ffffff22);
-  --hover-bg: var(--vscode-list-hoverBackground, #ffffff14);
-  --ghost-hover: var(--vscode-toolbar-hoverBackground, #5a5d5e50);
-  --pill-bg: color-mix(in srgb, var(--fg) 10%, transparent);
-  --pill-hover: color-mix(in srgb, var(--fg) 18%, transparent);
-  --chip-bg: color-mix(in srgb, var(--input-bg) 85%, var(--fg-2));
-  --overlay: #000000bf;
-
-  /* Lines */
-  --border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, #2a2b2c)));
-  --dialog-border: color-mix(in srgb, var(--vscode-inputOption-activeBorder, #2a2b2c) 65%, transparent);
-  --option-ring: #ffffff1a;
-
-  /* Text: five colours */
-  --sel-fg: var(--vscode-list-activeSelectionForeground, #ededed);
-  --fg: var(--vscode-foreground, #bfbfbf);
-  --fg-2: var(--vscode-descriptionForeground, #8c8c8c);
-  --fg-50: color-mix(in srgb, var(--fg) 50%, transparent);
-  --placeholder: var(--vscode-input-placeholderForeground, #555555);
-  --disabled: var(--vscode-disabledForeground, #555555);
-  --link: var(--vscode-textLink-foreground, #48a0c7);
-  --inline-code-fg: var(--vscode-textPreformat-foreground, #8c8c8c);
-
-  /* Accent and modes: the composer's ring and send button take their mode's pair */
-  --accent: var(--fl-accent, #d97757);
-  --send-bg: var(--fl-accent, #c6613f);
-  --send-fg: #faf9f5;
-  --focus-border: var(--vscode-focusBorder, #3994bcb3);
-  --button-bg: var(--vscode-button-background, #297aa0);
-  --button-fg: var(--vscode-button-foreground, #ffffff);
-  --error: var(--vscode-errorForeground, #f48771);
-  --warn: var(--vscode-editorWarning-foreground, #e1c08d);
-  --toggle-on: var(--button-bg);
-  --effort-fill: var(--vscode-inputOption-activeBorder, #2a2b2c);
-  /* The composer's mic: a bare white glyph at rest (the text colour in light themes); while it
-     listens, a brand-blue pill (#0078d4, white 4.53:1) with white level bars. */
-  --mic-idle: #fff;
-  --mic-bg: #0078d4;
-  --mic-fg: #fff;
-  /* The one loud colour of the Agent Manager: "you must decide". */
-  --decision: var(--vscode-friedliver-decision, var(--focus-border));
-  --decision-fg: var(--vscode-friedliver-decisionForeground, var(--button-fg));
-  --decision-soft: color-mix(in srgb, var(--decision) 12%, transparent);
-  --decision-line: color-mix(in srgb, var(--decision) 45%, transparent);
-  /* Focus rings drop the theme's transparency so they stay visible on any surface. */
-  --focus: rgb(from var(--focus-border) r g b / 1);
-
-  /* Status */
-  /* One status palette on every surface (QA F06): working blue, done green, problem red, needs you the accent. */
-  --status-working: var(--vscode-charts-blue, #57a3f8);
-  --status-done: var(--tl-success);
-  --status-failed: var(--error);
-  --status-waiting: var(--decision);
-  --dot-idle: color-mix(in srgb, var(--fg-2) 40%, transparent);
-  --tl-success: #74c991;
-  --tl-default: var(--fg-2);
-  --added: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
-  --removed: var(--vscode-gitDecoration-deletedResourceForeground, #f48771);
-  --recording: var(--vscode-charts-blue, #57a3f8);
-
-  /* Agents */
-  --hue-claude: var(--vscode-friedliver-agentClaude, var(--vscode-charts-orange, #d97757));
-  --hue-codex: var(--vscode-friedliver-agentCodex, var(--vscode-charts-green, #89d185));
-  --hue-gemini: var(--vscode-friedliver-agentGemini, var(--vscode-charts-blue, #57a3f8));
-  --hue-demo: var(--fg-2);
-
-  /* Type: one family, one base size (Cmd/Ctrl + = - 0 scales --fl-font-size), em steps */
-  --font: var(--vscode-chat-font-family, system-ui, sans-serif);
-  --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
-  --fl-font-size: var(--vscode-chat-font-size, 13px);
-  --fs: var(--fl-font-size);
-  --fs-mono: var(--vscode-editor-font-size, 12px);
-  --t-100: 1em;
-  --t-90: 0.9em;
-  --t-85: 0.85em;
-  --t-80: 0.8em;
-  --t-75: 0.75em;
-  --t-title: 16px;
-
-  /* Shape */
-  --r-1: 1px;
-  --r-3: 3px;
-  --r-4: 4px;
-  --r-5: 5px;
-  --r-6: 6px;
-  --r-8: 8px;
-  /* Sheets that rise from the bottom edge. */
-  --r-12: 12px;
-  --r-pill: 9999px;
-  --r-round: 50%;
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 20px;
-  /* Layout spacing (the spacing pass, 2026-10-17): the chat's side gutter (16 when narrow, to line up with
-     the composer), the tab strip's height, and the extra space above a message that starts a new turn. */
-  --gutter: 20px;
-  --tab-h: 30px;
-  --turn-gap: 8px;
-
-  /* Elevation: menus are flat; depth comes from border and tone */
-  --shadow-composer: 0 1px 2px #0000001a;
-  --shadow-thumb: 0 1px 2px #0003;
-  --shadow-ctx: 0 2px 8px #00000026;
-  --shadow-tip: 0 2px 6px #00000026;
-  --shadow-sheet: 0 -8px 24px #00000059;
-
-  /* Layers */
-  --z-content: 1;
-  --z-sticky: 2;
-  --z-sticky-open: 3;
-  --z-footer: 6;
-  --z-menu: 10;
-  --z-composer: 20;
-  --z-overlay: 1000;
-
-  /* Motion */
-  --fade-menu: fadeIn 0.15s ease-out;
-  --fade-banner: fadeIn 0.2s ease-out;
-  --ease-toggle: 0.15s;
-}
-/* tokens:end */
-@media (max-width: 720px) {
-  :root {
-    --gutter: 16px;
-  }
-}
-/* Light themes: the option ring and depth turn dark. */
-body.vscode-light,
-body.vscode-high-contrast-light {
-  --option-ring: #0000001a;
-  --decision-soft: color-mix(in srgb, var(--decision) 9%, transparent);
-  --decision-line: color-mix(in srgb, var(--decision) 50%, transparent);
-  --field-border: color-mix(in srgb, var(--fg-2) 40%, transparent);
-  /* A dark knob on a light track reads as on: knobs are white, with a ring. */
-  --thumb: #ffffff;
-  --shadow-thumb: 0 0 0 1px #00000033, 0 1px 2px #00000029;
-  --mic-idle: var(--fg);
-}
-body.vscode-high-contrast,
-body.vscode-high-contrast-light {
-  --border: var(--vscode-contrastBorder);
-  --dialog-border: var(--vscode-contrastBorder);
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes blink {
-  50% {
-    opacity: 0.3;
-  }
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 /* ---- Base ---- */
 
-* {
-  box-sizing: border-box;
-}
 html,
 body,
 #root {
@@ -207,99 +30,6 @@ h1,
 h2,
 h3 {
   margin: 0;
-}
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--vscode-scrollbarSlider-background);
-  border: 2px solid transparent;
-  border-radius: var(--r-pill);
-  background-clip: padding-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: var(--vscode-scrollbarSlider-hoverBackground);
-}
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-:focus-visible {
-  outline: 1px solid var(--focus);
-  outline-offset: -1px;
-}
-/* A reset, not a look: each component draws its own buttons. */
-button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: inherit;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-textarea,
-input[type='text'],
-input[type='search'],
-input[type='number'] {
-  font: inherit;
-  color: var(--vscode-input-foreground, var(--fg));
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  padding: 4px 8px;
-  width: 100%;
-  resize: vertical;
-}
-textarea::placeholder,
-input::placeholder {
-  color: var(--placeholder);
-}
-input[type='search']::-webkit-search-cancel-button {
-  filter: grayscale(1);
-}
-input[type='checkbox'] {
-  accent-color: var(--button-bg);
-  width: 14px;
-  height: 14px;
-  margin: 0;
-}
-kbd {
-  font: inherit;
-  color: var(--fg-2);
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-3);
-  padding: 1px 4px;
-}
-code,
-pre,
-.mono {
-  font-family: var(--mono);
-}
-code {
-  font-size: var(--t-90);
-  color: var(--inline-code-fg);
-  background: var(--inline-code-bg);
-  border-radius: var(--r-3);
-  padding: 2px 4px;
-}
-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: var(--t-85);
-}
-.icon {
-  flex: none;
 }
 
 /* ---- Utilities ---- */
@@ -347,90 +77,6 @@ pre {
 }
 .row.end {
   justify-content: flex-end;
-}
-
-/* ---- Buttons: one family, shared by every view ---- */
-
-/* Secondary: a hairline box (banners, cards, "Undo this turn"). */
-button.sm {
-  height: 26px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  font-size: var(--t-90);
-  line-height: 1;
-  white-space: nowrap;
-}
-button.sm:hover:not(:disabled) {
-  background: var(--hover-bg);
-}
-button.sm .icon {
-  width: 14px;
-  height: 14px;
-}
-button.primary,
-button.decide {
-  color: var(--button-fg);
-  background: var(--button-bg);
-  border-color: transparent;
-}
-button.primary:hover:not(:disabled),
-button.decide:hover:not(:disabled) {
-  background: var(--vscode-button-hoverBackground, var(--button-bg));
-}
-button.ghost {
-  border: 0;
-  color: var(--fg-2);
-  background: transparent;
-  border-color: transparent;
-}
-button.ghost:hover:not(:disabled),
-button.ghost[aria-expanded='true'] {
-  color: var(--fg);
-  background: var(--ghost-hover);
-}
-button.danger {
-  color: var(--error);
-}
-button.ghost.danger:hover:not(:disabled) {
-  color: var(--error);
-}
-button.link {
-  height: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--link);
-}
-/* Beside the numbered choices, a link so it doesn't read as one more. */
-.actions .pop:has(> button.always-allow) {
-  margin-left: var(--sp-2);
-  align-self: center;
-}
-button.link:hover:not(:disabled) {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-/* Icon buttons: 26 square, r5 (copy and the like: 20, r4). */
-button.icon-btn {
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: var(--r-5);
-}
-button.icon-btn.sm {
-  width: 20px;
-  height: 20px;
-  border-radius: var(--r-4);
-}
-button.icon-btn .icon {
-  width: 16px;
-  height: 16px;
-}
-button.icon-btn.sm .icon {
-  width: 14px;
-  height: 14px;
 }
 
 /* ---- Small things: tags, chips, badges, counts ---- */
@@ -685,189 +331,14 @@ button.seg-item[aria-checked='true'] {
   outline: none;
 }
 
-/* Every agent has a face: its letter on a 16% tint of its hue. */
-.glyph {
-  --hue: var(--hue-demo);
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--r-5);
-  font-size: var(--t-85);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--hue);
-  background: color-mix(in srgb, var(--hue) 16%, transparent);
-}
-.glyph.sm {
-  width: 16px;
-  height: 16px;
-  font-size: var(--t-75);
-  border-radius: var(--r-4);
-}
-.glyph.lg {
-  width: 32px;
-  height: 32px;
-  font-size: var(--t-100);
-  border-radius: var(--r-8);
-}
-[data-agent='claude'] {
-  --hue: var(--hue-claude);
-}
-[data-agent='codex'] {
-  --hue: var(--hue-codex);
-}
-[data-agent='gemini'] {
-  --hue: var(--hue-gemini);
-}
-[data-agent='demo'] {
-  --hue: var(--hue-demo);
-}
+/* ---- Popover contents (the panel is the Menu component) ---- */
 
-/* One dot: 8px, flat. Running green (blinks), waiting blue, failed red, done and idle quiet. */
-.dot {
-  flex: none;
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--r-round);
-  background: var(--dot-idle);
-}
-.dot[data-state='working'] {
-  background: var(--status-working);
-  animation: blink 1s linear infinite;
-}
-.dot[data-state='needs-you'] {
-  background: var(--status-waiting);
-}
-.dot[data-state='done'] {
-  background: var(--status-done);
-}
-.dot[data-state='error'] {
-  background: var(--status-failed);
-}
-.dot[data-still] {
-  animation: none;
-}
-
-/* Pills: the decisions-waiting jump and its quiet "nothing waiting". */
-button.pill,
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  height: 22px;
-  padding: 0 var(--sp-2);
-  border: 0;
-  border-radius: var(--r-pill);
-  font-size: var(--t-90);
-}
-.pill.loud {
-  color: var(--decision);
-  background: var(--decision-soft);
-}
-.pill.loud:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--decision) 18%, transparent);
-}
-.pill.quiet {
-  color: var(--fg-2);
-  background: var(--pill-bg);
-}
-
-/* ---- Popovers: context menus and small forms ---- */
-
-.pop {
-  position: relative;
-  display: inline-flex;
-}
-.popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: var(--z-overlay);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 200px;
-  max-width: min(380px, calc(100vw - 16px));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 6px 0 4px;
-  color: var(--vscode-menu-foreground, var(--fg));
-  background: var(--menu-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  box-shadow: var(--shadow-ctx);
-  font-size: var(--t-100);
-  text-align: left;
-  animation: var(--fade-menu);
-}
-/* Rows keep their height; a menu taller than the room scrolls. */
-.popover > * {
-  flex-shrink: 0;
-}
-.popover[data-end] {
-  left: auto;
-  right: 0;
-}
-.popover[data-up] {
-  top: auto;
-  bottom: calc(100% + 4px);
-}
-.popover [role^='menuitem'] {
-  justify-content: flex-start;
-  height: auto;
-  border: 0;
-  background: none;
-  white-space: nowrap;
-  gap: 10px;
-  margin: 0 var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-4);
-  text-align: left;
-}
-.popover [role^='menuitem'] .icon {
-  width: 16px;
-  height: 16px;
-  color: var(--fg-2);
-}
-.popover [role^='menuitem']:hover:not(:disabled),
-.popover [role^='menuitem']:focus-visible {
-  background: var(--hover-bg);
-  outline: none;
-}
-.popover [role^='menuitem'].danger {
-  color: var(--error);
-}
-.popover [role='menuitemradio'][aria-checked='true'],
-.popover [role='menuitemcheckbox'][aria-checked='true'] {
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-}
-.popover.dialog {
-  padding: var(--sp-2);
-  min-width: 340px;
-}
-.pop-title {
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-.popover.dialog .pop-title {
-  padding: 0 0 var(--sp-1);
-}
 .pop-scroll {
   display: flex;
   flex-direction: column;
   gap: 2px;
   max-height: min(320px, 50vh);
   overflow-y: auto;
-}
-.pop-sep {
-  height: 1px;
-  margin: var(--sp-1) 0;
-  background: var(--border);
 }
 .menu-label {
   flex: none;
@@ -1052,16 +523,16 @@ button.count-item .icon {
   background: var(--pill-bg);
   border-color: color-mix(in srgb, var(--hue) 55%, var(--border));
 }
-.agent-option:has(.glyph[data-agent='claude']) {
+.agent-option:has(.fl-avatar[data-agent='claude']) {
   --hue: var(--hue-claude);
 }
-.agent-option:has(.glyph[data-agent='codex']) {
+.agent-option:has(.fl-avatar[data-agent='codex']) {
   --hue: var(--hue-codex);
 }
-.agent-option:has(.glyph[data-agent='gemini']) {
+.agent-option:has(.fl-avatar[data-agent='gemini']) {
   --hue: var(--hue-gemini);
 }
-.agent-option:has(.glyph[data-agent='demo']) {
+.agent-option:has(.fl-avatar[data-agent='demo']) {
   --hue: var(--hue-demo);
 }
 .check {
@@ -1130,19 +601,6 @@ button.count-item .icon {
   font-size: var(--t-90);
   text-align: center;
 }
-.task-card {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: var(--sp-3);
-  padding: var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.3s;
-}
 /* A chat's subagents: small cards tucked under its card. */
 .sub-cards {
   display: flex;
@@ -1197,25 +655,15 @@ button.sub-fold.link {
 .sub-row.static {
   cursor: default;
 }
-.task-card:hover {
-  border-color: var(--border);
-}
-.task-card[data-status='needs-you'] {
-  border-color: var(--decision-line);
-  background: linear-gradient(var(--decision-soft), var(--decision-soft)), var(--menu-bg);
-}
-.task-card[data-status='error'] {
-  border-color: color-mix(in srgb, var(--error) 40%, transparent);
-}
 [data-flash] {
   animation: flash 1.2s ease-out;
 }
 @keyframes flash {
   from {
-    box-shadow: 0 0 0 4px var(--focus);
+    box-shadow: var(--shadow-flash);
   }
   to {
-    box-shadow: 0 0 0 4px transparent;
+    box-shadow: var(--shadow-flash-end);
   }
 }
 .card-top {
@@ -1349,16 +797,6 @@ button.sub-fold.link {
   width: 13px;
   height: 13px;
 }
-/* A card's answers wrap their words rather than run past its edge. */
-.task-card button.sm {
-  max-width: 100%;
-  height: auto;
-  min-height: 26px;
-  padding-block: var(--sp-1);
-  line-height: 1.3;
-  white-space: normal;
-  text-align: left;
-}
 .card-top .card-connect + .pop,
 .card-top .card-more {
   flex: none;
@@ -1370,10 +808,6 @@ button.sub-fold.link {
   gap: 2px;
   min-width: 0;
   min-height: 26px;
-}
-.card-actions > button.sm {
-  flex: none;
-  white-space: nowrap;
 }
 /* Hand off, Ask and Pipe to: on hover or keyboard focus only (they are in ⋯ as well). */
 .card-connect {
@@ -1456,13 +890,10 @@ button.sub-fold.link {
   color: var(--fg-2);
 }
 /* The topic gets a line of its own under the agent, status and numbers. */
-.compare-top .title-btn {
+.compare-topic {
   flex: 1 0 100%;
   order: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 600;
   font-size: var(--t-100);
 }
@@ -2087,7 +1518,7 @@ svg[data-lit] .map-file-line:not(.lit) {
   font-weight: 600;
   display: table-cell;
 }
-.chat-table .group-row .dot {
+.chat-table .group-row .fl-dot {
   margin-right: 6px;
 }
 .chat-table .group-row .col-count {
@@ -2553,19 +1984,8 @@ button.preview-nav[data-dir='next'] .icon {
   align-items: center;
   gap: var(--sp-1);
 }
-button.mini-select {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  height: 24px;
+.task-options .fl-select {
   max-width: 130px;
-  padding: 0 var(--sp-1) 0 var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  color: var(--fg-2);
-  background: var(--input-bg);
-  font-family: var(--font);
-  font-size: var(--t-85);
 }
 .approval-seg .seg-item {
   gap: 3px;
@@ -2688,7 +2108,7 @@ button.mini-select {
   white-space: pre-wrap;
   color: var(--fg);
 }
-.map-detail button.link {
+.map-detail .fl-btn--link {
   align-self: flex-start;
 }
 .seg-bar {
@@ -2710,670 +2130,9 @@ button.mini-select {
   background: var(--status-working);
 }
 
-/* ---- Composer (§2.1, §2.2): one box, one tone; chips, the message, one row of controls ---- */
-
-.composer-dock {
-  position: relative;
-  z-index: var(--z-composer);
-  flex: none;
-  padding: 0 var(--sp-4) var(--sp-4);
-}
-.composer-col {
-  position: relative;
-  max-width: 680px;
-  margin: 0 auto;
-}
-.composer {
-  container-type: inline-size;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  box-shadow: var(--shadow-composer);
-}
-/* The mode's colour: the focus ring and the send button. */
-.composer,
-.composer[data-mode='ask'] {
-  --mode: var(--accent);
-  --mode-send: var(--send-bg);
-  --mode-send-fg: var(--send-fg);
-}
-.composer[data-mode='edits'] {
-  --mode: var(--fg);
-  --mode-send: var(--fg);
-  --mode-send-fg: var(--tool-bg);
-}
-.composer[data-mode='plan'] {
-  --mode: var(--focus-border);
-  --mode-send: var(--button-bg);
-  --mode-send-fg: var(--button-fg);
-}
-.composer[data-mode='full'] {
-  --mode: var(--error);
-  --mode-send: var(--error);
-  --mode-send-fg: var(--button-fg);
-}
-.composer:focus-within {
-  border-color: var(--mode);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--mode) 12%, transparent),
-    0 1px 2px color-mix(in srgb, var(--mode) 20%, transparent);
-}
-/* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
-.cc-chips {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding: 6px;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-.cc-chips[data-over] {
-  mask-image: linear-gradient(to right, black calc(100% - var(--sp-5)), transparent);
-}
-.cc-chips-count {
-  flex: none;
-  padding: 0 var(--sp-1);
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-.cc-chip,
-.cc-chips .code-ref {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  height: 24px;
-  max-width: 180px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--chip-bg);
-  font-size: var(--t-85);
-  font-weight: 500;
-  overflow: hidden;
-}
-.cc-chip:hover,
-.cc-chips .code-ref:hover {
-  border-color: color-mix(in srgb, var(--border) 60%, var(--fg));
-}
-/* The chip opens a preview; its own × removes it. */
-button.cc-chip-open {
-  min-width: 0;
-  gap: var(--sp-1);
-}
-.cc-chip img {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  object-fit: cover;
-  border-radius: var(--r-1);
-}
-.cc-chip-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-chip-meta {
-  flex: none;
-  color: var(--fg-2);
-  font-weight: 400;
-}
-button.cc-chip-remove {
-  flex: none;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--r-3);
-  color: var(--fg-2);
-}
-button.cc-chip-remove:hover {
-  color: var(--fg);
-  background: var(--ghost-hover);
-}
-/* A full look at an attached image. */
-.image-preview img {
-  max-width: calc(100vw - 64px);
-  max-height: calc(100vh - 64px);
-  border-radius: var(--r-6);
-  object-fit: contain;
-}
-.cc-chips .code-ref button.ref {
-  height: auto;
-  padding: 0;
-  border: 0;
-  font-size: inherit;
-  color: inherit;
-}
-.cc-chips .code-ref button.ref:hover {
-  background: none;
-}
-.cc-input {
-  position: relative;
-  display: flex;
-}
-.cc-input textarea {
-  flex: 1;
-  min-height: calc(1.5em + 20px);
-  /* Eight lines, then it scrolls inside; never more than a quarter of the panel. */
-  max-height: min(calc(8lh + 20px), 25vh);
-  field-sizing: content;
-  padding: 10px 36px 10px 14px;
-  border: 0;
-  border-radius: var(--r-8);
-  background: transparent;
-  color: var(--fg);
-  caret-color: var(--fg);
-  font-size: var(--t-100);
-  line-height: 1.5;
-  resize: none;
-  outline: none;
-}
-button.cc-mic {
-  position: absolute;
-  top: 5px;
-  right: 0;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-right: 5px;
-  border-radius: var(--r-5);
-  color: var(--mic-idle);
-  background: none;
-}
-button.cc-mic:hover {
-  color: var(--mic-idle);
-  background: var(--ghost-hover);
-}
-button.cc-mic .icon {
-  width: 16px;
-  height: 16px;
-}
-/* The footer: +, /, pills; the mode and send at the right end. */
-.composer-bar {
-  position: relative;
-  z-index: var(--z-footer);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  padding: 5px;
-  border-top: 0.5px solid var(--border);
-  color: var(--fg-2);
-}
-button.cc-icon-btn {
-  flex: none;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--r-5);
-  color: var(--fg);
-}
-button.cc-icon-btn:hover:not(:disabled),
-button.cc-icon-btn[aria-expanded='true'] {
-  background: var(--ghost-hover);
-}
-button.cc-pill {
-  flex: 0 1 auto;
-  min-width: 0;
-  height: 18px;
-  margin-left: 6px;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  color: var(--fg);
-  font-size: var(--t-85);
-  line-height: 18px;
-  white-space: nowrap;
-}
-button.cc-pill:hover {
-  background: var(--pill-hover);
-}
-button.cc-agents {
-  flex: none;
-}
-button.cc-agents .dot {
-  width: 6px;
-  height: 6px;
-}
-.cc-pill-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cc-pill-sub {
-  flex: none;
-  color: var(--fg-2);
-}
-.composer-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  min-width: 0;
-  margin-left: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-button.cc-mode {
-  flex: none;
-  height: 26px;
-  gap: 0;
-  padding: 0 var(--sp-2) 0 0;
-  border-radius: var(--r-5);
-  color: var(--fg);
-  white-space: nowrap;
-}
-.cc-icon-box {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-}
-button.cc-mode:hover,
-button.cc-mode[aria-expanded='true'],
-.composer[data-menu='modes'] button.cc-mode {
-  background: var(--ghost-hover);
-}
-/* The agent's own mode, when it won't ask: said in the error colour. */
-button.cc-mode[data-warn] {
-  color: var(--error);
-}
-button.send-btn {
-  flex: none;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: 2px;
-  border-radius: var(--r-5);
-  color: var(--mode-send-fg);
-  background: var(--mode-send);
-}
-button.send-btn:hover:not(:disabled) {
-  background: var(--mode-send);
-  filter: brightness(1.1);
-}
-button.send-btn:active:not(:disabled) {
-  filter: brightness(0.9);
-}
-button.send-btn:disabled {
-  opacity: 0.4;
-}
-/* Narrow: labels go before anything overlaps (the controls keep their tooltips). */
-@container (max-width: 420px) {
-  button.cc-mode {
-    padding: 0;
-    font-size: 0;
-  }
-  .composer-hint {
-    display: none;
-  }
-}
-@container (max-width: 300px) {
-  button.cc-pill {
-    margin-left: 2px;
-  }
-  .cc-pill-sub {
-    display: none;
-  }
-}
-
-/* ---- Banners above the composer (§2.10) ---- */
-
-.banners {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  margin-bottom: var(--sp-2);
-  pointer-events: none;
-}
-.banners > * {
-  pointer-events: auto;
-}
-.banners:empty {
-  display: none;
-}
-.banner {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
-  animation: var(--fade-banner);
-}
-.banner-text {
-  margin-left: var(--sp-2);
-  font-weight: 700;
-  color: var(--fg);
-}
-.banner a {
-  color: var(--link);
-}
-.banner button.sm {
-  height: auto;
-  padding: 6px var(--sp-3);
-  font-size: var(--t-100);
-}
-/* While subagents run: one muted line, each name a link to its card. */
-.sa-strip {
-  padding: 0 var(--sp-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-button.sa-name {
-  display: inline;
-  color: var(--fg);
-}
-button.sa-name:hover {
-  text-decoration: underline;
-}
-
-/* ---- Menus above the composer (§2.3–2.6): model, modes, / and the typeahead ---- */
-
-/* Measured from the composer's outer edge: the menu spans its border, 8px above it. */
-.cc-menu {
-  position: absolute;
-  z-index: var(--z-menu);
-  left: -1px;
-  right: -1px;
-  bottom: calc(100% + 1px);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 70vh;
-  margin-bottom: var(--sp-2);
-  padding: 6px 0 4px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
-  color: var(--fg);
-  font-size: var(--t-100);
-  text-align: left;
-  animation: var(--fade-menu);
-}
-.cc-modes-menu {
-  left: auto;
-  /* Measured on 7.png: 301px wide with its border, its right edge on the mode button's (36.5px in from the composer's). */
-  right: 35.5px;
-  width: 301px;
-  font-size: var(--t-90);
-}
-.cc-slash-menu,
-.cc-typeahead {
-  max-height: 50vh;
-}
-.cc-slash-menu {
-  padding-top: 0;
-}
-.cc-menu-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 0;
-  overflow-y: auto;
-}
-/* More below: the list's end fades while it can scroll further. */
-.cc-menu-list[data-more] {
-  mask-image: linear-gradient(to bottom, black calc(100% - var(--sp-5)), transparent);
-}
-.cc-typeahead {
-  overflow-y: auto;
-}
-.cc-model-menu .cc-menu-list {
-  max-height: 270px;
-}
-.cc-slash-menu .cc-menu-list {
-  gap: 0;
-  max-height: 300px;
-  padding-bottom: var(--sp-2);
-}
-.cc-menu-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-1) var(--sp-3);
-  color: var(--fg-50);
-}
-.cc-modes-menu .cc-menu-title {
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-.cc-keys {
-  font-size: var(--t-75);
-  color: var(--fg-2);
-  opacity: 0.7;
-}
-.cc-menu-section {
-  display: flex;
-  flex-direction: column;
-}
-.cc-menu-sub {
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--t-90);
-  color: var(--fg-50);
-}
-.cc-divider {
-  flex: none;
-  height: 1px;
-  margin: var(--sp-1) 0;
-  background: var(--border);
-}
-.cc-empty {
-  padding: var(--sp-1) var(--sp-3);
-  color: var(--fg-2);
-}
-/* A row: inset 4 from the menu's sides, so r4 sits concentric in the menu's r8. */
-button.cc-item,
-.cc-item {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-4);
-  color: var(--fg);
-  text-align: left;
-}
-button.cc-item:hover,
-button.cc-item:focus-visible,
-.cc-item.pick-row:hover,
-.cc-item.pick-row[aria-selected='true'] {
-  background: var(--hover-bg);
-  outline: none;
-}
-button.cc-item[aria-checked='true'] {
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-}
-.cc-item > .icon {
-  color: var(--fg-2);
-}
-.cc-item > .icon:last-child:not(:first-child) {
+/* The Ultracode-style option row: its Toggle sits at the row's end. */
+.cc-toggle {
   margin-left: auto;
-}
-button.cc-item[aria-checked='true'] .icon,
-button.cc-item[aria-checked='true'] .cc-item-desc {
-  color: var(--sel-fg);
-}
-.cc-item-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-/* Two-line rows: each line 1.2em. */
-.cc-model-menu .cc-item-text,
-.cc-modes-menu .cc-item-text {
-  line-height: 1.2em;
-}
-.cc-item-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-modes-menu .cc-item-name,
-.cc-modes-menu .cc-item-desc {
-  white-space: normal;
-}
-.cc-item-desc {
-  font-size: var(--t-85);
-  color: var(--fg-2);
-}
-.cc-model-menu .cc-item-desc {
-  color: inherit;
-  opacity: 0.5;
-}
-.cc-item-hint {
-  margin-top: 2px;
-  font-size: var(--t-85);
-  color: var(--disabled);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The / menu keeps one line per command: name, then its description, cut to fit. */
-.cc-slash-menu .cc-item-text {
-  flex: 1;
-  flex-direction: row;
-  align-items: baseline;
-  gap: var(--sp-2);
-}
-.cc-slash-menu .cc-item-name {
-  flex: none;
-  max-width: 60%;
-}
-.cc-slash-menu .cc-item-hint {
-  margin-top: 0;
-  flex: 1;
-}
-.cc-item-value {
-  flex: none;
-  margin-left: auto;
-  color: var(--fg-2);
-}
-.cc-typeahead .cc-item-value {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-effort .cc-item-name .cc-item-value {
-  margin-left: 0;
-}
-button.cc-more-btn > .icon:last-child {
-  transition: transform var(--ease-toggle);
-}
-button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
-  transform: rotate(180deg);
-}
-/* Effort: a 76×18 track, a notch per level, a 14px thumb. */
-.cc-slider {
-  --track: 76px;
-  position: relative;
-  flex: none;
-  width: var(--track);
-  height: 18px;
-  margin-left: auto;
-  border-radius: var(--r-pill);
-  background: var(--border);
-  cursor: pointer;
-  touch-action: none;
-}
-.cc-slider::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: calc(18px + var(--at) * (var(--track) - 18px));
-  border-radius: var(--r-pill);
-  background: var(--effort-fill);
-}
-.cc-notch {
-  position: absolute;
-  top: 7px;
-  left: calc(7px + var(--i) * (var(--track) - 18px));
-  width: 4px;
-  height: 4px;
-  border-radius: var(--r-round);
-  background: color-mix(in srgb, var(--fg-2) 40%, transparent);
-}
-.cc-thumb {
-  position: absolute;
-  top: 2px;
-  left: calc(2px + var(--at) * (var(--track) - 18px));
-  width: 14px;
-  height: 14px;
-  border-radius: var(--r-round);
-  background: var(--thumb);
-  box-shadow: var(--shadow-thumb);
-  transition: left var(--ease-toggle);
-}
-/* A toggle: 32×18, the thumb slides right when on. */
-button.cc-switch {
-  position: relative;
-  flex: none;
-  width: 32px;
-  height: 18px;
-  margin-left: auto;
-  border-radius: var(--r-pill);
-  background: var(--border);
-  transition: background-color var(--ease-toggle);
-}
-button.cc-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--r-round);
-  background: var(--thumb);
-  box-shadow: var(--shadow-thumb);
-  transition: left var(--ease-toggle);
-}
-button.cc-switch[aria-checked='true'] {
-  background: var(--toggle-on);
-}
-button.cc-switch[aria-checked='true']::after {
-  left: 16px;
-}
-/* The / palette's filter: the composer's tone inside the menu. */
-.cc-search {
-  flex: none;
-  width: auto;
-  margin: var(--sp-1);
-  padding: var(--sp-2) var(--sp-3);
-  border: 0;
-  border-radius: var(--r-4);
-  background: var(--input-bg);
-  color: var(--fg);
-  font-size: var(--t-90);
-  line-height: normal;
-  outline: none;
-}
-.cc-search::placeholder {
-  color: var(--fg-50);
 }
 
 /* ---- Chat layout ---- */
@@ -3620,9 +2379,8 @@ button.rewind-btn {
   overflow: hidden;
   mask-image: linear-gradient(to bottom, black 85%, transparent);
 }
-button.sm-link {
+.sm-link {
   margin-top: 2px;
-  font-size: var(--t-85);
 }
 /* File paths: open at the line inside the chat's folder, copy otherwise. Inline, so a long one wraps. */
 .path-link {
@@ -3654,19 +2412,6 @@ button.sm-link {
 .msg-tools .copy-btn:focus-visible {
   opacity: 1;
 }
-/* Copy: 20px, a hairline box, on hover. */
-button.copy-btn {
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--menu-bg);
-  color: var(--fg-2);
-}
-button.copy-btn:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--hover-bg);
-}
 
 /* Code blocks: the code on its own tone, no border, no header; the tools show on hover. */
 .code-block {
@@ -3695,9 +2440,6 @@ pre.code {
 .code-block[data-wrap] pre.code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-button.wrap-btn[aria-pressed='true'] {
-  color: var(--fg);
 }
 pre.code:focus-visible {
   outline: 1px solid var(--focus);
@@ -3730,12 +2472,6 @@ pre.code code {
   font-family: var(--mono);
   font-size: var(--t-85);
   color: var(--fg-2);
-}
-.code-tools button.sm,
-.tool-tools button.sm {
-  height: 20px;
-  padding: 0 6px;
-  font-size: var(--t-85);
 }
 .run-short {
   display: none;
@@ -4367,201 +3103,13 @@ button.cc-map-node:hover {
 /* ---- Decisions and cards in the transcript (§2.10, §2.11) ---- */
 
 /* ---- Approvals (webview/approval.tsx; RESEARCH.md §3 A + C) ----
-   Shared component classes, the swap points onto the design system's components:
-   fl-btn   one button family, r5: md 28 (default) and --sm 24; --ghost (quiet text, fill on hover),
-            --quiet (pill fill), --brand (the one orange primary, on the request the keys act on),
-            --inverse (selected choice), --danger (careful); --icon makes it square.
-   fl-split a fl-btn and its caret, joined.
-   fl-hold  press-and-hold: a fill that tracks the hold (600 ms) and drains back on release.
-   fl-chip  status pill, sm 24, r pill; data-tone routine | review | careful adds the tinted dot.
-   fl-card  a request in the stream: r8 card (review, careful), r6 sentence row (routine). */
+   Drawn with the components: Button (brand on the request the keys act on), SplitButton, the hold
+   Button, Segmented, Pill, Countdown, MenuItem, and Card (bare: its rows pad themselves). */
 
-:root {
-  --ctl-sm: 24px;
-  --ctl-md: 28px;
-  --ctl-lg: 32px;
-  --ctl-touch: 44px;
-}
-.fl-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: var(--ctl-md);
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--r-5);
-  background: transparent;
-  color: var(--fg);
-  font-size: var(--t-100);
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  flex: none;
-}
-.fl-btn--sm {
-  height: var(--ctl-sm);
-  padding: 0 var(--sp-2);
-  font-size: var(--t-90);
-}
-.fl-btn--icon {
-  width: var(--ctl-md);
-  padding: 0;
-}
-.fl-btn--sm.fl-btn--icon {
-  width: var(--ctl-sm);
-}
-.fl-btn .k {
-  font-weight: 400;
-  font-size: var(--t-85);
-  opacity: 0.55;
-}
-.fl-btn .icon {
-  color: inherit;
-}
-.fl-btn--ghost:hover:not(:disabled),
-.fl-btn--ghost[aria-expanded='true'] {
-  background: var(--hover-bg);
-}
-.fl-btn--quiet {
-  background: var(--pill-bg);
-}
-.fl-btn--quiet:hover:not(:disabled),
-.fl-btn--quiet[aria-expanded='true'] {
-  background: var(--pill-hover);
-}
-.fl-btn--brand {
-  background: var(--send-bg);
-  color: var(--send-fg);
-}
-.fl-btn--brand .k {
-  opacity: 0.75;
-}
-.fl-btn--brand:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-.fl-btn--inverse {
-  background: var(--sel-fg);
-  color: var(--bg);
-}
-.fl-btn--danger {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-}
-.fl-btn:focus-visible {
-  outline: 1px solid var(--focus);
-  outline-offset: 1px;
-}
-.fl-split {
-  display: inline-flex;
-  flex: none;
-}
-.fl-split > .fl-btn {
-  border-radius: var(--r-5) 0 0 var(--r-5);
-}
-.fl-split > .pop > .fl-btn {
-  width: var(--ctl-sm);
-  height: var(--ctl-md);
-  border-radius: 0 var(--r-5) var(--r-5) 0;
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--bg) 30%, transparent);
-}
-.fl-hold {
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  user-select: none;
-  touch-action: none;
-}
-.fl-hold::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: color-mix(in srgb, var(--error) 30%, transparent);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.2s ease-out;
-}
-.fl-hold[data-holding]::before {
-  transform: scaleX(1);
-  transition: transform 0.6s linear;
-}
-.fl-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--ctl-sm);
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  color: var(--fg-2);
-  font-size: var(--t-85);
-  font-weight: 400;
-  white-space: nowrap;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.fl-chip > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.fl-chip[data-tone]::before {
-  flex: none;
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: var(--r-round);
-  background: currentColor;
-}
-.fl-chip[data-tone]:has(> .icon)::before {
-  display: none;
-}
-.fl-chip[data-tone='review'] {
-  /* Mixed toward the text colour so it reads on light themes too. */
-  color: color-mix(in srgb, var(--warn) 70%, var(--fg));
-  background: color-mix(in srgb, var(--warn) 11%, transparent);
-}
-.fl-chip[data-tone='careful'] {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-}
-
-/* A request: the card (A) for review and careful, a sentence row (C) for routine. Full width, no shadow. */
-.fl-card.apv {
-  display: flex;
-  flex-direction: column;
+/* A request: a bare Card for review and careful, a ghost Card (one sentence row) for routine. Full width. */
+.apv {
   margin: var(--sp-2) 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
   container-type: inline-size;
-  animation: apv-in 0.15s ease-out;
-}
-@keyframes apv-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-.fl-card.apv-row {
-  border-color: transparent;
-  border-radius: var(--r-6);
-}
-/* The request the keys act on: the one orange ring (careful: the ring in its own red). */
-.fl-card.apv[data-on] {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.fl-card.apv[data-risk='careful'] {
-  border-color: color-mix(in srgb, var(--error) 30%, var(--border));
-  background: color-mix(in srgb, var(--error) 5%, var(--input-bg));
-}
-.fl-card.apv[data-risk='careful'][data-on] {
-  border-color: color-mix(in srgb, var(--error) 60%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 14%, transparent);
 }
 .apv-hd {
   display: flex;
@@ -4587,7 +3135,7 @@ button.cc-map-node:hover {
   flex: none;
   color: var(--fg-2);
 }
-.apv-what > .glyph,
+.apv-what > .fl-avatar,
 .apv-what > .icon {
   flex: none;
 }
@@ -4633,9 +3181,6 @@ button.cc-map-node:hover {
   align-items: center;
   gap: var(--sp-1);
   margin-left: auto;
-}
-.apv-once {
-  gap: var(--sp-1);
 }
 /* Narrow: the actions get their own row, right-aligned. */
 @container (max-width: 560px) {
@@ -4698,7 +3243,7 @@ button.cc-map-node:hover {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  min-height: var(--ctl-lg);
+  min-height: var(--h-lg);
   padding: 0 var(--sp-1) 0 10px;
   border-bottom: 0.5px solid var(--border);
   color: var(--fg-2);
@@ -4708,17 +3253,11 @@ button.cc-map-node:hover {
   color: var(--fg);
   font-size: var(--fs-mono);
 }
-button.apv-file {
+.apv-file {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .apv-dh .stats {
   font-family: var(--mono);
-}
-.apv-dh kbd {
-  font-size: var(--t-85);
 }
 .apv-diff .diff {
   margin: 0;
@@ -4910,30 +3449,12 @@ button.apv-file {
   color: var(--fg-2);
   font-size: var(--t-85);
 }
+/* The Countdown along the row's bottom edge. */
 .apv-auto-bar {
   position: absolute;
   left: 0;
   right: 0;
   bottom: -1px;
-  height: 2px;
-  overflow: hidden;
-  border-radius: 0 0 var(--r-6) var(--r-6);
-  background: var(--border);
-}
-.apv-auto-bar i {
-  position: absolute;
-  inset: 0;
-  background: var(--accent);
-  transform-origin: left;
-  animation: apv-drain linear forwards;
-}
-@keyframes apv-drain {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
 }
 /* "N more routine requests · Allow all". */
 .apv-batch {
@@ -4960,42 +3481,7 @@ button.apv-file {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The Allow menu: each scope names the rule it keeps. */
-.popover [role^='menuitem'].apv-scope-row {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: start;
-  gap: var(--sp-2);
-  width: min(340px, calc(100vw - 48px));
-  white-space: normal;
-}
-.apv-check {
-  display: inline-flex;
-  padding-top: 2px;
-}
-.apv-scope-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.apv-scope-text .menu-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.apv-scope-text .menu-sub {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.popover [role^='menuitem'].apv-scope-row:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
 /* The routine row's "once ▾" token and its little form. */
-.apv-token .icon {
-  color: var(--fg-2);
-}
 .apv-scope-pop {
   display: flex;
   flex-direction: column;
@@ -5008,24 +3494,9 @@ button.apv-file {
   color: var(--fg-50);
   font-size: var(--t-85);
 }
-.apv-scope-opts {
-  display: flex;
-  gap: var(--sp-1);
-}
-.apv-scope-opts .fl-btn {
-  flex: 1;
-}
 .apv-scope-rule {
   color: var(--fg-2);
   font-size: var(--t-85);
-}
-@media (prefers-reduced-motion: reduce) {
-  .fl-card.apv {
-    animation: none;
-  }
-  .apv-auto-bar i {
-    animation: none;
-  }
 }
 
 /* What saying yes would do: on the composer's tone inside the card. */
@@ -5200,19 +3671,14 @@ button.q-opt[data-picked] .q-opt-desc {
   color: inherit;
   opacity: 0.8;
 }
-.q-rec {
-  font-size: var(--t-80);
-}
 .q-opt-other .q-opt-label {
   color: var(--fg-2);
 }
 .q-other {
   padding: 2px 0;
 }
-.q-other input,
-input.q-input {
+.q-input {
   width: 100%;
-  height: 26px;
 }
 .q-preview {
   min-width: 0;
@@ -5273,10 +3739,12 @@ input.q-input {
   padding-left: 20px;
 }
 
-/* A card: a plan, the files a turn changed, a message between chats. */
-.card,
-.link-card,
-.notice {
+/* Cards in the transcript (plan, changes, notices) are the Card and Banner components; they sit 8 apart. */
+.msg-card {
+  margin: var(--sp-2) 0;
+}
+/* A message between chats. */
+.link-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -5285,18 +3753,6 @@ input.q-input {
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--input-bg);
-}
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  font-weight: 700;
-}
-.card-head .hint {
-  font-size: var(--t-90);
-}
-.changes[data-undone] {
-  opacity: 0.7;
 }
 .plan-steps {
   display: flex;
@@ -5311,7 +3767,7 @@ input.q-input {
   align-items: baseline;
   gap: var(--sp-2);
 }
-.plan-steps .dot {
+.plan-steps .fl-dot {
   position: relative;
   top: -1px;
 }
@@ -5326,12 +3782,7 @@ input.q-input {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.notice[data-tone='error'] {
-  border-color: color-mix(in srgb, var(--error) 35%, transparent);
-  background: color-mix(in srgb, var(--bg) 96%, var(--error));
-  color: var(--error);
-}
-.notice .detail {
+.notice-detail {
   display: block;
   white-space: pre-wrap;
 }
@@ -5573,17 +4024,6 @@ button.chat-head-title:hover {
 }
 .status-pill {
   flex: none;
-  height: 18px;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  color: var(--fg-2);
-  font-size: var(--t-85);
-  line-height: 18px;
-}
-.status-pill[data-state='needs-you'] {
-  color: var(--status-waiting);
-  background: color-mix(in srgb, var(--status-waiting) 14%, transparent);
 }
 .chat-head-actions {
   flex: none;
@@ -5787,7 +4227,7 @@ button.starter:hover {
   margin: var(--sp-5) auto 0;
   text-align: left;
 }
-.reopen .pop-title {
+.reopen .fl-menu__title {
   margin: 0 0 var(--sp-1);
   padding: 0 var(--sp-3);
 }
@@ -5806,7 +4246,7 @@ button.reopen-row {
   gap: var(--sp-1);
   width: min(380px, calc(100vw - 40px));
 }
-.popover:has(.all-chats) {
+.fl-menu:has(.all-chats) {
   padding: var(--sp-2);
 }
 .all-list {
@@ -5886,7 +4326,6 @@ button.new-chat kbd {
   visibility: visible;
 }
 
-
 /* Motion is a hint, never the only signal: everything still reads without it. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -5897,44 +4336,6 @@ button.new-chat kbd {
     scroll-behavior: auto !important;
   }
 }
-/* Listening: the mic grows into a blue pill, [mic | level bars], white on blue. */
-button.cc-mic[data-state='listening'] {
-  width: auto;
-  gap: 5px;
-  padding: 0 8px 0 5px;
-  color: var(--mic-fg);
-  background: var(--mic-bg);
-}
-.cc-input:has(button.cc-mic[data-state='listening']) textarea {
-  padding-right: 76px;
-}
-.mic-bars {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 14px;
-}
-.mic-bars i {
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--mic-fg);
-  transform: scaleY(0.15);
-}
-/* Reduced motion: one pulsing dot instead of the bars. */
-.mic-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--mic-fg);
-  animation: mic-pulse 1.2s ease infinite;
-}
-@keyframes mic-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
 /* Manage Permissions (permissions.tsx): the whole width, one table per kind. */
 .perms {
   padding: 20px 24px 32px;
@@ -6148,9 +4549,6 @@ button.cc-mic[data-state='listening'] {
   font-size: var(--t-85);
   color: var(--fg-2);
 }
-button.primary .acct-kind {
-  color: inherit;
-}
 .acct-key {
   display: flex;
   align-items: flex-start;
@@ -6199,9 +4597,8 @@ button.primary .acct-kind {
   align-items: center;
   gap: var(--sp-2);
 }
-.acct-choice button.mini-select {
+.acct-choice .fl-select {
   max-width: 260px;
-  color: var(--fg);
 }
 .acct-foot {
   padding: var(--sp-2) 0 var(--sp-5);
@@ -6436,17 +4833,12 @@ button.inbox-history-row:hover:not(:disabled) {
   gap: var(--sp-2);
   padding: var(--sp-3);
   border-radius: var(--r-8);
-  background: var(--input-bg);
+  /* The card tone, so the Textarea's field tone stands off it. */
+  background: var(--menu-bg);
 }
 .inbox-reply-label {
   color: var(--fg-50);
   font-size: var(--t-85);
-}
-.inbox-reply textarea {
-  min-height: 64px;
-  border-radius: var(--r-6);
-  background: var(--bg);
-  resize: vertical;
 }
 .inbox-reply .fl-btn {
   align-self: stretch;
@@ -6608,10 +5000,4 @@ button.inbox-entry[data-waiting] {
   .inbox-history-topic {
     display: none;
   }
-}
-
-/* A setting that can't change now (Mac & Windows control while it is off). */
-button.cc-switch:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
