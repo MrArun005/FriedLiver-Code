@@ -129,7 +129,7 @@
 }
 
 /* Option toggles (Aa, ab, .*): IconButton, the "on" state of a pressed quiet button. */
-.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle:not(.monaco-checkbox) {
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle:not(.monaco-checkbox):not(.setting-value-checkbox) {
 	--vscode-inputOption-activeBackground: color-mix(in srgb, var(--fl-focus) 24%, transparent);
 	--vscode-inputOption-activeBorder: transparent;
 	--vscode-inputOption-activeForeground: var(--fl-sel-fg);
@@ -170,8 +170,10 @@
 
 /* ---- Checkbox §2.9: 14 square, r3; checked = the button colour with a check ------------- */
 
-/* Doubled class: above the settings editor's own 18px checkbox rule (0,5,0). */
-.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox {
+/* The settings editor's boolean is a plain toggle (.setting-value-checkbox), not .monaco-checkbox.
+   Doubled class: above the settings editor's own 18px rule (0,5,0). */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox,
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.setting-value-checkbox {
 	--vscode-checkbox-background: var(--fl-input-bg);
 	--vscode-checkbox-border: color-mix(in srgb, var(--fl-fg-2) 70%, transparent);
 	--vscode-checkbox-foreground: var(--fl-button-fg);
@@ -188,7 +190,8 @@
 	font-size: var(--fl-i-xs) !important;
 }
 
-.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox.checked {
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox.checked,
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.setting-value-checkbox.checked {
 	--vscode-checkbox-background: var(--fl-button-bg);
 	--vscode-checkbox-border: var(--fl-button-bg);
 	--vscode-settings-checkboxBackground: var(--fl-button-bg);
