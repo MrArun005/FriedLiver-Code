@@ -709,19 +709,6 @@ button.count-item .icon {
   font-size: var(--t-90);
   text-align: center;
 }
-.task-card {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: var(--sp-3);
-  padding: var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.3s;
-}
 /* A chat's subagents: small cards tucked under its card. */
 .sub-cards {
   display: flex;
@@ -776,25 +763,15 @@ button.sub-fold.link {
 .sub-row.static {
   cursor: default;
 }
-.task-card:hover {
-  border-color: var(--border);
-}
-.task-card[data-status='needs-you'] {
-  border-color: var(--decision-line);
-  background: linear-gradient(var(--decision-soft), var(--decision-soft)), var(--menu-bg);
-}
-.task-card[data-status='error'] {
-  border-color: color-mix(in srgb, var(--error) 40%, transparent);
-}
 [data-flash] {
   animation: flash 1.2s ease-out;
 }
 @keyframes flash {
   from {
-    box-shadow: 0 0 0 4px var(--focus);
+    box-shadow: var(--shadow-flash);
   }
   to {
-    box-shadow: 0 0 0 4px transparent;
+    box-shadow: var(--shadow-flash-end);
   }
 }
 .card-top {
@@ -950,10 +927,6 @@ button.sub-fold.link {
   min-width: 0;
   min-height: 26px;
 }
-.card-actions > button.sm {
-  flex: none;
-  white-space: nowrap;
-}
 /* Hand off, Ask and Pipe to: on hover or keyboard focus only (they are in ⋯ as well). */
 .card-connect {
   flex: none;
@@ -1035,13 +1008,10 @@ button.sub-fold.link {
   color: var(--fg-2);
 }
 /* The topic gets a line of its own under the agent, status and numbers. */
-.compare-top .title-btn {
+.compare-topic {
   flex: 1 0 100%;
   order: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 600;
   font-size: var(--t-100);
 }
@@ -2528,9 +2498,8 @@ button.rewind-btn {
   overflow: hidden;
   mask-image: linear-gradient(to bottom, black 85%, transparent);
 }
-button.sm-link {
+.sm-link {
   margin-top: 2px;
-  font-size: var(--t-85);
 }
 /* File paths: open at the line inside the chat's folder, copy otherwise. Inline, so a long one wraps. */
 .path-link {
@@ -2562,19 +2531,6 @@ button.sm-link {
 .msg-tools .copy-btn:focus-visible {
   opacity: 1;
 }
-/* Copy: 20px, a hairline box, on hover. */
-button.copy-btn {
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--menu-bg);
-  color: var(--fg-2);
-}
-button.copy-btn:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--hover-bg);
-}
 
 /* Code blocks: the code on its own tone, no border, no header; the tools show on hover. */
 .code-block {
@@ -2603,9 +2559,6 @@ pre.code {
 .code-block[data-wrap] pre.code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-button.wrap-btn[aria-pressed='true'] {
-  color: var(--fg);
 }
 pre.code:focus-visible {
   outline: 1px solid var(--focus);
@@ -2638,12 +2591,6 @@ pre.code code {
   font-family: var(--mono);
   font-size: var(--t-85);
   color: var(--fg-2);
-}
-.code-tools button.sm,
-.tool-tools button.sm {
-  height: 20px;
-  padding: 0 6px;
-  font-size: var(--t-85);
 }
 .run-short {
   display: none;
@@ -3645,10 +3592,12 @@ input.q-input {
   padding-left: 20px;
 }
 
-/* A card: a plan, the files a turn changed, a message between chats. */
-.card,
-.link-card,
-.notice {
+/* Cards in the transcript (plan, changes, notices) are the Card and Banner components; they sit 8 apart. */
+.msg-card {
+  margin: var(--sp-2) 0;
+}
+/* A message between chats. */
+.link-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -3657,18 +3606,6 @@ input.q-input {
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--input-bg);
-}
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  font-weight: 700;
-}
-.card-head .hint {
-  font-size: var(--t-90);
-}
-.changes[data-undone] {
-  opacity: 0.7;
 }
 .plan-steps {
   display: flex;
@@ -3698,12 +3635,7 @@ input.q-input {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.notice[data-tone='error'] {
-  border-color: color-mix(in srgb, var(--error) 35%, transparent);
-  background: color-mix(in srgb, var(--bg) 96%, var(--error));
-  color: var(--error);
-}
-.notice .detail {
+.notice-detail {
   display: block;
   white-space: pre-wrap;
 }

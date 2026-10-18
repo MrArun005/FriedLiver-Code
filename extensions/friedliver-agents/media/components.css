@@ -176,8 +176,8 @@
   opacity: 0.4;
   cursor: default;
 }
-/* The trigger of an open menu keeps its pressed fill. */
-.fl-btn[aria-expanded='true'] {
+/* The trigger of an open menu keeps its pressed fill (a disclosure's aria-expanded doesn't). */
+.fl-btn[aria-haspopup][aria-expanded='true'] {
   background: var(--btn-bg-active);
 }
 /* A quiet or secondary toggle button that is on: the same "on" as a pressed pill (focus blue at 24%). */
@@ -257,6 +257,36 @@
 }
 .fl-btn--link:hover:not(:disabled) {
   text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Text: a title that opens something (a card's title). The text's own colour and size; wraps. */
+.fl-btn--text {
+  --btn-bg: transparent;
+  --btn-bg-hover: transparent;
+  --btn-bg-active: transparent;
+  --btn-fg: inherit;
+  display: inline;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.fl-btn--text.fl-btn--truncate {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fl-btn--text:hover:not(:disabled) {
+  text-decoration: underline;
+  text-decoration-color: var(--fg-2);
   text-underline-offset: 3px;
 }
 /* IconButton: the same button, square; quiet unless a variant says otherwise. The composer's + and /. */
@@ -1114,14 +1144,14 @@ textarea.fl-input {
   border-radius: 0;
 }
 
-/* ---- Card (§2.14): inline (menu tone) · flat (outline only) · raised (lifts); r8, 12 padding ---- */
+/* ---- Card (§2.16): inline (menu tone) · flat (outline only) · raised (lifts); r8; 12 padding and rhythm (sm 8·12 / 8) ---- */
 
 .fl-card {
   --card-pad: var(--sp-3);
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
   min-width: 0;
   padding: var(--card-pad);
   border: var(--line) solid var(--border);
@@ -1136,8 +1166,8 @@ textarea.fl-input {
   box-shadow: var(--elev-1);
 }
 .fl-card--sm {
-  --card-pad: var(--sp-2);
-  gap: var(--sp-1);
+  --card-pad: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
 }
 .fl-card--interactive:hover {
   border-color: color-mix(in srgb, var(--border) 60%, var(--fg));

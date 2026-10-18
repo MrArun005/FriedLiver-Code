@@ -625,7 +625,7 @@ BLOCKS.F26 = async () => {
   const rows = p.locator('.chat-item');
   await rows.first().waitFor();
   const r = await rows.evaluateAll((rs) => rs.map((e) => ({ glyph: !!e.querySelector('.fl-avatar'), time: e.querySelector('.chat-item-time')?.textContent ?? '' })));
-  check(r.length > 0 && r.every((x) => x.fl-avatar && x.time), `every row has a glyph and a time [${r.slice(0, 3).map((x) => JSON.stringify(x)).join(' ')}]`);
+  check(r.length > 0 && r.every((x) => x.glyph && x.time), `every row has a glyph and a time [${r.slice(0, 3).map((x) => JSON.stringify(x)).join(' ')}]`);
   await p.close();
 };
 

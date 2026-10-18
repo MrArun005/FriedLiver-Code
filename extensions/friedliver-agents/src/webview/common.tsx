@@ -2,7 +2,7 @@ import { linkTarget } from '../shared/links';
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Avatar } from './ui/display';
-import { IconButton } from './ui/controls';
+import { Button, IconButton } from './ui/controls';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
@@ -290,9 +290,9 @@ export const Markdown = memo(function Markdown({ text, chatId, cwd, full }: { te
         ))}
       </div>
       {lines > COLLAPSE_LINES && (
-        <button class="link sm-link md-more" aria-expanded={all} onClick={() => setAll(!all)}>
+        <Button variant="link" size="sm" class="sm-link md-more" aria-expanded={all} onClick={() => setAll(!all)}>
           {all ? 'Show less' : `Show all ${lines} lines`}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -378,17 +378,18 @@ export function Code({ code, lang, class: className }: { code: string; lang: str
  */
 export function RunButton({ chatId, command, cwd }: { chatId: string; command: string; cwd?: string }) {
   return (
-    <button
-      type="button"
-      class="ghost sm run-btn"
+    <Button
+      variant="secondary"
+      size="sm"
+      icon="terminal"
+      class="run-btn"
       aria-label="Run in terminal"
       title={`Type this into a new terminal and run it:\n${command.length > 600 ? `${command.slice(0, 600)}…` : command}`}
       onClick={() => send({ type: 'runInTerminal', chatId, command, ...(cwd ? { cwd } : {}) })}
     >
-      <Icon name="terminal" />
       <span class="run-long">Run in terminal</span>
       <span class="run-short">Run</span>
-    </button>
+    </Button>
   );
 }
 
@@ -420,13 +421,13 @@ function CodeBlock({ lang, code, chatId }: { lang: string; code: string; chatId?
       <Code code={code} lang={lang} />
       <div class="code-tools">
         <span class="code-lang">{lang || 'code'}</span>
-        <button type="button" class="ghost sm wrap-btn" aria-pressed={wrap} title={wrap ? 'Long lines wrap: click to keep them whole' : 'Wrap long lines'} onClick={() => setWrap(!wrap)}>
+        <Button variant="secondary" size="sm" class="wrap-btn" aria-pressed={wrap} title={wrap ? 'Long lines wrap: click to keep them whole' : 'Wrap long lines'} onClick={() => setWrap(!wrap)}>
           Wrap
-        </button>
+        </Button>
         {run && chatId && <RunButton chatId={chatId} command={run} />}
-        <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
+        <Button variant="secondary" size="sm" class="insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
           Insert
-        </button>
+        </Button>
         <CopyButton text={code} label="Copy code" />
       </div>
     </div>
@@ -631,6 +632,7 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
       label={label}
       title={done ? 'Copied' : label}
       size="sm"
+      variant="secondary"
       muted
       class="copy-btn"
       onClick={() => {
