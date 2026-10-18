@@ -16,7 +16,9 @@
 //        &fixture=permissions (approvals offering "Always allow", and ?surface=permissions: Manage Permissions, ui-fixture-permissions.mjs)
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 //        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
+//        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
+//   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -33,6 +35,7 @@ import { permissionsFixture } from './ui-fixture-permissions.mjs';
 import { IMAGE_ROOTS, exists, imagesFixture } from './ui-fixture-images.mjs';
 import { createRequire } from 'node:module';
 import { accountsFixture } from './ui-fixture-accounts.mjs';
+import { inboxFixture } from './ui-fixture-inbox.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -128,6 +131,8 @@ function page(params) {
           ? subagentsFixture(Date.now())
           : params.get('fixture') === 'reference'
             ? referenceFixture(Date.now())
+            : params.get('fixture') === 'inbox' || params.get('fixture') === 'inbox-empty'
+              ? inboxFixture(Date.now(), { answered: params.get('fixture') === 'inbox-empty' })
             : params.get('fixture') === 'permissions' || surface === 'permissions'
               ? permissionsFixture(Date.now())
               : params.get('fixture') === 'images'
@@ -254,8 +259,8 @@ async function shoot() {
   fs.mkdirSync(opts.out, { recursive: true });
   const problems = [];
 
-  const open = async (query, width, height) => {
-    const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  const open = async (query, width, height, scale = 1) => {
+    const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
     p.on('pageerror', (e) => problems.push(`${query}: ${e.message}`));
     p.on('console', (m) => m.type() === 'error' && problems.push(`${query}: ${m.text()}`));
     await p.goto(`${base}/?${query}`);
@@ -274,8 +279,8 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  if (opts.only === 'images') {
-    await imagesChecks({ open, check, posted });
+  if (opts.only === 'images' || opts.only === 'inbox') {
+    await (opts.only === 'inbox' ? inboxChecks : imagesChecks)({ open, check, posted });
     await browser.close();
     if (problems.length) {
       console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -402,8 +407,9 @@ async function shoot() {
     check((await p.locator('.popover').count()) === 0 && (await trigger.evaluate((el) => el === document.activeElement)), 'Escape closes the menu and focus returns');
 
     await p.click('.pill.loud');
-    await p.waitForTimeout(100);
-    check(await p.evaluate(() => document.activeElement?.getAttribute('data-nav') === 'chat-c1'), 'the decisions pill jumps to the first decision');
+    check((await p.locator('.inbox').count()) === 1, 'the decisions pill opens the Inbox');
+    await p.keyboard.press('Escape');
+    await p.locator('[data-nav="chat-c1"]').focus();
     await p.keyboard.press('j');
     check(await p.evaluate(() => document.activeElement?.getAttribute('data-nav') === 'chat-x1'), 'j moves to the next card');
     await p.keyboard.press('3');
@@ -1258,6 +1264,7 @@ async function shoot() {
   }
 
   await imagesChecks({ open, check, posted });
+  await inboxChecks({ open, check, posted });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1448,6 +1455,168 @@ async function imagesChecks({ open, check, posted }) {
     check(await p.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth), 'no sideways scroll at 300px');
     await p.close();
   }
+}
+
+// ---- The Decision Inbox ----
+
+async function inboxChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const { ids } = inboxFixture();
+  const shot = async (p, name) => {
+    await p.screenshot({ path: path.join(out, `${name}.png`), animations: 'disabled', caret: 'hide' });
+    console.log(`  ${path.join(out, `${name}.png`)}`);
+  };
+  const sel = (p) => p.evaluate(() => document.querySelector('.inbox-row[aria-selected="true"]')?.dataset.id);
+  const answers = (p) => p.evaluate(() => window.__posted.filter((m) => m.type !== 'ready' && m.type !== 'imageThumb' && m.type !== 'imageSrc'));
+  const clear = (p) => p.evaluate(() => (window.__posted.length = 0));
+  const host = (p, action) => p.evaluate((a) => window.postMessage({ type: 'action', action: a }, '*'), action);
+  const grace = (p) => p.waitForTimeout(700);
+  const order = ['perm-a-test', 'perm-a-edit', 'cmd-b-test', 'bridge-b-ask', 'bridge-c-open', 'bridge-c-click', 'q-d-driver', 'review-d-store', 'perm-e-test', 'perm-e-api'];
+
+  for (const [theme, tone] of [['dark-2026', 'dark'], ['light-2026', 'light']]) {
+    for (const [width, height] of [[1200, 800], [640, 900]]) {
+      const p = await open(`surface=tasks&theme=${theme}&view=board&fixture=inbox`, width, height, 2);
+      const tab = p.locator('.views button.seg-item').nth(4);
+      check((await tab.innerText()).replace(/\s+/g, ' ').trim() === 'Inbox · 10', `${width} ${tone}: the view switch says Inbox · 10`);
+      await p.keyboard.press('5');
+      await p.waitForSelector('.inbox-row');
+      await grace(p);
+      check(await p.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth), `${width} ${tone}: no sideways scroll`);
+      await shot(p, `inbox-${width}-${tone}`);
+      if (width === 1200 && tone === 'dark') {
+        await p.keyboard.press('b');
+        await p.waitForSelector('.inbox-confirm');
+        await grace(p);
+        await shot(p, `inbox-confirm-${width}-${tone}`);
+        await p.keyboard.press('Escape');
+        await p.keyboard.press('j');
+        await grace(p);
+        await shot(p, `inbox-edit-${width}-${tone}`);
+      }
+      await p.close();
+    }
+  }
+
+  const p = await open('surface=tasks&theme=dark-2026&view=list&fixture=inbox', 1200, 800);
+  await p.keyboard.press('5');
+  await p.waitForSelector('.inbox-row');
+  check(JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.inbox-row')].map((r) => r.dataset.id))) === JSON.stringify(order), 'oldest first, grouped by chat, the chat with the oldest request first');
+  check(
+    JSON.stringify(await p.locator('.inbox-group-head .inbox-topic').allInnerTexts()) ===
+      JSON.stringify(['Fix formatCents for negative amounts', 'Add CSV export to the reports page', 'Check the checkout flow on staging', 'Migrate the inventory store to SQLite', 'Bump the test dependencies']),
+    'each group is headed by its chat topic',
+  );
+  check((await p.locator('.inbox-row').first().locator('.glyph[data-agent="claude"]').count()) === 1 && (await p.locator('.inbox-row .inbox-kind').count()) === 10 && (await p.locator('.inbox-row .inbox-age').first().innerText()) === '7m', 'a row has its agent glyph, kind icon and age');
+  check((await sel(p)) === ids.first, 'the oldest request is selected');
+  check((await p.locator('.inbox-detail .cmdline').innerText()).includes('npm test') && (await p.locator('.inbox-detail').innerText()).includes('in /Users/arun/code/shop'), 'the detail shows the command and its folder');
+  check((await p.locator('.inbox-batch').innerText()).includes('3 identical requests wait in 3 chats'), 'three identical requests are counted, across chats');
+  check((await p.locator('.mgr-head .search').count()) === 0 && (await p.locator('.new-task').count()) === 0, 'the Inbox has the room: no search, no new task');
+
+  // Grace: an answer key right after moving does nothing; after it, it answers the request on screen.
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('j');
+  await p.keyboard.press('a');
+  check((await sel(p)) === ids.edit && (await answers(p)).length === 0, 'an answer key just after moving does nothing (grace)');
+  check((await p.locator('.inbox-detail .diff .dl[data-op="add"]').count()) === 3, 'an edit shows its diff');
+  await grace(p);
+  await p.keyboard.press('a');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'permission', requestId: ids.edit, optionId: 'allow' }]), 'a allows the selected request once, through the permission path');
+
+  // A new arrival, older than everything, never takes the selection.
+  await host(p, { t: 'items', chatId: 'chat-c', items: [{ kind: 'permission', requestId: 'perm-new', title: 'Read .env', toolKind: 'read', options: [{ optionId: 'y', name: 'Yes', kind: 'allow_once' }, { optionId: 'n', name: 'No', kind: 'reject_once' }] }], at: Date.now() - 3_600_000 });
+  await p.waitForSelector('.inbox-row[data-id="perm-new"]');
+  check((await sel(p)) === ids.edit, 'a new arrival never takes the selection');
+  check((await tabText(p)) === 'Inbox · 11', 'the count follows live');
+
+  // Answered: the row folds away, and the selection goes to the oldest still waiting, with a fresh grace period.
+  await clear(p);
+  await host(p, { t: 'permissionAnswered', requestId: ids.edit, answer: 'Yes' });
+  check((await p.locator(`.inbox-row[data-id="${ids.edit}"][data-leaving]`).count()) === 1, 'an answered row animates out');
+  await p.waitForTimeout(300);
+  check((await p.locator(`.inbox-row[data-id="${ids.edit}"]`).count()) === 0, '...and is gone');
+  check((await sel(p)) === 'perm-new', 'the selection moves to the oldest still waiting');
+  await p.keyboard.press('d');
+  check((await answers(p)).length === 0, 'and the keys wait out its grace period');
+
+  // Batch: only identical commands (same text, same folder), confirmed with the list, never Always allow.
+  await p.locator(`.inbox-row[data-id="${ids.first}"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('b');
+  const listed = await p.locator('.inbox-confirm-list li').allInnerTexts();
+  check(listed.length === 3 && listed.every((t) => t.includes('/Users/arun/code/shop')) && !listed.some((t) => t.includes('packages/api')), 'the confirmation lists the three identical requests, not the one in another folder');
+  await p.keyboard.press('Enter');
+  check((await answers(p)).length === 0, 'Enter right after the confirmation opens does nothing (grace)');
+  await grace(p);
+  await p.keyboard.press('Enter');
+  check(
+    JSON.stringify(await answers(p)) ===
+      JSON.stringify([
+        { type: 'permission', requestId: 'perm-a-test', optionId: 'allow' },
+        { type: 'command', commandId: 'cmd-b-test', approve: true },
+        { type: 'permission', requestId: 'perm-e-test', optionId: 'allow' },
+      ]),
+    'Apply to all allows each identical request once, each through its own path',
+  );
+  check((await p.locator('.inbox-confirm').count()) === 0, 'the confirmation closes once answered');
+
+  await p.locator(`.inbox-row[data-id="${ids.elsewhere}"]`).click();
+  check((await p.locator('.inbox-batch').count()) === 0, 'the same command in another folder is never batched');
+  await p.locator(`.inbox-row[data-id="${ids.click}"]`).click();
+  check((await p.locator('.inbox-detail .bridge-text').innerText()).includes('Click on https://staging.shop.test'), 'a browser action shows the action and its site');
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('A');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'bridge', requestId: ids.click, answer: 'allowAlways' }]), 'A always allows the site where the request offers it');
+  await p.locator(`.inbox-row[data-id="${ids.review}"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('A');
+  await p.keyboard.press('Enter');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'review', reviewId: ids.review, action: 'open' }]), 'a review offers no Always allow; Enter opens its diff');
+  await p.locator(`.inbox-row[data-id="${ids.question}"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('1');
+  await p.keyboard.press('o');
+  check(
+    JSON.stringify(await answers(p)) ===
+      JSON.stringify([
+        { type: 'answerQuestion', requestId: ids.question, action: 'accept', values: { driver: 'better-sqlite3' } },
+        { type: 'openChat', chatId: 'chat-d', item: ids.question },
+      ]),
+    '1 picks the recommended option; o opens the chat at the request',
+  );
+  await p.keyboard.press('Escape');
+  check((await p.locator('.inbox').count()) === 0 && (await p.locator('.chat-table').count()) === 1, 'Esc goes back to the view you came from');
+  await p.evaluate(() => window.postMessage({ type: 'showInbox' }, '*'));
+  await p.waitForSelector('.inbox');
+  check(true, 'Open Decision Inbox turns the Manager to its Inbox');
+  await p.close();
+
+  for (const tone of ['dark', 'light']) {
+    const e = await open(`surface=tasks&theme=${tone}-2026&view=inbox&fixture=inbox-empty`, 1200, 800, 2);
+    await e.waitForSelector('.inbox-empty');
+    check((await e.locator('.inbox-empty h2').innerText()) === 'Nothing waits for you', `${tone}: empty, it says nothing waits`);
+    const rows = await e.locator('.inbox-history-row').allInnerTexts();
+    check(rows.length === 8 && rows[0].includes('No') && rows[1].includes('Accepted') && rows.some((r) => r.includes('Denied')), `${tone}: and lists what was answered lately, newest first`);
+    await shot(e, `inbox-empty-1200-${tone}`);
+    await e.close();
+  }
+
+  const side = await open('surface=chat&theme=dark-2026&side=1&list=1&fixture=inbox', 300, 800);
+  await side.waitForSelector('.inbox-entry');
+  check((await side.locator('.inbox-entry').innerText()).trim() === 'Inbox · 10', 'the Chats view shows Inbox · 10');
+  await clear(side);
+  await side.locator('.inbox-entry').click();
+  check(JSON.stringify(await answers(side)) === JSON.stringify([{ type: 'openInbox' }]), '...and opens it');
+  await side.close();
+}
+
+function tabText(p) {
+  return p.locator('.views button.seg-item').nth(4).innerText().then((t) => t.replace(/\s+/g, ' ').trim());
 }
 
 function sharedGallery() {
