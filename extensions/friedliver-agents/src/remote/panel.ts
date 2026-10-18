@@ -144,7 +144,7 @@ h2 { margin: 0 0 8px; font-size: 1em; font-weight: 600; color: var(--sel-fg); }
 </style></head>
 <body><main>
 <h1>FriedLiver Remote</h1>
-<p class="lead">Control your agents from your phone. Paired phones can read chats, send messages and answer approvals; Auto and Always allow from a phone still ask here first.</p>
+<p class="lead">Control your agents from your phone. Paired phones can read chats, send messages and answer approvals; Auto, Edits and Always allow from a phone still ask here first, and each new phone needs your OK.</p>
 <section class="pair">
   ${viaTabs}
   ${qr}
@@ -157,7 +157,7 @@ h2 { margin: 0 0 8px; font-size: 1em; font-weight: 600; color: var(--sel-fg); }
       <dt>Address</dt><dd>${esc(v.url ?? 'none')}</dd>
       <dt>Certificate</dt><dd>${v.pinned ? `SHA-256 ${esc(fpShort)}` : 'Trusted (tailscale cert)'}</dd>
     </dl>
-    <p class="note">${v.pinned ? 'Your phone’s browser will warn about this self-signed certificate the first time. Its fingerprint must match the one above.' : ''}</p>
+    <p class="note">${v.pinned ? 'Your phone’s browser warns once about this self-signed certificate. Before continuing, open the certificate details there and check its SHA-256 matches the one above. If it ever warns again after pairing, stop. Use only on a network you trust, or use Tailscale.' : ''}</p>
   </div>
   <div class="box">
     <h2>Paired phones</h2>

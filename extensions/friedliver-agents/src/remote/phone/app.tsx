@@ -750,7 +750,7 @@ function Pairing({ code, fp, done }: { code: string | undefined; fp: string | un
           <>
             <p class="field__title">Certificate fingerprint (SHA-256)</p>
             <p class="fp">{groupedFp(fp)}</p>
-            <p class="hint">The same as on your Mac’s pairing panel. If your browser warned about the certificate, it should show this fingerprint too.</p>
+            <p class="hint">It must match your Mac’s pairing panel and the certificate details your browser showed. If your browser warns again after pairing, don’t continue: someone may be in between.</p>
           </>
         ) : null}
         <p class="field__title">Name this phone</p>
