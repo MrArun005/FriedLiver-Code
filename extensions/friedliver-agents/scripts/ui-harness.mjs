@@ -1618,6 +1618,59 @@ async function imagesChecks({ open, check, posted }) {
     await p.close();
   }
 
+  for (const width of [1200, 640]) {
+    // The copies: space used in the bar, pins, Done looking with its undo toast.
+    const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', width, 900);
+    await p.waitForSelector('.gallery-card');
+    const store = (s) => p.evaluate((st) => window.postMessage({ type: 'imageStore', store: st }, '*'), s);
+    const MB = 1024 * 1024;
+    const pinnedKeys = all.slice(1, 3).map((i) => i.key);
+    await store({ used: 212 * MB, cap: 1024 * MB, pinned: pinnedKeys, hidden: [] });
+    await p.waitForSelector('.gallery-used');
+    check((await p.locator('.gallery-used-text').innerText()) === '212 MB of 1 GB', `${width}: the bar shows the space the copies use`);
+    check((await p.locator('.gallery-used .fl-progress').getAttribute('aria-valuenow')) === String(212 * MB), `${width}: with a meter`);
+    check((await p.locator('.gallery-pin[aria-pressed="true"]').count()) === 2, `${width}: pinned images show a pressed star`);
+    const bar = await p.evaluate(() => {
+      const b = document.querySelector('.gallery-bar').getBoundingClientRect();
+      const s = document.querySelector('.gallery-store').getBoundingClientRect();
+      return { inside: s.right <= b.right + 0.5 && s.left >= b.left - 0.5, page: document.scrollingElement.scrollWidth - window.innerWidth };
+    });
+    check(bar.inside && bar.page <= 0, `${width}: the store group stays in the bar, no sideways scroll`);
+    await settle(p);
+    await p.locator('.gallery-item').nth(4).hover();
+    if (width === 1200) await shotTo(p, 'images-store');
+    else await shotTo(p, 'images-store-640');
+
+    if (width === 1200) {
+      await p.locator('.gallery-item').nth(4).locator('.gallery-pin').click();
+      check((await posted(p)).some((m) => m.type === 'imagePin' && m.key === all[4].key && m.pinned === true), 'the star pins by key');
+      await p.locator('.gallery-item').nth(1).locator('.gallery-pin').click();
+      check((await posted(p)).some((m) => m.type === 'imagePin' && m.key === all[1].key && m.pinned === false), 'a pressed star unpins');
+
+      // Done looking on All: every unpinned image; the host answers with them hidden.
+      await p.click('button:has-text("Done looking")');
+      check(JSON.stringify((await posted(p)).filter((m) => m.type === 'imagesDone').at(-1)) === JSON.stringify({ type: 'imagesDone' }), 'Done looking on All covers every chat');
+      await store({ used: 9 * MB, cap: 1024 * MB, pinned: pinnedKeys, hidden: all.filter((i) => !pinnedKeys.includes(i.key)).map((i) => i.key) });
+      await p.waitForFunction((n) => document.querySelectorAll('.gallery-card').length === n, pinnedKeys.length);
+      check((await p.locator('.fl-toast').innerText()).includes(`Done looking at ${all.length - 2} images`), 'a toast says how many, with Undo');
+      check((await p.locator('.gallery-tabs button.tab').first().innerText()).replace(/\s+/g, ' ').trim() === 'All 2', 'only the pinned images are left');
+      await shotTo(p, 'images-done-toast');
+      await p.keyboard.press('Meta+z');
+      check((await posted(p)).some((m) => m.type === 'imagesUndo') && (await p.locator('.fl-toast').count()) === 0, '⌘Z while the toast shows undoes');
+      check(!(await posted(p)).some((m) => m.type === 'imagesCommit'), 'an undone Done looking never commits');
+      await store({ used: 212 * MB, cap: 1024 * MB, pinned: pinnedKeys, hidden: [] });
+      await p.waitForFunction((n) => document.querySelectorAll('.gallery-card').length === n, all.length);
+
+      // One chat's tab, by keyboard; the toast runs out and commits.
+      await p.click('.gallery-tabs button.tab:has-text("Compare the composer")');
+      await p.keyboard.press('Meta+Shift+Backspace');
+      check(JSON.stringify((await posted(p)).filter((m) => m.type === 'imagesDone').at(-1)) === JSON.stringify({ type: 'imagesDone', chatId: 'chat-review' }), '⇧⌘⌫ is Done looking for the open chat');
+      await p.waitForFunction(() => window.__posted.some((m) => m.type === 'imagesCommit'), null, { timeout: 12_000 });
+      check(true, 'when the undo time ends the view commits');
+    }
+    await p.close();
+  }
+
   {
     // What can't be done isn't offered: no file for an attachment, no step outside FriedLiver.
     const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images&imagesTab=chat-tabs', 1200, 900);
