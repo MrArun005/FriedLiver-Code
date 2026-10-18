@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseCall } from '../src/bridge/protocol';
 import { findSymbol, SeenFiles, symbolRange } from '../src/host/indexReads';
-import { answerIndex, outline, ProjectIndex } from '../src/host/projectIndex';
+import { answerIndex, outline, ProjectIndex, projectPrimer } from '../src/host/projectIndex';
 import { estimateTokens } from '../src/shared/tokens';
 import { disposeCores, makeCore, waitFor } from './helpers';
 
@@ -264,5 +264,45 @@ describe('what the core tells the index', () => {
     await waitFor(() => ended.length === 1);
     expect(seen).toEqual([[chat.id, path.join(root, 'src/a.ts')]]);
     expect(ended).toEqual([chat.id]);
+  }, 30_000);
+});
+
+describe('session primer', () => {
+  afterEach(disposeCores);
+
+  it('maps the project and the files likely relevant to the first prompt, within its budget', async () => {
+    const root = await project({
+      'src/auth/refresh.ts': 'export function refreshToken() {}\nexport class TokenStore {}\n',
+      'src/app.ts': 'export const app = 1;\n',
+      'test/refresh.test.ts': 'refreshToken();\n',
+      'docs/a.md': '# a\n',
+      'README.md': '# readme\n',
+      '.env': 'SECRET=1',
+    });
+    const ix = await build(root);
+    const p = projectPrimer([ix], 'fix the refreshToken expiry bug', 1500)!;
+    expect(p).toMatch(/^<friedliver-project-map>/);
+    expect(p).toContain('src/ 2 · docs/ 1 · test/ 1 · README.md');
+    expect(p).toContain('src/auth/refresh.ts: refreshToken, TokenStore');
+    expect(p).toContain('index_read');
+    expect(p).not.toContain('.env');
+    expect(estimateTokens(p)).toBeLessThanOrEqual(1500);
+    // A tight budget drops the lists before going over; too tight gives nothing.
+    expect(estimateTokens(projectPrimer([ix], 'refreshToken', 90)!)).toBeLessThanOrEqual(90);
+    expect(projectPrimer([ix], 'refreshToken', 10)).toBeUndefined();
+    expect(projectPrimer([], 'x', 1500)).toBeUndefined();
+  });
+
+  it('goes in front of a new session\'s first message only', async () => {
+    const root = await project({ 'a.ts': 'x' });
+    const asked: string[] = [];
+    const core = makeCore(root, { primer: async (_chatId, text) => (asked.push(text), '<friedliver-project-map>MAP</friedliver-project-map>') });
+    const chat = await core.createChat('demo');
+    await core.send(chat.id, 'hello there');
+    await core.send(chat.id, 'again');
+    const replies = core.chat(chat.id)!.items.filter((i) => i.kind === 'agent').map((i) => (i as { text: string }).text);
+    expect(replies[0]).toContain('MAP');
+    expect(replies[1]).not.toContain('MAP');
+    expect(asked).toEqual(['hello there']);
   }, 30_000);
 });

@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { SeenFiles } from './indexReads';
-import { answerIndex, ProjectIndex, readIndexFile, saveIndexFile, STAT_BATCH, type IndexCall } from './projectIndex';
+import { answerIndex, ProjectIndex, projectPrimer, readIndexFile, saveIndexFile, STAT_BATCH, type IndexCall } from './projectIndex';
 
 /** git files that move on a checkout, pull or branch switch: re-check every file's stat then. */
 const HEAD_MOVED = /[/\\]\.git[/\\](HEAD|ORIG_HEAD|FETCH_HEAD)$/;
@@ -57,6 +57,12 @@ export class ProjectIndexHost implements vscode.Disposable {
     const rel = ix && path.relative(ix.root, abs).split(path.sep).join('/');
     if (!ix || !rel || !ix.has(rel)) return;
     void ix.readChecked(rel).then((got) => got && this.seen.set(chatId, abs, got.hash, got.text));
+  }
+
+  /** The project map for a new session's first message; none when friedliver.index.primer is off or nothing is indexed. */
+  async primer(text: string, maxTokens: number): Promise<string | undefined> {
+    if (!vscode.workspace.getConfiguration('friedliver.index').get<boolean>('primer', true)) return undefined;
+    return projectPrimer(this.indexes, text, maxTokens);
   }
 
   /** Pins each folder's project hash as this chat's last turn. */

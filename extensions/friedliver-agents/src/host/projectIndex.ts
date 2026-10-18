@@ -461,6 +461,11 @@ export class ProjectIndex {
     return this.docs.has(rel);
   }
 
+  /** Every indexed file's folder-relative path. */
+  paths(): IterableIterator<string> {
+    return this.docs.keys();
+  }
+
   /** What `rel` imports (resolved to indexed files where possible) and the indexed files that import it. */
   related(rel: string): { imports: string[]; importedBy: string[] } | undefined {
     const doc = this.docs.get(rel);
@@ -824,5 +829,56 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       }
       return cap(note + parts.join('\n\n'));
     }
+  }
+}
+
+const PRIMER_OPEN = '<friedliver-project-map>';
+const PRIMER_CLOSE = '</friedliver-project-map>';
+
+/**
+ * A compact map of the project for the start of a session: its top-level folders with file counts,
+ * then the indexed files that best match the first prompt with their main definitions, within
+ * `maxTokens`. Lists are cut to fit; undefined when not even the frame fits or nothing is indexed.
+ */
+export function projectPrimer(indexes: ProjectIndex[], prompt: string, maxTokens: number): string | undefined {
+  const total = indexes.reduce((n, ix) => n + ix.size, 0);
+  if (!total) return undefined;
+  const multi = indexes.length > 1;
+  const tops: string[] = [];
+  for (const ix of indexes) {
+    const dirs = new Map<string, number>();
+    const files: string[] = [];
+    for (const rel of ix.paths()) {
+      const i = rel.indexOf('/');
+      if (i < 0) files.push(rel);
+      else dirs.set(rel.slice(0, i), (dirs.get(rel.slice(0, i)) ?? 0) + 1);
+    }
+    const parts = [...[...dirs].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([d, n]) => `${d}/ ${n}`), ...files.sort()];
+    tops.push(`${multi ? `${path.basename(ix.root)}: ` : ''}${parts.join(' · ')}`);
+  }
+  const query = prompt.slice(0, 2000);
+  const hits = indexes
+    .flatMap((ix) => ix.search(query, 8).map((h) => ({ ...h, ix })))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((h) => {
+      const top = (h.ix.outline(h.rel) ?? []).filter((s) => h.symbols.includes(s) || !h.symbols.length);
+      const names = [...new Set([...h.symbols, ...top].map((s) => s.name))].slice(0, 4);
+      return `- ${multi ? `${path.basename(h.ix.root)}/` : ''}${h.rel}${names.length ? `: ${names.join(', ')}` : ''}`;
+    });
+  const head =
+    `${PRIMER_OPEN}\nFriedLiver's index of this project (${total.toLocaleString('en-US')} files). Cheapest way in: index_search, then index_outline, ` +
+    'index_read with a symbol or lines, and index_diff after a file changes; read whole files only when you need all of one.';
+  const build = (top: string[], rel: string[]) =>
+    [head, top.length ? `Top level: ${top.join('\n')}` : '', rel.length ? `Likely relevant to the task:\n${rel.join('\n')}` : '', PRIMER_CLOSE].filter(Boolean).join('\n');
+  let rel = hits;
+  // Shorten the folder lists to a line each first, then drop relevant files from the end.
+  let top = tops.map((t) => (t.length > 600 ? `${t.slice(0, t.lastIndexOf(' · ', 600))} · …` : t));
+  for (;;) {
+    const text = build(top, rel);
+    if (estimateTokens(text) <= maxTokens) return text;
+    if (rel.length) rel = rel.slice(0, -1);
+    else if (top.length) top = [];
+    else return undefined;
   }
 }
