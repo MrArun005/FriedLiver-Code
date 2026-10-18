@@ -3,7 +3,7 @@
 // that keeps allowing (Auto, "Always allow", an agent's "don't ask again")
 // waits for the user's OK on the Mac first.
 import type { AgentCore } from '../host/core';
-import type { AgentKey, ChatView, Item } from '../shared/model';
+import { waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { ESCALATING } from '../shared/tools';
 import { phoneChats } from './phoneView';
 import type { RemoteAction } from './protocol';
@@ -23,6 +23,7 @@ export interface RemoteActionsDeps {
 
 export type ActionResult = { ok: true; chatId?: string } | { ok: false; error: string };
 
+const idOf = (i: Item) => (i.kind === 'permission' || i.kind === 'question' || i.kind === 'bridge' ? i.requestId : i.kind === 'command' ? i.commandId : i.kind === 'review' ? i.reviewId : undefined);
 const refused = (error: string): ActionResult => ({ ok: false, error });
 
 export class RemoteActions {
@@ -39,17 +40,8 @@ export class RemoteActions {
   /** The waiting request with this id, in a chat the phone may see. */
   private waiting<K extends Item['kind']>(kind: K, id: string): { chat: ChatView; item: Extract<Item, { kind: K }> } | undefined {
     for (const chat of this.visible()) {
-      for (const i of chat.items) {
-        if (i.kind !== kind) continue;
-        const it = i as Extract<Item, { kind: K }>;
-        const match =
-          (it.kind === 'permission' && it.requestId === id && !it.answer) ||
-          (it.kind === 'command' && it.commandId === id && it.state === 'awaiting') ||
-          (it.kind === 'question' && it.requestId === id && it.state === 'awaiting') ||
-          (it.kind === 'review' && it.reviewId === id && it.state === 'pending') ||
-          (it.kind === 'bridge' && it.requestId === id && it.state === 'awaiting');
-        if (match) return { chat, item: it };
-      }
+      const item = waitingItems(chat.items).find((i) => i.kind === kind && idOf(i) === id);
+      if (item) return { chat, item: item as Extract<Item, { kind: K }> };
     }
     return undefined;
   }
