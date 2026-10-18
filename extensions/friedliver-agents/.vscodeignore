@@ -8,4 +8,5 @@
 !dist/thumbWorker.js
 !media/**
 !bin/friedliver-dictate
+!bin/friedliver-fsevents
 media/dist/*.map

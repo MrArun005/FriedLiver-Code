@@ -79,9 +79,10 @@ jobs:
       # Root packages: the ACP SDK that agent-core/ and the demo agent import.
       - run: npm ci
       - run: node scripts/fetch.mjs
-      # The composer mic's speech helper (Swift, on-device recognition) into the Agents extension's bin/,
+      # The macOS helpers (Swift): the composer mic's speech helper (on-device recognition) and the
+      # project index's change journal (FSEvents history), into the Agents extension's bin/,
       # which prepare.mjs copies into the app; build.mjs signs it before the app (finishMacApp).
-      - name: Build the dictation helper (macOS)
+      - name: Build the macOS helpers
         if: runner.os == 'macOS'
         run: extensions/friedliver-agents/native/build.sh
       - run: node scripts/prepare.mjs
