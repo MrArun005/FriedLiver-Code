@@ -42,10 +42,10 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
-import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, type AgentDefaults, type ApprovalLevel } from '../shared/session';
+import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
+import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, usageTotalLines, usageTotals, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
-import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
+import { AskMenu, HandoffMenu, HandoffTargets, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, TaskOptions, decisionId } from './controls';
 import { ApprovalCard } from './approval';
 import { approvalOf, type Approvable } from '../shared/approval';
@@ -53,7 +53,7 @@ import { AgentMap } from './map';
 import { Gallery } from './gallery';
 import { Inbox } from './inbox';
 import { inbox } from '../shared/inbox';
-import type { OutsideImages } from '../shared/gallery';
+import type { ImageStoreInfo, OutsideImages } from '../shared/gallery';
 import { chatName, chatTip } from '../shared/names';
 
 type View = 'board' | 'list' | 'map' | 'images' | 'inbox';
@@ -266,8 +266,10 @@ function Manager() {
   const [defaults, setDefaults] = useState<Partial<Record<AgentKey, AgentDefaults>>>({});
   const [claude, setClaude] = useState<ClaudeSession[]>([]);
   const [outsideImages, setOutsideImages] = useState<OutsideImages[]>([]);
+  const [imageStore, setImageStore] = useState<ImageStoreInfo>();
   const { state } = useHost((m) => {
     if (m.type === 'claudeImages') setOutsideImages(m.sessions);
+    if (m.type === 'imageStore') setImageStore(m.store);
     if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
     if (m.type === 'defaults') setDefaults(m.defaults);
     if (m.type === 'claudeSessions') setClaude(m.sessions);
@@ -294,6 +296,7 @@ function Manager() {
   if (view !== 'inbox') cameFrom.current = view;
   const tally = { ...counts({ ...state, chats: own }) };
   const saved = totalSaved(own);
+  const used = useMemo(() => usageTotals(own, now), [own, now]);
   tally.archived += oldOutside.length;
 
   useEffect(() => {
@@ -377,6 +380,11 @@ function Manager() {
                   <Icon name="bolt" /> ~{formatTokens(saved)} tokens saved
                 </span>
               )}
+              {used.window.turns > 0 && (
+                <span class="count-item" title={usageTotalLines(used)}>
+                  <Icon name="gauge" /> {formatTokens(used.today.total)} tokens today
+                </span>
+              )}
               {tally.archived > 0 && (
                 <Button
                   variant="link"
@@ -446,7 +454,7 @@ function Manager() {
         {view !== 'images' && view !== 'inbox' && <NewTask defaults={defaults} />}
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
-          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} />}
+          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} store={imageStore} />}
           {view === 'inbox' && <Inbox state={state} now={now} onClose={() => setView(cameFrom.current)} />}
           {view !== 'images' && view !== 'inbox' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
           {view !== 'images' && view !== 'inbox' && !query && shown.length === 0 && outside.length === 0 && (
@@ -766,8 +774,6 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
     if (form) form.click();
     else open(chat.id);
   };
-  // Hand off only to agents the pickers offer (Demo when shown).
-  const agents = useRoster().agents;
   return (
     <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
@@ -776,16 +782,7 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
           <MenuItem icon="diff" label="View changes" disabled={!changes} title={changes ? undefined : 'No changes yet'} onSelect={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))} />
           <MenuItem icon="ask" label="Ask another agent…" onSelect={() => (close(false), ask())} />
           <MenuSep />
-          <MenuTitle>Hand off to</MenuTitle>
-          {agents.map((agent) => (
-            <MenuItem
-              key={agent}
-              lead={<Glyph agent={agent} size="sm" />}
-              label={agentName(agent)}
-              end={agent === chat.agent ? 'new chat' : undefined}
-              onSelect={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}
-            />
-          ))}
+          <HandoffTargets chat={chat} close={close} title="Hand off to" />
           <MenuSep />
           <PipeTargets chat={chat} close={close} />
           <MenuSep />

@@ -58,7 +58,7 @@ import { foldApprovals } from '../shared/steps';
 import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
 import { Viewer } from './viewer';
 import { chatGallery } from '../shared/gallery';
-import { AskMenu, PipeTargets } from './connect';
+import { AskMenu, HandoffTargets, PipeTargets } from './connect';
 import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
@@ -451,7 +451,6 @@ const IS_MAC = /Mac/.test(navigator.platform);
 /** The open chat: who and what, its connections, and the actions that join it to other agents. */
 function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState; onSelect: Select }) {
   const status = statusOf(chat);
-  const agents = useRoster().agents;
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
   // The banner covers where this chat came from, and a handoff has its card in the transcript; chips cover the rest.
@@ -522,21 +521,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" trigger={<Icon name="more" />}>
             {(close) => (
               <>
-                <div class="fl-menu__title" aria-hidden="true">Hand off to</div>
-                {agents.map((agent) => (
-                  <button
-                    key={agent}
-                    role="menuitem"
-                    onClick={() => {
-                      close();
-                      send({ type: 'handoff', chatId: chat.id, agent });
-                    }}
-                  >
-                    <Glyph agent={agent} size="sm" />
-                    <span class="grow">{AGENT_FACES[agent].name}</span>
-                    {agent === chat.agent && <span class="hint">new chat</span>}
-                  </button>
-                ))}
+                <HandoffTargets chat={chat} close={close} title="Hand off to" />
                 <PipeTargets chat={chat} close={close} />
                 <div class="fl-menu__sep" role="separator" />
                 <MenuItem label="Rules…" onSelect={() => (close(), send({ type: 'openRules' }))} />
@@ -1038,7 +1023,13 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
             ))}
           >
             <div>{item.text}</div>
-            {item.detail && <code class="notice-detail">{item.detail}</code>}
+            {item.detail &&
+              (item.detailKind === 'code' ? (
+                <code class="notice-detail">{item.detail}</code>
+              ) : (
+                // Prose (an agent's words, a hint) in the body font; `backticks` are its code spans.
+                <p class="notice-detail">{item.detail.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</p>
+              ))}
           </Banner>
         </div>
       );

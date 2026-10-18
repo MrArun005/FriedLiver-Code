@@ -43,8 +43,8 @@ const clipTo = (t: string, max: number) => {
 };
 const clipTitle = (t: string) => clipTo(t, TITLE_MAX);
 
-type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
-type Line = {
+export type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
+export type Line = {
   type?: string;
   cwd?: string;
   entrypoint?: string;
@@ -227,7 +227,7 @@ function feedAgent(a: AgentState, o: Line): void {
 
 // ---- Reading only what was appended ----
 
-interface Tail<S> {
+export interface Tail<S> {
   ino: number;
   offset: number;
   /** The start of a line whose end hasn't been written yet. */
@@ -238,14 +238,25 @@ interface Tail<S> {
   state: S;
 }
 
-const tails = new Map<string, Tail<unknown>>();
+export type TailStore = Map<string, Tail<unknown>>;
+const tails: TailStore = new Map();
 
-/** Feeds the lines appended to `file` since the last call into its state. A file that shrank or was replaced is read again from the start. */
-async function advance<S>(file: string, st: { ino: number; size: number }, init: () => S, feed: (s: S, o: Line) => void): Promise<S> {
-  let t = tails.get(file) as Tail<S> | undefined;
+/**
+ * Feeds the lines appended to `file` since the last call into its state. A file that shrank or was replaced is read again
+ * from the start, or from `start` (its first whole line after that byte) for a file too large to read whole.
+ */
+export async function advance<S>(
+  file: string,
+  st: { ino: number; size: number },
+  init: () => S,
+  feed: (s: S, o: Line) => void,
+  store: TailStore = tails,
+  start = 0,
+): Promise<S> {
+  let t = store.get(file) as Tail<S> | undefined;
   if (!t || t.ino !== st.ino || st.size < t.offset) {
-    t = { ino: st.ino, offset: 0, rest: [], restLen: 0, skipping: false, state: init() };
-    tails.set(file, t as Tail<unknown>);
+    t = { ino: st.ino, offset: start, rest: [], restLen: 0, skipping: start > 0, state: init() };
+    store.set(file, t as Tail<unknown>);
   }
   if (st.size === t.offset) return t.state;
   const fh = await open(file, 'r');
@@ -287,7 +298,7 @@ async function advance<S>(file: string, st: { ino: number; size: number }, init:
 }
 
 const metas = new Map<string, { mtime: number; meta: AgentMeta }>();
-interface AgentMeta {
+export interface AgentMeta {
   agentType?: string;
   description?: string;
   toolUseId?: string;
@@ -354,6 +365,26 @@ async function sessionSubagents(dir: string, s: SessionState, touched: Set<strin
     if (a.background && !sub.end && notice) sub.end = notice.status === 'completed' ? 'done' : 'failed';
   }
   return { subs: [...out.values()], lastActivity };
+}
+
+/**
+ * A listed session's subagent's transcript, by the id the Manager knows it by (its Agent call's tool-use id, or its
+ * agent id): only a session the last listing found, and only inside that session's own subagents/ folder.
+ */
+export async function findSubagent(sessionId: string, id: string): Promise<{ file: string; meta: AgentMeta } | null> {
+  const f = listed.get(sessionId);
+  if (!f || !/^[\w-]{1,128}$/.test(id)) return null;
+  const dir = path.join(f.dir, sessionId, 'subagents');
+  if ((await realpath(dir).catch(() => null)) !== dir) return null;
+  for (const name of await readdir(dir).catch(() => [] as string[])) {
+    const m = AGENT_META.exec(name);
+    if (!m) continue;
+    const metaFile = path.join(dir, name);
+    const st = await lstat(metaFile).catch(() => null);
+    const meta = st?.isFile() ? await readMeta(metaFile, st.mtimeMs) : null;
+    if (meta && (meta.toolUseId === id || m[1] === id)) return { file: path.join(dir, `agent-${m[1]}.jsonl`), meta };
+  }
+  return null;
 }
 
 export interface ListOptions {

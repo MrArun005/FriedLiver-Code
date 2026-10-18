@@ -76,6 +76,7 @@ export class AgentConnection {
     readonly info: acp.InitializeResponse,
     readonly terminals: TerminalManager,
     private readonly stderrTail: string[],
+    private readonly log?: (line: string) => void,
   ) {
     this.exited = new Promise((resolve) => {
       const onExit = () => {
@@ -191,7 +192,7 @@ export class AgentConnection {
         }),
         failed,
       ]);
-      return new AgentConnection(spec, child, connection, info, terminals, stderrTail);
+      return new AgentConnection(spec, child, connection, info, terminals, stderrTail, log);
     } catch (err) {
       // The connection often closes a moment before the process reports its
       // exit (always on Windows, where a missing command exits through
@@ -248,33 +249,33 @@ export class AgentConnection {
    * `meta` is the request's `_meta`, e.g. claude-agent-acp's `systemPrompt` and `claudeCode.options`.
    */
   newSession(cwd: string, mcpServers: acp.McpServer[] = [], meta?: Record<string, unknown>): Promise<SessionSetup & { sessionId: string }> {
-    return this.connection.agent.request(sdk!.methods.agent.session.new, { cwd, mcpServers, ...(meta ? { _meta: meta } : {}) });
+    return this.request(sdk!.methods.agent.session.new, { cwd, mcpServers, ...(meta ? { _meta: meta } : {}) });
   }
 
   async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = [], meta?: Record<string, unknown>): Promise<SessionSetup> {
-    return ((await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers, ...(meta ? { _meta: meta } : {}) })) as SessionSetup | undefined) ?? {};
+    return ((await this.request<SessionSetup | undefined>(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers, ...(meta ? { _meta: meta } : {}) })) as SessionSetup | undefined) ?? {};
   }
 
   /** Returns the agent's whole list of options afterwards: changing the model can change the effort levels. */
   async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<acp.SessionConfigOption[]> {
     const params: acp.SetSessionConfigOptionRequest =
       typeof value === 'boolean' ? { sessionId, configId, type: 'boolean', value } : { sessionId, configId, value };
-    const r = await this.connection.agent.request(sdk!.methods.agent.session.setConfigOption, params);
+    const r = await this.request<acp.SetSessionConfigOptionResponse>(sdk!.methods.agent.session.setConfigOption, params);
     return r.configOptions ?? [];
   }
 
   async setMode(sessionId: string, modeId: string): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.session.setMode, { sessionId, modeId });
+    await this.request(sdk!.methods.agent.session.setMode, { sessionId, modeId });
   }
 
   /** Gemini's unstable `session/set_model`, which SDK 1.8 has no type for. */
   async setModel(sessionId: string, modelId: string): Promise<void> {
-    await this.connection.agent.request<unknown>('session/set_model', { sessionId, modelId });
+    await this.request('session/set_model', { sessionId, modelId });
   }
 
   /** Adds a message to the running turn. False when no turn is running, so it must go as a prompt. */
   async steer(sessionId: string, prompt: acp.ContentBlock[]): Promise<boolean> {
-    const r = await this.connection.agent.request<{ outcome?: string }>('_session/steering', {
+    const r = await this.request<{ outcome?: string }>('_session/steering', {
       sessionId,
       prompt,
       _meta: { steering: { idleBehavior: 'promptRequired' } },
@@ -283,11 +284,11 @@ export class AgentConnection {
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.session.close, { sessionId });
+    await this.request(sdk!.methods.agent.session.close, { sessionId });
   }
 
   prompt(sessionId: string, prompt: acp.ContentBlock[]): Promise<acp.PromptResponse> {
-    return this.connection.agent.request(sdk!.methods.agent.session.prompt, { sessionId, prompt });
+    return this.request(sdk!.methods.agent.session.prompt, { sessionId, prompt });
   }
 
   cancel(sessionId: string): Promise<void> {
@@ -295,11 +296,11 @@ export class AgentConnection {
   }
 
   async authenticate(methodId: string): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.authenticate, { methodId });
+    await this.request(sdk!.methods.agent.authenticate, { methodId });
   }
 
   async logout(): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.logout, {});
+    await this.request(sdk!.methods.agent.logout, {});
   }
 
   async stop(): Promise<void> {
@@ -318,6 +319,16 @@ export class AgentConnection {
     clearTimeout(forced);
   }
 
+  /** Every request to the agent; a failure is logged with the agent's own code, message and data before it is thrown on. */
+  private async request<T>(method: string, params: unknown): Promise<T> {
+    try {
+      return await this.connection.agent.request<T>(method, params as never);
+    } catch (err) {
+      if (this.alive) this.log?.(`[${this.spec.id}] ${method} failed: ${describeAgentError(err)}`);
+      throw err;
+    }
+  }
+
   recentStderr(): string {
     return this.stderrTail.join('\n');
   }
@@ -329,6 +340,46 @@ function notInstalled(spec: AgentSpec): AgentStartError {
     spec,
     'not_installed',
   );
+}
+
+/** An error as the log shows it: the JSON-RPC code, message and data. */
+export function describeAgentError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const { code, data } = err as { code?: unknown; data?: unknown };
+  const json = data === undefined ? '' : JSON.stringify(data);
+  return `${code !== undefined ? `code ${String(code)} ` : ''}"${err.message}"${json ? ` data ${json.length > 2000 ? `${json.slice(0, 2000)}…` : json}` : ''}`;
+}
+
+/**
+ * What the agent itself said went wrong. Agents often answer with a bare
+ * "Internal error" and put the reason in `data`: Gemini as `details`, Codex as
+ * `message` holding the API's JSON error.
+ */
+export function agentErrorMessage(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  return reasonIn((err as { data?: unknown }).data) ?? err.message;
+}
+
+function reasonIn(data: unknown, depth = 0): string | undefined {
+  if (depth > 6) return undefined;
+  if (typeof data === 'string') {
+    const s = data.trim();
+    if (!s) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (parsed && typeof parsed === 'object') return reasonIn(parsed, depth + 1) ?? s;
+    } catch {
+      // Plain text.
+    }
+    return s;
+  }
+  if (!data || typeof data !== 'object') return undefined;
+  const d = data as Record<string, unknown>;
+  for (const key of ['error', 'message', 'details', 'detail', 'reason']) {
+    const found = reasonIn(d[key], depth + 1);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 export function isAuthRequired(err: unknown): boolean {

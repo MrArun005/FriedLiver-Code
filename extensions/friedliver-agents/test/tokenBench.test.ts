@@ -17,6 +17,7 @@ import { compactOutput } from '@friedliver/main/agents/terminals';
 import { handoffContext, rewoundHistory } from '../src/host/transcript';
 import { longChat } from './fixtures/chats';
 import { imageTokens, shotParams } from '../src/host/browserRules';
+import { combineRules, mergeRules, withoutNative } from '../src/host/sharedRules';
 import { extractPage, PageMemory, renderPage, SNAPSHOT_LIMITS } from '../src/host/pageText';
 import { estimateTokens } from '../src/shared/tokens';
 import { fakeVisible, oldSnapshot, parseHtml } from './fakeDom';
@@ -418,6 +419,31 @@ describe('token bench: hand-off', () => {
     const c = longChat();
     // Before: the transcript (up to 24,000 characters), as hand-offs carried it, plus the same plan/commands/files sections.
     rows.push({ category: 'Hand-off', task: 'Hand a 40-turn chat to another agent', without: tokens.count(rewoundHistory(c, c.items)), with: tokens.count(handoffContext(c, { 'src/limiter.ts': '1a2b3c4d' })), calls: [1, 1] });
+    expect(rows.at(-1)!.with).toBeLessThan(rows.at(-1)!.without);
+  });
+});
+
+describe('token bench: fixed waste (review 2026-10-18)', () => {
+  const row = (task: string, without: string, withText: string) => rows.push({ category: 'Token waste', task, without: tokens.count(without), with: tokens.count(withText), calls: [1, 1] });
+
+  it('shared rules: no CLAUDE.md text sent to Claude again', async () => {
+    tokens ??= await counter();
+    const claudeMd = [
+      '# Project rules',
+      'Use pnpm, never npm or yarn. Run `pnpm test` and `pnpm lint` before every commit; both must pass.',
+      'TypeScript strict mode everywhere. No `any`; prefer `unknown` and narrow it. No default exports.',
+      'Every change ships with a test that fails without it. Unit tests live next to the code as `*.test.ts`.',
+      '## Style',
+      'Two-space indent, single quotes, trailing commas. Keep functions under 40 lines; split by intent, not by size.',
+      'Errors: throw `Error` subclasses with a message a user can act on. Never swallow an error silently.',
+      '## Git',
+      'Commit messages: imperative mood, a short subject under 72 characters, then why the change was needed.',
+      'Never force-push to main. Rebase feature branches on main before opening a pull request.',
+      '## Security',
+      'Never log secrets, tokens or personal data. Validate every input at the boundary; trust nothing from the network.',
+    ].join('\n\n');
+    const rulesMd = mergeRules('Answer in British English.\n', [{ name: 'CLAUDE.md', text: claudeMd }]).text;
+    row('Shared rules to a Claude session after importing CLAUDE.md', combineRules([{ label: '.friedliver/rules.md', text: rulesMd }])!.text, combineRules([{ label: '.friedliver/rules.md', text: withoutNative(rulesMd, claudeMd, 'CLAUDE.md') }])!.text);
     expect(rows.at(-1)!.with).toBeLessThan(rows.at(-1)!.without);
   });
 });
