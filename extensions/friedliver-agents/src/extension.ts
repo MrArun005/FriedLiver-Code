@@ -39,7 +39,7 @@ import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
-import { clip, panelTitle } from './shared/view';
+import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
 import { linkDestination, linkTarget } from './shared/links';
 
 /** friedliver.links.openIn: where web links you click open. */
@@ -117,6 +117,8 @@ export class Controller {
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
+  /** Where the Diagnose Claude Code Sessions command writes. */
+  private claudeReport?: vscode.OutputChannel;
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
   private claudeWatchers = new Map<string, FSWatcher>();
@@ -363,6 +365,7 @@ export class Controller {
     command('friedliver.fanout', () => this.fanoutCommand());
     command('friedliver.rewind', (chatId?: unknown) => this.rewindCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.pipe', (chatId?: unknown) => this.pipeCommand(typeof chatId === 'string' ? chatId : undefined));
+    command('friedliver.diagnoseClaudeSessions', () => this.diagnoseClaudeSessions());
     this.editor = new EditorAgent(context, {
       core: this.core,
       showChat: (chatId, revealItem) => this.showChat(chatId, revealItem),
@@ -705,6 +708,12 @@ export class Controller {
           // Only a session this window listed, so a webview can't name some other folder's.
           const found = this.claudeSessions.find((s) => s.id === m.sessionId);
           if (!found) return;
+          // A chat already continues it (one that only resumed it shows in its card): that chat, not another.
+          const existing = found.chatId ?? chatOfSession(this.core.exportState(), found.id);
+          if (existing) {
+            await this.showChat(existing);
+            return;
+          }
           const chat = await this.core.createChat('claude', { title: found.title, resume: { sessionId: found.id, cwd: found.cwd } });
           this.refreshClaudeSessions();
           await this.showChat(chat.id);
@@ -1581,21 +1590,45 @@ export class Controller {
     }, 500);
   }
 
+  /** Writes what the Manager's Claude Code lane reads, and why each session is shown or hidden, to an output channel. */
+  private async diagnoseClaudeSessions(): Promise<void> {
+    if (!this.claudeReport) {
+      this.claudeReport = vscode.window.createOutputChannel('FriedLiver: Claude Code Sessions');
+      this.context.subscriptions.push(this.claudeReport);
+    }
+    const out = this.claudeReport;
+    const folders = this.folders();
+    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    const shown = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true);
+    const showAll = vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false);
+    const report: string[] = [];
+    const sessions = await listClaudeSessions({ home: os.homedir(), folders, skip: owned, showAll, report });
+    out.clear();
+    out.appendLine(`Claude Code sessions, ${new Date().toISOString()}`);
+    out.appendLine(`folders: ${folders.length ? folders.join(', ') : 'none (every project from the last week)'}`);
+    out.appendLine(`friedliver.showClaudeCodeSessions: ${shown}, friedliver.claudeSessions.showAll: ${showAll}`);
+    out.appendLine(`sessions FriedLiver's chats have: ${owned.size ? [...owned].join(', ') : 'none'}`);
+    out.appendLine(`listed: ${sessions.length}; the Manager last got: ${this.claudeSessions.length}`);
+    for (const line of report) out.appendLine(line);
+    out.show(true);
+  }
+
   private async readClaudeSessions(): Promise<void> {
     const shown = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true);
     const manager = shown && [...this.surfaces].some((s) => s.kind === 'tasks');
     // The Images view and the Manager's Images tab show what those sessions looked at.
     const gallery = shown && [...this.surfaces].some((s) => s.kind !== 'chat');
     this.watchClaudeSessions(gallery);
-    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    const saved = this.core.exportState();
+    const owned = new Set(Object.values(saved.chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
     const home = os.homedir();
     const folders = this.folders();
-    this.claudeSessions = manager ? await listClaudeSessions({
+    this.claudeSessions = manager ? linkResumeChats(await listClaudeSessions({
           home,
           folders,
           skip: owned,
           showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
-        }) : [];
+        }), saved) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
     const images = gallery ? await listClaudeImages({ home, folders, skip: owned }) : [];
     if (JSON.stringify(images) === JSON.stringify(this.claudeImages)) return;
