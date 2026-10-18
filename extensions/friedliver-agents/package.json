@@ -132,6 +132,12 @@
         "category": "FriedLiver"
       },
       {
+        "command": "friedliver.openInbox",
+        "title": "Open Decision Inbox",
+        "category": "FriedLiver",
+        "icon": "$(inbox)"
+      },
+      {
         "command": "friedliver.review.accept",
         "title": "Accept Edit",
         "category": "FriedLiver",
@@ -484,6 +490,12 @@
         "command": "friedliver.nextDecision",
         "key": "ctrl+alt+d",
         "mac": "ctrl+alt+d",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.openInbox",
+        "key": "ctrl+alt+shift+i",
+        "mac": "cmd+shift+i",
         "when": "!terminalFocus"
       },
       {
