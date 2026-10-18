@@ -208,6 +208,7 @@ export class Controller {
       index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
       indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),
       indexTurnEnded: (chatId) => this.projectIndex?.turnEnded(chatId),
+      primer: async (_chatId, text, maxTokens) => this.projectIndex?.primer(text, maxTokens),
       approvalDefault: () => this.approvalDefault(),
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {

@@ -87,6 +87,8 @@ const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_PROPOSAL_BYTES = 4 * 1024 * 1024;
 /** Tool calls remembered per chat until they finish, to fill in permission requests that name only an id. */
 const MAX_OPEN_TOOLS = 200;
+/** Tokens the project map at a session's start takes at most. */
+export const PRIMER_TOKENS = 1500;
 /** Where agents' tool inputs name the files they act on (Claude, Codex, Gemini, and the obvious others). */
 const TARGET_KEYS = ['file_path', 'filePath', 'path', 'abs_path', 'notebook_path', 'old_path', 'new_path', 'source', 'destination', 'target'];
 /** Messages that can wait for a busy chat. */
@@ -154,6 +156,8 @@ export interface CoreOptions {
   index?: ToolHost['index'];
   /** A file (absolute) a chat's agent read or wrote: it has seen this version (projectIndexHost.ts observe). */
   indexSeen?(chatId: string, file: string): void;
+  /** A project map for a new session's first message (projectIndex.ts projectPrimer), at most `maxTokens`. */
+  primer?(chatId: string, text: string, maxTokens: number): Promise<string | undefined>;
   /** A chat's turn ended: index_changes since "last_turn" compares with now. */
   indexTurnEnded?(chatId: string): void;
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
@@ -243,6 +247,8 @@ export class AgentCore {
   private readonly confirmedFull = new Set<string>();
   private readonly queues = new Map<string, Queued[]>();
   private readonly openTools = new Map<string, Map<string, OpenTool>>();
+  /** Bytes of shared rules each chat's session got, so the project map fits beside them. */
+  private readonly rulesBytes = new Map<string, number>();
   /** What a permission request would write, for "Open diff", by request. */
   private readonly proposals = new Map<string, Proposal[]>();
   /** Content the user approved on a permission card that showed its diff: the write that follows isn't asked again. */
@@ -303,6 +309,9 @@ export class AgentCore {
       terminalListener: (agentId) => this.commandHooks(agentId),
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
       rulesFor: (chatId) => this.rulesFor(chatId),
+      // The map shares the rules' cap: rules first, the map gets what is left (~4 bytes a token), at most PRIMER_TOKENS.
+      primerFor: async (chatId, _agent, text) =>
+        this.readOnlyChat(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
       freshSessionFor: (chatId) => this.readOnlyChat(chatId),
       sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
@@ -863,6 +872,7 @@ export class AgentCore {
 
   /** Stops and forgets a chat. A worktree it had stays on disk; only the record goes. */
   async removeChat(chatId: string): Promise<void> {
+    this.rulesBytes.delete(chatId);
     const chat = this.chat(chatId);
     if (!chat) return;
     if (chat.busy) await this.cancel(chatId);
@@ -1286,6 +1296,7 @@ export class AgentCore {
 
   private async rulesFor(chatId: string): Promise<{ text: string; files: string[] } | undefined> {
     const rules = await this.options.sharedRules?.();
+    this.rulesBytes.set(chatId, rules ? Buffer.byteLength(rules.text) : 0);
     if (rules?.truncated) {
       this.items(chatId, [{ kind: 'notice', tone: 'error', text: `The shared rules are over ${RULES_CAP / 1024} KB, so this session got only the first ${RULES_CAP / 1024} KB. Shorten .friedliver/rules.md or memory.md.` }]);
     }
