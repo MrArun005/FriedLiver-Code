@@ -57,7 +57,7 @@ describe('phone actions', () => {
     const always = p.options.find((o) => o.kind === 'allow_always')!;
     expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: always.optionId, shown: 'node --version' }, PHONE)).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
     expect(confirms).toHaveLength(1);
-    expect(confirms[0]).toBe('Phone “Arun’s iPhone” asks: Answer “Yes, and don\'t ask again for this session” for Demo?');
+    expect(confirms[0]).toBe('Phone “Arun’s iPhone” asks: Answer “Yes, and don\'t ask again for this session” in “native-run”?');
     expect(open(core, chat.id)?.requestId).toBe(p.requestId);
     expect(await actions.run({ type: 'permission', requestId: p.requestId, optionId: null }, PHONE)).toEqual({ ok: true });
     await turn;
@@ -316,7 +316,7 @@ describe('slash commands from the phone', () => {
     }
     expect(await send('/clear')).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
     expect(await send('/model opus')).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
-    expect(confirms).toEqual(['Phone “Arun’s iPhone” asks: Send /clear to claude?', 'Phone “Arun’s iPhone” asks: Send /model to claude?']);
+    expect(confirms).toEqual(['Phone “Arun’s iPhone” asks: Send /clear to “t”?', 'Phone “Arun’s iPhone” asks: Send /model to “t”?']);
     expect(sent).toEqual(['/help', '  /cost']);
   });
 
@@ -325,7 +325,7 @@ describe('slash commands from the phone', () => {
     expect(await send('/approvals full-access')).toMatchObject({ ok: false });
     expect(await send('/mode')).toMatchObject({ ok: false });
     expect(await send('/init')).toEqual({ ok: true });
-    expect(confirms).toEqual(['Phone “Arun’s iPhone” asks: Send /init to codex?']);
+    expect(confirms).toEqual(['Phone “Arun’s iPhone” asks: Send /init to “t”?']);
     expect(sent).toEqual(['/init']);
   });
 

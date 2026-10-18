@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { EMPTY_STATE, isAgentKey, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
+import { AGENT_FACES, EMPTY_STATE, isAgentKey, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
 import type { ChatSession, SessionOption } from '../shared/session';
 
 /** What the next window needs to bring a chat back. Never API keys or bridge tokens. */
@@ -180,7 +180,8 @@ export function parseSaved(raw: unknown): SavedState | null {
     chats.push({
       id: c.id,
       agent: c.agent,
-      label: str(c.label) ? c.label : c.agent,
+      // Older versions numbered it ("Claude 9"); a chat is named by its topic now, so only the agent's name stays.
+      label: AGENT_FACES[c.agent].name,
       title: str(c.title) ? c.title : 'Untitled task',
       titlePinned: c.titlePinned === true || undefined,
       cwd: c.cwd,

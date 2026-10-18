@@ -38,6 +38,7 @@ import { answerSummary, checkAnswer, questionFields, type QuestionField } from '
 import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
 import { approvalOf, type Approvable } from '../shared/approval';
 import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
+import { chatRef } from '../shared/names';
 import {
   AGENT_FACES,
   EMPTY_STATE,
@@ -120,7 +121,7 @@ export interface CoreUi {
   /** A read-only diff of what a permission request would write. */
   showProposal?(p: { id: string; path: string; before: string | null; after: string; agentLabel: string; chatId: string }): void;
   /** A turn ended: the editor may say so when the chat isn't on screen. */
-  turnEnded?(t: { chatId: string; label: string; title: string; stopReason: acp.StopReason | null; failure?: Item; files: number; byUser: boolean }): void;
+  turnEnded?(t: { chatId: string; agent: AgentKey; title: string; stopReason: acp.StopReason | null; failure?: Item; files: number; byUser: boolean }): void;
   /** Asks once per chat before Full auto. */
   confirmFullAuto?(ask: { label: string; agent: string; mode?: string }): Promise<boolean>;
   /** Asks before adding an "Always allow" command rule. */
@@ -426,12 +427,13 @@ export class AgentCore {
     }
     const chat = this.hub.createChat(agent, cwd, options.resume?.sessionId);
     if (wt) this.worktrees.set(chat.id, wt);
-    const n = (this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1);
+    // Counted still (saved state keeps it), never shown: a chat is named by its topic (names.ts).
+    this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1;
     const name = AGENT_FACES[agent].name;
     const view: ChatView = {
       id: chat.id,
       agent,
-      label: n > 1 ? `${name} ${n}` : name,
+      label: name,
       title: options.title ? titleFrom(options.title) : 'New chat',
       cwd,
       branch: wt?.branch,
@@ -656,7 +658,7 @@ export class AgentCore {
       // From a phone: tightening goes ahead; loosening waits for the Mac; nothing becomes a default for new chats.
       if (level === (chat.approval ?? 'ask')) return;
       if (level === 'full' && !(await this.confirmFull(chat, via))) return;
-      if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chat.label} accept edits without asking?`, detail: `${chat.label}'s edits would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
+      if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chatRef(chat)} accept edits without asking?`, detail: `${chat.label}'s edits would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
       this.dispatch({ t: 'approval', chatId, level });
       await this.applyLevel(chatId, true);
       return;
@@ -684,14 +686,14 @@ export class AgentCore {
   private async confirmFull(chat: ChatView, via: Via = 'desktop'): Promise<boolean> {
     if (via !== 'desktop') {
       // Every time from the phone, whatever the desktop confirmed before.
-      const ok = await this.confirmRemote(via, { title: `Run ${chat.label} in Auto?`, detail: `${chat.label} would edit and run commands without asking until the chat is switched back.`, button: 'Use Auto' });
+      const ok = await this.confirmRemote(via, { title: `Run ${chatRef(chat)} in Auto?`, detail: `${chat.label} would edit and run commands without asking until the chat is switched back.`, button: 'Use Auto' });
       if (ok) this.confirmedFull.add(chat.id);
       return ok;
     }
     if (this.confirmedFull.has(chat.id)) return true;
     const mode = modeFor(chat.agent, modeOption(chat.session), 'full');
     const name = modeOption(chat.session)?.choices.find((c) => c.value === mode)?.name;
-    if (!(await this.options.ui.confirmFullAuto?.({ label: chat.label, agent: this.label(chat.agent), mode: name }))) return false;
+    if (!(await this.options.ui.confirmFullAuto?.({ label: `the chat ${chatRef(chat)}`, agent: this.label(chat.agent), mode: name }))) return false;
     this.confirmedFull.add(chat.id);
     return true;
   }
@@ -1479,7 +1481,7 @@ export class AgentCore {
     if (notice) this.items(chatId, [notice]);
     const chat = this.chat(chatId);
     if (chat) {
-      this.options.ui.turnEnded?.({ chatId, label: chat.label, title: chat.title, stopReason, failure: notice?.kind === 'notice' && notice.tone === 'error' ? notice : undefined, files: files.length, byUser });
+      this.options.ui.turnEnded?.({ chatId, agent: chat.agent, title: chat.title, stopReason, failure: notice?.kind === 'notice' && notice.tone === 'error' ? notice : undefined, files: files.length, byUser });
     }
     // Read the reply before pipes or held forwards give the chat its next message.
     const result: TurnResult = { stopReason, reply: chat ? lastReply(chat) : '' };

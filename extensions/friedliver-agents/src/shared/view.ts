@@ -1,7 +1,6 @@
 // Pure helpers for the agent views: search, sorting, badges, the agent map's
 // layout and the @-mention picker. No DOM here, so all of it is unit tested.
 import {
-  AGENT_FACES,
   AGENT_KEYS,
   age,
   boardColumn,
@@ -27,7 +26,8 @@ import {
 import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
 
-export const agentName = (agent: AgentKey) => AGENT_FACES[agent].name;
+import { agentName, chatTip } from './names';
+export { agentName };
 
 /** Shortens to `max` characters with an ellipsis. */
 export function clip(text: string, max: number): string {
@@ -371,7 +371,7 @@ export interface Badge {
 export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView): Badge[] {
   const byId = new Map(state.chats.map((c) => [c.id, c]));
   const out: Badge[] = [];
-  const to = (other: ChatView, text: string, extra: Partial<Badge> & Pick<Badge, 'kind'>): Badge => ({ text, chatId: other.id, tip: `${other.label}: ${other.title}`, ...extra });
+  const to = (other: ChatView, text: string, extra: Partial<Badge> & Pick<Badge, 'kind'>): Badge => ({ text, chatId: other.id, tip: chatTip(other), ...extra });
   const parent = chat.origin && byId.get(chat.origin.chatId);
   if (chat.origin && parent) out.push(to(parent, `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.title}`, { kind: 'origin' }));
   for (const l of state.links) {

@@ -314,7 +314,7 @@ export function fixture(now = Date.now()) {
           'link-handoff-1',
           'handoff-from',
           c.c5,
-          "**Where Claude 5 got to.** The middleware reads the `sid` cookie on every request and looks it up in the in-memory map in `src/auth/sessions.ts`; expired entries are swept every minute.\n\n**Next:** put sessions behind an interface so another store can replace the map.",
+          "**Where Claude got to.** The middleware reads the `sid` cookie on every request and looks it up in the in-memory map in `src/auth/sessions.ts`; expired entries are swept every minute.\n\n**Next:** put sessions behind an interface so another store can replace the map.",
         ),
         user('Refactor the middleware so the session store can be swapped. Keep the tests green.'),
         plan(['Read the middleware', 'Add a SessionStore interface', 'Move the map behind it', 'Pick a store for serverless'], 3),
@@ -350,7 +350,7 @@ export function fixture(now = Date.now()) {
       lastActivity: min(2),
       turns: 3,
       items: [
-        user('Review every change Claude 6 sends you for regressions. Be brief.'),
+        user('Review every change the session-store chat sends you for regressions. Be brief.'),
         link('link-pipe-1', 'piped-in', c.c6, 'Added a trigram index on products.name and switched the query to use it.'),
         agent('Looks safe. The index adds about 40 MB on the big catalog; worth noting in the release notes.'),
       ],

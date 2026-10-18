@@ -47,6 +47,7 @@ import {
   transcriptGroups,
   statusOf,
 } from '../shared/view';
+import { agentName, chatName, chatTip, chatRef } from '../shared/names';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
@@ -244,7 +245,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
               tabIndex={c.id === focusable ? 0 : -1}
               aria-keyshortcuts="Delete"
               aria-selected={c.id === active}
-              title={`${c.title} (${c.label})`}
+              title={chatTip(c)}
               onClick={() => onSelect(c.id)}
               onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
             >
@@ -390,7 +391,7 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
               >
                 <Glyph agent={c.agent} size="sm" />
                 <span class="chat-item-text">
-                  <span class="pick-title" title={`${c.title} (${c.label}) · ${switcherMeta(c, now)}`}>
+                  <span class="pick-title" title={`${chatTip(c)} · ${switcherMeta(c, now)}`}>
                     {c.title}
                   </span>
                 </span>
@@ -466,7 +467,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
       <header class="chat-head">
         <div class="chat-head-text">
           <div class="chat-head-row">
-            <button class="chat-head-title" title={`${chat.title} (${chat.label}) · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
+            <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
               {chat.title}
             </button>
             {chat.branch && (
@@ -584,7 +585,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           <span>{chat.origin.kind === 'handoff' ? 'Continues' : 'Asked by'}</span>
           <button class="link-chip" title={parent.title} onClick={() => onSelect(parent.id)}>
             <Glyph agent={parent.agent} size="sm" />
-            {parent.label}
+            {agentName(parent.agent)}
           </button>
           <span class="origin-title">{parent.title}</span>
           {chat.origin.by === 'agent' && <span class="tag">by agent</span>}
@@ -685,7 +686,7 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         <section class="reopen" aria-label="Reopen a chat">
           <h3 class="pop-title">Reopen</h3>
           {recent.map((c) => (
-            <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={`${c.title} (${c.label})`} onClick={() => onSelect(c.id)}>
+            <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={chatTip(c)} onClick={() => onSelect(c.id)}>
               <Glyph agent={c.agent} size="sm" />
               <span class="pick-title">{c.title}</span>
               <span class="pick-label">{switcherMeta(c, now)}</span>
@@ -865,7 +866,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       )}
       {/* Read out what matters, not every streamed word. */}
       <div class="sr" aria-live="polite">
-        {waitingNow ? `${chat.label} needs your decision` : chat.busy ? '' : chat.turns ? `${chat.label} finished` : ''}
+        {waitingNow ? `${agentName(chat.agent)} needs your decision` : chat.busy ? '' : chat.turns ? `${agentName(chat.agent)} finished` : ''}
       </div>
     </div>
       {pastText && (
@@ -1127,14 +1128,14 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   const long = item.text.length > 700 || item.text.split('\n').length > 12;
   const [expanded, setExpanded] = useState(!long);
   // A hand-off names the chat it went to (or came from) by its topic, like the header chips; the label is in the tooltip.
-  const name = item.role.startsWith('handoff') && other ? other.title : item.label;
+  const name = item.role.startsWith('handoff') && other ? other.title : agentName(item.agent);
   const head = LINK_HEAD[item.role](name);
   return (
     <section class="link-card" data-role={item.role} aria-label={head}>
       <div class="link-head">
         <Icon name={LINK_ICON[item.role]} />
         <Glyph agent={item.agent} size="sm" />
-        <span class="link-title" title={other ? `${other.label}: ${other.title}` : item.label}>
+        <span class="link-title" title={other ? chatTip(other) : agentName(item.agent)}>
           {head}
         </span>
         {item.role.startsWith('piped') && <span class="tag">pipe</span>}
@@ -1157,10 +1158,10 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
             <button
               class="sm"
               disabled={!other}
-              title={other ? `Give this answer to ${chat.label} as a message` : 'That chat is gone'}
+              title={other ? `Give this answer to ${agentName(chat.agent)} in ${chatRef(chat)} as a message` : 'That chat is gone'}
               onClick={() => send({ type: 'forward', fromChatId: item.chatId, toChatId: chat.id })}
             >
-              <Icon name="send" /> Send to {chat.label}
+              <Icon name="send" /> Send to {agentName(chat.agent)}
             </button>
           )}
           {long && (
@@ -1199,12 +1200,15 @@ function Stats({ item }: { item: ReviewItem }) {
   );
 }
 
-/** "also in Codex 2" when another open chat changed the same file. */
+/** "also in <that chat's topic>" when another open chat changed the same file. */
 function ConflictChip({ item, chat, state, conflicts }: { item: ReviewItem; chat: ChatView; state: AppState; conflicts: FileConflict[] }) {
   const file = relativePath(chat.cwd, item.path);
   const hit = conflicts.find((f) => f.file === file);
   if (!hit) return null;
-  const others = hit.chats.filter((id) => id !== chat.id).flatMap((id) => state.chats.find((c) => c.id === id)?.label ?? []);
+  const others = hit.chats.filter((id) => id !== chat.id).flatMap((id) => {
+    const other = state.chats.find((c) => c.id === id);
+    return other ? [chatName(other)] : [];
+  });
   return (
     <span class="badge conflict" title={`${file} is changed in ${others.join(', ')} too: they clash when merged`}>
       <Icon name="diff" />
@@ -1611,7 +1615,7 @@ function Composer({
               ref={area}
               value={text}
               rows={1}
-              aria-label={`Message ${chat.label}`}
+              aria-label={`Message ${agentName(chat.agent)}`}
               aria-autocomplete="list"
               aria-controls={picking ? listId : undefined}
               aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
@@ -1730,7 +1734,7 @@ function Composer({
               disabled={!stopping && !canSend}
               data-stop={stopping ? '' : undefined}
               aria-label={stopping ? 'Stop' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
+              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${agentName(chat.agent)} finishes this turn` : 'Send (Enter)'}
             >
               <Icon name={stopping ? 'stop' : asking ? 'ask' : queueing ? 'queue' : 'up'} size={stopping ? 16 : 20} />
             </button>

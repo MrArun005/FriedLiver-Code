@@ -1,4 +1,5 @@
 import { isBrowserCall, isExternal, isIndexCall, isSystemCall, type BridgeCall, type BrowserCall, type SystemCall } from '../bridge/protocol';
+import { chatRef } from '../shared/names';
 import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
 import { AGENT_FACES, BRIDGE_TIMEOUT_MS, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
@@ -145,7 +146,7 @@ export class BridgeRequests {
       case 'send_to_chat': {
         const target = this.chat(call.chatId)!;
         this.host.message(chatId, target.id, call.message);
-        return `Sent to ${target.label} (${target.id}). It is working on it now; use read_chat later to see its reply.`;
+        return `Sent to ${chatRef(target)} (${target.id}). It is working on it now; use read_chat later to see its reply.`;
       }
       case 'read_chat':
         return renderChat(this.chat(call.chatId)!, call.last ?? DEFAULT_READ);
@@ -398,9 +399,9 @@ export class BridgeRequests {
   private reachable(caller: ChatView, target: ChatView): void {
     if (target.id === caller.id) throw new Error('That is this chat. Answer the user directly instead.');
     if (this.linked(caller.id).has(target.id)) {
-      throw new Error(`${target.label} is waiting on this chat, or this chat on it, so asking it now would deadlock.`);
+      throw new Error(`${chatRef(target)} is waiting on this chat, or this chat on it, so asking it now would deadlock.`);
     }
-    if (target.busy) throw new Error(`${target.label} is busy. Try again when it is idle, or carry on without it.`);
+    if (target.busy) throw new Error(`${chatRef(target)} is busy. Try again when it is idle, or carry on without it.`);
   }
 
   /** Every chat joined to `chatId` by waits, either way round. */

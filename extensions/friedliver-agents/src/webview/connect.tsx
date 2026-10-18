@@ -4,6 +4,7 @@ import { useContext, useState } from 'preact/hooks';
 import { AGENT_FACES, AGENT_KEYS, type AgentKey, type ChatView } from '../shared/model';
 import { clip, openChats } from '../shared/view';
 import { Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
+import { chatName, chatRef } from '../shared/names';
 
 /** Text beside the icon, or the icon alone where room is short. */
 function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['name']; text: string; compact?: boolean }) {
@@ -19,7 +20,7 @@ function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['na
 export function HandoffMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   const agents = useRoster().agents;
   return (
-    <Popover label={`Hand off ${chat.label} to`} title={compact ? 'Hand off' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="handoff" text="Hand off" compact={compact} />}>
+    <Popover label={`Hand off ${chatRef(chat)} to`} title={compact ? 'Hand off' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="handoff" text="Hand off" compact={compact} />}>
       {(close) => (
         <>
           <div class="pop-title" aria-hidden="true">Continue with</div>
@@ -52,7 +53,7 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
   const [text, setText] = useState('');
   const agents = useRoster().agents;
   return (
-    <Popover kind="dialog" label={`Ask another agent from ${chat.label}`} title={compact ? 'Ask another agent' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="ask" text="Ask" compact={compact} />}>
+    <Popover kind="dialog" label={`Ask another agent from ${chatRef(chat)}`} title={compact ? 'Ask another agent' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="ask" text="Ask" compact={compact} />}>
       {(close) => {
         const ask = () => {
           if (!text.trim()) return;
@@ -102,7 +103,7 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
 /** Forward every finished turn of this chat to another one; picking a piped chat again stops the pipe. */
 export function PipeMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   return (
-    <Popover label={`Pipe ${chat.label} to`} title={compact ? 'Pipe to' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="pipe" text="Pipe to" compact={compact} />}>
+    <Popover label={`Pipe ${chatRef(chat)} to`} title={compact ? 'Pipe to' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="pipe" text="Pipe to" compact={compact} />}>
       {(close) => <PipeTargets chat={chat} close={close} />}
     </Popover>
   );
@@ -115,7 +116,7 @@ export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: b
   const state = useContext(LiveState);
   const others = openChats(state.chats)
     .filter((c) => c.id !== chat.id)
-    .sort((a, b) => AGENT_KEYS.indexOf(a.agent) - AGENT_KEYS.indexOf(b.agent) || byLabel.compare(a.label, b.label));
+    .sort((a, b) => AGENT_KEYS.indexOf(a.agent) - AGENT_KEYS.indexOf(b.agent) || byLabel.compare(chatName(a), chatName(b)));
   const pipeTo = (id: string) => state.links.find((l) => l.kind === 'pipe' && l.from === chat.id && l.to === id);
   return (
     <>

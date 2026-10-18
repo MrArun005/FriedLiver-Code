@@ -19,6 +19,7 @@ import { siteOrigin } from '../shared/permissions';
 import { relativePath } from '../shared/view';
 import { CopyButton, Glyph, Icon, Markdown, Popover, basename, send, useNow, type IconName } from './common';
 import { DiffView } from './controls';
+import { chatTip } from '../shared/names';
 
 /** What the decision keys do to a request on screen, by its id: set while it is shown. */
 export interface CardKeys {
@@ -567,7 +568,7 @@ function BridgePreview({ item, a, state }: { item: Extract<Approvable, { kind: '
     <div class="apv-msg">
       {other && (
         <div class="apv-to">
-          to <Glyph agent={other.agent} size="sm" /> {other.label} · {other.title}
+          to <Glyph agent={other.agent} size="sm" /> {chatTip(other)}
         </div>
       )}
       {item.text && (

@@ -42,6 +42,7 @@ import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
 import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
+import { agentName, chatName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
 
 /** friedliver.links.openIn: where web links you click open. */
@@ -830,7 +831,7 @@ export class Controller {
         case 'removeChat': {
           const chat = this.core.chat(m.chatId);
           if (!chat) return;
-          const ok = await vscode.window.showWarningMessage(`Remove ${chat.label}: “${chat.title}”?`, { modal: true, detail: 'Its history goes. A worktree it had stays on disk.' }, 'Remove');
+          const ok = await vscode.window.showWarningMessage(`Remove ${chatRef(chat)} (${agentName(chat.agent)})?`, { modal: true, detail: 'Its history goes. A worktree it had stays on disk.' }, 'Remove');
           if (ok) await this.core.removeChat(m.chatId);
           return;
         }
@@ -940,7 +941,7 @@ export class Controller {
     }
     const roots = this.core.roots();
     const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
-    const terminal = vscode.window.createTerminal({ name: `${chat.label}: ${clip(chat.title, 40)}`, cwd: folder });
+    const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)}: ${clip(chatName(chat), 40)}`, cwd: folder });
     terminal.show();
     terminal.sendText(command, true);
   }
@@ -1076,7 +1077,7 @@ export class Controller {
     if (!agent) return;
     const text = await vscode.window.showInputBox({
       title: `Ask ${AGENT_FACES[agent].name}`,
-      prompt: `The answer comes back into ${source.label}.`,
+      prompt: `The answer comes back into ${chatRef(source)}.`,
       validateInput: (v) => (v.trim() ? undefined : 'Type a question.'),
     });
     if (!text?.trim()) return;
@@ -1123,11 +1124,11 @@ export class Controller {
   async pipeCommand(chatId?: string): Promise<void> {
     const from = await this.pickChat('Pipe which chat’s replies?', chatId);
     if (!from) return;
-    const to = await this.pickChat(`Send each reply from ${from.label} to…`, undefined, from.id);
+    const to = await this.pickChat(`Send each reply from ${chatRef(from)} to…`, undefined, from.id);
     if (!to) return;
     try {
       this.core.pipe(from.id, to.id);
-      void vscode.window.showInformationMessage(`Each reply from ${from.label} now goes to ${to.label}.`);
+      void vscode.window.showInformationMessage(`Each reply from ${chatRef(from)} now goes to ${chatRef(to)}.`);
     } catch (err) {
       this.error(err);
     }
@@ -1162,7 +1163,7 @@ export class Controller {
       return undefined;
     }
     const items = chats
-      .map((c) => ({ label: c.label, description: c.title, chat: c }))
+      .map((c) => ({ ...chatPick(c), chat: c }))
       .sort((a, b) => (b.chat.id === this.lastSelected ? 1 : 0) - (a.chat.id === this.lastSelected ? 1 : 0));
     return (await vscode.window.showQuickPick(items, { title }))?.chat;
   }
@@ -1218,16 +1219,17 @@ export class Controller {
     const key = `${busy.map((c) => c.id).join()}|${full.map((c) => c.id).join()}`;
     if (key === this.shownStatus) return;
     this.shownStatus = key;
-    if (busy.length) {
-      this.workingItem.text = `$(sync~spin) ${busy.length} working`;
-      this.workingItem.tooltip = `${busy.map((c) => c.label).join(', ')} ${busy.length === 1 ? 'is' : 'are'} working. Open the Agent Manager.`;
+    const shown = statusTexts(busy, full);
+    if (shown.working) {
+      this.workingItem.text = shown.working.text;
+      this.workingItem.tooltip = shown.working.tooltip;
       this.workingItem.show();
     } else {
       this.workingItem.hide();
     }
-    if (full.length) {
-      this.autoItem.text = `$(zap) Auto: ${full.length === 1 ? full[0].label : `${full.length} chats`}`;
-      this.autoItem.tooltip = `${full.map((c) => c.label).join(', ')} edit${full.length === 1 ? 's' : ''} and run${full.length === 1 ? 's' : ''} commands without asking. Click to see.`;
+    if (shown.auto) {
+      this.autoItem.text = shown.auto.text;
+      this.autoItem.tooltip = shown.auto.tooltip;
       this.autoItem.command = { command: 'friedliver.command.show', title: 'Show', arguments: [full[0].id, ''] };
       this.autoItem.show();
     } else {
@@ -1365,20 +1367,19 @@ export class Controller {
    * consultation) answer there instead. VS Code has no stable API for an OS
    * notification or taskbar flash, so an unfocused window gets these toasts only.
    */
-  private turnEnded(t: { chatId: string; label: string; title: string; stopReason: string | null; failure?: Item; files: number; byUser: boolean }): void {
+  private turnEnded(t: { chatId: string; agent: AgentKey; title: string; stopReason: string | null; failure?: Item; files: number; byUser: boolean }): void {
     if (!t.byUser || this.onScreen(t.chatId)) return;
     const open = { title: 'Open', run: () => void this.showChat(t.chatId) };
     if (t.failure?.kind === 'notice') {
       const actions = (t.failure.actions ?? []).slice(0, 2).map((a) => ({ title: a.label, run: () => void this.noticeAction(t.chatId, a).catch((err: unknown) => this.error(err)) }));
-      void vscode.window.showErrorMessage(`${plainText(t.label)}: ${plainText(t.failure.text)}`, ...[...actions, open].map((b) => b.title)).then((picked) => {
+      void vscode.window.showErrorMessage(plainText(turnEndedText({ ...t, failure: t.failure.text })), ...[...actions, open].map((b) => b.title)).then((picked) => {
         [...actions, open].find((b) => b.title === picked)?.run();
       });
       return;
     }
     if (t.stopReason === 'cancelled' || !vscode.workspace.getConfiguration('friedliver.notify').get<boolean>('finished', true)) return;
-    const changed = t.files ? ` · ${t.files} file${t.files === 1 ? '' : 's'} changed` : '';
     const buttons = [open, ...(t.files ? [{ title: 'View changes', run: () => void viewChanges(this.core, t.chatId) }] : [])];
-    void vscode.window.showInformationMessage(`${plainText(t.label)} finished: ${plainText(t.title)}${changed}`, ...buttons.map((b) => b.title)).then((picked) => {
+    void vscode.window.showInformationMessage(plainText(turnEndedText({ agent: t.agent, title: t.title, files: t.files })), ...buttons.map((b) => b.title)).then((picked) => {
       buttons.find((b) => b.title === picked)?.run();
     });
   }
