@@ -44,10 +44,10 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
-import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, type AgentDefaults, type ApprovalLevel } from '../shared/session';
+import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
+import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, usageTotalLines, usageTotals, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
-import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
+import { AskMenu, HandoffMenu, HandoffTargets, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, TaskOptions, decisionId } from './controls';
 import { ApprovalCard } from './approval';
 import { approvalOf, type Approvable } from '../shared/approval';
@@ -299,6 +299,7 @@ function Manager() {
   if (view !== 'inbox') cameFrom.current = view;
   const tally = { ...counts({ ...state, chats: own }) };
   const saved = totalSaved(own);
+  const used = useMemo(() => usageTotals(own, now), [own, now]);
   tally.archived += oldOutside.length;
 
   useEffect(() => {
@@ -385,6 +386,11 @@ function Manager() {
                   title="Estimated tokens FriedLiver's compact answers saved across these chats: index reads and diffs instead of whole files, page text instead of page dumps, smaller screenshots, compacted command output and hand-offs."
                 >
                   <Icon name="bolt" /> ~{formatTokens(saved)} tokens saved
+                </span>
+              )}
+              {used.window.turns > 0 && (
+                <span class="count-item" title={usageTotalLines(used)}>
+                  <Icon name="gauge" /> {formatTokens(used.today.total)} tokens today
                 </span>
               )}
               {tally.archived > 0 && (
@@ -783,8 +789,6 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
     if (form) form.click();
     else open(chat.id);
   };
-  // Hand off only to agents the pickers offer (Demo when shown).
-  const agents = useRoster().agents;
   return (
     <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
@@ -793,16 +797,7 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
           <MenuItem icon="diff" label="View changes" disabled={!changes} title={changes ? undefined : 'No changes yet'} onSelect={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))} />
           <MenuItem icon="ask" label="Ask another agent…" onSelect={() => (close(false), ask())} />
           <MenuSep />
-          <MenuTitle>Hand off to</MenuTitle>
-          {agents.map((agent) => (
-            <MenuItem
-              key={agent}
-              lead={<Glyph agent={agent} size="sm" />}
-              label={agentName(agent)}
-              end={agent === chat.agent ? 'new chat' : undefined}
-              onSelect={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}
-            />
-          ))}
+          <HandoffTargets chat={chat} close={close} title="Hand off to" />
           <MenuSep />
           <PipeTargets chat={chat} close={close} />
           <MenuSep />

@@ -72,6 +72,16 @@ describe('what the agent advertises', () => {
     expect(c.chat(chat.id)!.session!.usage!.used).toBeGreaterThan(0);
   });
 
+  it('keeps the commands the agent sends while FriedLiver is still reading which models the account may use', async () => {
+    const dir = await gitRepo();
+    // The Demo agent sends its commands right after the session answer; the account's models arrive later.
+    const { core: c } = core(dir, { modelVisibility: () => new Promise((r) => setTimeout(() => r(undefined), 200)) });
+    const chat = await c.createChat('demo');
+    await waitFor(() => live(c, chat.id), 5_000);
+    await waitFor(() => (c.chat(chat.id)!.session!.commands.length ?? 0) > 0, 2_000);
+    expect(c.chat(chat.id)!.session!.commands.map((x) => x.name)).toEqual(['help', 'compact', 'review']);
+  });
+
   it('sets the model and effort, and the effort levels follow the model', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);

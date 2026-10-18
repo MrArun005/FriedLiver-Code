@@ -72,6 +72,8 @@ export interface ChatSession {
   agent?: { name: string; version: string };
   /** The shared rules files this session got when it started (sharedRules.ts). */
   rules?: string[];
+  /** Models the agent lists but won't run here, left out of every model picker (hiddenModels). */
+  hiddenModels?: string[];
 }
 
 const MAX_OPTIONS = 32;
@@ -155,6 +157,41 @@ function commandsOf(list: acp.AvailableCommand[]): SlashCommand[] {
     .map((c) => ({ name: c.name.replace(/^\//, ''), description: text(c.description) ?? '', hint: text(c.input?.hint) }));
 }
 
+/** A model id without the "[effort]" suffix Codex adds: "some-model[high]" is "some-model". */
+export const baseModel = (id: string): string => id.replace(/\[[^\]]*\]$/, '');
+
+/** Which models the account may use, from the agent's own records (Codex's ~/.codex/models_cache.json). */
+export interface ModelVisibility {
+  listed: string[];
+  hidden: string[];
+}
+
+/**
+ * The model choices to leave out: ones the agent's own list of available
+ * models (`models`, besides a `model` config option) doesn't have, and ones
+ * its records mark hidden or don't list. Never all of them: an agent whose
+ * list no record knows (an old adapter) keeps its list.
+ */
+export function hiddenModels(setup: SessionSetupLike, options: SessionOption[], records?: ModelVisibility): string[] {
+  const model = options.find((o) => o.category === 'model' && o.type === 'select' && o.via === 'option');
+  if (!model) return [];
+  const ids = [...new Set(model.choices.map((c) => baseModel(c.value)))];
+  const drop = new Set<string>();
+  const available = setup.models?.availableModels?.map((m) => baseModel(String(m.modelId)));
+  if (available?.length) for (const id of ids) if (!available.includes(id)) drop.add(id);
+  if (records) {
+    for (const id of ids) if (records.hidden.includes(id)) drop.add(id);
+    if (ids.some((id) => records.listed.includes(id))) for (const id of ids) if (!records.listed.includes(id)) drop.add(id);
+  }
+  return ids.every((id) => drop.has(id)) ? [] : [...drop];
+}
+
+/** The options without the hidden model choices. */
+export function withoutModels(options: SessionOption[], hidden: readonly string[] | undefined): SessionOption[] {
+  if (!hidden?.length) return options;
+  return options.map((o) => (o.category === 'model' && o.type === 'select' ? { ...o, choices: o.choices.filter((c) => !hidden.includes(baseModel(c.value))) } : o));
+}
+
 const SESSION_UPDATES = new Set(['config_option_update', 'current_mode_update', 'available_commands_update', 'usage_update']);
 
 /** Updates that change the session, not the transcript. */
@@ -169,7 +206,7 @@ export function applySessionUpdate(session: ChatSession | undefined, update: acp
   const s = session ?? EMPTY_SESSION;
   switch (update.sessionUpdate) {
     case 'config_option_update': {
-      const options = sessionOptions({ configOptions: update.configOptions });
+      const options = withoutModels(sessionOptions({ configOptions: update.configOptions }), s.hiddenModels);
       // Settings FriedLiver made from modes or models stay unless the options now cover them.
       const kept = s.options.filter((o) => o.via !== 'option' && !options.some((n) => n.category === o.category));
       return { ...s, options: [...kept, ...options].slice(0, MAX_OPTIONS) };
@@ -468,6 +505,53 @@ export function usageLines(log: TurnUsage[] | undefined): string[] {
   const sum = log.reduce((a, t) => ({ input: a.input + t.input, output: a.output + t.output, cacheRead: a.cacheRead + t.cacheRead, cacheWrite: a.cacheWrite + t.cacheWrite }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const kinds = (t: typeof sum) => `${formatTokens(t.input)} input · ${formatTokens(t.output)} output · ${formatTokens(t.cacheRead)} cache read · ${formatTokens(t.cacheWrite)} cache write`;
   return [`Tokens in this chat: ${log.length} turn${log.length === 1 ? '' : 's'} · ${kinds(sum)}`, `Last turn: ${kinds(log.at(-1)!)}`];
+}
+
+export interface UsageTotal {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** All four together. */
+  total: number;
+  turns: number;
+}
+
+/** The agents' own token counts across these chats: every logged turn (the window), and the turns since local midnight (today). */
+export function usageTotals(chats: Pick<ChatView, 'usageLog'>[], now: number): { window: UsageTotal; today: UsageTotal } {
+  const zero = (): UsageTotal => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, turns: 0 });
+  const add = (a: UsageTotal, t: TurnUsage) => {
+    a.input += t.input;
+    a.output += t.output;
+    a.cacheRead += t.cacheRead;
+    a.cacheWrite += t.cacheWrite;
+    a.total += t.input + t.output + t.cacheRead + t.cacheWrite;
+    a.turns++;
+  };
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  const out = { window: zero(), today: zero() };
+  for (const c of chats)
+    for (const t of c.usageLog ?? []) {
+      add(out.window, t);
+      if (t.at >= midnight) add(out.today, t);
+    }
+  return out;
+}
+
+/** The Agent Manager's tooltip for those totals. */
+export function usageTotalLines(t: { window: UsageTotal; today: UsageTotal }): string {
+  const kinds = (u: UsageTotal) => `${formatTokens(u.total)} (${formatTokens(u.input)} input · ${formatTokens(u.output)} output · ${formatTokens(u.cacheRead)} cache read · ${formatTokens(u.cacheWrite)} cache write)`;
+  return [`Tokens the agents reported, counted on this computer only.`, `Today: ${kinds(t.today)}`, `All chats in this window: ${kinds(t.window)}`].join('\n');
+}
+
+/**
+ * The optional spending warning (friedliver.usage.dailyTokenWarning, 0 = off): once per local day, when
+ * today's tokens pass the limit. `warned` is the day it last warned (its midnight); returns that day and the words.
+ */
+export function dailyWarning(limit: number, today: number, now: number, warned: number | undefined): { day: number; text: string } | undefined {
+  const day = new Date(now).setHours(0, 0, 0, 0);
+  if (!(limit > 0) || today < limit || warned === day) return undefined;
+  return { day, text: `Today's chats in this window used ${formatTokens(today)} tokens, over your ${formatTokens(limit)} daily warning (friedliver.usage.dailyTokenWarning).` };
 }
 
 /** Tokens FriedLiver saved across these chats (estimate). */

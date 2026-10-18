@@ -9,6 +9,8 @@ import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, sho
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
 import { chatName, chatTip } from '../shared/names';
 import { Button, IconButton } from './ui';
+import { parentLine } from '../shared/subagentDetail';
+import { OutsideSubagent } from './subagentDetail';
 
 const TIP_W = 288;
 
@@ -437,6 +439,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
   const steps = chat ? chat.items.filter((i): i is ToolItem => i.kind === 'tool' && i.parent === sub.item) : [];
   const answer = call && subagentAnswer(call);
   const state_ = info?.state ?? sub.state;
+  const parent = parentLine({ chat, session });
   const ms = info?.ms ?? (info?.startedAt !== undefined ? Math.max(0, now - info.startedAt) : undefined);
   const box = useRef<HTMLDivElement>(null);
   // Opened: focus moves in without scrolling the page; Esc closes.
@@ -457,6 +460,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
   return (
     <div
       class="map-detail"
+      data-rich={session ? '' : undefined}
       ref={box}
       tabIndex={-1}
       role="dialog"
@@ -485,7 +489,12 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         <IconButton icon="close" label="Close" muted size="sm" title="Close" onClick={onClose} />
       </div>
       <div class="tip-title">{info?.title ?? sub.title}</div>
-      <div class="tip-meta" title={chat ? chatTip(chat) : undefined}>of {chat ? chat.title : session ? `${session.title} (Claude Code, outside FriedLiver)` : 'its chat'}</div>
+      {session && <OutsideSubagent key={sub.item} session={session} id={sub.item} state={state_} now={now} />}
+      {parent && !session && (
+        <div class="tip-meta sd-parent" title={chat ? chatTip(chat) : undefined}>
+          {parent.label} · {parent.title}
+        </div>
+      )}
       {steps.length > 0 && (
         <ol class="map-detail-steps" aria-label="Steps">
           {steps.slice(-8).map((t) => (
@@ -496,9 +505,7 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         </ol>
       )}
       {answer && <div class="map-detail-answer">{answer.length > 600 ? `${answer.slice(0, 599)}…` : answer}</div>}
-      {session && info?.about && <div class="tip-meta">{info.about}</div>}
-      {session && info?.last && <div class="tip-line">Last step: {info.last}</div>}
-      {!steps.length && !answer && !info?.last && <div class="tip-line">{session ? 'Its steps are in that session\'s transcript; FriedLiver lists only its title and state.' : 'No steps reported yet.'}</div>}
+      {!session && !steps.length && !answer && <div class="tip-line">No steps reported yet.</div>}
       {chat && (
         <Button variant="link" onClick={() => send({ type: 'openChat', chatId: chat.id, item: sub.item })}>
           Show in its chat

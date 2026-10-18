@@ -1,7 +1,7 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { chatRef } from '../shared/names';
 import type { Attachment } from '../shared/messages';
-import { MAX_LINK_DEPTH, lastReply, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
+import { MAX_LINK_DEPTH, lastReply, linkedChat, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
 import type { ApprovalLevel } from '../shared/session';
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
@@ -60,6 +60,8 @@ export interface ChatHost {
 export interface ConsultOptions {
   /** Ask this chat, instead of the consultation the source already has with `agent` or a new one. */
   chatId?: string;
+  /** Start a new consultation even when the source already has one with `agent`. */
+  fresh?: boolean;
   images?: Attachment[];
   /** Called once the consulted chat is known, before its turn starts. */
   started?(chatId: string): void;
@@ -81,9 +83,20 @@ export class Connections {
 
   constructor(private readonly host: ChatHost) {}
 
-  /** A new chat for `agent` that continues `chatId`'s work, in the same folder. Spends no turn. */
-  async handoff(chatId: string, agent: AgentKey): Promise<ChatView> {
+  /**
+   * A chat for `agent` that continues `chatId`'s work, in the same folder. Spends no turn.
+   * Handing off to an agent again goes back to the chat this one handed off to before,
+   * which keeps what it knew, with where the task is now; `fresh` starts a new chat.
+   */
+  async handoff(chatId: string, agent: AgentKey, fresh = false): Promise<ChatView> {
     const source = this.require(chatId);
+    const again = fresh ? undefined : this.linkedChat(source.id, agent, 'handoff');
+    if (again) {
+      const link = this.linkBetween(source.id, again.id, 'handoff')!;
+      this.carry(link, source, again, 'handoff-to', 'handoff-from', handoffSummary(source), 'user');
+      this.host.preamble(again.id, handoffContext(source, await fileHashes(source), true));
+      return this.require(again.id);
+    }
     const target = await this.host.createChat(agent, {
       shareWorktreeOf: source.id,
       title: source.title === 'New chat' ? undefined : source.title,
@@ -107,7 +120,7 @@ export class Connections {
    */
   async consult(chatId: string, agent: AgentKey, text: string, by: 'user' | 'agent', options: ConsultOptions = {}): Promise<string> {
     const source = this.require(chatId);
-    let target = options.chatId ? this.require(options.chatId) : this.consultation(source.id, agent);
+    let target = options.chatId ? this.require(options.chatId) : options.fresh ? undefined : this.consultation(source.id, agent);
     if (target?.id === source.id) throw new Error('A chat cannot ask itself.');
     if (target && target.agent !== agent) throw new Error(`${chatRef(target)} is a ${target.agent} chat, not ${agent}.`);
     if (target?.busy) throw new Error(`${chatRef(target)} is still working. Wait for it to finish, or ask again later.`);
@@ -135,13 +148,17 @@ export class Connections {
       { type: 'text', text },
       ...(options.images ?? []).map((img): acp.ContentBlock => ({ type: 'image', data: img.data, mimeType: img.mimeType })),
     ];
+    const mark = this.require(target.id).items.length;
     const result = await this.host.prompt(target.id, blocks);
     const answered = this.chat(target.id);
     if (!answered) throw new Error(`${chatRef(target)} was closed before it answered.`);
-    if (!result.reply) {
-      const why = result.stopReason && result.stopReason !== 'end_turn' ? ` (${result.stopReason})` : '';
-      this.notice(source.id, `${chatRef(answered)} stopped without answering${why}.`);
-      throw new Error(`${chatRef(answered)} stopped without answering${why}.`);
+    // Why it couldn't, in its agent's words, rather than only that it didn't.
+    const failed = answered.items.slice(mark).findLast((i) => i.kind === 'notice' && i.tone === 'error');
+    if (!result.reply || (failed && result.stopReason === null)) {
+      const why = failed?.kind === 'notice' ? `. ${failed.text}` : result.stopReason && result.stopReason !== 'end_turn' ? ` (${result.stopReason}).` : '.';
+      const text = failed ? `${chatRef(answered)} couldn't answer${why}` : `${chatRef(answered)} stopped without answering${why}`;
+      this.notice(source.id, text, failed ? 'error' : 'info');
+      throw new Error(text);
     }
     // Briefed once it answered: a turn that failed before the agent read it gets the whole brief next time.
     this.briefed.set(target.id, seen);
@@ -152,12 +169,11 @@ export class Connections {
 
   /** The consultation a chat already has with an agent, if it can take another question. */
   consultation(chatId: string, agent: AgentKey): ChatView | undefined {
-    for (const l of this.host.state.links) {
-      if (l.kind !== 'consult' || l.from !== chatId) continue;
-      const c = this.chat(l.to);
-      if (c && c.agent === agent && !c.archived) return c;
-    }
-    return undefined;
+    return this.linkedChat(chatId, agent, 'consult');
+  }
+
+  linkedChat(chatId: string, agent: AgentKey, kind: 'consult' | 'handoff'): ChatView | undefined {
+    return linkedChat(this.host.state, chatId, agent, kind);
   }
 
   /** Forwards each finished turn of `from` to `to` from now on. Turning a paused pipe on again resets its limit. */
@@ -316,8 +332,8 @@ export class Connections {
     this.host.dispatch({ t: 'items', chatId, items, at: Date.now() });
   }
 
-  private notice(chatId: string, text: string): void {
-    this.host.dispatch({ t: 'items', chatId, items: [{ kind: 'notice', tone: 'info', text }], at: Date.now() });
+  private notice(chatId: string, text: string, tone: 'info' | 'error' = 'info'): void {
+    this.host.dispatch({ t: 'items', chatId, items: [{ kind: 'notice', tone, text }], at: Date.now() });
   }
 }
 
