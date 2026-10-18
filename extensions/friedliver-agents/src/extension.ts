@@ -10,6 +10,7 @@ import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { runRewind } from './host/rewindFlow';
 import { encodeCwd, listClaudeImages, listClaudeSessions } from './host/claudeSessions';
+import { SubagentWatch } from './host/subagentDetail';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
 import { ProjectIndexHost } from './host/projectIndexHost';
@@ -131,6 +132,8 @@ export class Controller {
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
   private claudeWatchers = new Map<string, FSWatcher>();
+  /** The outside subagent whose detail sheet is open, and the Manager showing it. */
+  private subagent?: { watch: SubagentWatch; surface: Surface };
   /** The images in those sessions, as the Images view and the Manager last got them. */
   private claudeImages: OutsideImages[] = [];
   /** Thumbnails are made one at a time, the scaling in a worker thread. */
@@ -883,6 +886,11 @@ export class Controller {
           // From the side bar's list: into the chat tab, opening one when there is none.
           if (surface.list && !this.chatPanel) await this.moveToCenter();
           await this.showChat(m.chatId, m.item);
+          return;
+        case 'watchSubagent':
+          this.subagent?.watch.stop();
+          this.subagent = m.sessionId && m.id ? { watch: new SubagentWatch(m.sessionId, m.id), surface } : undefined;
+          await this.pushSubagent();
           return;
         case 'openClaudeSession': {
           // Only a session this window listed, so a webview can't name some other folder's.
@@ -1839,10 +1847,24 @@ export class Controller {
           showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
         }), saved) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
+    await this.pushSubagent();
     const images = gallery ? await listClaudeImages({ home, folders, skip: owned }) : [];
     if (JSON.stringify(images) === JSON.stringify(this.claudeImages)) return;
     this.claudeImages = images;
     for (const s of this.surfaces) if (s.kind !== 'chat' && s.ready) post(s, { type: 'claudeImages', sessions: images });
+  }
+
+  /** Sends the open subagent detail what its transcript gained (the watcher above calls this, debounced, as it grows). */
+  private async pushSubagent(): Promise<void> {
+    const sub = this.subagent;
+    if (!sub) return;
+    if (!this.surfaces.has(sub.surface)) {
+      sub.watch.stop();
+      this.subagent = undefined;
+      return;
+    }
+    const detail = await sub.watch.read();
+    if (detail && this.subagent === sub && sub.surface.ready) post(sub.surface, { type: 'subagentDetail', detail });
   }
 
   /**

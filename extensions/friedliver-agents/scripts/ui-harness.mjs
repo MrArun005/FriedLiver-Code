@@ -24,6 +24,8 @@
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
 //   --only agent-errors the agent-error notices and the hand-off/ask menus that reuse a chat (agent-errors-*.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
+//   --only subagent-detail  an outside Claude Code subagent's detail (working and done), Dark 2026, sheet and panel
+//                   [--shot-tag before|after]: screenshots to ~/code/FriedLiver-Code-design/review/subagent-detail/
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
 
 import { spawnSync } from 'node:child_process';
@@ -43,6 +45,7 @@ import { createRequire } from 'node:module';
 import { accountsFixture } from './ui-fixture-accounts.mjs';
 import { inboxFixture } from './ui-fixture-inbox.mjs';
 import { approvalsFixture } from './ui-fixture-approvals.mjs';
+import { subagentDetailFixture } from './ui-fixture-subagent-detail.mjs';
 import { agentErrorsFixture } from './ui-fixture-agent-errors.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,6 +62,7 @@ const { values: opts } = parseArgs({
     only: { type: 'string' },
     // --gutter-shot before|after: also save review/left-gutter-<it>-{480,1200}.png
     'gutter-shot': { type: 'string' },
+    'shot-tag': { type: 'string', default: 'after' },
   },
 });
 
@@ -330,7 +334,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
+  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, 'subagent-detail': subagentDetailChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -1824,6 +1828,73 @@ function stretched(v, key) {
   if (Array.isArray(v)) return v.map((x) => stretched(x, key));
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'id' || k.endsWith('Id') ? x : stretched(x, k)]));
   return v;
+}
+
+/** An outside subagent's detail on the map, as the host would feed it: the brief, steps, tokens, files, the report. */
+async function subagentDetailChecks({ open, check, posted }) {
+  const fx = subagentDetailFixture(Date.now());
+  const after = opts['shot-tag'] === 'after';
+  const out = path.join(os.homedir(), 'code/FriedLiver-Code-design/review/subagent-detail');
+  fs.mkdirSync(out, { recursive: true });
+  for (const [state, title] of [['working', 'Fix token waste findings'], ['done', 'Audit the token waste']]) {
+    for (const [width, height] of [[870, 900], [1440, 900]]) {
+      const p = await open('surface=tasks&theme=dark-2026&view=map', width, height, 2);
+      await p.evaluate((s) => window.postMessage({ type: 'claudeSessions', sessions: [s] }, '*'), fx.session);
+      // The outside session's lane is the last: its fold of done agents.
+      if (state === 'done') await p.locator('.map-fold').last().click();
+      const node = p.locator(`.map-sub[aria-label="Subagent: ${title}"]`);
+      await node.waitFor();
+      await node.click();
+      await p.locator('.map-detail').waitFor();
+      await p.waitForFunction(() => window.__posted.some((m) => m.type === 'watchSubagent' && m.id), null, { timeout: 2000 }).catch(() => {});
+      const asked =(await posted(p)).find((m) => m.type === 'watchSubagent' && m.id);
+      if (after) check(asked?.sessionId === fx.session.id && !!fx.details[asked.id], `${state} at ${width}: opening it follows its transcript [${JSON.stringify(asked ?? (await posted(p)))}]`);
+      const detail = fx.details[asked?.id ?? fx.session.subagents.find((s) => s.title === title).id];
+      await p.evaluate((d) => window.postMessage({ type: 'subagentDetail', detail: d }, '*'), detail);
+      // Scrolled to the very bottom (Playwright brought the node into view), the sticky panel rides up with its column.
+      await p.evaluate(() => document.querySelector('.map-detail').scrollIntoView({ block: 'nearest' }));
+      await p.waitForTimeout(400);
+      if (after) {
+        const r = await p.locator('.map-detail').evaluate((el) => {
+          const tl = el.querySelector('.sd-timeline');
+          return {
+            brief: el.querySelector('.sd-brief')?.textContent ?? '',
+            steps: el.querySelectorAll('.sd-timeline .tl-step').length,
+            report: !!el.querySelector('.sd-report .md'),
+            tokens: el.querySelector('.sd-tokens')?.textContent ?? '',
+            parent: el.querySelector('.sd-parent')?.textContent ?? '',
+            files: el.querySelectorAll('.sd-files .fl-row').length,
+            atEnd: tl ? Math.abs(tl.scrollHeight - tl.scrollTop - tl.clientHeight) < 4 : false,
+            side: document.documentElement.scrollWidth <= window.innerWidth,
+          };
+        });
+        check(r.brief.includes('token-efficiency review'), `${state} at ${width}: shows the brief`);
+        check(r.steps >= 25, `${state} at ${width}: shows its steps [${r.steps}]`);
+        check(r.parent.includes('IDE identification question') && !r.parent.trim().startsWith('of '), `${state} at ${width}: names its parent session as a field [${r.parent}]`);
+        check(/34\.7M|52\.1M/.test(r.tokens), `${state} at ${width}: shows its token use [${r.tokens}]`);
+        check(r.files >= 5, `${state} at ${width}: lists the files it touched [${r.files}]`);
+        check(state === 'done' ? r.report : !r.report, `${state} at ${width}: ${state === 'done' ? 'shows its' : 'no'} report`);
+        check(state === 'done' || r.atEnd, `${state} at ${width}: the timeline follows the newest step`);
+        check(r.side, `${state} at ${width}: nothing scrolls sideways`);
+        // Live: the running step finishing and a new note arrive as a partial update.
+        if (state === 'working' && width === 870) {
+          const last = detail.entries.at(-1);
+          await p.evaluate(
+            ([d, l]) => window.postMessage({ type: 'subagentDetail', detail: { ...d, reset: false, entries: [{ ...l, status: 'completed', ms: 90_000 }, { kind: 'note', id: 'n99', seq: l.seq + 1, rev: 99, text: 'All green. Pushing.' }] } }, '*'),
+            [detail, last],
+          );
+          await p.waitForTimeout(200);
+          const live = await p.locator('.map-detail').evaluate((el) => ({ note: [...el.querySelectorAll('.sd-note')].map((n) => n.textContent).at(-1), steps: el.querySelectorAll('.sd-timeline .tl-step').length }));
+          check(!!live.note?.includes('All green') && live.steps === r.steps, `${state}: a live update adds to the timeline in place [${JSON.stringify(live)}]`);
+        }
+      }
+      await p.screenshot({ path: path.join(out, `subagent-${state}-${width}-${opts['shot-tag']}.png`), animations: 'disabled', caret: 'hide' });
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => window.__posted.some((m) => m.type === 'watchSubagent' && !m.id), null, { timeout: 2000 }).catch(() => {});
+      if (after) check((await posted(p)).some((m) => m.type === 'watchSubagent' && !m.id) && !(await p.locator('.map-detail').count()), `${state} at ${width}: Esc closes it and it stops following`);
+      await p.close();
+    }
+  }
 }
 
 async function gutterChecks({ open, check }) {

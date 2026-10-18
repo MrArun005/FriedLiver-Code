@@ -8,6 +8,7 @@ import { linkTarget } from './links';
 import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
 import { typeable } from './steps';
+import type { SubagentDetail } from './subagentDetail';
 
 /** Choices for a new task's agents, per agent: optionKey → value (see session.ts). */
 export type TaskChoices = Partial<Record<AgentKey, Record<string, string | boolean>>>;
@@ -133,7 +134,9 @@ export type WebviewMessage =
   /** Agents & Accounts, on the agent's card when given. */
   | { type: 'openAccounts'; agent?: AgentKey }
   /** Continue a Claude Code session started outside FriedLiver in a new chat. */
-  | { type: 'openClaudeSession'; sessionId: string };
+  | { type: 'openClaudeSession'; sessionId: string }
+  /** Follow that session's subagent for the Manager's detail sheet (subagentDetail updates); without ids, stop. */
+  | { type: 'watchSubagent'; sessionId?: string; id?: string };
 
 export type HostMessage =
   /** `defaults` (optional): each agent's last known options and the user's last choices. */
@@ -159,6 +162,8 @@ export type HostMessage =
   | { type: 'claudeSessions'; sessions: ClaudeSession[] }
   /** The images those sessions read or took, for the Images view. */
   | { type: 'claudeImages'; sessions: OutsideImages[] }
+  /** The followed subagent's brief, steps, token use and report: what changed since the last one. */
+  | { type: 'subagentDetail'; detail: SubagentDetail }
   /** FriedLiver's image copies: the space they use, and which gallery images are pinned or hidden. */
   | { type: 'imageStore'; store: ImageStoreInfo }
   /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
@@ -384,6 +389,9 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return isAgentKey(m.agent) ? { type: 'newChat', agent: m.agent } : null;
     case 'openClaudeSession':
       return id(m.sessionId) ? { type: 'openClaudeSession', sessionId: m.sessionId } : null;
+    case 'watchSubagent':
+      if (m.sessionId === undefined && m.id === undefined) return { type: 'watchSubagent' };
+      return id(m.sessionId) && id(m.id) ? { type: 'watchSubagent', sessionId: m.sessionId, id: m.id } : null;
     case 'openChat':
       return id(m.chatId) ? { type: 'openChat', chatId: m.chatId, ...(id(m.item) ? { item: m.item } : {}) } : null;
     case 'select':
