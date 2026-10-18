@@ -2,48 +2,14 @@
   "css": {
     "remote.css": {
       "colour": 1,
-      "px": 124,
-      "effect": 2,
+      "px": 76,
+      "effect": 1,
       "restyle": [
         ".badge",
-        ".btn",
-        ".btn--danger",
-        ".btn--primary",
-        ".btn-lg",
-        ".btn-lg--hold",
         ".btn-lg--holding .btn-lg__fill",
-        ".btn-lg:active",
-        ".btn-lg:disabled",
-        ".btn-lg__fill",
-        ".btn-lg__label",
-        ".btn-sm",
-        ".btn-text",
-        ".btn-text--left",
-        ".btn-text--sm",
-        ".btn:disabled",
-        ".chip",
-        ".chip--careful",
-        ".chip--review::before",
-        ".chip--routine::before",
-        ".chip::before",
         ".composer__input",
-        ".composer__input::placeholder",
         ".group__count",
-        ".icon-btn",
-        ".icon-btn--accent",
-        ".icon-btn:active",
-        ".input",
-        ".input--area",
-        ".input::placeholder",
-        ".pill",
-        ".pill--on",
-        ".tag",
-        ".tag-mac",
-        "button",
-        "button:focus-visible",
-        "input:focus-visible",
-        "select:focus-visible",
-        "textarea:focus-visible"
+        ".tag"
       ]
     },
     "webview.css": {
@@ -204,7 +170,7 @@
     }
   },
   "tsx": {
-    "remote/phone/app.tsx": 38,
+    "remote/phone/app.tsx": 2,
     "webview/accounts.tsx": 1,
     "webview/approval.tsx": 1,
     "webview/chat.tsx": 20,
@@ -222,9 +188,9 @@
   },
   "totals": {
     "colour": 10,
-    "px": 271,
-    "effect": 8,
-    "restyle": 188,
-    "rawControls": 114
+    "px": 223,
+    "effect": 7,
+    "restyle": 154,
+    "rawControls": 78
   }
 }

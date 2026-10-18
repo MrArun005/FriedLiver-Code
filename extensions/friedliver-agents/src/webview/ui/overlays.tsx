@@ -2,7 +2,7 @@
 // elevation come from components.css; these handle focus, Escape and timing.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { Icon, type IconName } from '../common';
+import { Icon, type IconName } from './icon';
 import { Button, IconButton } from './controls';
 import { Countdown, type Tone } from './display';
 

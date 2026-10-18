@@ -3,7 +3,7 @@
 // fails on a raw one anywhere else (baseline in test/fixtures/ds-baseline.json, ratchet down).
 import { createElement, type ButtonHTMLAttributes, type ComponentChildren, type InputHTMLAttributes, type Ref, type TextareaHTMLAttributes } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Icon, type IconName } from '../common';
+import { Icon, type IconName } from './icon';
 
 export type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'quiet-danger' | 'brand' | 'link' | 'text';
 export type Size = 'sm' | 'md' | 'lg' | 'touch';
@@ -61,12 +61,13 @@ export function IconButton({
   variant = 'quiet',
   size,
   muted,
+  round,
   class: className,
   type = 'button',
   ...rest
-}: Omit<ButtonBase, 'icon' | 'iconEnd' | 'kbd' | 'block' | 'children'> & { icon: IconName; label: string; muted?: boolean; children?: never }) {
+}: Omit<ButtonBase, 'icon' | 'iconEnd' | 'kbd' | 'block' | 'children'> & { icon: IconName; label: string; muted?: boolean; round?: boolean; children?: never }) {
   return (
-    <button {...rest} type={type} title={rest.title ?? label} aria-label={label} class={buttonClass({ variant, size, class: className }, cx('fl-btn--icon', muted && 'fl-btn--muted'))}>
+    <button {...rest} type={type} title={rest.title ?? label} aria-label={label} class={buttonClass({ variant, size, class: className }, cx('fl-btn--icon', muted && 'fl-btn--muted', round && 'fl-btn--round'))}>
       <Icon name={icon} />
     </button>
   );
@@ -290,8 +291,8 @@ export function Input({ size, class: className, type = 'text', ...rest }: InputP
   return createElement('input', { ...rest, type, class: cx('fl-input', size && size !== 'md' && `fl-input--${size}`, className) });
 }
 
-export function Textarea({ class: className, ...rest }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'class'> & { class?: string; ref?: Ref<HTMLTextAreaElement> }) {
-  return <textarea {...rest} class={cx('fl-input', className)} />;
+export function Textarea({ class: className, rows, ...rest }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'class' | 'rows'> & { class?: string; rows?: number; ref?: Ref<HTMLTextAreaElement> }) {
+  return <textarea {...rest} rows={rows} style={rows ? { '--rows': String(rows) } : undefined} class={cx('fl-input', className)} />;
 }
 
 /** A filter field: the search glyph, the text, a clear button once there is text. */

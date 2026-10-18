@@ -1,101 +1,91 @@
-/* FriedLiver Remote: the phone app. Tokens from DESIGN-SYSTEM.md §1 (Dark 2026 / Light 2026),
-   scaled for touch: 15px text, 44px targets. Components use tokens only. */
+/* FriedLiver Remote: the phone app. Its colours are the editor's Dark 2026 and Light 2026 themes, given as the
+   --vscode-* keys a webview gets, so tokens.css and components.css (served before this file) draw it exactly as
+   the desktop: one palette, one set of components. app.tsx sets body.vscode-light / vscode-dark from the phone's
+   setting and data-density="touch" (44px controls, 16px fields). This file only lays out the phone's screens. */
 
 :root {
-  --bg: #121314;
-  --input-bg: #191a1b;
-  --menu-bg: #202122;
-  --border: #2a2b2c;
-  --fg: #bfbfbf;
-  --fg-2: #8c8c8c;
-  --fg-50: #707071;
-  --placeholder: #555555;
-  --sel-bg: #3d3e3f;
-  --sel-fg: #ededed;
-  --hover-bg: #313233;
-  --link: #48a0c7;
-  --code-bg: #242526;
-  --inline-code-bg: #262626;
-  --error: #f48771;
-  --btn-bg: #297aa0;
-  --btn-fg: #ffffff;
-  --added: #73c991;
-  --removed: #f48771;
-  --dot-running: #89d185;
-  --dot-waiting: #3b82f6;
-  --dot-idle: #4b4c4c;
-  --accent: #d97757;
-  --warn: #e1c08d;
-  --send-bg: #c6613f;
-  --send-fg: #faf9f5;
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Menlo, Monaco, 'Courier New', monospace;
-  --fs: 15px;
-  --r-3: 3px;
-  --r-4: 4px;
-  --r-6: 6px;
-  --r-8: 8px;
-  --r-pill: 9999px;
+  --vscode-editor-background: #121314;
+  --vscode-input-background: #191A1B;
+  --vscode-input-foreground: #bfbfbf;
+  --vscode-menu-background: #202122;
+  --vscode-menu-foreground: #bfbfbf;
+  --vscode-sideBar-background: #191A1B;
+  --vscode-textCodeBlock-background: #242526;
+  --vscode-textPreformat-background: #262626;
+  --vscode-textPreformat-foreground: #8C8C8C;
+  --vscode-list-activeSelectionBackground: #FFFFFF22;
+  --vscode-list-activeSelectionForeground: #ededed;
+  --vscode-list-hoverBackground: #FFFFFF14;
+  --vscode-toolbar-hoverBackground: #5A5D5E50;
+  --vscode-inlineChatInput-border: #2A2B2C;
+  --vscode-foreground: #bfbfbf;
+  --vscode-descriptionForeground: #8C8C8C;
+  --vscode-input-placeholderForeground: #555555;
+  --vscode-disabledForeground: #555555;
+  --vscode-textLink-foreground: #48A0C7;
+  --vscode-focusBorder: #3994BCB3;
+  --vscode-button-background: #297AA0;
+  --vscode-button-foreground: #FFFFFF;
+  --vscode-button-hoverBackground: #2B7DA3;
+  --vscode-errorForeground: #f48771;
+  --vscode-gitDecoration-addedResourceForeground: #73c991;
+  --vscode-gitDecoration-deletedResourceForeground: #f48771;
+  --vscode-charts-blue: #57A3F8;
+  --vscode-charts-green: #86CF86;
+  --vscode-charts-orange: #CD861A;
+  --vscode-notificationsInfoIcon-foreground: #3a94bc;
+  --vscode-friedliver-decision: #3a94bc;
+  --vscode-friedliver-decisionForeground: #121314;
+  --vscode-inputOption-activeBorder: #2A2B2C;
+  --vscode-scrollbarSlider-background: #A8A9AA85;
+  --vscode-scrollbarSlider-hoverBackground: #A8A9AA90;
+  --vscode-chat-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --vscode-chat-font-size: 15px;
+  --vscode-editor-font-family: ui-monospace, Menlo, Monaco, 'Courier New', monospace;
+  --vscode-editor-font-size: 13px;
   --gutter: 16px;
-  --tap: 44px;
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) {
-    --bg: #ffffff;
-    --input-bg: #ffffff;
-    --menu-bg: #fafafd;
-    --border: #e4e5e6;
-    --fg: #202020;
-    --fg-2: #606060;
-    --fg-50: #8a8a8a;
-    --placeholder: #999999;
-    --sel-bg: #e6e6e8;
-    --sel-fg: #202020;
-    --hover-bg: #f0f0f2;
-    --link: #0069cc;
-    --code-bg: #eaeaea;
-    --inline-code-bg: #ececec;
-    --error: #ad0707;
-    --btn-bg: #0069cc;
-    --btn-fg: #ffffff;
-    --added: #587c0c;
-    --removed: #ad0707;
-    --dot-running: #388a34;
-    --dot-idle: #c4c4c6;
-    --warn: #8a6100;
+  :root {
+    --vscode-editor-background: #FFFFFF;
+    --vscode-input-background: #FFFFFF;
+    --vscode-input-foreground: #202020;
+    --vscode-menu-background: #FAFAFD;
+    --vscode-menu-foreground: #202020;
+    --vscode-sideBar-background: #FAFAFD;
+    --vscode-textCodeBlock-background: #EAEAEA;
+    --vscode-textPreformat-background: #ECECEC;
+    --vscode-textPreformat-foreground: #606060;
+    --vscode-list-activeSelectionBackground: #00000025;
+    --vscode-list-activeSelectionForeground: #202020;
+    --vscode-list-hoverBackground: #00000014;
+    --vscode-toolbar-hoverBackground: #0000001F;
+    --vscode-inlineChatInput-border: #E4E5E6;
+    --vscode-foreground: #202020;
+    --vscode-descriptionForeground: #606060;
+    --vscode-input-placeholderForeground: #999999;
+    --vscode-disabledForeground: #BBBBBB;
+    --vscode-textLink-foreground: #0069CC;
+    --vscode-focusBorder: #0069CC;
+    --vscode-button-background: #0069CC;
+    --vscode-button-foreground: #FFFFFF;
+    --vscode-button-hoverBackground: #0063C1;
+    --vscode-errorForeground: #ad0707;
+    --vscode-gitDecoration-addedResourceForeground: #587c0c;
+    --vscode-gitDecoration-deletedResourceForeground: #ad0707;
+    --vscode-charts-blue: #1A5CFF;
+    --vscode-charts-green: #388A34;
+    --vscode-charts-orange: #d18616;
+    --vscode-notificationsInfoIcon-foreground: #0069CC;
+    --vscode-friedliver-decision: #0069CC;
+    --vscode-friedliver-decisionForeground: #FFFFFF;
+    --vscode-inputOption-activeBorder: #F0F1F2;
+    --vscode-scrollbarSlider-background: #646464C0;
+    --vscode-scrollbarSlider-hoverBackground: #646464D0;
     color-scheme: light;
   }
-}
-
-:root[data-theme='light'] {
-  --bg: #ffffff;
-  --input-bg: #ffffff;
-  --menu-bg: #fafafd;
-  --border: #e4e5e6;
-  --fg: #202020;
-  --fg-2: #606060;
-  --fg-50: #8a8a8a;
-  --placeholder: #999999;
-  --sel-bg: #e6e6e8;
-  --sel-fg: #202020;
-  --hover-bg: #f0f0f2;
-  --link: #0069cc;
-  --code-bg: #eaeaea;
-  --inline-code-bg: #ececec;
-  --error: #ad0707;
-  --btn-bg: #0069cc;
-  --added: #587c0c;
-  --removed: #ad0707;
-  --dot-running: #388a34;
-  --dot-idle: #c4c4c6;
-  --warn: #8a6100;
-  color-scheme: light;
-}
-
-* {
-  box-sizing: border-box;
 }
 
 html,
@@ -115,23 +105,6 @@ body {
 
 #root {
   height: 100%;
-}
-
-button {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-}
-
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--btn-bg);
-  outline-offset: 1px;
 }
 
 code {
@@ -215,32 +188,6 @@ pre {
   gap: 6px;
 }
 
-.icon-btn {
-  width: var(--tap);
-  height: var(--tap);
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-8);
-  color: var(--fg);
-}
-
-.icon-btn:active {
-  background: var(--hover-bg);
-}
-
-.icon-btn--accent {
-  color: var(--send-fg);
-  background: var(--send-bg);
-  width: 36px;
-  height: 36px;
-  margin-left: 4px;
-}
-
-.icon {
-  width: 18px;
-  height: 18px;
-}
-
 .live {
   font-size: 0.8em;
   color: var(--fg-2);
@@ -259,74 +206,10 @@ pre {
 }
 
 .live--on::before {
-  background: var(--dot-running);
+  background: var(--status-working);
 }
 
 /* ---- Status dots and avatars ---- */
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dot-idle);
-}
-
-.dot--working {
-  background: var(--dot-running);
-  animation: blink 1s linear infinite;
-}
-
-.dot--needs-you {
-  background: var(--accent);
-}
-
-.dot--error {
-  background: var(--error);
-}
-
-.dot--done {
-  background: var(--fg-2);
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.avatar {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-8);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: 0.85em;
-  color: var(--sel-fg);
-  background: var(--menu-bg);
-  border: 1px solid var(--border);
-}
-
-.avatar--small {
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r-6);
-  font-size: 0.72em;
-}
-
-.avatar--claude {
-  color: var(--accent);
-}
-
-.avatar--codex {
-  color: var(--fg);
-}
-
-.avatar--gemini {
-  color: var(--link);
-}
 
 /* ---- Chat list ---- */
 
@@ -419,56 +302,12 @@ pre {
 /* ---- Chat ---- */
 
 .levels {
-  display: flex;
-  gap: 4px;
-  padding: 8px var(--gutter);
+  padding: var(--sp-2) var(--gutter);
   border-bottom: 1px solid var(--border);
-}
-
-.level {
-  flex: 1;
-  height: 32px;
-  border-radius: var(--r-pill);
-  font-size: 0.85em;
-  color: var(--fg-2);
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-}
-
-.level--on {
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-  border-color: var(--sel-bg);
-}
-
-.level--auto.level--on {
-  color: var(--btn-fg);
-  background: var(--error);
-  border-color: var(--error);
 }
 
 .subs {
   border-bottom: 1px solid var(--border);
-}
-
-.subs__head {
-  width: 100%;
-  min-height: var(--tap);
-  padding: 0 var(--gutter);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.85em;
-  color: var(--fg-2);
-}
-
-.chev {
-  display: grid;
-  transition: transform 0.15s;
-}
-
-.chev--open {
-  transform: rotate(90deg);
 }
 
 .subs__list {
@@ -596,7 +435,7 @@ pre {
 }
 
 .step--working::before {
-  background: var(--dot-running);
+  background: var(--status-working);
   animation: blink 1s linear infinite;
 }
 
@@ -692,159 +531,7 @@ pre {
 
 /* Buttons */
 
-.btn-sm {
-  min-height: 36px;
-  padding: 0 12px;
-  border-radius: var(--r-6);
-  background: var(--input-bg);
-  font-size: 13px;
-  color: var(--fg);
-  text-align: left;
-}
-
-.btn-lg {
-  position: relative;
-  overflow: hidden;
-  width: 100%;
-  min-height: 48px;
-  border-radius: var(--r-8);
-  background: var(--send-bg);
-  color: var(--send-fg);
-  font-size: 15px;
-  font-weight: 600;
-  touch-action: manipulation;
-}
-
-.btn-lg:active {
-  filter: brightness(0.92);
-}
-
-.btn-lg:disabled {
-  opacity: 0.4;
-}
-
-.btn-lg--hold {
-  background: color-mix(in srgb, var(--error) 16%, var(--menu-bg));
-  color: var(--error);
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.btn-lg__fill {
-  position: absolute;
-  inset: 0;
-  width: 0;
-  background: color-mix(in srgb, var(--error) 30%, transparent);
-}
-
-.btn-lg--holding .btn-lg__fill {
-  width: 100%;
-  transition: width 0.6s linear;
-}
-
-.btn-lg__label {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn-text {
-  min-height: var(--tap);
-  padding: 0 12px;
-  border-radius: var(--r-6);
-  color: var(--fg);
-  font-size: 15px;
-}
-
-.btn-text--sm {
-  min-height: 36px;
-  font-size: 13px;
-  color: var(--link);
-}
-
-.btn-text--left {
-  align-self: flex-start;
-  padding: 0 4px;
-  text-align: left;
-}
-
-.round {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--fg-2);
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-}
-
-.round:active {
-  background: var(--hover-bg);
-}
-
-.round--yes {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.round--quiet {
-  width: 36px;
-  height: 36px;
-  background: none;
-}
-
-.round--flip .icon {
-  transform: scaleX(-1);
-}
-
 /* Chips */
-
-.chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  align-self: flex-start;
-  height: 20px;
-  padding: 0 7px;
-  border-radius: var(--r-pill);
-  font-size: 12px;
-  white-space: nowrap;
-  color: var(--fg-2);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
-.chip::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--fg-2);
-}
-
-.chip--routine::before {
-  background: var(--dot-running);
-}
-
-.chip--review::before {
-  background: var(--warn);
-}
-
-.chip--careful {
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 13%, transparent);
-}
-
-.chip--careful::before {
-  display: none;
-}
-
-.lock {
-  flex: none;
-}
 
 /* The pending row */
 
@@ -984,14 +671,6 @@ pre {
 
 .sheet__nav .meta {
   flex: 1;
-}
-
-.sheet__nav .round--quiet + .meta {
-  flex: none;
-}
-
-.sheet__nav .btn-text {
-  margin-left: auto;
 }
 
 .sheet__scroll {
@@ -1178,81 +857,10 @@ pre {
   gap: 4px;
 }
 
-.choice {
-  min-height: var(--tap);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  padding: 8px 12px;
-  border-radius: var(--r-6);
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  text-align: left;
-  color: var(--fg);
-  overflow-wrap: anywhere;
-}
-
-.choice--on {
-  background: var(--sel-bg);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.choice__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.choice__title {
-  color: var(--sel-fg);
-}
-
-.choice__desc {
-  font-size: 13px;
-  color: var(--fg-2);
-}
-
-.tag-mac {
-  flex: none;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: var(--r-pill);
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--fg-2);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
 /* Waiting bar and undo, above the composer */
 
 .waiting {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  margin: 0 var(--gutter) 6px;
-  padding: 0 6px 0 12px;
-  border-radius: var(--r-pill);
-  background: var(--menu-bg);
-  font-size: 13px;
-  color: var(--sel-fg);
-}
-
-.waiting__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.waiting__go {
-  margin-left: auto;
-  padding: 6px 12px;
-  border-radius: var(--r-pill);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  font-weight: 600;
+  margin: 0 var(--gutter) var(--sp-2);
 }
 
 .undo {
@@ -1326,67 +934,6 @@ pre {
   margin: 0;
 }
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--tap);
-}
-
-.input {
-  width: 100%;
-  min-height: var(--tap);
-  padding: 10px 12px;
-  border-radius: var(--r-6);
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--sel-fg);
-  font: 16px / 1.4 var(--font);
-}
-
-.input--area {
-  resize: vertical;
-}
-
-.input::placeholder {
-  color: var(--placeholder);
-}
-
-.btn {
-  min-height: var(--tap);
-  padding: 0 16px;
-  border-radius: var(--r-6);
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  color: var(--sel-fg);
-}
-
-.btn--primary {
-  background: var(--btn-bg);
-  border-color: var(--btn-bg);
-  color: var(--btn-fg);
-  font-weight: 600;
-}
-
-.btn--danger {
-  color: var(--error);
-}
-
-.btn--wide {
-  width: 100%;
-  margin-top: 16px;
-}
-
-.btn:disabled {
-  opacity: 0.4;
-}
-
-.link {
-  min-height: 36px;
-  color: var(--link);
-  text-align: left;
-}
-
 .hint {
   margin: 0;
   font-size: 13px;
@@ -1421,43 +968,7 @@ pre {
 
 .composer__input {
   flex: 1;
-  min-height: 40px;
   max-height: 160px;
-  padding: 9px 12px;
-  border-radius: var(--r-8);
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--sel-fg);
-  font: 16px / 1.4 var(--font);
-  resize: none;
-  field-sizing: content;
-}
-
-.composer__input::placeholder {
-  color: var(--placeholder);
-}
-
-.send {
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--r-8);
-  display: grid;
-  place-items: center;
-  background: var(--send-bg);
-  color: var(--send-fg);
-}
-
-.send:disabled {
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  color: var(--fg-50);
-}
-
-.send--stop {
-  background: var(--menu-bg);
-  border: 1px solid var(--border);
-  color: var(--sel-fg);
 }
 
 /* ---- Sheets, pairing, toast ---- */
@@ -1485,7 +996,7 @@ pre {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: var(--tap);
+  min-height: var(--h-touch);
 }
 
 .sheet__head h2 {
@@ -1498,29 +1009,6 @@ pre {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--tap);
-  padding: 0 12px 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-}
-
-.pill .avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-}
-
-.pill--on {
-  background: var(--sel-bg);
-  border-color: var(--sel-bg);
-  color: var(--sel-fg);
 }
 
 .pair {

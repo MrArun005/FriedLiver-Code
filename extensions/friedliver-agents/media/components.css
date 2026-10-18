@@ -295,6 +295,10 @@
   min-width: 0;
   padding: 0;
 }
+/* Round: the phone's swipe-row and pager actions only, a full circle at touch size (§2.2). */
+.fl-btn--round {
+  border-radius: var(--r-round);
+}
 .fl-btn--icon.fl-btn--quiet {
   --btn-fg: var(--fg);
 }
@@ -380,8 +384,9 @@
   --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
   --pill-fill-hover: var(--pill-hover);
-  /* Shrinks with its row; the text ends in an ellipsis. */
+  /* Shrinks with its row (the text ends in an ellipsis); never stretches across a column. */
   flex: 0 1 auto;
+  width: fit-content;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
@@ -815,7 +820,8 @@ button.fl-pill:focus-visible {
 }
 textarea.fl-input {
   height: auto;
-  min-height: calc(3lh + var(--sp-2) + 2px);
+  /* As many lines as its rows (3 unless set), then it grows with its text. */
+  min-height: calc(var(--rows, 3) * 1lh + var(--sp-2) + 2px);
   padding: var(--sp-1) var(--sp-2);
   resize: vertical;
   field-sizing: content;
@@ -2486,6 +2492,10 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   --h-xs: 28px;
   --h-sm: 36px;
   --h-md: var(--h-touch);
+}
+/* Fields on a phone keep 16px text: iOS zooms into anything smaller. */
+[data-density='touch'] .fl-input {
+  font-size: var(--t-touch);
 }
 
 @media (prefers-reduced-motion: reduce) {
