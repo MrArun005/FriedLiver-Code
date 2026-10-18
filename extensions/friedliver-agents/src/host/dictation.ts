@@ -19,11 +19,14 @@ export type DeniedCode = keyof typeof PRIVACY_PANES;
 export const MAX_SPOKEN = 10_000;
 /** A longer stdout line than this is dropped unread. */
 const MAX_LINE = 64 * 1024;
+/** Loudness goes to the webview at most this often (30 a second); levels in between are dropped. */
+export const LEVEL_MS = 33;
 /** After asking the helper to stop, how long it gets to send its final words before it is killed. */
 const STOP_GRACE_MS = 4000;
 
 export type HelperEvent =
   | { kind: 'partial' | 'final'; text: string }
+  | { kind: 'level'; level: number }
   | { kind: 'error'; code: DeniedCode | 'unavailable' | 'audio' | 'recognition'; message: string };
 
 // Control characters (newlines and tabs aside) never reach the message box.
@@ -43,6 +46,7 @@ export function parseHelperLine(line: string): HelperEvent | null {
   const o = v as Record<string, unknown>;
   if (typeof o.partial === 'string') return { kind: 'partial', text: clean(o.partial, MAX_SPOKEN) };
   if (typeof o.final === 'string') return { kind: 'final', text: clean(o.final, MAX_SPOKEN) };
+  if (typeof o.level === 'number') return Number.isFinite(o.level) ? { kind: 'level', level: Math.min(1, Math.max(0, o.level)) } : null;
   if (typeof o.error === 'string') {
     const code = o.code === 'mic-denied' || o.code === 'speech-denied' || o.code === 'unavailable' || o.code === 'audio' ? o.code : 'recognition';
     return { kind: 'error', code, message: clean(o.error, 300) };
@@ -86,6 +90,8 @@ export interface DictationDeps<S> {
   /** Dictation stopped for another reason. */
   failed(message: string): void;
   spawn?: typeof nodeSpawn;
+  /** The clock levels are throttled by (tests set it). */
+  now?: () => number;
 }
 
 /** One dictation at a time (there is one microphone): idle → listening → stopping → idle. */
@@ -95,6 +101,7 @@ export class Dictation<S> {
   private surface: S | undefined;
   private chatId = '';
   private killTimer: NodeJS.Timeout | undefined;
+  private lastLevel = -Infinity;
 
   constructor(private readonly deps: DictationDeps<S>) {}
 
@@ -110,6 +117,7 @@ export class Dictation<S> {
     this.surface = surface;
     this.chatId = chatId;
     this.state = 'listening';
+    this.lastLevel = -Infinity;
     this.post({ state: 'listening' });
     let buffer = '';
     child.stdout?.setEncoding('utf8');
@@ -156,6 +164,14 @@ export class Dictation<S> {
 
   private event(e: HelperEvent | null): void {
     if (!e) return;
+    if (e.kind === 'level') {
+      // Only while listening, for the one chat dictating, and at most every LEVEL_MS.
+      const now = (this.deps.now ?? Date.now)();
+      if (this.state !== 'listening' || now - this.lastLevel < LEVEL_MS) return;
+      this.lastLevel = now;
+      this.post({ level: e.level });
+      return;
+    }
     if (e.kind !== 'error') {
       this.post({ text: e.text, final: e.kind === 'final' });
       return;
