@@ -57,7 +57,9 @@ import {
   type Item,
   type NoticeAction,
   type QueuedMessage,
+  type TokenTally,
 } from '../shared/model';
+import { estimateTokens } from '../shared/tokens';
 import { BridgeServer } from './bridge';
 import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
@@ -1319,6 +1321,11 @@ export class AgentCore {
     this.items(chatId, [{ kind: 'notice', tone: 'info', text, ...(can ? { actions: [{ label: 'Compact now', do: 'compact' as const }] } : {}) }]);
   }
 
+  /** Adds to a chat's token totals (the "tokens saved" readout). */
+  noteTokens(chatId: string, add: Partial<TokenTally>): void {
+    if (this.chat(chatId)) this.dispatch({ t: 'tokens', chatId, add });
+  }
+
   /** Sends the agent's own /compact as the chat's next message. */
   async compact(chatId: string): Promise<void> {
     await this.send(chatId, '/compact');
@@ -1421,6 +1428,8 @@ export class AgentCore {
       await this.ensureBridge();
       const result: acp.PromptResponse = this.stopping.has(chatId) ? { stopReason: 'cancelled' } : await this.hub.prompt(chatId, blocks);
       stopReason = result.stopReason;
+      // The agent's own count of this turn's input and what of it came from its prompt cache.
+      if (result.usage) this.noteTokens(chatId, { input: Number(result.usage.inputTokens), cacheRead: Number(result.usage.cachedReadTokens ?? 0) });
       if (result.stopReason !== 'end_turn') notice = stopNotice(result.stopReason, this.label(agent));
     } catch (err) {
       this.settleChat(chatId);
@@ -2001,6 +2010,10 @@ export class AgentCore {
       onData: (terminalId, data) => {
         const k = known.get(terminalId);
         if (k) this.queueOutput(k.commandId, data);
+      },
+      compacted: (info, raw, sent) => {
+        const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
+        if (chatId) this.noteTokens(chatId, { naive: estimateTokens(raw), sent: estimateTokens(sent) });
       },
       saveOutput: async (info, text) => {
         const dir = this.options.outputDir;

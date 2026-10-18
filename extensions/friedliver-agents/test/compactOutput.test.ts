@@ -49,10 +49,12 @@ describe('terminal output for agents', () => {
   it('is compacted, with the whole output saved where the agent can read it', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'fl-out-'));
     let saved = '';
+    const counted: [number, number][] = [];
     const m = new TerminalManager(dir, {
       onStart: () => {},
       onData: () => {},
       onExit: () => {},
+      compacted: (_info, raw, sent) => counted.push([raw.length, sent.length]),
       saveOutput: async (_info, text) => {
         saved = path.join(dir, 'out.txt');
         await (await import('node:fs/promises')).writeFile(saved, text);
@@ -67,5 +69,7 @@ describe('terminal output for agents', () => {
     expect(r.output).toMatch(/… \d+ lines left out \(\d+-\d+\); the whole output: .*out\.txt/);
     expect(r.output.split('\n').length).toBeLessThan(200);
     expect((await readFile(saved, 'utf8')).split('\n').length).toBe(2001);
+    expect(counted.length).toBe(1);
+    expect(counted[0][0]).toBeGreaterThan(counted[0][1] * 5);
   });
 });

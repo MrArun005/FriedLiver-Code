@@ -40,6 +40,8 @@ export interface TerminalListener {
   onExit(terminalId: string, status: acp.TerminalExitStatus): void;
   /** Keeps a command's whole output where the agent can read it, when what it gets is cut; resolves to that file. */
   saveOutput?(info: TerminalInfo, text: string): Promise<string>;
+  /** An agent got `sent` for output that was `raw` (compactOutput changed it). */
+  compacted?(info: TerminalInfo, raw: string, sent: string): void;
 }
 
 /** Lines of a long output an agent gets from its start and its end. */
@@ -222,6 +224,7 @@ export class TerminalManager {
       const file = await this.listener.saveOutput(command.info, snap.output).catch(() => undefined);
       if (file) r = compactOutput(snap.output, OUTPUT_KEEP, file);
     }
+    if (r.text !== snap.output) this.listener?.compacted?.(command.info, snap.output, r.text);
     return { ...snap, output: r.text, truncated: snap.truncated || r.omitted > 0 };
   }
 

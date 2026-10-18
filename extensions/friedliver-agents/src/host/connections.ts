@@ -5,7 +5,8 @@ import type { ApprovalLevel } from '../shared/session';
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { consultBrief, forwardText, handoffContext, handoffSummary } from './transcript';
+import { estimateTokens } from '../shared/tokens';
+import { consultBrief, forwardText, handoffContext, handoffSummary, rewoundHistory } from './transcript';
 
 /** Forwards one pipe makes before it pauses, so two agents can't keep each other busy forever. */
 export const MAX_PIPE_FORWARDS = 20;
@@ -85,7 +86,10 @@ export class Connections {
     const link = this.addLink('handoff', source.id, target.id, 'user', 1);
     const summary = handoffSummary(source);
     this.carry(link, source, target, 'handoff-to', 'handoff-from', summary, 'user');
-    this.host.preamble(target.id, handoffContext(source, await fileHashes(source)));
+    const context = handoffContext(source, await fileHashes(source));
+    this.host.preamble(target.id, context);
+    // The naive way carried the transcript itself.
+    this.host.dispatch({ t: 'tokens', chatId: target.id, add: { naive: estimateTokens(rewoundHistory(source, source.items)), sent: estimateTokens(context) } });
     return this.require(target.id);
   }
 

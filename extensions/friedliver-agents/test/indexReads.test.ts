@@ -96,7 +96,10 @@ describe('index_read', () => {
   it('returns one symbol, a line range, or a small file whole; a big file gives an outline only', async () => {
     const root = await project({ 'src/big.ts': BIG, 'src/small.ts': 'export const one = 1;\nexport const two = 2;\n' });
     const ix = await build(root);
-    const sym = await answerIndex([ix], { tool: 'index_read', path: 'src/big.ts', symbol: 'take' }, false);
+    const tally: [number, number][] = [];
+    const sym = await answerIndex([ix], { tool: 'index_read', path: 'src/big.ts', symbol: 'take' }, false, { chatId: 'c', seen: new SeenFiles(), saved: (n, sent) => tally.push([n, sent]) });
+    // What the answer stood in for (the whole file) and what it cost.
+    expect(tally).toEqual([[estimateTokens(BIG), estimateTokens(sym)]]);
     expect(sym).toContain('return this.items.pop();');
     expect(sym).not.toContain('this.items.push');
     expect(sym).toMatch(/^src\/big\.ts · \d+ lines/);

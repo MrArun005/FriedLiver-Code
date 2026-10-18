@@ -44,7 +44,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
+import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
@@ -311,6 +311,7 @@ function Manager() {
   const shownState = useMemo<AppState>(() => ({ ...state, chats: state.chats.filter((c) => c.archived || shown.includes(c)) }), [state, shown]);
   const waiting = useMemo(() => decisions({ chats: openChats(state.chats) }), [state]);
   const tally = { ...counts(state) };
+  const saved = totalSaved(state.chats);
   tally.archived += oldOutside.length;
 
   const jump = () => {
@@ -395,6 +396,14 @@ function Manager() {
               <span class="count-item">
                 <Dot state="done" /> {tally.done} done
               </span>
+              {saved > 0 && (
+                <span
+                  class="count-item"
+                  title="Estimated tokens FriedLiver's compact answers saved across these chats: index reads and diffs instead of whole files, page text instead of page dumps, smaller screenshots, compacted command output and hand-offs."
+                >
+                  <Icon name="bolt" /> ~{formatTokens(saved)} tokens saved
+                </span>
+              )}
               {tally.archived > 0 && (
                 <button
                   class="link count-item"
