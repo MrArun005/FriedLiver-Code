@@ -5,7 +5,7 @@ import { spliceDictation, type DictationState, type Segment } from '../shared/di
 import { MicVisualizer } from './micVisualizer';
 import {
   AGENT_FACES,
-  boardColumn,
+  EXPIRED,
   bridgeTitle,
   fileConflicts,
   formatDuration,
@@ -48,6 +48,8 @@ import {
   switcherMeta,
   transcriptGroups,
   statusOf,
+  needsYou,
+  turnsOf,
 } from '../shared/view';
 import { agentName, chatName, chatTip, chatRef } from '../shared/names';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
@@ -247,7 +249,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
     }
   };
   const open = openChats(state.chats);
-  const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
+  const needs = open.filter(needsYou).length;
   return (
     <div class="switcher">
       <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-fit={fit} data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
@@ -843,7 +845,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       )}
       {/* Read out what matters, not every streamed word. */}
       <div class="sr" aria-live="polite">
-        {waitingNow ? `${agentName(chat.agent)} needs your decision` : chat.busy ? '' : chat.turns ? `${agentName(chat.agent)} finished` : ''}
+        {waitingNow ? `${agentName(chat.agent)} needs your decision` : chat.busy ? '' : turnsOf(chat) ? `${agentName(chat.agent)} finished` : ''}
       </div>
     </div>
       {pastText && (
@@ -1140,7 +1142,7 @@ function BridgeView({ item, chat, state }: { item: BridgeItem; chat: ChatView; s
       <div class="answered">
         <Icon name={item.state === 'allowed' ? 'check' : 'close'} /> {title}{' '}
         <span class="hint">
-          · {item.state === 'allowed' ? 'allowed' : 'denied'}
+          · {item.expired ? EXPIRED : item.state === 'allowed' ? 'allowed' : 'denied'}
           {item.auto ? ` · ${item.auto}` : ''}
         </span>
       </div>
@@ -1179,11 +1181,12 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
   if (item.state !== 'pending') {
     return (
       <div class="answered">
-        <Icon name={item.state === 'accepted' ? 'check' : 'close'} /> {item.state === 'accepted' ? 'Accepted' : 'Rejected'} edit to{' '}
+        <Icon name={item.expired ? 'clock' : item.state === 'accepted' ? 'check' : 'close'} /> {item.expired ? 'Edit to' : item.state === 'accepted' ? 'Accepted edit to' : 'Rejected edit to'}{' '}
         <Button variant="link" title={item.path} onClick={() => send({ type: 'openFile', path: item.path })}>
           {name}
         </Button>{' '}
         <Stats item={item} />
+        {item.expired && <span class="hint">· {EXPIRED}</span>}
         {item.auto && <span class="hint">· {item.auto}</span>}
         <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
       </div>
@@ -1203,7 +1206,9 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
   if (item.state === 'awaiting') return <WaitingCard item={item} chat={chat} />;
   const failed = item.state === 'exited' && item.exitCode !== 0;
   const meta =
-    item.state === 'denied'
+    item.expired
+      ? EXPIRED
+      : item.state === 'denied'
       ? 'denied'
       : item.state === 'running'
         ? 'running…'

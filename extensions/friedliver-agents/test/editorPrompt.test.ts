@@ -2,6 +2,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   AROUND_LINES,
+  EDIT_AGENT_HINT,
   EDIT_MARK,
   PROMPT_LIMITS,
   REFS_MARK,
@@ -149,5 +150,13 @@ describe('code references', () => {
     expect(text).toContain(big);
     expect(text).not.toContain('second');
     expect(text).toContain('[2 more references left out: too long.]');
+  });
+});
+
+describe('the Edit with Agent hint', () => {
+  it('names each agent as its mention everywhere else does (@codex, not @gpt), and each one parses', () => {
+    const mentions = EDIT_AGENT_HINT.match(/@\w+/g)!;
+    expect(mentions).toEqual(['@claude', '@codex', '@gemini', '@demo']);
+    for (const m of mentions) expect(parseEditInput(`${m} tidy`).agent).toBe(m.slice(1));
   });
 });

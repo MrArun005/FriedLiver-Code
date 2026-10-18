@@ -26,3 +26,39 @@ index 89200842..87b2b83b 100644
  		ContextKeyExpr.or(
  			ContextKeyExpr.and(
  				ChatContextKeys.Setup.hidden.negate(),
+diff --git a/src/vs/workbench/contrib/terminalContrib/inlineHint/browser/terminal.initialHint.contribution.ts b/src/vs/workbench/contrib/terminalContrib/inlineHint/browser/terminal.initialHint.contribution.ts
+index d7bb9e3d..35ba896d 100644
+--- a/src/vs/workbench/contrib/terminalContrib/inlineHint/browser/terminal.initialHint.contribution.ts
++++ b/src/vs/workbench/contrib/terminalContrib/inlineHint/browser/terminal.initialHint.contribution.ts
+@@ -268,7 +268,8 @@ class TerminalInitialHintWidget extends Disposable {
+ 		const hintElement = $('div.terminal-initial-hint');
+ 		hintElement.style.display = 'block';
+ 
+-		const aiFeaturesHidden = this._chatEntitlementService.sentiment.hidden;
++		// FriedLiver: chat.disableAIFeatures (default true) also hides the Copilot CLI hint.
++		const aiFeaturesHidden = this._chatEntitlementService.sentiment.hidden || this._configurationService.getValue<boolean>('chat.disableAIFeatures') === true;
+ 
+ 		// Copilot CLI hint (only shown when AI features are enabled)
+ 		if (!aiFeaturesHidden) {
+diff --git a/src/vs/workbench/services/chat/common/chatEntitlementService.ts b/src/vs/workbench/services/chat/common/chatEntitlementService.ts
+index 29ce4272..ad2697bd 100644
+--- a/src/vs/workbench/services/chat/common/chatEntitlementService.ts
++++ b/src/vs/workbench/services/chat/common/chatEntitlementService.ts
+@@ -456,6 +456,17 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
+ 		}
+ 
+ 		if (!productService.defaultChatAgent) {
++			// FriedLiver: without a default chat agent the entitlement context, which applies chat.disableAIFeatures, is
++			// never created, so `chatSetupHidden` stayed false and Copilot's onboarding, Welcome entries and terminal hint
++			// showed. Apply the setting here, as that context would.
++			const hiddenContext = ChatEntitlementContextKeys.Setup.hidden.bindTo(this.contextKeyService);
++			const applyAIDisabled = () => hiddenContext.set(this.configurationService.getValue(ChatAIDisabledSettingId) === true);
++			applyAIDisabled();
++			this._register(this.configurationService.onDidChangeConfiguration(e => {
++				if (e.affectsConfiguration(ChatAIDisabledSettingId)) {
++					applyAIDisabled();
++				}
++			}));
+ 			return; // we need a default chat agent configured going forward from here
+ 		}
+ 

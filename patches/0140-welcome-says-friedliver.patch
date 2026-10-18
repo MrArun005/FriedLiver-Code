@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 067580a4..bcd99a9d 100644
+index 067580a4..6f664ee5 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 @@ -50,7 +50,7 @@ registerAction2(class extends Action2 {
@@ -20,6 +20,118 @@ index 067580a4..bcd99a9d 100644
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.readme' }, "Open the README when opening a folder that contains one, fallback to 'welcomePage' otherwise. Note: This is only observed as a global configuration, it will be ignored if set in a workspace or folder configuration."),
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.newUntitledFile' }, "Open a new untitled text file (only applies when opening an empty window)."),
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.welcomePageInEmptyWorkbench' }, "Open the Welcome page when opening an empty workbench."),
+@@ -342,7 +342,8 @@ configurationRegistry.registerConfiguration({
+ 		'workbench.welcomePage.experimentalOnboarding': {
+ 			scope: ConfigurationScope.APPLICATION,
+ 			type: 'boolean',
+-			default: true,
++			// FriedLiver: upstream's onboarding is a GitHub Copilot sign-in; the first launch opens the Agents walkthrough instead.
++			default: false,
+ 			tags: ['experimental'],
+ 			description: localize('workbench.welcomePage.experimentalOnboarding', "When enabled, show the new onboarding experience instead of the classic walkthrough on first launch."),
+ 			experiment: {
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
+index 322ec1ab..f211319d 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
+@@ -927,7 +927,7 @@ export class GettingStartedPage extends EditorPane {
+ 
+ 		const header = $('.header', {},
+ 			$('h1.product-name.caption', {}, this.productService.nameLong),
+-			$('p.subtitle.description', {}, localize({ key: 'gettingStarted.editingEvolved', comment: ['Shown as subtitle on the Welcome page.'] }, "Editing evolved"))
++			$('p.subtitle.description', {}, localize({ key: 'gettingStarted.friedliverSubtitle', comment: ['Shown as subtitle on the Welcome page.'] }, "Agents propose, you decide"))
+ 		);
+ 
+ 		const leftColumn = $('.categories-column.categories-column-left', {},);
+@@ -1015,7 +1015,10 @@ export class GettingStartedPage extends EditorPane {
+ 			const telemetryNotice = $('p.telemetry-notice');
+ 			this.buildTelemetryFooter(telemetryNotice);
+ 			footer.appendChild(telemetryNotice);
+-		} else if (!this.productService.openToWelcomeMainPage && this.showFeaturedWalkthrough && this.storageService.isNew(StorageScope.APPLICATION) && !this.configurationService.getValue<boolean>('workbench.welcomePage.experimentalOnboarding')) {
++		} else if (!this.productService.openToWelcomeMainPage && this.showFeaturedWalkthrough && this.storageService.isNew(StorageScope.APPLICATION) && !this.configurationService.getValue<boolean>('workbench.welcomePage.experimentalOnboarding')
++			// FriedLiver: a walkthrough asked for by id (the first launch's Agents walkthrough) that its extension hasn't
++			// registered yet opens once it does; don't replace it with the first built-in one meanwhile.
++			&& !editorInput?.selectedCategory) {
+ 			const firstSessionDateString = this.storageService.get(firstSessionDateStorageKey, StorageScope.APPLICATION) || new Date().toUTCString();
+ 			const daysSinceFirstSession = ((+new Date()) - (+new Date(firstSessionDateString))) / 1000 / 60 / 60 / 24;
+ 			const fistContentBehaviour = daysSinceFirstSession < 1 ? 'openToFirstCategory' : 'index';
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts
+index ac89ae8e..2c161390 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts
+@@ -626,6 +626,7 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+ 			step.completionEvents.push('stepSelected');
+ 		}
+ 
++		let alreadyDone = false;
+ 		for (let event of step.completionEvents) {
+ 			const [_, eventType, argument] = /^([^:]*):?(.*)$/.exec(event) ?? [];
+ 
+@@ -643,8 +644,10 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+ 						this.stepCompletionContextKeyExpressions.add(expression);
+ 						expression.keys().forEach(key => this.stepCompletionContextKeys.add(key));
+ 						event = eventType + ':' + expression.serialize();
++						// FriedLiver: a context that already holds (a folder is open for `onContext:workspaceFolderCount > 0`)
++						// completes the step. Upstream only marked the event as seen, so the step stayed open all session.
+ 						if (this.contextService.contextMatchesRules(expression)) {
+-							this.sessionEvents.add(event);
++							alreadyDone = true;
+ 						}
+ 					} else {
+ 						console.error('Unable to parse context key expression:', expression, 'in walkthrough step', step.id);
+@@ -667,6 +670,9 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+ 
+ 			this.registerCompletionListener(event, step);
+ 		}
++		if (alreadyDone) {
++			this.progressStep(step.id);
++		}
+ 	}
+ 
+ 	private registerCompletionListener(event: string, step: IWalkthroughStep) {
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
+index 777f3ad8..ded32e70 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
+@@ -42,6 +42,8 @@ export type RestoreWalkthroughsConfigurationValue = { folder: string; category?:
+ const configurationKey = 'workbench.startupEditor';
+ const oldConfigurationKey = 'workbench.welcome.enabled';
+ const telemetryOptOutStorageKey = 'workbench.telemetryOptOutShown';
++/** FriedLiver: the walkthrough the first launch opens, contributed by the built-in extensions/friedliver-agents. */
++export const friedliverWalkthroughId = 'friedliver.friedliver-agents#friedliver.gettingStarted';
+ 
+ export class StartupPageEditorResolverContribution extends Disposable implements IWorkbenchContribution {
+ 
+@@ -212,13 +214,17 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+ 		}
+ 
+ 		if (startupEditorTypeID === gettingStartedInputTypeId) {
++			// FriedLiver: the first launch opens the Agents walkthrough instead of upstream's Copilot-led Setup one. The
++			// page waits for the extension to register it (GettingStartedPage rebuilds when a walkthrough is added).
++			const firstLaunch = this.storageService.isNew(StorageScope.APPLICATION);
+ 			this.editorService.openEditor({
+ 				resource: GettingStartedInput.RESOURCE,
+ 				options: {
+ 					index: editor ? 0 : undefined,
+ 					pinned: false,
+ 					preserveFocus: this.shouldPreserveFocus(),
+-					...{ showTelemetryNotice }
++					...{ showTelemetryNotice },
++					...(firstLaunch ? { selectedCategory: friedliverWalkthroughId } : {})
+ 				},
+ 			});
+ 		}
+@@ -246,8 +252,8 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+ 			return; // experimental onboarding is disabled
+ 		}
+ 
+-		if (this.chatEntitlementService.sentiment.hidden) {
+-			return; // AI features are hidden, do not show AI-focused onboarding
++		if (this.chatEntitlementService.sentiment.hidden || this.configurationService.getValue<boolean>('chat.disableAIFeatures') === true) {
++			return; // AI features are hidden, do not show AI-focused onboarding (FriedLiver: also when only the setting says so)
+ 		}
+ 
+ 		if (!this.storageService.isNew(StorageScope.APPLICATION)) {
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
 index 168a3d01..d95769b5 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
@@ -153,3 +265,17 @@ index 168a3d01..d95769b5 100644
  					},
  				},
  				{
+diff --git a/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts b/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts
+index d725507e..5fd80031 100644
+--- a/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts
+@@ -22,7 +22,8 @@ registerAction2(class extends Action2 {
+ 			id: 'workbench.action.welcomeOnboarding2026',
+ 			title: localize2('welcomeOnboarding2026', "Welcome Onboarding 2026"),
+ 			category: Categories.Developer,
+-			f1: true,
++			// FriedLiver: upstream's onboarding signs in to GitHub Copilot, which FriedLiver doesn't ship.
++			f1: false,
+ 		});
+ 	}
+ 

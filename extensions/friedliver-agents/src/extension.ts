@@ -26,14 +26,14 @@ import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
 import { SystemControl, systemSettings } from './host/system';
-import { ReviewUi } from './host/review';
+import { ReviewUi, type ReviewPlacement } from './host/review';
 import { RemoteControl } from './remote/host';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
-import { isVendor, rosterOf, shownAgents } from './shared/accounts';
+import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
@@ -135,6 +135,8 @@ export class Controller {
   private thumbQueue: Promise<unknown> = Promise.resolve();
   private readonly scaler: ReturnType<typeof workerScaler>;
   private claudeTimer?: ReturnType<typeof setTimeout>;
+  /** Connecting Claude Code to the browser, one write of ~/.claude.json at a time. */
+  private claudeLink: Promise<void> = Promise.resolve();
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
@@ -232,6 +234,7 @@ export class Controller {
       autoAllowLinkedReads: () => userSetting(vscode.workspace.getConfiguration('friedliver.chat').inspect<unknown>('autoAllowLinkedReads')).value === true,
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
+      indexEnabled: () => vscode.workspace.getConfiguration('friedliver.index').get<boolean>('enabled', true),
       indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),
       indexTurnEnded: (chatId) => this.projectIndex?.turnEnded(chatId),
       primer: async (_chatId, text, maxTokens) => this.projectIndex?.primer(text, maxTokens),
@@ -272,7 +275,7 @@ export class Controller {
       checkpointDir: path.join(context.globalStorageUri.fsPath, 'checkpoints'),
       outputDir: path.join(context.globalStorageUri.fsPath, 'output'),
       ui: {
-        showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review)),
+        showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review) ?? this.besideManager()),
         closeReview: (id) => void this.reviews.close(id),
         askCommand: (ask) => !this.inlineChats.has(ask.chatId ?? '') && void this.askCommand(ask),
         askPermission: (ask) => !this.inlineChats.has(ask.chatId) && void this.askPermission(ask),
@@ -370,8 +373,10 @@ export class Controller {
     command('friedliver.links.useExternal', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'external', vscode.ConfigurationTarget.Global));
     this.browser.registerLinkOpener(linkMode);
     command('friedliver.system.showLog', () => this.systemLog.show(true));
-    command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
+    command('friedliver.connectClaudeBrowser', () => this.connectClaudeCommand());
     // Integration tests must not write the developer's ~/.claude.json.
+    // Opt-in (friedliver.browser.externalClients, off by default): on, this launch's token is written and the
+    // entry kept; off, an entry an earlier FriedLiver added is removed and ~/.claude.json is otherwise not touched.
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
@@ -748,7 +753,7 @@ export class Controller {
         case 'createTask': {
           const approval = await this.taskApproval(m.approval, [m.agent]);
           if (approval === null) return;
-          const chat = await this.core.createChat(m.agent, { worktree: m.worktree, title: m.prompt, choices: m.choices?.[m.agent], approval });
+          const chat = await this.core.createChat(m.agent, { worktree: m.worktree, title: m.prompt, choices: m.choices?.[m.agent], approval, messageFollows: true });
           void this.core.send(chat.id, m.prompt).catch((err: unknown) => this.error(err));
           return;
         }
@@ -1058,6 +1063,11 @@ export class Controller {
     else this.inboxWanted = true;
   }
 
+  /** While you look at the Agent Manager, a diff an agent opens goes beside it, unfocused, instead of covering it. */
+  private besideManager(): ReviewPlacement | undefined {
+    return this.tasksPanel?.active ? { viewColumn: vscode.ViewColumn.Beside, focus: false } : undefined;
+  }
+
   openTasks(): void {
     if (this.tasksPanel) {
       this.tasksPanel.reveal();
@@ -1099,8 +1109,12 @@ export class Controller {
 
   /** "Run a Task on Several Agents": one prompt, a chat per agent, to compare. */
   async fanoutCommand(): Promise<void> {
+    // Preselected: the agents that can run (not ones the Accounts page found not installed); Demo only when nothing else can.
+    const roster = this.roster();
+    const vendors = roster.agents.filter((a) => a !== 'demo' && installedOrUnknown(roster, a));
+    const preselected = vendors.length ? vendors : preselectAgents(roster, []);
     const picked = await vscode.window.showQuickPick(
-      shownAgents(this.showDemo()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: a !== 'demo' })),
+      roster.agents.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: preselected.includes(a) })),
       { title: 'Run a task on which agents?', canPickMany: true },
     );
     if (!picked?.length) return;
@@ -1617,18 +1631,34 @@ export class Controller {
    * launch's token file and the secret-free `friedliver-browser` stdio entry in ~/.claude.json. With
    * the setting off, revokes the token and removes both. `show` reports the result (the Connect command).
    */
-  private async connectClaude(show: boolean): Promise<void> {
+  private connectClaude(show: boolean): Promise<void> {
+    // One at a time: the command and the setting it turns on both get here, and both write ~/.claude.json.
+    this.claudeLink = this.claudeLink.then(() => this.linkClaude(show));
+    return this.claudeLink;
+  }
+
+  /** FriedLiver: Connect Claude Code to the browser: the explicit opt-in; turns friedliver.browser.externalClients on in your user settings. */
+  private async connectClaudeCommand(): Promise<void> {
+    if (!this.browserSetting('externalClients', false)) {
+      // The setting's change connects (onConfig); this call reports the result.
+      await vscode.workspace.getConfiguration('friedliver.browser').update('externalClients', true, vscode.ConfigurationTarget.Global);
+    }
+    await this.connectClaude(true);
+  }
+
+  private async linkClaude(show: boolean): Promise<void> {
     const say = (text: string, error = false) => {
       if (error) this.log.warn(text);
       else this.log.info(text);
       if (show) void (error ? vscode.window.showErrorMessage(text) : vscode.window.showInformationMessage(text));
     };
     try {
-      if (!this.browserSetting('externalClients', true)) {
+      if (!this.browserSetting('externalClients', false)) {
         this.core.revokeExternal();
         await removeTokenFile(this.context.globalStorageUri.fsPath);
-        await unregisterClaude(CLAUDE_CONFIG());
-        return say('Claude Code is not connected to the browser: friedliver.browser.externalClients is off.');
+        // Only the entry FriedLiver added, and only when there is one: otherwise the file isn't written.
+        const removed = await unregisterClaude(CLAUDE_CONFIG());
+        return say(`Claude Code is not connected to the browser: friedliver.browser.externalClients is off${removed ? '; removed the friedliver-browser entry FriedLiver had added to ~/.claude.json' : ''}.`);
       }
       const storage = this.context.globalStorageUri.fsPath;
       // First, before anything can fail: an older http entry points at a port another process may hold now.

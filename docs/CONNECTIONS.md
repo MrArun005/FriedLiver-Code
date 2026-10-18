@@ -163,7 +163,10 @@ The separate Claude Code VS Code extension, and `claude` run in FriedLiver's
 terminal, reach the browser tools (and only those) through an MCP server named
 `friedliver-browser`:
 
-- On start, with `friedliver.browser.externalClients` on (default), FriedLiver
+- It is opt-in: `friedliver.browser.externalClients` is off by default, and
+  until you turn it on (or run **FriedLiver: Connect Claude Code to the
+  browser**, which turns it on) FriedLiver writes nothing to `~/.claude.json`.
+- On start, with `friedliver.browser.externalClients` on, FriedLiver
   mints a random 256-bit token for this launch and writes `{url, token}` to
   `<globalStorage>/external/browser-token.json` (0600, in a fresh 0700 folder;
   deleted again when the window closes). It then sets
@@ -183,7 +186,8 @@ terminal, reach the browser tools (and only those) through an MCP server named
   took over a stale port learns nothing and its answers are dropped. No file, no
   server, or a wrong proof gives "FriedLiver isn't running".
 - The server is the same 127.0.0.1-only HTTP server the chats use, with the
-  same Host/Origin checks. The external client gets the `browser_*` tools only;
+  same Host/Origin checks. The external client gets the `browser_*` tools only
+  (not `system_*`: the computer itself stays with FriedLiver's own chats);
   anything else is "not found". Its token is refused as a plain bearer, and
   used nonces are refused.
 - Every action (open, click, type, back, reload) asks with a non-modal popup
@@ -195,7 +199,10 @@ terminal, reach the browser tools (and only those) through an MCP server named
   site asks again. Full auto in a chat does not cover Claude Code; only
   `friedliver.browser.externalAutoApprove` (default off) does. The URL rules,
   the own-tab-only rule and `agentToAgent: off` apply as for chats.
-- **FriedLiver: Connect Claude Code to the browser** does this again and says
-  what happened. Start a new Claude Code session afterwards to pick up the
-  server. Turning `externalClients` off revokes the token and removes the file and the entry.
+- **FriedLiver: Connect Claude Code to the browser** turns the setting on (if
+  it isn't), does this again and says what happened. Start a new Claude Code
+  session afterwards to pick up the server. Turning `externalClients` off
+  revokes the token and removes the file and the entry FriedLiver added (only
+  that one: a `friedliver-browser` server set up some other way is left alone,
+  and FriedLiver won't overwrite it either).
 - Both settings are read from your user settings only.

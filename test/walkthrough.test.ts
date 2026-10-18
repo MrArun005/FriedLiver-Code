@@ -59,3 +59,13 @@ it('starts the Demo agent, the accounts check and the Agent Manager from their s
   expect(steps.find((s) => s.id === 'mention')?.title).toContain('@gemini');
   expect(byId.editInPlace).toEqual([{ id: 'friedliver.editSelection', args: [] }]);
 });
+
+it('is the walkthrough the first launch opens (patch 0140), and upstream Copilot onboarding stays off', () => {
+  const pkg = manifest as unknown as { publisher: string; name: string };
+  const patch = readFileSync(path.join(__dirname, '..', 'patches', '0140-welcome-says-friedliver.patch'), 'utf8').replace(/\r\n/g, '\n');
+  expect(patch).toContain(`+export const friedliverWalkthroughId = '${pkg.publisher}.${pkg.name}#${walkthrough.id}';`);
+  expect(patch).toMatch(/'workbench\.welcomePage\.experimentalOnboarding': \{[^}]*\n\+\t\t\tdefault: false,/);
+  // Its first step completes when a folder is already open: the service completes a step whose context already holds.
+  expect(steps[0].completionEvents).toContain('onContext:workspaceFolderCount > 0');
+  expect(patch).toContain('+			this.progressStep(step.id);');
+});

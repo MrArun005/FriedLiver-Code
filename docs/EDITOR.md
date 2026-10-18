@@ -23,7 +23,7 @@ the extension is installed in VS Code or Antigravity.
    agent gets the function around the cursor (from the language's outline),
    or the cursor's line if no function is found.
 2. Describe the change. The box's title shows which agent will do it. Start
-   with `@claude`, `@gpt`, `@gemini` or `@demo` to pick another one, or use
+   with `@claude`, `@codex`, `@gemini` or `@demo` to pick another one, or use
    the button in the box. Otherwise you get the agent you last used for edits
    in this folder. Before you pick one, it's `friedliver.edit.defaultAgent`
    (Claude unless you change it).
