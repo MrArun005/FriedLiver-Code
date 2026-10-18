@@ -43,24 +43,47 @@ export interface DiscussHost {
   message(from: string, to: string, text: string): Promise<unknown>;
 }
 
-/** Tool kinds a discussion may use: reading, searching, thinking, fetching a page. */
-const READ_KINDS = new Set(['read', 'search', 'think', 'fetch']);
-/** FriedLiver tools that only look: the project index, the chat list, a page's text. */
-const READ_TOOLS = /^(index_[a-z]+|list_agents|list_chats|read_chat|browser_snapshot|browser_screenshot|browser_console)$/;
+/** ACP tool kinds a discussion may use, as the agent's adapter reports them: reading, searching, fetching a page. */
+const READ_KINDS = new Set(['read', 'search', 'fetch']);
+/** FriedLiver tools that only look, by exact name: the project index, the chat list, a page's text. */
+const READ_TOOLS = new Set([
+  'index_search',
+  'index_symbols',
+  'index_read',
+  'index_outline',
+  'index_related',
+  'index_diff',
+  'index_changes',
+  'list_agents',
+  'list_chats',
+  'read_chat',
+  'browser_snapshot',
+  'browser_screenshot',
+  'browser_console',
+]);
+/** The real MCP name of one of those (Claude's toolName in the call's _meta), exactly: never a display title. */
+const READ_MCP = /^mcp__friedliver(?:-browser)?__([a-z_]+)$/;
 
 export const DISCUSS_READ_ONLY = 'FriedLiver refused this: the chat is in a discussion, where agents may only read and search. Say what you would change instead.';
 
-/** Whether a permission request may go to the user (or the chat's rules) during a discussion. Fails closed. */
-export function discussionAllows(tool: { kind?: string | null; title?: string | null; command?: boolean; diffs?: boolean }): boolean {
+/**
+ * Whether a permission request may go to the user (or the chat's rules) during a discussion. Decided
+ * on the call's kind and its real tool name (`toolName`, from the adapter's _meta), never its title,
+ * which the agent or a tool writes. Anything it doesn't recognise is refused.
+ */
+export function discussionAllows(tool: { kind?: string | null; toolName?: string; command?: boolean; diffs?: boolean }): boolean {
   if (tool.command || tool.diffs) return false;
-  if (tool.kind && READ_KINDS.has(tool.kind)) return true;
-  // Claude names an MCP tool mcp__friedliver__<tool>; the bridge checks the call itself too.
-  const m = /friedliver(?:__|[\s:./-]+)([a-z_]+)/i.exec(tool.title ?? '');
-  return !!m && READ_TOOLS.test(m[1]);
+  if (tool.toolName !== undefined) {
+    const m = READ_MCP.exec(tool.toolName);
+    if (m) return READ_TOOLS.has(m[1]);
+    // Another MCP server's tool, or a look-alike of ours: its kind is only its own say-so.
+    if (/mcp|__|friedliver/i.test(tool.toolName)) return false;
+  }
+  return !!tool.kind && READ_KINDS.has(tool.kind);
 }
 
 /** Whether a FriedLiver tool call may run during a discussion. */
-export const discussionAllowsBridge = (call: Pick<BridgeCall, 'tool'>): boolean => READ_TOOLS.test(call.tool);
+export const discussionAllowsBridge = (call: Pick<BridgeCall, 'tool'>): boolean => READ_TOOLS.has(call.tool);
 
 const clamp = (n: number | undefined, lo: number, hi: number, d: number) => (n === undefined || !Number.isFinite(n) ? d : Math.min(hi, Math.max(lo, Math.round(n))));
 

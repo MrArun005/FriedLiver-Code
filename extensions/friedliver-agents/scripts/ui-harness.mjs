@@ -17,9 +17,11 @@
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 //        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
 //        &fixture=approvals[&countdown=1] (approvals at every weight: routine, review, careful; ui-fixture-approvals.mjs)
+//        &fixture=discuss|discuss-before (/discuss: Postgres vs MySQL, running, split, agreed; before = the same question by /ask, ui-fixture-discuss.mjs)
 //        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
+//   --only discuss   run only the /discuss card's checks (screenshots discuss-*-{1200,640}-dark.png to --out)
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
@@ -41,6 +43,7 @@ import { createRequire } from 'node:module';
 import { accountsFixture } from './ui-fixture-accounts.mjs';
 import { inboxFixture } from './ui-fixture-inbox.mjs';
 import { approvalsFixture } from './ui-fixture-approvals.mjs';
+import { discussFixture } from './ui-fixture-discuss.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -173,6 +176,8 @@ function page(params) {
             ? referenceFixture(Date.now())
             : params.get('fixture') === 'approvals'
               ? approvalsFixture(Date.now(), { countdown: params.get('countdown') === '1' })
+            : params.get('fixture') === 'discuss' || params.get('fixture') === 'discuss-before'
+              ? discussFixture(Date.now(), { before: params.get('fixture') === 'discuss-before' })
             : params.get('fixture') === 'inbox' || params.get('fixture') === 'inbox-empty'
               ? inboxFixture(Date.now(), { answered: params.get('fixture') === 'inbox-empty' })
             : params.get('fixture') === 'permissions' || surface === 'permissions'
@@ -325,7 +330,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks }[opts.only ?? ''];
+  const only = { discuss: discussChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -1982,6 +1987,53 @@ function sharedGallery() {
 }
 
 // ---- Approvals: routine rows, review and careful cards, the Allow menu, hold to allow, the Inbox lanes ----
+
+async function discussChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const shot = async (p, name, element) => {
+    const file = path.join(out, `${name}.png`);
+    await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    console.log(`  ${file}`);
+  };
+  const noScroll = (p) => p.evaluate(() => [...document.querySelectorAll('.transcript, body')].every((e) => e.scrollWidth <= e.clientWidth + 1));
+  for (const width of [1200, 640]) {
+    const before = await open(`surface=chat&theme=dark-2026&fixture=discuss-before&select=chat-main`, width, 1400, 2);
+    await before.waitForSelector('.link-card');
+    await before.waitForTimeout(500);
+    await shot(before, `discuss-chat-${width}-dark-before`);
+    await before.close();
+    for (const [chat, name] of [['chat-main', 'running'], ['chat-split', 'split'], ['chat-agreed', 'agreed']]) {
+      const p = await open(`surface=chat&theme=dark-2026&fixture=discuss&select=${chat}`, width, 1400, 2);
+      await p.waitForSelector('.fl-discuss');
+      await p.waitForTimeout(500);
+      check(await noScroll(p), `${width} ${name}: no sideways scroll`);
+      check((await p.locator('.transcript .prose').count()) === 1, `${width} ${name}: the starting agent's discussion turns fold into the card`);
+      await shot(p, `discuss-${name}-${width}-dark`);
+      await shot(p, `discuss-${name}-card-${width}-dark`, '.fl-discuss');
+      await p.close();
+    }
+  }
+  const p = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-split', 1200, 1400);
+  await p.waitForSelector('.fl-discuss');
+  check((await p.locator('.fl-discuss .fl-btn--primary:not(.fl-split-caret)').count()) === 1, 'one primary on the card: Carry out (its split caret aside)');
+  check(!(await p.locator('.fl-discuss__log').evaluate((e) => e.open)), 'the transcript is folded once there is a conclusion');
+  await p.evaluate(() => (window.__posted.length = 0));
+  await p.locator('.fl-discuss .fl-split > .fl-btn--primary').click();
+  const carried = await p.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
+  check(carried.length === 1 && carried[0].act === 'carry' && carried[0].agent === 'codex', 'Carry out goes to the agent the summary suggests');
+  await p.locator('.fl-discuss .fl-split-caret').click();
+  check((await p.locator('.fl-menu [role^="menuitem"]').count()) === 3, 'the split menu lists every participant');
+  await p.close();
+  const r = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main', 1200, 1400);
+  await r.waitForSelector('.fl-discuss');
+  check((await r.locator('.fl-discuss .fl-btn--primary').count()) === 0, 'no primary while it runs');
+  await r.evaluate(() => (window.__posted.length = 0));
+  await r.getByRole('button', { name: 'Stop' }).click();
+  const stop = await r.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
+  check(stop.length === 1 && stop[0].act === 'stop', 'Stop asks the host to stop the discussion');
+  await r.close();
+}
 
 async function approvalsChecks({ open, check }) {
   const out = opts.out;

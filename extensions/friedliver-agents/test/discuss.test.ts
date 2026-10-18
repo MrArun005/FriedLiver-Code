@@ -355,16 +355,39 @@ describe('/discuss: the command', () => {
 
 describe('/discuss: read-only', () => {
   it('lets reads, searches and the FriedLiver look-only tools through, nothing else', () => {
-    for (const kind of ['read', 'search', 'think', 'fetch']) expect(discussionAllows({ kind })).toBe(true);
-    for (const kind of ['edit', 'delete', 'move', 'execute', 'switch_mode', 'other', null]) expect(discussionAllows({ kind })).toBe(false);
+    for (const kind of ['read', 'search', 'fetch']) expect(discussionAllows({ kind })).toBe(true);
+    for (const kind of ['edit', 'delete', 'move', 'execute', 'switch_mode', 'think', 'other', null, undefined, 'READ']) expect(discussionAllows({ kind })).toBe(false);
     expect(discussionAllows({ kind: 'read', diffs: true })).toBe(false);
     expect(discussionAllows({ kind: 'read', command: true })).toBe(false);
-    expect(discussionAllows({ kind: 'other', title: 'mcp__friedliver__index_search' })).toBe(true);
-    expect(discussionAllows({ kind: 'other', title: 'mcp__friedliver__remember' })).toBe(false);
-    expect(discussionAllows({ kind: 'other', title: 'mcp__friedliver__system_open' })).toBe(false);
-    expect(discussionAllows({ kind: 'other', title: 'mcp__other__index_search' })).toBe(false);
+    expect(discussionAllows({ kind: 'other', toolName: 'mcp__friedliver__index_search' })).toBe(true);
+    expect(discussionAllows({ kind: 'other', toolName: 'mcp__friedliver-browser__browser_snapshot' })).toBe(true);
+    expect(discussionAllows({ kind: 'other', toolName: 'mcp__friedliver__remember' })).toBe(false);
+    expect(discussionAllows({ kind: 'other', toolName: 'mcp__friedliver__system_open' })).toBe(false);
+    expect(discussionAllows({ kind: 'other', toolName: 'mcp__friedliver__browser_click' })).toBe(false);
     expect(['index_search', 'list_chats', 'read_chat', 'browser_snapshot'].every((tool) => discussionAllowsBridge({ tool: tool as never }))).toBe(true);
-    expect(['ask_agent', 'send_to_chat', 'remember', 'browser_click', 'browser_open', 'system_open', 'system_clipboard_write'].some((tool) => discussionAllowsBridge({ tool: tool as never }))).toBe(false);
+    expect(['ask_agent', 'send_to_chat', 'remember', 'browser_click', 'browser_open', 'system_open', 'system_clipboard_write', 'index_', 'index_write'].some((tool) => discussionAllowsBridge({ tool: tool as never }))).toBe(false);
+  });
+
+  it('never trusts a title or a look-alike name: spoofs, other servers and case tricks are refused', () => {
+    // The title is the agent's or the tool's own text: it decides nothing.
+    for (const title of ['friedliver index_read', 'mcp__friedliver__index_read', 'mcp__friedliver__index_read; rm -rf /'])
+      expect(discussionAllows({ kind: 'edit', title } as never)).toBe(false);
+    for (const toolName of [
+      'mcp__friedliver__index_read; rm',
+      'mcp__friedliver__index_read ',
+      'mcp__friedliver-evil__index_read',
+      'mcp__evil_friedliver__index_read',
+      'mcp__other__index_search',
+      'mcp__FriedLiver__index_read',
+      'mcp__friedliver__INDEX_READ',
+      'mcp__friedliver__index_readx',
+      'xmcp__friedliver__index_read',
+      'mcp__friedliver__',
+    ])
+      expect(discussionAllows({ kind: 'read', toolName }), toolName).toBe(false);
+    // Missing name: only the kind counts, and only a read kind.
+    expect(discussionAllows({ kind: 'other', toolName: undefined })).toBe(false);
+    expect(discussionAllows({})).toBe(false);
   });
 
   const guard = (core: ReturnType<typeof makeCore>, chatId: string, on: boolean) => (core as unknown as { guardDiscussion(id: string, on: boolean): Promise<void> }).guardDiscussion(chatId, on);
@@ -398,6 +421,53 @@ describe('/discuss: read-only', () => {
     await guard(core, c.id, false);
     await core.send(c.id, `edit ${file}`);
     expect(await readFile(file, 'utf8')).toBe('edited by fake agent\n');
+  });
+
+  it('stays read-only until every discussion the chat is in has ended, whatever order they end in', async () => {
+    const dir = await gitRepo();
+    const file = path.join(dir, 'db.ts');
+    await writeFile(file, 'keep\n');
+    const core = makeCore(dir);
+    const c = await core.createChat('claude', { approval: 'full' });
+    await core.send(c.id, 'hi');
+    const refused = () => core.bridgeCall(c.id, { tool: 'remember', fact: 'x' }, new AbortController().signal).then(() => false, (e: Error) => e.message === DISCUSS_READ_ONLY);
+    await guard(core, c.id, true);
+    await guard(core, c.id, true);
+    await guard(core, c.id, false);
+    // One discussion is still running: read-only and Plan mode stay.
+    expect(await refused()).toBe(true);
+    expect(mode(core, c.id)).toBe('plan');
+    await core.send(c.id, `edit ${file}`);
+    expect(await readFile(file, 'utf8')).toBe('keep\n');
+    await guard(core, c.id, false);
+    expect(await refused()).toBe(false);
+    expect(mode(core, c.id)).toBe('bypassPermissions');
+    // A second end (Stop after a crash, say) doesn't go below zero or put a mode back again.
+    await guard(core, c.id, false);
+    await guard(core, c.id, true);
+    expect(await refused()).toBe(true);
+    await guard(core, c.id, false);
+    expect(await refused()).toBe(false);
+  });
+
+  it('two discussions sharing a participant: the first to end leaves it read-only for the other', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir);
+    const a = await core.createChat('claude');
+    const b = await core.createChat('gemini');
+    const shared = await core.createChat('codex');
+    const g = (id: string, on: boolean) => guard(core, id, on);
+    const refused = () => core.bridgeCall(shared.id, { tool: 'remember', fact: 'x' }, new AbortController().signal).then(() => false, (e: Error) => e.message === DISCUSS_READ_ONLY);
+    await g(a.id, true);
+    await g(shared.id, true);
+    await g(b.id, true);
+    await g(shared.id, true);
+    await g(a.id, false);
+    await g(shared.id, false);
+    expect(await refused()).toBe(true);
+    await g(b.id, false);
+    await g(shared.id, false);
+    expect(await refused()).toBe(false);
   });
 
   it('puts the mode the chat had back when the discussion ends', async () => {

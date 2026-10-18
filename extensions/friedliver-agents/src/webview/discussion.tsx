@@ -161,7 +161,7 @@ function Conclusion({ d }: { d: DiscussionItem }) {
       </section>
       <section class="fl-discuss__section" aria-label="Recommended next step">
         <div class="fl-discuss__label">
-          <Icon name="forward" />
+          <Icon name="send" />
           Recommended next step
         </div>
         <span class="fl-discuss__next">{c.next}</span>
