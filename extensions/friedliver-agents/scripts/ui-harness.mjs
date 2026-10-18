@@ -21,6 +21,7 @@
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
+//   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
 
 import { spawnSync } from 'node:child_process';
@@ -28,7 +29,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL, URLSearchParams } from 'node:url';
 import { parseArgs } from 'node:util';
 import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
@@ -53,6 +54,8 @@ const { values: opts } = parseArgs({
     port: { type: 'string', default: '5178' },
     themes: { type: 'string', default: 'black-blue,light-blue' },
     only: { type: 'string' },
+    // --gutter-shot before|after: also save review/left-gutter-<it>-{480,1200}.png
+    'gutter-shot': { type: 'string' },
   },
 });
 
@@ -285,8 +288,9 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  if (opts.only === 'images' || opts.only === 'inbox' || opts.only === 'approvals' || opts.only === 'labels') {
-    await (opts.only === 'inbox' ? inboxChecks : opts.only === 'approvals' ? approvalsChecks : opts.only === 'labels' ? labelChecks : imagesChecks)({ open, check, posted });
+  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks }[opts.only ?? ''];
+  if (only) {
+    await only({ open, check, posted, save });
     await browser.close();
     if (problems.length) {
       console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1302,6 +1306,7 @@ async function shoot() {
   await imagesChecks({ open, check, posted });
   await inboxChecks({ open, check, posted });
   await labelChecks({ open, check, posted });
+  await gutterChecks({ open, check, posted, save });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1546,6 +1551,116 @@ async function labelChecks({ open, check }) {
     }
     check(hits.length === 0, `no numbered agent label on ${query}${hits.length ? ` [${[...new Set(hits)].slice(0, 5).join(' | ')}]` : ''}`);
     await p.close();
+  }
+}
+
+// ---- The chat's left and right gutter: nothing in the transcript reaches past it ----
+
+/**
+ * Every box in the transcript (and its ::before/::after drawn with position: absolute, like a timeline's
+ * dots and spine), clipped by any scrolling or clipping box inside it, must sit within the transcript's
+ * gutter: left >= gutter - 0.5 and right <= width - gutter + 0.5, the scrollbar left out. And the page
+ * never scrolls sideways.
+ */
+async function gutterOffenders(p) {
+  return p.evaluate(() => {
+    const t = document.querySelector('.transcript');
+    if (!t) return { gutter: 0, offenders: ['no .transcript'], pageScroll: false, sideways: 0 };
+    const gutter = parseFloat(window.getComputedStyle(t).paddingLeft);
+    const box = t.getBoundingClientRect();
+    const min = box.left + gutter - 0.5;
+    const max = box.left + t.clientWidth - gutter + 0.5;
+    const offenders = [];
+    const name = (el) => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''}`;
+    const clipOf = (el) => {
+      let l = -Infinity;
+      let r = Infinity;
+      for (let a = el.parentElement; a && a !== t; a = a.parentElement) {
+        const cs = window.getComputedStyle(a);
+        if (cs.overflowX !== 'visible' || cs.contain.includes('paint')) {
+          const ar = a.getBoundingClientRect();
+          l = Math.max(l, ar.left);
+          r = Math.min(r, ar.right);
+        }
+      }
+      return [l, r];
+    };
+    const visible = (el, cs) => cs.display !== 'none' && cs.visibility !== 'hidden' && !(cs.position === 'absolute' && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clipPath === 'inset(50%)'));
+    for (const el of t.querySelectorAll('*')) {
+      const cs = window.getComputedStyle(el);
+      if (!visible(el, cs) || el.closest('svg') !== null && el.tagName.toLowerCase() !== 'svg') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 1 || r.height <= 1) continue;
+      const [cl, cr] = clipOf(el);
+      const left = Math.max(r.left, cl);
+      const right = Math.min(r.right, cr);
+      if (right - left <= 1) continue;
+      if (left < min || right > max) offenders.push(`${name(el)} ${Math.round(left - box.left)}..${Math.round(box.left + t.clientWidth - right)}`);
+      for (const pseudo of ['::before', '::after']) {
+        const ps = window.getComputedStyle(el, pseudo);
+        if (ps.content === 'none' || ps.position !== 'absolute' || ps.display === 'none') continue;
+        const w = parseFloat(ps.width);
+        if (!(w > 1) || !(parseFloat(ps.height) > 1)) continue;
+        const pl = parseFloat(ps.left);
+        if (Number.isNaN(pl)) continue;
+        // left is from the padding box of the containing block; for the element itself as that block, near enough.
+        const at = r.left + parseFloat(cs.borderLeftWidth) + pl;
+        if (Math.max(at, cl) < min || Math.min(at + w, cr) > max) offenders.push(`${name(el)}${pseudo} ${Math.round(at - box.left)}`);
+      }
+    }
+    return { gutter, offenders, pageScroll: document.scrollingElement.scrollWidth > window.innerWidth, sideways: Math.max(0, t.scrollWidth - t.clientWidth - 1) };
+  });
+}
+
+/** The same items with a long unbreakable word, path or URL added to every text: nothing may push the transcript wider. */
+function stretched(v, key) {
+  // Functions hoist, constants don't: shoot() runs before the module's later lines.
+  const LONG = 'averyveryverylongunbreakabletoken'.repeat(12);
+  const TEXTS = ['text', 'title', 'commandLine', 'path', 'line', 'message', 'output', 'name', 'target', 'always', 'cwd', 'summary', 'last'];
+  if (typeof v === 'string') return TEXTS.includes(key) && v.length > 2 ? `${v} ${key === 'path' || key === 'cwd' ? '/' : 'https://example.com/'}${LONG}` : v;
+  if (Array.isArray(v)) return v.map((x) => stretched(x, key));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'id' || k.endsWith('Id') ? x : stretched(x, k)]));
+  return v;
+}
+
+async function gutterChecks({ open, check }) {
+  const shots = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  const now = Date.now();
+  const sets = [
+    ['', fixture(now)],
+    ['fixture=approvals&', approvalsFixture(now)],
+    ['fixture=subagents&', subagentsFixture(now)],
+    ['fixture=permissions&', permissionsFixture(now)],
+    ['fixture=steps&', stepsFixture(now)],
+    ['fixture=reference&', referenceFixture(now)],
+  ];
+  // Each chat of each fixture, in the editor and in the side bar, plus the largest text size.
+  const pages = sets.flatMap(([q, fx]) => fx.state.chats.flatMap((c) => [`${q}select=${c.id}`, `side=1&${q}select=${c.id}`]).map((query) => ({ query, fx })));
+  pages.push({ query: 'textSize=17&fixture=reference&select=chat-long', fx: sets[5][1] }, { query: 'textSize=17&select=chat-c5', fx: sets[0][1] });
+  for (const theme of ['dark-2026', 'light-2026']) {
+    for (const width of [320, 480, 640, 900, 1200]) {
+      const bad = [];
+      for (const { query, fx } of pages) {
+        const p = await open(`surface=chat&theme=${theme}&${query}`, width, 900);
+        // A spinner mid-turn is a rotated square: measure it at rest.
+        await p.addStyleTag({ content: '*, *::before, *::after { animation: none !important; transition: none !important; }' });
+        const report = (r, how) => (r.offenders.length || r.pageScroll || r.sideways) && bad.push(`${query}${how} (gutter ${r.gutter}): ${r.pageScroll ? 'the page scrolls sideways; ' : ''}${r.sideways ? `the transcript scrolls sideways (${r.sideways}px); ` : ''}${[...new Set(r.offenders)].slice(0, 6).join(', ')}`);
+        report(await gutterOffenders(p), '');
+        // Long words, paths and URLs everywhere.
+        const selected = new URLSearchParams(query).get('select');
+        await p.evaluate((m) => window.postMessage(m, '*'), { type: 'snapshot', state: { ...fx.state, chats: fx.state.chats.map((c) => ({ ...c, items: stretched(c.items, 'items') })) }, selected, now: Date.now() });
+        await p.waitForTimeout(150);
+        report(await gutterOffenders(p), ' with long words');
+        if (theme === 'dark-2026' && (width === 480 || width === 1200) && query === 'fixture=approvals&select=chat-shop' && opts['gutter-shot']) {
+          // As after a sideways trackpad swipe (or a focus that scrolls it into view): as far right as it goes.
+          await p.evaluate(() => (document.querySelector('.transcript').scrollLeft = 1e6));
+          fs.mkdirSync(shots, { recursive: true });
+          await p.screenshot({ path: path.join(shots, `left-gutter-${opts['gutter-shot']}-${width}.png`), animations: 'disabled', caret: 'hide' });
+        }
+        await p.close();
+      }
+      check(bad.length === 0, `the transcript keeps its gutter at ${width}px, ${theme}${bad.length ? `:\n      ${bad.join('\n      ')}` : ''}`);
+    }
   }
 }
 

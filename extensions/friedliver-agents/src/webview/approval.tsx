@@ -436,7 +436,7 @@ function Risks({ a }: { a: Approval }) {
       ))}
       {a.risk.safer && (
         <li data-safer="">
-          Safer: <code>{a.risk.safer}</code>
+          <span class="apv-safer">Safer:</span> <code>{a.risk.safer}</code>
         </li>
       )}
     </ul>
