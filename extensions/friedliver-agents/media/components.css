@@ -416,7 +416,7 @@
 }
 .fl-pill__sub {
   flex: none;
-  color: var(--fg-2);
+  color: var(--fg);
 }
 .fl-pill__dot {
   flex: none;
@@ -437,6 +437,7 @@
   --pill-px: var(--sp-3);
   --pill-fs: var(--t-100);
 }
+/* Text on a pill's own fill is --fg, never --fg-2 (3.9:1 on --pill-bg): a muted or routine pill is the neutral pill, untinted. */
 /* Tones: the tone's colour on a 14% tint of itself. Risk uses neutral, warn and error with a dot. */
 .fl-pill[data-tone] {
   /* Tone text mixes toward the text colour in light themes (--tone-ink), so green and amber stay readable on white. */
@@ -445,7 +446,7 @@
   --pill-fill-hover: color-mix(in srgb, var(--tone) var(--tint-hover), transparent);
 }
 .fl-pill[data-tone='muted'] {
-  --pill-c: var(--fg-2);
+  --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
   --pill-fill-hover: var(--pill-hover);
 }
@@ -478,7 +479,7 @@
   --tone: var(--fg-2);
 }
 .fl-pill[data-tone='routine'] {
-  --pill-c: var(--fg-2);
+  --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
 }
 /* A pill you can press: the composer's agents and model pills, filter chips. */
@@ -599,7 +600,7 @@ button.fl-pill:focus-visible {
   border: 0;
   border-radius: var(--r-4);
   background: transparent;
-  color: var(--fg-2);
+  color: var(--fg);
   font: inherit;
   font-size: var(--t-90);
   line-height: 1;
@@ -610,8 +611,9 @@ button.fl-pill:focus-visible {
   width: var(--i-sm);
   height: var(--i-sm);
 }
-.fl-seg__item:hover:not(:disabled) {
-  color: var(--fg);
+/* Segments read --fg on the track (--fg-2 is 3.9:1 on --pill-bg); hover shows as a fill. */
+.fl-seg__item:hover:not(:disabled, [aria-checked='true'], [aria-selected='true'], [aria-pressed='true']) {
+  background: var(--hover-bg);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
@@ -828,6 +830,9 @@ button.fl-pill:focus-visible {
 .fl-radio__desc {
   font-size: var(--t-85);
   color: var(--fg-2);
+}
+.fl-radio:hover .fl-radio__desc {
+  color: var(--fg);
 }
 .fl-radio:is(:has(:checked), [data-on]) .fl-radio__desc {
   color: inherit;
@@ -1556,7 +1561,8 @@ button.fl-row,
   outline-offset: -1px;
 }
 .fl-row[aria-selected='true'] > .icon,
-.fl-row[aria-selected='true'] .fl-row__meta {
+.fl-row[aria-selected='true'] .fl-row__meta,
+.fl-row:is(button, [role='option'], [role='treeitem']):hover .fl-row__meta {
   color: inherit;
 }
 .fl-row__text {
