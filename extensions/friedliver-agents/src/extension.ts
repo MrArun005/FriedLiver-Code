@@ -40,6 +40,12 @@ import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
 import { clip, panelTitle } from './shared/view';
+import { linkDestination, linkTarget } from './shared/links';
+
+/** friedliver.links.openIn: where web links you click open. */
+const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
+/** The system browser, skipping FriedLiver's own link opener. */
+const openInSystemBrowser = (url: string) => vscode.env.openExternal(vscode.Uri.parse(url, true), { allowContributedOpeners: false });
 import type { OutsideImages } from './shared/gallery';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -311,6 +317,9 @@ export class Controller {
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
     command('friedliver.openBrowser', () => this.browser.show());
+    command('friedliver.links.useBuiltin', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'builtin', vscode.ConfigurationTarget.Global));
+    command('friedliver.links.useExternal', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'external', vscode.ConfigurationTarget.Global));
+    this.browser.registerLinkOpener(linkMode);
     command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
     // Integration tests must not write the developer's ~/.claude.json.
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
@@ -806,6 +815,9 @@ export class Controller {
           return;
         case 'copy':
           await vscode.env.clipboard.writeText(m.text);
+          return;
+        case 'openLink':
+          await this.openLink(m.url, m.modifier);
           return;
         case 'openText': {
           // An untitled document in FriedLiver's output language, so it wraps; the user's own files keep their setting.
@@ -1444,11 +1456,21 @@ export class Controller {
     for (const s of this.surfaces) post(s, message);
   }
 
+  /** A web link the user clicked: FriedLiver's browser or the system's, by friedliver.links.openIn, the other way with Cmd/Ctrl. */
+  private async openLink(url: string, modifier: boolean): Promise<void> {
+    // Checked here too: a webview's word is never enough.
+    const t = linkTarget(url);
+    if (t?.kind !== 'web') return;
+    if (linkDestination(linkMode(), modifier) === 'builtin' && this.browser.supported()) return this.browser.openUserTab(t.url);
+    await openInSystemBrowser(t.url);
+  }
+
   private async offerSignInUrl(agent: AgentKey, url: string): Promise<void> {
     if (this.asked.has(url)) return;
     this.asked.add(url);
     const open = await vscode.window.showInformationMessage(`${AGENT_FACES[agent].name} printed a sign-in link.`, 'Open sign-in page');
-    if (open) await vscode.env.openExternal(vscode.Uri.parse(url, true));
+    // Sign-in pages talk back to the agent on this machine: the system browser, never FriedLiver's.
+    if (open) await openInSystemBrowser(url);
   }
 
   private async pickImages(): Promise<Attachment[]> {

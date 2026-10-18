@@ -42,6 +42,21 @@ function Page() {
           editor’s secret storage and go only to their own agent. Nothing here starts an agent until you press Check, Refresh or a sign-in.
         </p>
       </header>
+      <section class="acct-card acct-links" aria-label="Links">
+        <div class="acct-links-row">
+          <div>
+            <h2>Open links in</h2>
+            <p class="hint">Links you click in FriedLiver, its editor and terminal. In chats and the Agent Manager, hold {MAC ? '⌘' : 'Ctrl'} to open one the other way.</p>
+          </div>
+          <div class="seg" role="radiogroup" aria-label="Open links in">
+            {(['builtin', 'external'] as const).map((mode) => (
+              <button key={mode} type="button" role="radio" class="seg-item" aria-checked={view.links === mode} onClick={() => send({ type: 'setLinks', mode })}>
+                {mode === 'builtin' ? 'FriedLiver browser' : 'System browser'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
       {view.cards.map((card) => (
         <Card key={card.agent} card={card} focused={view.focus?.agent === card.agent} />
       ))}
@@ -283,5 +298,7 @@ function Choice({ card, option, k, label }: { card: AccountCard; option: Session
     </div>
   );
 }
+
+const MAC = /Mac/.test(navigator.platform);
 
 render(<Page />, document.getElementById('root')!);

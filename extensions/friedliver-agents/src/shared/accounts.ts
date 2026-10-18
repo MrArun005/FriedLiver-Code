@@ -1,6 +1,7 @@
 // Agents & Accounts: what each agent's card shows and what the page may ask
 // for (docs/ACCOUNTS.md). Pure, so the host, the page and the tests agree.
 // Secrets never come here: a card says only whether a key is set.
+import type { LinkMode } from './links';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type AgentKey } from './model';
 import { offers, optionKey, type AgentDefaults, type SessionOption } from './session';
 
@@ -329,6 +330,8 @@ export interface AccountsView {
   /** The card to scroll to; `n` grows each time the page is opened on one. */
   focus?: { agent: AgentKey; n: number };
   showDemo: boolean;
+  /** Where links you click open. */
+  links: LinkMode;
 }
 
 /** Which way of signing in is in use, as well as FriedLiver can tell without asking the agent. */
@@ -350,6 +353,8 @@ export type CliWhat = 'install' | 'signIn' | 'signOut';
 export type AccountsMessage =
   | { type: 'ready' }
   | { type: 'openSettings' }
+  /** Where links you click open (friedliver.links.openIn). */
+  | { type: 'setLinks'; mode: LinkMode }
   /** Starts the agent and a short session: sign-in, version and models. */
   | { type: 'check'; agent: AgentKey }
   /** One of the agent's own browser or terminal methods, by id. */
@@ -376,6 +381,7 @@ export function parseAccountsMessage(raw: unknown, shown: readonly AgentKey[]): 
   if (!isObj(raw) || typeof raw.type !== 'string') return null;
   const m = raw;
   if (m.type === 'ready' || m.type === 'openSettings') return { type: m.type };
+  if (m.type === 'setLinks') return m.mode === 'builtin' || m.mode === 'external' ? { type: 'setLinks', mode: m.mode } : null;
   if (!isAgentKey(m.agent) || !shown.includes(m.agent)) return null;
   const agent = m.agent;
   switch (m.type) {
