@@ -493,9 +493,9 @@ async function spacing(page, width, P, box, css) {
   row(name, 'gap between turns', 24, gaps.turn);
   row(name, 'gap between steps in a turn', 16, gaps.within);
   await other.goto(`${base}/?surface=chat&theme=dark-2026&select=chat-c2`);
-  await other.waitForSelector('.ask');
-  row(name, 'decision card margin', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.ask')).marginTop)));
-  row(name, 'decision card padding', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.ask')).paddingTop)));
+  await other.waitForSelector('.fl-card.apv');
+  row(name, 'decision card margin', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.fl-card.apv')).marginTop)));
+  row(name, 'decision card padding', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.fl-card.apv')).paddingTop)));
   await other.close();
 }
 
