@@ -886,6 +886,9 @@ export class Controller {
       case 'retry':
         retry();
         return;
+      case 'compact':
+        await this.core.compact(chatId).catch((err: unknown) => this.error(err));
+        return;
       case 'signIn':
         await this.accounts.signIn(action.agent, action.methodId, retry);
         return;
