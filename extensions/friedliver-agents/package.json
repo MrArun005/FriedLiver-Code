@@ -298,6 +298,11 @@
         "command": "friedliver.index.rebuild",
         "title": "Rebuild Project Index",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.diagnoseClaudeSessions",
+        "title": "Diagnose Claude Code Sessions",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
