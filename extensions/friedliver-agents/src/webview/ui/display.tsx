@@ -3,6 +3,8 @@ import type { ButtonHTMLAttributes, ComponentChildren } from 'preact';
 import { Icon, type IconName } from './icon';
 import { AGENT_FACES, type AgentKey } from '../../shared/model';
 import { IconButton, cx } from './controls';
+import { markFor } from './marks';
+import { useTooltip } from './overlays';
 
 export type Tone = 'working' | 'done' | 'failed' | 'waiting' | 'warn' | 'accent' | 'muted' | 'info' | 'success' | 'error' | 'routine' | 'review' | 'careful';
 
@@ -134,6 +136,20 @@ export function Avatar({ agent, size }: { agent: AgentKey; size?: 'sm' | 'md' | 
   );
 }
 
+/** An agent's mark (§2.22b): a 16px monochrome drawing in the text colour; its hue where the tab is selected or hovered. */
+export function AgentMark({ agent }: { agent: string }) {
+  const m = markFor(agent);
+  const name = AGENT_FACES[agent as AgentKey]?.name ?? 'Agent';
+  return (
+    <span class="fl-mark" data-agent={agent} role="img" aria-label={name} title={name}>
+      <svg viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
+        {m.fill && <path d={m.fill} fill="currentColor" />}
+        <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
 export const Spinner = ({ size, label = 'Working' }: { size?: 'sm' | 'md' | 'lg'; label?: string }) => (
   <span class={cx('fl-spinner', size && size !== 'md' && `fl-spinner--${size}`)} role="status" aria-label={label} />
 );
@@ -255,18 +271,24 @@ export const CardFoot = ({ start, children }: { start?: boolean; children: Compo
   </div>
 );
 
-/** One tab in a strip the caller lays out (role tablist): its own keyboard, an optional × to close it. */
+/**
+ * One tab in a strip the caller lays out (role tablist): its own keyboard, an optional × to close it.
+ * `tip`: an immediate tooltip below it (§2.18, a mark-only tab) in place of the native title.
+ */
 export function Tab({
   selected,
   onSelect,
   onClose,
   closeTitle = 'Close',
+  tip,
   children,
   ...rest
-}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'class' | 'role' | 'onClick'> & { selected: boolean; onSelect(): void; onClose?: () => void; closeTitle?: string; children: ComponentChildren }) {
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'class' | 'role' | 'onClick'> & { selected: boolean; onSelect(): void; onClose?: () => void; closeTitle?: string; tip?: string; children: ComponentChildren }) {
+  const tooltip = useTooltip<HTMLSpanElement>({ text: tip, delay: 0, side: 'below' });
   return (
-    <span class="fl-tab-wrap tab-wrap" data-active={selected ? '' : undefined}>
-      <button {...rest} type="button" role="tab" class="fl-tab tab" aria-selected={selected} onClick={onSelect}>
+    <span ref={tooltip.ref} class="fl-tab-wrap tab-wrap" data-active={selected ? '' : undefined} {...tooltip.handlers}>
+      {tooltip.tip}
+      <button {...rest} title={tip ? undefined : rest.title} type="button" role="tab" class="fl-tab tab" aria-selected={selected} onClick={onSelect}>
         {children}
       </button>
       {onClose && (

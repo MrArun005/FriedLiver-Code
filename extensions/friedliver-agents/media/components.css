@@ -1516,6 +1516,95 @@ textarea.fl-input {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.fl-tab > .fl-mark {
+  flex: none;
+}
+.fl-tab:hover > .fl-mark,
+.fl-tab[aria-selected='true'] > .fl-mark {
+  color: var(--hue);
+}
+/*
+ * Fit (§2.18): a crowded strip (data-fit, set from tabFit()) shrinks its tabs before it scrolls.
+ * full: tabs shrink from their own width. compact: squeezed to --tab-min-compact; only the open, hovered
+ * or focused tab keeps room for its ×. icon: every tab but the open one is a mark-only tab, 26 square,
+ * its status a badge on the mark (closed by middle-click, Delete or Cmd/Ctrl+W; an immediate tooltip
+ * names it); the open one keeps its title (--tab-open-min and up) and shows its × on hover or focus.
+ */
+[data-fit] > .fl-tab-wrap {
+  flex: 0 1 auto;
+  max-width: var(--tab-max);
+}
+[data-fit='compact'] > .fl-tab-wrap {
+  min-width: var(--tab-min-compact);
+}
+[data-fit='compact'] > .fl-tab-wrap:not([data-active], :hover, :focus-within) > .fl-tab,
+[data-fit='icon'] > .fl-tab-wrap[data-active]:not(:hover, :focus-within) > .fl-tab {
+  padding-right: var(--sp-2);
+}
+/* Marks only: even the open tab's × waits for the pointer or focus, so its title keeps the room. */
+[data-fit='icon'] > .fl-tab-wrap[data-active]:not(:hover, :focus-within) > .fl-tab__x {
+  opacity: 0;
+}
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) {
+  flex: none;
+}
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) > .fl-tab {
+  position: relative;
+  padding: 0 var(--sp-1);
+}
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-tab__label,
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-pill,
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) > .fl-tab__x {
+  display: none;
+}
+/* The status as a badge on the mark's bottom-right corner, ringed in the page colour. */
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-dot {
+  position: absolute;
+  top: calc(50% + var(--sp-half));
+  left: calc(var(--sp-1) + var(--i-md) - var(--dot) + var(--sp-half));
+  box-shadow: 0 0 0 var(--sp-half) var(--bg);
+}
+/* The open tab keeps its title: at least --tab-open-min; with marks only it takes all the room the others leave. */
+[data-fit] > .fl-tab-wrap[data-active] {
+  min-width: var(--tab-open-min);
+}
+[data-fit='icon'] > .fl-tab-wrap[data-active] {
+  flex: 1 1 auto;
+  max-width: none;
+}
+/* Still too many: a whole window of marks beside it, the open tab taking exactly the rest (--open-w, useTabStrip). */
+[data-fit='icon'][data-windowed] > .fl-tab-wrap[data-active] {
+  flex: none;
+  width: var(--open-w, auto);
+}
+/* Past the fit it scrolls by whole tabs; a tab an edge cuts is clipped away (--clip-l/-r from useTabStrip). */
+[role='tablist'][data-overflow] {
+  scroll-snap-type: x mandatory;
+  clip-path: inset(0 var(--clip-r, 0) 0 var(--clip-l, 0));
+}
+[role='tablist'][data-overflow] > .fl-tab-wrap {
+  scroll-snap-align: start;
+}
+
+/* ---- Agent mark (§2.22b): 16, monochrome in the text colour, its hue on a hovered or selected tab ---- */
+
+/* Unknown agents and FriedLiver's own (Demo) stay in the text colour when lit. */
+.fl-mark,
+.fl-mark[data-agent='demo'] {
+  --hue: currentColor;
+}
+.fl-mark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--i-md);
+  height: var(--i-md);
+  color: inherit;
+}
+.fl-mark > svg {
+  width: 100%;
+  height: 100%;
+}
 
 /* ---- List row / tree row (§2.17): 26 tall, r4; indent 12 a level ---- */
 
