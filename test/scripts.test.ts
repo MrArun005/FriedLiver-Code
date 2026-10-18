@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
+import { checkRun, parseRef } from '../scripts/fetch-build.mjs';
+import { diffStyles } from '../scripts/workbench-shots.mjs';
 import { codesignArgs, friedliverVersion, keepChromiumLocale, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
@@ -204,5 +206,43 @@ describe('Chromium locale packs in the packaged app', () => {
     const build = fs.readFileSync(path.join(root, 'scripts', 'build.mjs'), 'utf8');
     expect(build).toContain('keepChromiumLocale(n)');
     expect(build.indexOf('trimPackagedApp(out);')).toBeLessThan(build.indexOf('buildInstaller(arch, out);'));
+  });
+});
+
+describe('workbench harness', () => {
+  const good = {
+    repository: { full_name: 'MrArun005/FriedLiver-Code' },
+    head_repository: { full_name: 'MrArun005/FriedLiver-Code' },
+    path: '.github/workflows/build.yml',
+    conclusion: 'success',
+    event: 'workflow_dispatch',
+    head_branch: 'ui/workbench-modern',
+  };
+
+  it('takes only "latest", v* tags and run ids as the build', () => {
+    expect(parseRef('latest')).toEqual({ kind: 'release', ref: null });
+    expect(parseRef('v1.142.0-5')).toEqual({ kind: 'release', ref: 'v1.142.0-5' });
+    expect(parseRef('39085377230')).toEqual({ kind: 'run', ref: '39085377230' });
+    for (const bad of ['', '--repo=x', 'v1; rm -rf /', '123/other-artifact', 'main']) expect(() => parseRef(bad)).toThrow();
+  });
+
+  it('runs builds only from trusted runs of build.yml', () => {
+    expect(() => checkRun(good)).not.toThrow();
+    expect(() => checkRun({ ...good, head_branch: 'main', event: 'push' })).not.toThrow();
+    expect(() => checkRun({ ...good, head_repository: { full_name: 'evil/FriedLiver-Code' } })).toThrow(/fork/);
+    expect(() => checkRun({ ...good, event: 'pull_request' })).toThrow(/event/);
+    expect(() => checkRun({ ...good, path: '.github/workflows/ci.yml' })).toThrow(/build.yml/);
+    expect(() => checkRun({ ...good, head_branch: 'feat/x' })).toThrow(/branch/);
+    expect(() => checkRun({ ...good, head_branch: 'ui/../main' })).toThrow(/branch/);
+    expect(() => checkRun({ ...good, conclusion: 'failure' })).toThrow(/conclusion/);
+  });
+
+  it('reports every composer style that changed', () => {
+    const base = { '.composer': { color: 'red', 'border-radius': '8px' }, '.send-btn': { color: 'blue' } };
+    expect(diffStyles(base, structuredClone(base))).toEqual([]);
+    expect(diffStyles(base, { '.composer': { color: 'red', 'border-radius': '6px' }, '.send-btn': null })).toEqual([
+      '.composer border-radius: "8px" -> "6px"',
+      '.send-btn: present -> absent',
+    ]);
   });
 });
