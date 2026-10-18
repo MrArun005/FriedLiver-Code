@@ -1466,7 +1466,39 @@ svg[data-lit] .map-file-line:not(.lit) {
   padding-right: 0;
 }
 .gallery-item {
+  position: relative;
   min-width: 0;
+}
+/* The pin sits at the meta row's end: shown on hover and focus, always once pinned. */
+.gallery-item .gallery-meta {
+  margin-right: var(--h-sm);
+}
+/* Two classes: the button's own position: relative (components.css, loaded last) must not win. */
+.gallery-item > .gallery-pin {
+  position: absolute;
+  right: 0;
+  bottom: calc(var(--sp-half) * -1);
+  visibility: hidden;
+}
+.gallery-item:hover .gallery-pin,
+.gallery-item:focus-within .gallery-pin,
+.gallery-pin[aria-pressed='true'] {
+  visibility: visible;
+}
+/* Space used and Done looking, at the bar's end. */
+.gallery-store {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+}
+.gallery-used {
+  display: grid;
+  gap: var(--sp-half);
+  width: 112px;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+  white-space: nowrap;
 }
 button.gallery-card {
   display: flex;
@@ -3644,6 +3676,7 @@ button.file-row .icon {
 }
 .notice-detail {
   display: block;
+  margin: 0;
   white-space: pre-wrap;
 }
 .link-head {
