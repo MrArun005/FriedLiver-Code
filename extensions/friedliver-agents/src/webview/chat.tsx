@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
+import { MicVisualizer } from './micVisualizer';
 import {
   AGENT_FACES,
   boardColumn,
@@ -1528,6 +1529,8 @@ function Composer({
   // The mic: what the host's helper hears goes into the box at the caret, each partial replacing the last.
   const [mic, setMic] = useState<DictationState>('idle');
   const spoken = useRef<Segment | null>(null);
+  // The input's loudness, for the visualizer; a ref, so 30 levels a second don't redraw the composer.
+  const level = useRef({ level: 0, at: 0 });
   const latestInsert = useRef(insert);
   latestInsert.current = insert;
   const dictate = (on: boolean) => {
@@ -1547,6 +1550,10 @@ function Composer({
     const onMessage = (e: MessageEvent) => {
       const m = e.data as HostMessage;
       if (m?.type !== 'dictation' || m.chatId !== chat.id) return;
+      if ('level' in m) {
+        if (typeof m.level === 'number' && Number.isFinite(m.level)) level.current = { level: Math.min(1, Math.max(0, m.level)), at: performance.now() };
+        return;
+      }
       if ('text' in m) {
         if (!spoken.current) return;
         const next = spliceDictation(area.current?.value ?? '', spoken.current, m.text, m.final, LIMITS.text);
@@ -1788,6 +1795,7 @@ function Composer({
                 onClick={() => dictate(mic === 'idle')}
               >
                 <Icon name="mic" />
+                {mic === 'listening' && <MicVisualizer level={level} />}
               </button>
             )}
           </div>

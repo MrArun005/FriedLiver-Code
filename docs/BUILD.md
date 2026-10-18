@@ -88,7 +88,10 @@ The composer's mic runs `friedliver-dictate`, a small Swift program
 (`extensions/friedliver-agents/native/friedliver-dictate.swift`) that listens
 with AVAudioEngine and SFSpeechRecognizer (on-device when macOS has the
 language) and writes JSON lines (`{"partial":…}`, `{"final":…}`,
-`{"error":…,"code":…}`) that the extension streams into the message box.
+`{"error":…,"code":…}`, and `{"level":0…1}` about 20 times a second for the
+listening mic's visualizer) that the extension streams into the message box.
+The host checks every line (levels must be finite; they are clamped to 0…1)
+and forwards levels at most 30 times a second, to the dictating chat only.
 
 - `extensions/friedliver-agents/native/build.sh` builds it into the
   extension's `bin/` (gitignored, shipped by `.vscodeignore`), with its

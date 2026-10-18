@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { Dictation, MAX_SPOKEN, PRIVACY_PANES, helperArgs, helperPath, parseHelperLine } from '../src/host/dictation';
-import { spliceDictation } from '../src/shared/dictation';
+import { Dictation, LEVEL_MS, MAX_SPOKEN, PRIVACY_PANES, helperArgs, helperPath, parseHelperLine } from '../src/host/dictation';
+import { BARS, spliceDictation, visualizerFrame } from '../src/shared/dictation';
 import { parseWebviewMessage } from '../src/shared/messages';
 import { turnsLeft } from '../src/shared/session';
 
@@ -34,6 +34,15 @@ describe('the helper protocol', () => {
   it('ignores anything else', () => {
     for (const line of ['', 'hello', '[]', 'null', '"x"', '{"partial":3}', '{"other":"x"}', '{"partial":']) expect(parseHelperLine(line), line).toBeNull();
     expect(parseHelperLine(JSON.stringify({ partial: 'x'.repeat(70_000) }))).toBeNull();
+  });
+  it('reads loudness levels: finite, clamped to 0…1', () => {
+    expect(parseHelperLine('{"level":0.42}')).toEqual({ kind: 'level', level: 0.42 });
+    expect(parseHelperLine('{"level":0}')).toEqual({ kind: 'level', level: 0 });
+    expect(parseHelperLine('{"level":1.7}')).toEqual({ kind: 'level', level: 1 });
+    expect(parseHelperLine('{"level":-3}')).toEqual({ kind: 'level', level: 0 });
+    expect(parseHelperLine('{"level":1e999}')).toBeNull();
+    expect(parseHelperLine('{"level":"0.5"}')).toBeNull();
+    expect(parseHelperLine('{"level":null}')).toBeNull();
   });
   it('an unknown error code is a recognition error', () => {
     expect(parseHelperLine('{"error":"x","code":"rm -rf"}')).toMatchObject({ code: 'recognition' });
@@ -113,7 +122,7 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function setup(missing = false) {
+function setup(missing = false, clock = { t: 0 }) {
   const posts: { surface: string; chatId: string; update: unknown }[] = [];
   const children: FakeChild[] = [];
   const spawned: { file: string; args: string[]; options: unknown }[] = [];
@@ -125,6 +134,7 @@ function setup(missing = false) {
     post: (surface, chatId, update) => posts.push({ surface, chatId, update }),
     denied: (code) => denied.push(code),
     failed: (m) => failed.push(m),
+    now: () => clock.t,
     spawn: ((file: string, args: string[], options: unknown) => {
       spawned.push({ file, args, options });
       const c = new FakeChild();
@@ -137,7 +147,53 @@ function setup(missing = false) {
 }
 const flush = () => new Promise((r) => setImmediate(r));
 
+describe('the visualizer frame', () => {
+  it('rises toward a loud level, decays when quiet or when levels stop', () => {
+    let shown = 0;
+    for (let i = 0; i < 10; i++) shown = visualizerFrame(shown, 0.9, 20, i * 33).shown;
+    expect(shown).toBeGreaterThan(0.85);
+    const loud = visualizerFrame(shown, 0.9, 20, 400).bars;
+    expect(loud).toHaveLength(BARS);
+    let quiet = shown;
+    for (let i = 0; i < 30; i++) quiet = visualizerFrame(quiet, 0.9, 500, i * 33).shown;
+    expect(quiet).toBeLessThan(0.05);
+    const still = visualizerFrame(quiet, 0, 20, 400).bars;
+    for (const [i, h] of loud.entries()) expect(h, `bar ${i}`).toBeGreaterThan(still[i]);
+  });
+  it('bars stay between 15% and 100% of the pill', () => {
+    for (const level of [0, 0.5, 1]) {
+      for (const h of visualizerFrame(level, level, 0, 123).bars) {
+        expect(h).toBeGreaterThanOrEqual(0.15);
+        expect(h).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
 describe('Dictation (the helper process)', () => {
+  it('forwards levels at most every LEVEL_MS, only while listening', async () => {
+    const clock = { t: 1000 };
+    const t = setup(false, clock);
+    t.d.start('view', 'chat-1');
+    const c = t.children[0];
+    const level = async (v: number, at: number) => {
+      clock.t = at;
+      c.stdout.write(`{"level":${v}}\n`);
+      await flush();
+    };
+    await level(0.1, 1000);
+    await level(0.2, 1010);
+    await level(0.3, 1000 + LEVEL_MS);
+    await level(0.4, 1000 + LEVEL_MS + 5);
+    await level(5, 1000 + 2 * LEVEL_MS);
+    expect(t.updates().filter((u) => typeof u === 'object' && u !== null && 'level' in u)).toEqual([{ level: 0.1 }, { level: 0.3 }, { level: 1 }]);
+    t.d.stop('chat-1');
+    await level(0.5, 5000);
+    expect(t.updates().at(-1)).toEqual({ state: 'stopping' });
+    expect(t.posts.every((p) => p.chatId === 'chat-1')).toBe(true);
+  });
+
+
   it('spawns the bundled helper without a shell and streams partials then the final', async () => {
     const t = setup();
     t.d.start('view', 'chat-1');
@@ -265,7 +321,7 @@ describe('the bundled helper', () => {
     expect(plist).toContain('NSMicrophoneUsageDescription');
     expect(plist).toContain('NSSpeechRecognitionUsageDescription');
     const swift = readFileSync(path.join(root, 'native', 'friedliver-dictate.swift'), 'utf8');
-    for (const s of ['requiresOnDeviceRecognition', '"partial"', '"final"', '"mic-denied"', '"speech-denied"', 'SIGTERM', 'standardInput']) expect(swift).toContain(s);
+    for (const s of ['requiresOnDeviceRecognition', '"level"', '"partial"', '"final"', '"mic-denied"', '"speech-denied"', 'SIGTERM', 'standardInput']) expect(swift).toContain(s);
   });
 });
 

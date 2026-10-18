@@ -110,7 +110,8 @@ check from install to two agents talking to each other.
    while it works wait in a queue (Send now adds one to the running turn
    where the agent allows it).
    On a Mac, the **mic** in the message box dictates: click it and talk, and
-   the words appear at the caret as you speak. It stops after 2.5 s without
+   the words appear at the caret as you speak, while the mic turns into a
+   blue pill whose bars move with your voice. It stops after 2.5 s without
    new words, on a second click or on Esc. macOS asks once for microphone and
    speech-recognition permission for FriedLiver. Recognition runs on the Mac
    whenever macOS has the language on device (otherwise Apple's server does
