@@ -1,13 +1,16 @@
 // The editor side of the project index (projectIndex.ts): one index per trusted
 // workspace folder, kept in globalStorage between sessions (with its Merkle
 // tree), refreshed from a FileSystemWatcher, shown in the status bar, and
-// answering the index_* tools. On open only files whose stat changed are read,
-// and only those whose content changed are re-indexed; a git checkout, pull or
-// branch switch (HEAD moving) re-runs that same stat pass.
+// answering the index_* tools. On open the saved index answers at once, then
+// catches up in the background: git's hint, then the change journal since the
+// saved mark (macOS FSEvents), else a stat of every file. Only changed files are
+// read, and only changed content is re-indexed. A git checkout, pull or branch
+// switch (HEAD moving) or a .gitignore edit re-runs the stat pass.
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import * as vscode from 'vscode';
-import { answerIndex, ProjectIndex, readIndexFile, saveIndexFile, STAT_BATCH, type IndexCall } from './projectIndex';
+import { fseventsJournal, journalHelper, type Journal, type JournalMark } from './changeJournal';
+import { answerIndex, ProjectIndex, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
 
 /** git files that move on a checkout, pull or branch switch: re-check every file's stat then. */
 const HEAD_MOVED = /[/\\]\.git[/\\](HEAD|ORIG_HEAD|FETCH_HEAD)$/;
@@ -16,7 +19,11 @@ const CHANGE_DELAY_MS = 1_000;
 
 export class ProjectIndexHost implements vscode.Disposable {
   private indexes: ProjectIndex[] = [];
-  private building = false;
+  /** true: a first build, answers incomplete. 'verifying': answering from the saved index while it catches up. */
+  private building: boolean | 'verifying' = false;
+  private readonly journal?: Journal;
+  /** The journal mark taken at the last save: the next save's mark, once the watcher has had time to deliver what came before. */
+  private readonly pending = new Map<ProjectIndex, JournalMark | undefined>();
   private generation = 0;
   private readonly item = vscode.window.createStatusBarItem('friedliver.index', vscode.StatusBarAlignment.Right, 98);
   private readonly disposables: vscode.Disposable[] = [this.item];
@@ -28,7 +35,10 @@ export class ProjectIndexHost implements vscode.Disposable {
   constructor(
     private readonly storage: string,
     private readonly log: (message: string) => void = () => {},
+    extensionPath?: string,
   ) {
+    const helper = extensionPath ? journalHelper(extensionPath) : undefined;
+    this.journal = helper ? fseventsJournal(helper) : undefined;
     this.item.name = 'FriedLiver Project Index';
     this.item.command = 'friedliver.index.rebuild';
     this.disposables.push(
@@ -87,14 +97,16 @@ export class ProjectIndexHost implements vscode.Disposable {
   }
 
   private async build(gen: number, fresh: boolean): Promise<void> {
-    this.building = true;
     this.item.show();
+    this.pending.clear();
+    // Every saved index loads at once, without touching the files: answers start now.
+    // A missing, corrupt or older saved index loads nothing: that folder gets a full build.
+    if (!fresh) for (const ix of this.indexes) await ix.load(await readIndexFile(this.file(ix)));
+    if (gen !== this.generation) return;
+    this.building = this.indexes.every((ix) => ix.size > 0) ? 'verifying' : true;
+    this.status(this.building === 'verifying' ? `${this.summary()} · checking changes` : `$(sync~spin) Index · ${this.count().toLocaleString()} files`);
     try {
-      for (const ix of this.indexes) {
-        // A missing, corrupt or older saved index loads nothing: this becomes a full build.
-        if (!fresh) await ix.load(await readIndexFile(this.file(ix)));
-        if (!(await this.sync(gen, ix))) return;
-      }
+      for (const ix of this.indexes) if (!(await ix.catchUp(this.journal, () => this.tick(gen)))) return;
     } finally {
       if (gen === this.generation) {
         this.building = false;
@@ -104,16 +116,11 @@ export class ProjectIndexHost implements vscode.Disposable {
     }
   }
 
-  /** Every listed file through update(): a stat each, a read only where it changed. False when superseded. */
-  private async sync(gen: number, ix: ProjectIndex): Promise<boolean> {
-    const files = await ix.list();
-    ix.prune(new Set(files));
-    for (let i = 0; i < files.length; i += STAT_BATCH) {
-      if (gen !== this.generation) return false;
-      if (!(await ix.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
-      if (this.building) this.status(`$(sync~spin) Index · ${this.count().toLocaleString()} files`);
-      await new Promise((r) => setTimeout(r, 0));
-    }
+  /** Between batches: yields to the editor, shows progress, and says whether to go on (not superseded). */
+  private async tick(gen: number): Promise<boolean> {
+    if (gen !== this.generation) return false;
+    if (this.building === true) this.status(`$(sync~spin) Index · ${this.count().toLocaleString()} files`);
+    await new Promise((r) => setTimeout(r, 0));
     return gen === this.generation;
   }
 
@@ -133,9 +140,10 @@ export class ProjectIndexHost implements vscode.Disposable {
       if (gen !== this.generation) return;
       // Outside every folder (or the folder itself): never indexed. The rest go through the full build's filters.
       const inside = paths.filter((abs) => abs.startsWith(ix.root + path.sep));
-      // HEAD moved: the watcher may not report every file a big checkout touched. The stat pass is cheap.
-      if (!this.building && inside.some((abs) => HEAD_MOVED.test(abs))) {
-        await this.sync(gen, ix);
+      // HEAD moved: the watcher may not report every file a big checkout touched. A .gitignore edit can
+      // hide files no event names. The stat pass is cheap.
+      if (!this.building && inside.some((abs) => HEAD_MOVED.test(abs) || path.basename(abs) === '.gitignore')) {
+        await ix.syncAll(() => this.tick(gen));
         continue;
       }
       const rels = inside.map((abs) => path.relative(ix.root, abs));
@@ -152,6 +160,13 @@ export class ProjectIndexHost implements vscode.Disposable {
 
   private async save(): Promise<void> {
     for (const ix of this.indexes) {
+      if (!this.building) {
+        // The mark saved is the one taken at the previous save (or at open): the watcher has delivered
+        // everything before it by now, so the next open replays the journal from there.
+        const now = await this.journal?.now(ix.root);
+        if (this.pending.get(ix)) ix.mark = this.pending.get(ix);
+        this.pending.set(ix, now);
+      }
       // Keeps this root for later diffs (index_changes) and as the next open's base.
       ix.tree.snapshot();
       await saveIndexFile(this.file(ix), ix).catch((e: Error) => this.log(`Project index: could not save ${this.file(ix)}: ${e.message}`));

@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
-import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, readIndexFile, saveIndexFile, STAT_BATCH, tokenize } from '../src/host/projectIndex';
+import type { Journal } from '../src/host/changeJournal';
+import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -179,6 +180,11 @@ describe('what is never indexed', () => {
     const doc = (rel: string) => ({ rel, mtimeNs: '0', size: 1, hash: 'a'.repeat(64), len: 1, tokens: [['outsidesecret', 1]], symbols: [], imports: [] });
     const ix = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
     await ix.load({ v: 2, docs: [doc('link.ts'), doc('.env'), doc('gone.ts'), doc('ok.ts')] });
+    // Loading checks names only (it must be instant): the secret goes now.
+    expect(ix.has('.env')).toBe(false);
+    // Before the files are checked, a search never returns what the symlink points at: every read re-checks.
+    expect(await answerIndex([ix], { tool: 'index_search', query: 'outsidesecret' }, 'verifying')).not.toContain('link.ts');
+    await ix.catchUp();
     expect(['link.ts', '.env', 'gone.ts'].map((r) => ix.has(r))).toEqual([false, false, false]);
     expect(ix.has('ok.ts')).toBe(true);
   });
@@ -231,15 +237,25 @@ describe('the index_* tools on the tools server', () => {
 });
 
 /** What the editor does on open: the saved index back, then every listed file through update(). */
-async function reopen(root: string, saved: unknown, opts: Partial<ConstructorParameters<typeof ProjectIndex>[1]> = {}): Promise<ProjectIndex> {
+async function reopen(root: string, saved: unknown, opts: Partial<ConstructorParameters<typeof ProjectIndex>[1]> = {}, journal?: Journal): Promise<ProjectIndex> {
   const ix = new ProjectIndex(root, { maxFiles: 100_000, maxBytes: 1e9, ...opts });
   await ix.load(saved);
   ix.counts.stat = ix.counts.read = ix.counts.reindex = 0;
-  const files = await ix.list();
-  ix.prune(new Set(files));
-  for (let i = 0; i < files.length; i += STAT_BATCH) await ix.updateBatch(files.slice(i, i + STAT_BATCH));
+  await ix.catchUp(journal);
   return ix;
 }
+
+/** A journal that reports what the test says changed. */
+const fakeJournal = (changes: { files?: string[]; dirs?: string[] } | null, next = '900'): Journal & { asked: number } => ({
+  asked: 0,
+  async now() {
+    return { kind: 'fsevents', uuid: 'U', id: next };
+  },
+  async since() {
+    this.asked++;
+    return changes && { files: changes.files ?? [], dirs: changes.dirs ?? [], next: { kind: 'fsevents', uuid: 'U', id: next } };
+  },
+});
 const saveOf = (ix: ProjectIndex) => {
   ix.tree.snapshot();
   return JSON.parse(JSON.stringify(ix));
@@ -387,4 +403,109 @@ describe('the Merkle tree over the index', () => {
     expect(re.tree.visits).toBeLessThanOrEqual(21); // root + the changed directories, not all 1,021
     console.log(`20k files: full build ${fullMs.toFixed(0)} ms, reopen after 10 edits ${reMs.toFixed(0)} ms (${re.counts.stat} stats, ${re.counts.read} reads)`);
   }, 120_000);
+});
+
+describe('opening: ready at once, then caught up from the journal', () => {
+  const files40 = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`d${i % 4}/f${i}.ts`, `export const v${i} = ${i};\n`]));
+  const savedWith = (ix: ProjectIndex, id = '100') => {
+    ix.mark = { kind: 'fsevents', uuid: 'U', id };
+    return saveOf(ix);
+  };
+
+  it('serves the saved index before any file is checked', async () => {
+    const root = await project(files40);
+    const first = await build(root);
+    const saved = saveOf(first);
+    const ix = new ProjectIndex(root, { maxFiles: 1000, maxBytes: 1e8 });
+    await ix.load(saved);
+    expect(ix.counts.stat).toBe(0);
+    expect(ix.size).toBe(40);
+    expect(ix.tree.root()).toBe(first.tree.root());
+    expect(ix.search('v7', 5)[0].rel).toBe('d3/f7.ts');
+    expect(await answerIndex([ix], { tool: 'index_search', query: 'v7' }, 'verifying')).toContain('Checking files changed since the last session');
+  });
+
+  it('re-checks only the journal\'s paths, rescans its directories, and moves the mark', async () => {
+    const root = await project(files40);
+    const saved = savedWith(await build(root));
+    await writeFile(path.join(root, 'd0/f0.ts'), 'export const edited = 1;\n');
+    await writeFile(path.join(root, 'd1/new.ts'), 'export const added = 1;\n');
+    await rm(path.join(root, 'd2/f2.ts'));
+    await rename(path.join(root, 'd3'), path.join(root, 'moved'));
+    const journal = fakeJournal({ files: ['d0/f0.ts', 'd1/new.ts', 'd2/f2.ts'], dirs: ['d3', 'moved'] });
+    const ix = await reopen(root, saved, {}, journal);
+    expect(journal.asked).toBe(1);
+    expect(ix.counts.stat).toBeLessThan(40); // not every file: 3 paths + the 10 moved files, each checked again before a read
+    expect(ix.counts.read).toBe(2 + 10);
+    expect(ix.changes()!.changes.filter((c) => !c.path.startsWith('d3/') && !c.path.startsWith('moved/'))).toEqual([
+      { path: 'd0/f0.ts', change: 'M' },
+      { path: 'd1/new.ts', change: 'A' },
+      { path: 'd2/f2.ts', change: 'D' },
+    ]);
+    expect(ix.has('d3/f3.ts')).toBe(false);
+    expect(ix.has('moved/f3.ts')).toBe(true);
+    expect(ix.mark).toEqual({ kind: 'fsevents', uuid: 'U', id: '900' });
+    // The result matches a full build.
+    const full = await build(root);
+    expect(ix.tree.root()).toBe(full.tree.root());
+  });
+
+  it('checks every file without a saved mark, or when the journal cannot vouch for the history', async () => {
+    const root = await project(files40);
+    const unmarked = saveOf(await build(root));
+    const a = await reopen(root, unmarked, {}, fakeJournal({ files: [] }));
+    expect(a.counts.stat).toBe(40);
+    expect(a.mark?.id).toBe('900'); // taken before the check, so the next open can use the journal
+    const b = await reopen(root, savedWith(await build(root)), {}, fakeJournal(null));
+    expect(b.counts.stat).toBe(40);
+    const c = await reopen(root, savedWith(await build(root))); // no journal at all (Linux, Windows)
+    expect(c.counts.stat).toBe(40);
+  });
+
+  it('rescans for a .gitignore that changed, and uses git status and the HEAD diff as an extra hint', async () => {
+    const root = await project({ 'src/b.ts': 'two', 'src/c.ts': 'three' }, true);
+    const g = (...args: string[]) => execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', ...args], { cwd: root });
+    g('add', '.');
+    g('commit', '-qm', 'one');
+    // Untracked: a .gitignore can hide it (git keeps listing tracked files whatever .gitignore says).
+    await mkdir(path.join(root, 'logs'));
+    await writeFile(path.join(root, 'logs/a.ts'), 'one');
+    const first = await build(root);
+    expect(first.has('logs/a.ts')).toBe(true);
+    await first.catchUp(); // records HEAD
+    const saved = savedWith(first);
+
+    await writeFile(path.join(root, '.gitignore'), 'logs/\n');
+    await writeFile(path.join(root, 'src/b.ts'), 'edited, committed');
+    g('commit', '-qam', 'two');
+    await writeFile(path.join(root, 'src/c.ts'), 'edited, not committed');
+    await writeFile(path.join(root, 'src/untracked.ts'), 'new');
+    // The journal saw only the .gitignore: git's hint brings the rest.
+    const ix = await reopen(root, saved, {}, fakeJournal({ files: ['.gitignore'] }));
+    expect(ix.has('logs/a.ts')).toBe(false);
+    expect(ix.search('edited', 5).map((h) => h.rel).sort()).toEqual(['src/b.ts', 'src/c.ts']);
+    expect(ix.has('src/untracked.ts')).toBe(true);
+    expect(ix.counts.stat).toBeLessThan(20);
+    expect((await ix.gitHint()).paths).toEqual(expect.arrayContaining(['src/c.ts', 'src/untracked.ts', '.gitignore']));
+  });
+
+  it('applies git\'s hint even when the journal reports nothing', async () => {
+    const root = await project({ 'a.ts': 'one', 'b.ts': 'two' }, true);
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-qm', 'x'], { cwd: root });
+    const saved = savedWith(await build(root));
+    await writeFile(path.join(root, 'a.ts'), 'hinted');
+    const ix = await reopen(root, saved, {}, fakeJournal({}));
+    expect(ix.search('hinted', 5)[0]?.rel).toBe('a.ts');
+    expect(ix.counts.stat).toBe(2); // a.ts, and again before its read; b.ts untouched
+  });
+
+  it('reads git paths relative to a workspace folder inside the repository', async () => {
+    const root = await project({ 'sub/a.ts': 'one', 'other/b.ts': 'two' }, true);
+    execFileSync('git', ['add', '.'], { cwd: root });
+    await writeFile(path.join(root, 'sub/a.ts'), 'changed');
+    await writeFile(path.join(root, 'other/b.ts'), 'changed');
+    const ix = new ProjectIndex(path.join(root, 'sub'), { maxFiles: 10, maxBytes: 1e8 });
+    expect((await ix.gitHint()).paths).toEqual(['a.ts']);
+  });
 });
