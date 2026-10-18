@@ -323,3 +323,12 @@ describe('system tools from Claude Code outside FriedLiver', () => {
     await expect(s.requests.call(S1, { tool: 'list_chats' }, s.signal)).rejects.toThrow(/browser_\* and system_\*/);
   });
 });
+
+describe('what the card shows', () => {
+  it('spells out names from disk without direction or control characters', async () => {
+    const s = setup();
+    void s.requests.call('chat-1', { tool: 'system_open', app: 'Safari‮gnp.exe' }, s.signal).catch(() => {});
+    await s.flush();
+    expect(s.last().target).toEqual({ system: 'Safari gnp.exe' });
+  });
+});

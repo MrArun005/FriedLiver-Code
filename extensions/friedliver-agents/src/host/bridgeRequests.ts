@@ -263,7 +263,8 @@ export class BridgeRequests {
     const remembered = grant ? this.host.permissions?.system?.(call.tool, prepared.target) : undefined;
     const fullAuto = !!caller && caller.approval === 'full' && settings.fullAutoAllowed;
     const auto = !once && (fullAuto || this.allowedChats.has(allowKey) || !!remembered);
-    const shown = prepared.target.replace(/^(app|url|file):/, '');
+    // Names come from disk (an app's folder name): no control or direction characters that could make it read as another.
+    const shown = clean(prepared.target.replace(/^(app|url|file):/, ''), 300);
     if (caller) {
       if (!auto) this.room(id);
       const item: BridgeItem = {
