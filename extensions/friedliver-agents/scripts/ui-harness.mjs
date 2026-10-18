@@ -561,19 +561,27 @@ async function shoot() {
     await p.fill('.composer textarea', 'Fix the');
     const look = () =>
       p.evaluate(() => {
-        const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b), ring = window.getComputedStyle(b, '::after');
+        const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b);
         const probe = document.createElement('i');
-        probe.style.color = '#0078d4'; // the mic's brand blue, the same in every theme
+        probe.style.color = '#0078d4'; // the mic's brand blue while it listens, the same in every theme
         document.body.append(probe);
-        const want = window.getComputedStyle(probe).color;
+        const blue = window.getComputedStyle(probe).color;
         probe.remove();
         const r = b.getBoundingClientRect();
-        return { blue: cs.backgroundColor === want, white: cs.color === 'rgb(255, 255, 255)', size: r.width === 26 && r.height === 26, ring: ring.content !== 'none' && ring.borderTopWidth === '2px' && ring.borderTopColor === 'rgb(255, 255, 255)', opacity: cs.opacity };
+        const bars = [...b.querySelectorAll('.mic-bars i')].map((i) => new window.DOMMatrix(window.getComputedStyle(i).transform).d);
+        return { bg: cs.backgroundColor, blue: cs.backgroundColor === blue, bare: cs.backgroundColor === 'rgba(0, 0, 0, 0)', white: cs.color === 'rgb(255, 255, 255)', width: r.width, size: r.width === 26 && r.height === 26, bars, dot: !!b.querySelector('.mic-dot'), opacity: cs.opacity };
       });
-    const idle = await look();
-    check(idle.blue && idle.white && idle.size && !idle.ring, 'the mic is a 26px blue button with a white glyph, no ring at rest');
+    // Loudness from the host, as the helper sends it (about 20 a second).
+    const speak = async (level, ms) => {
+      for (let t = 0; t < ms; t += 50) await host({ level });
+    };
     await p.mouse.move(0, 0);
-    await save(p, 'composer-mic-idle', { element: '.composer' });
+    const idle = await look();
+    check(idle.bare && idle.white && idle.size && !idle.bars.length, 'idle: a bare white mic glyph, 26px, no background (Dark 2026)');
+    await p.hover('.cc-mic');
+    check(!(await look()).bare && !(await look()).blue, 'idle hover: a subtle tint, not the blue');
+    await p.mouse.move(0, 0);
+    await save(p, 'mic-idle-dark', { element: '.composer' });
     await p.click('.cc-mic');
     check((await dictates()).at(-1)?.on === true && (await dictates()).at(-1)?.chatId === 'chat-c5', 'one click starts dictating into this chat');
     check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
@@ -586,12 +594,23 @@ async function shoot() {
     check((await box()) === 'Fix the login redirect', 'the next partial replaces it');
     await p.mouse.move(0, 0);
     const listening = await look();
-    check(listening.blue && listening.ring && listening.opacity === '1', 'listening: still blue, with a white 2px ring');
-    await save(p, 'composer-mic-listening', { element: '.composer' });
+    check(listening.blue && listening.white && listening.width > 50 && listening.bars.length === 6, 'listening: the blue pill grows to fit the mic and 6 white bars');
+    await speak(0, 400);
+    const quiet = (await look()).bars;
+    await speak(0.9, 400);
+    const loud = (await look()).bars;
+    check(loud.every((h, i) => h > quiet[i] + 0.2), 'the bars rise with the loudness');
+    await speak(0.6, 300);
+    await save(p, 'mic-listening-dark', { element: '.composer' });
+    await p.waitForTimeout(600);
+    check((await look()).bars.every((h, i) => h < loud[i] - 0.2), 'the bars fall when the levels stop');
+    check(await p.evaluate(() => { const b = document.querySelector('.cc-mic').getBoundingClientRect(), t = document.querySelector('.composer textarea'); return parseFloat(window.getComputedStyle(t).paddingRight) >= b.width + 5; }), 'typed text stays clear of the pill');
     await p.click('.cc-mic');
     check((await dictates()).at(-1)?.on === false, 'a second click stops');
     check((await p.locator('.cc-mic[data-state="stopping"]').count()) === 1, 'the mic shows it is finishing');
-    check((await look()).opacity === '0.6', 'finishing: the mic at 60%');
+    await p.mouse.move(0, 0);
+    const stopped = await look();
+    check(stopped.size && stopped.bare && !stopped.bars.length, 'stopping shrinks the pill back to the bare mic');
     await host({ text: 'login redirect bug.', final: true });
     await host({ state: 'idle' });
     check((await box()) === 'Fix the login redirect bug.', 'the final words stay');
@@ -626,14 +645,28 @@ async function shoot() {
     check((await posted(p)).some((m) => m.type === 'attach'), '+ attaches images');
     await p.close();
     const light = await open('surface=chat&side=1&select=chat-c5&theme=light-2026', 900, 700);
-    await save(light, 'composer-mic-idle-light', { element: '.composer' });
+    const lightLook = await light.evaluate(() => {
+      const probe = document.createElement('i');
+      probe.style.color = 'var(--fg)';
+      document.body.append(probe);
+      const fg = window.getComputedStyle(probe).color;
+      probe.remove();
+      return window.getComputedStyle(document.querySelector('.cc-mic')).color === fg;
+    });
+    check(lightLook, 'idle in a light theme: the glyph takes the text colour');
+    await save(light, 'mic-idle-light', { element: '.composer' });
     await light.click('.cc-mic');
     await light.mouse.move(0, 0);
-    await save(light, 'composer-mic-listening-light', { element: '.composer' });
+    for (let t = 0; t < 400; t += 50) await light.evaluate(() => window.postMessage({ type: 'dictation', chatId: 'chat-c5', level: 0.6 }, '*'));
+    await light.waitForTimeout(100);
+    await save(light, 'mic-listening-light', { element: '.composer' });
     await light.close();
-    const blackBlue = await open('surface=chat&side=1&select=chat-c5&theme=black-blue', 900, 700);
-    await save(blackBlue, 'composer-mic-idle-black-blue', { element: '.composer' });
-    await blackBlue.close();
+    // Reduced motion: a pulsing dot instead of moving bars.
+    const still = await open('surface=chat&side=1&select=chat-c5&theme=dark-2026', 900, 700);
+    await still.emulateMedia({ reducedMotion: 'reduce' });
+    await still.click('.cc-mic');
+    check(await still.evaluate(() => !!document.querySelector('.cc-mic .mic-dot') && !document.querySelector('.cc-mic .mic-bars')), 'reduced motion: a pulsing dot, no bars');
+    await still.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
     check((await linux.locator('.cc-mic').count()) === 0, 'no mic off macOS');
     await linux.close();

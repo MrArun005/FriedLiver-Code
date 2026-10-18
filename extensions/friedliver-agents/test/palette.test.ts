@@ -83,36 +83,35 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
       expect(contrast(resolve('var(--sel-fg)', vars), sel), 'selected text').toBeGreaterThanOrEqual(7);
       expect(contrast(sel, menu), 'the selected row stands off the menu').toBeGreaterThan(1.15);
       expect(sel.slice(0, 3), 'hover differs from selected').not.toEqual(hover.slice(0, 3));
-      // The composer's mic: a white glyph on the theme's button blue, at rest and hovered.
-      for (const t of ['--mic-bg', '--mic-hover']) {
-        const back = over(resolve(`var(${t})`, vars), surface('--input-bg'));
-        expect(contrast(resolve('var(--mic-fg)', vars), back), `mic glyph on ${t}`).toBeGreaterThanOrEqual(4.5);
-      }
+      // The composer's mic at rest: a bare glyph on the message box, white in dark themes and the
+      // text colour in light ones (the body.vscode-light block). Listening: white on the brand blue.
+      const idle = resolve(name.startsWith('light') ? 'var(--fg)' : '#ffffff', vars);
+      expect(contrast(idle, surface('--input-bg')), 'idle mic glyph').toBeGreaterThanOrEqual(4.5);
+      expect(contrast(resolve('var(--mic-fg)', vars), over(resolve('var(--mic-bg)', vars), surface('--input-bg'))), 'listening mic').toBeGreaterThanOrEqual(4.5);
     });
   }
 
-  it('the mic keeps a white glyph at 4.5:1 on its brand blue in five themes and with none', () => {
+  it('the listening mic keeps white at 4.5:1 on its brand blue in five themes and with none; idle is white, or the text colour in light themes', () => {
     const json = (file: string) => JSON.parse(readFileSync(file, 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1')).colors;
     const blackBlue = json(path.join(__dirname, '../../friedliver-theme/themes/friedliver-black-blue-color-theme.json'));
-    const fixture = (name: string) => theme(name);
     const themes: Record<string, Record<string, string>> = {
-      'Black Blue': { '--vscode-button-background': blackBlue['button.background'], '--vscode-button-hoverBackground': blackBlue['button.hoverBackground'] },
-      'Dark 2026': fixture('dark-2026'),
-      'Light 2026': fixture('light-2026'),
+      'Black Blue': { '--vscode-button-background': blackBlue['button.background'] },
+      'Dark 2026': theme('dark-2026'),
+      'Light 2026': theme('light-2026'),
       // VS Code's built-in Dark Modern and Light Modern (dark_modern.json, light_modern.json).
-      'Dark Modern': { '--vscode-button-background': '#0078D4', '--vscode-button-hoverBackground': '#026EC1' },
-      'Light Modern': { '--vscode-button-background': '#005FB8', '--vscode-button-hoverBackground': '#0258A8' },
+      'Dark Modern': { '--vscode-button-background': '#0078D4' },
+      'Light Modern': { '--vscode-button-background': '#005FB8' },
       none: {},
     };
-    expect(blackBlue['button.background']).toBe('#7cc4ff');
     for (const [name, colors] of Object.entries(themes)) {
       const vars = { ...declarations(block()), ...colors };
-      for (const t of ['--mic-bg', '--mic-hover']) {
-        const back = resolve(`var(${t})`, vars);
-        expect(contrast(resolve('var(--mic-fg)', vars), back), `${name} ${t}`).toBeGreaterThanOrEqual(4.5);
-        expect(back.slice(0, 3), `${name} ${t} is the brand blue`).toEqual(hex(t === '--mic-bg' ? '#0078d4' : '#026ec1').slice(0, 3));
-      }
+      const back = resolve('var(--mic-bg)', vars);
+      expect(contrast(resolve('var(--mic-fg)', vars), back), name).toBeGreaterThanOrEqual(4.5);
+      expect(back.slice(0, 3), `${name}: the brand blue`).toEqual(hex('#0078d4').slice(0, 3));
     }
+    expect(declarations(block())['--mic-idle']).toBe('#fff');
+    const light = css.slice(css.indexOf('body.vscode-light,'), css.indexOf('}', css.indexOf('body.vscode-light,')));
+    expect(declarations(light)['--mic-idle']).toBe('var(--fg)');
   });
 
   it('defines each token once, and every var() the stylesheet reads', () => {
