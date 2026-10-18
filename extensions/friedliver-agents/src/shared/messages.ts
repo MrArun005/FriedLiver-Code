@@ -72,10 +72,10 @@ export type WebviewMessage =
   /** The Agent Manager on its Inbox: everything any agent waits on. */
   | { type: 'openInbox' }
   // Connections between chats and agents.
-  /** Continue this chat with another agent, in a new chat that starts from its transcript. */
-  | { type: 'handoff'; chatId: string; agent: AgentKey }
-  /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. */
-  | { type: 'consult'; chatId: string; agent: AgentKey; text: string }
+  /** Continue this chat with another agent: in the chat it handed off to before, or with `fresh` a new one. */
+  | { type: 'handoff'; chatId: string; agent: AgentKey; fresh?: boolean }
+  /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. `fresh` asks in a new chat. */
+  | { type: 'consult'; chatId: string; agent: AgentKey; text: string; fresh?: boolean }
   /** Forward each finished turn of `from` to the chat `to`. */
   | { type: 'pipe'; from: string; to: string }
   | { type: 'unlink'; linkId: string }
@@ -268,6 +268,9 @@ function noticeAction(v: unknown): NoticeAction | null {
     case 'install':
       // Only which agent to install; the host chooses the command itself.
       return isAgentKey(v.agent) && v.agent !== 'demo' ? { label, do: 'install', agent: v.agent } : null;
+    case 'setOption':
+      // The host sets it only to a value the chat's agent offers.
+      return id(v.optionId) && typeof v.value === 'string' && optionValue(v.value) ? { label, do: 'setOption', optionId: v.optionId, value: v.value } : null;
     default:
       return null;
   }
@@ -391,10 +394,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'viewChanges':
       return id(m.chatId) ? { type: m.type, chatId: m.chatId } : null;
     case 'handoff':
-      return id(m.chatId) && isAgentKey(m.agent) ? { type: 'handoff', chatId: m.chatId, agent: m.agent } : null;
+      return id(m.chatId) && isAgentKey(m.agent) ? { type: 'handoff', chatId: m.chatId, agent: m.agent, ...(m.fresh === true ? { fresh: true } : {}) } : null;
     case 'consult':
       return id(m.chatId) && isAgentKey(m.agent) && str(m.text, LIMITS.text) && m.text.trim()
-        ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text }
+        ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text, ...(m.fresh === true ? { fresh: true } : {}) }
         : null;
     case 'pipe':
       return id(m.from) && id(m.to) && m.from !== m.to ? { type: 'pipe', from: m.from, to: m.to } : null;

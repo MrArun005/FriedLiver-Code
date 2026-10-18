@@ -3521,6 +3521,7 @@ button.file-row .icon {
 }
 .notice-detail {
   display: block;
+  margin: 0;
   white-space: pre-wrap;
 }
 .link-head {

@@ -237,4 +237,11 @@ describe('component states that QA caught', () => {
     expect(sys.some((d) => d.selector === '.fl-pill' && d.prop === 'text-overflow' && d.value === 'ellipsis')).toBe(true);
     expect(readFileSync(path.join(src, 'webview/tasks.tsx'), 'utf8')).not.toMatch(/class="fl-pill"[^>]*>\s*\+\{[^}]*\}\s*<\/span>/);
   });
+
+  it('a narrow banner puts its actions on their own row below the text (§2.26 Narrow), by its own width', () => {
+    expect(sys.some((d) => d.selector === '.fl-banner' && d.prop === 'container' && d.value === 'fl-banner / inline-size')).toBe(true);
+    const css = readFileSync(path.join(media, 'components.css'), 'utf8');
+    const narrow = /@container fl-banner \(max-width: 560px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    expect(narrow).toMatch(/\.fl-banner__actions \{[^}]*flex-basis: 100%/);
+  });
 });
