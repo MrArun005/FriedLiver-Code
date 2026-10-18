@@ -1859,6 +1859,7 @@ export class AgentCore {
         tone: 'error',
         text: err.message.split(' Install it with:')[0],
         detail: err.spec.installCommand,
+        detailKind: 'code',
         actions: [...(agent !== 'demo' ? [{ label: 'Install in terminal', do: 'install', agent } satisfies NoticeAction] : []), retry],
       };
     }

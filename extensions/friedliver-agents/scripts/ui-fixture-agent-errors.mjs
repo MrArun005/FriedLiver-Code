@@ -43,6 +43,7 @@ export function agentErrorsFixture(now = Date.now()) {
       { kind: 'agent', text: 'Line totals are rounded before they are summed. I’ll ask Codex to double-check the fix.', at: sec(1650) },
       { kind: 'link', linkId: 'link-ask', role: 'asked', chatId: 'chat-codex', agent: 'codex', label: 'Codex', text: 'Is rounding once at the end safe for tax lines?', by: 'agent' },
       { kind: 'notice', tone: 'error', text: "Codex couldn't answer. Codex can't use the model old-mini with this account." },
+      { kind: 'notice', tone: 'error', text: "Gemini isn't installed.", detail: 'npm install -g @google/gemini-cli', detailKind: 'code' },
       { kind: 'link', linkId: 'link-handoff', role: 'handoff-to', chatId: 'chat-gemini', agent: 'gemini', label: 'Gemini', text: '4 messages', by: 'user' },
     ]),
     chat(
