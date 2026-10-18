@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { isMark, type Journal, type JournalMark } from './changeJournal';
 import { MerkleTree } from './merkle';
 
 export const INDEX_LIMITS = {
@@ -24,6 +25,8 @@ export const INDEX_LIMITS = {
   /** Paths index_changes lists at most. */
   changes: 200,
 };
+
+const GIT_OID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
 /** Files whose stat checks run at once. */
 export const STAT_BATCH = 256;
@@ -178,6 +181,10 @@ export class ProjectIndex {
   private rootReal?: string;
   /** The Merkle tree of the indexed files: always exactly the docs, by content hash. */
   readonly tree = new MerkleTree();
+  /** Where the change journal stood when this index was last known complete (saved with it). */
+  mark?: JournalMark;
+  /** git's HEAD at the last catch-up, for the hint's diff next time. */
+  gitHead?: string;
   /** Listed files that were read but not indexed (binary): their `size:mtimeNs`, so they are not read again until they change. */
   private readonly unreadable = new Map<string, string>();
   /** Files stat'ed, read, and re-indexed (read with new content). For tests and the bench. */
@@ -402,6 +409,92 @@ export class ProjectIndex {
     return true;
   }
 
+  /** Every listed file through update(): a stat each, a read only where it changed. `onBatch` returning false stops it (and this returns false). */
+  async syncAll(onBatch?: () => Promise<boolean>): Promise<boolean> {
+    const files = await this.list();
+    this.prune(new Set(files));
+    for (let i = 0; i < files.length; i += STAT_BATCH) {
+      if (!(await this.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
+      if (onBatch && !(await onBatch())) return false;
+    }
+    return true;
+  }
+
+  /** Re-checks everything under these directories ('' is the whole folder): listed files updated, the rest dropped. */
+  async rescan(dirs: string[], onBatch?: () => Promise<boolean>): Promise<boolean> {
+    if (dirs.includes('')) return this.syncAll(onBatch);
+    const under = (r: string) => dirs.some((d) => r.startsWith(d + '/'));
+    const files = (await this.list()).filter(under);
+    const keep = new Set(files);
+    for (const rel of [...this.docs.keys()]) if (under(rel) && !keep.has(rel)) this.remove(rel);
+    for (let i = 0; i < files.length; i += STAT_BATCH) {
+      if (!(await this.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
+      if (onBatch && !(await onBatch())) return false;
+    }
+    return true;
+  }
+
+  private gitOut(args: string[]): Promise<string | null> {
+    return new Promise((resolve) =>
+      execFile(this.git, ['--no-optional-locks', ...args], { cwd: this.root, maxBuffer: 256 * 1024 * 1024 }, (err, out) => resolve(err ? null : out)),
+    );
+  }
+
+  /**
+   * A fast guess at what changed, from git: `git status` (modified, staged, untracked, deleted) and the
+   * files that differ between the HEAD of the last session and now. Folder-relative. A hint only: the
+   * paths still go through every check, and the journal or the full check still runs.
+   */
+  async gitHint(): Promise<{ paths: string[]; head?: string }> {
+    const status = await this.gitOut(['status', '--porcelain', '-z', '--untracked-files=all', '--no-renames']);
+    if (status === null) return { paths: [] };
+    // No commit yet: no HEAD, status alone.
+    const out = (await this.gitOut(['rev-parse', 'HEAD']))?.trim();
+    const head = out && GIT_OID.test(out) ? out : undefined;
+    const prefix = (await this.gitOut(['rev-parse', '--show-prefix']))?.trim() ?? '';
+    const paths = new Set<string>();
+    const add = (p: string) => {
+      if (p && p.startsWith(prefix)) paths.add(p.slice(prefix.length));
+    };
+    for (const e of status.split('\0')) if (e.length > 3) add(e.slice(3));
+    if (head && this.gitHead && this.gitHead !== head) {
+      const diff = await this.gitOut(['diff', '--name-only', '-z', '--no-renames', this.gitHead, head, '--']);
+      for (const p of (diff ?? '').split('\0')) add(p);
+    }
+    return { paths: [...paths].filter((p) => !p.endsWith('/')), head };
+  }
+
+  /**
+   * Brings a loaded index up to date in the background: git's hint first (cheap, so likely changes
+   * show soon), then the journal's changes since the saved mark. Without a journal or a mark, or when
+   * the journal can't vouch for its history, every file is checked. A .gitignore that changed rescans
+   * its directory. Returns how, or undefined when `onBatch` stopped it.
+   */
+  async catchUp(journal?: Journal, onBatch?: () => Promise<boolean>): Promise<'journal' | 'full' | undefined> {
+    const hint = await this.gitHint();
+    if (hint.paths.length) await this.updateMany(hint.paths);
+    const got = this.mark && journal ? await journal.since(this.root, this.mark) : null;
+    let mode: 'journal' | 'full';
+    if (got) {
+      const changed = [...got.files, ...hint.paths];
+      const dirs = [...got.dirs];
+      for (const f of changed) if (f === '.gitignore' || f.endsWith('/.gitignore')) dirs.push(path.posix.dirname(f) === '.' ? '' : path.posix.dirname(f));
+      if (changed.includes('.git/info/exclude')) dirs.push('');
+      await this.updateMany(got.files);
+      if (dirs.length && !(await this.rescan(dirs, onBatch))) return undefined;
+      this.mark = got.next;
+      mode = 'journal';
+    } else {
+      // Taken before the check: whatever changes during it is seen by the watcher and by the next open.
+      const next = await journal?.now(this.root);
+      if (!(await this.syncAll(onBatch))) return undefined;
+      this.mark = next;
+      mode = 'full';
+    }
+    if (hint.head) this.gitHead = hint.head;
+    return mode;
+  }
+
   /** Drops files that are no longer listed. */
   prune(keep: Set<string>): void {
     for (const rel of [...this.docs.keys()]) if (!keep.has(rel)) this.remove(rel);
@@ -502,7 +595,14 @@ export class ProjectIndex {
 
   /** The index as plain JSON, to keep between sessions: the docs (the tree's leaves) and the tree's kept roots. */
   toJSON(): object {
-    return { v: 2, docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })), unreadable: [...this.unreadable], merkle: this.tree };
+    return {
+      v: 2,
+      docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })),
+      unreadable: [...this.unreadable],
+      merkle: this.tree,
+      mark: this.mark,
+      gitHead: this.gitHead,
+    };
   }
 
   /**
@@ -526,14 +626,15 @@ export class ProjectIndex {
         typeof d.size === 'number'
       );
     });
-    for (let i = 0; i < ok.length && this.docs.size < this.options.maxFiles; i += STAT_BATCH) {
-      const batch = ok.slice(i, i + STAT_BATCH);
-      // The saved file may be stale or tampered with: an entry is used only if its file passes today's checks.
-      const passed = await Promise.all(batch.map((d) => this.check(d.rel)));
-      for (let j = 0; j < batch.length && this.docs.size < this.options.maxFiles; j++) {
-        if (passed[j] && !this.docs.has(batch[j].rel)) this.add({ ...batch[j], tokens: new Map(batch[j].tokens) });
-      }
+    // Name rules only, no file system: the saved index answers at once. catchUp() then checks the
+    // files; until then every read (snippets) still re-checks its file and drops what fails.
+    for (const d of ok) {
+      if (this.docs.size >= this.options.maxFiles) break;
+      if (this.allowed(d.rel) && !this.docs.has(d.rel)) this.add({ ...d, tokens: new Map(d.tokens) });
     }
+    const extra = saved as { mark?: unknown; gitHead?: unknown };
+    if (docs.length && isMark(extra.mark)) this.mark = extra.mark;
+    if (docs.length && typeof extra.gitHead === 'string' && GIT_OID.test(extra.gitHead)) this.gitHead = extra.gitHead;
     const unreadable = (saved as { unreadable?: unknown })?.unreadable;
     if (Array.isArray(docs) && Array.isArray(unreadable)) {
       for (const u of unreadable) if (Array.isArray(u) && typeof u[0] === 'string' && typeof u[1] === 'string' && /^\d+:\d+$/.test(u[1])) this.unreadable.set(u[0], u[1]);
@@ -642,11 +743,16 @@ const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice
  * The answers to the index_* tools over every folder's index. Paths in and out are
  * relative to the folder; with more than one folder they start with its name.
  */
-export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean): Promise<string> {
+export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean | 'verifying'): Promise<string> {
   if (!indexes.length) return 'No project index: no trusted workspace folder is open, or friedliver.index.enabled is off. Search the files another way.';
   const multi = indexes.length > 1;
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
-  const note = building ? '(The index is still being built; results may be incomplete.)\n' : '';
+  const note =
+    building === 'verifying'
+      ? '(Checking files changed since the last session; results may be a moment out of date.)\n'
+      : building
+        ? '(The index is still being built; results may be incomplete.)\n'
+        : '';
   const find = (p: string): [ProjectIndex, string] | undefined => {
     const rel = p.replace(/\\/g, '/').replace(/^\.\//, '');
     if (!multi) return indexes[0].has(rel) ? [indexes[0], rel] : undefined;
