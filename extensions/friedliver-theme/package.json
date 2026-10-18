@@ -54,6 +54,7 @@
       "editor.overviewRulerBorder": false,
       "editor.guides.bracketPairs": "active",
       "editor.renderLineHighlight": "line",
+      "editor.cursorBlinking": "smooth",
       "editor.cursorSmoothCaretAnimation": "on",
       "editor.smoothScrolling": true,
       "editor.stickyScroll.enabled": true,
