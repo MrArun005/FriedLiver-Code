@@ -13,7 +13,7 @@ import type { ToolOut } from '../shared/tools';
 import { Code, CopyButton, Icon, ImageThumb, RunButton, basename, memo, send } from './common';
 import { stepImage } from '../shared/stepImages';
 import { DiffView } from './controls';
-import { Button, IconButton } from './ui';
+import { Button, FileRef, IconButton } from './ui';
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
 
@@ -113,7 +113,7 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
           </span>
         )}
         <span class="step-end">
-          {exit !== undefined && exit !== 0 && <span class="tag bad">exit {exit}</span>}
+          {exit !== undefined && exit !== 0 && <span class="fl-pill" data-tone="failed">exit {exit}</span>}
           {denied && <span class="step-denied">denied</span>}
           {t.ms !== undefined && <span class="step-time">{shortDuration(t.ms)}</span>}
         </span>
@@ -181,9 +181,7 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
               <span class="tool-label">DIFF</span>
               <div class="tool-cell">
                 <div class="file-line">
-                  <button class="ref" title={o.path} onClick={() => send({ type: 'openFile', path: o.path })}>
-                    {basename(o.path)}
-                  </button>
+                  <FileRef path={o.path} onOpen={() => send({ type: 'openFile', path: o.path })} />
                   <span class="stats">
                     <span class="plus">+{o.added}</span>
                     <span class="minus">−{o.removed}</span>

@@ -17,9 +17,9 @@ import type { WebviewMessage } from '../shared/messages';
 import { AGENT_FACES, type AppState, type ChatView } from '../shared/model';
 import { siteOrigin } from '../shared/permissions';
 import { relativePath } from '../shared/view';
-import { CopyButton, Glyph, Icon, Markdown, Popover, basename, send, useNow, type IconName } from './common';
+import { CopyButton, Glyph, Icon, Markdown, Popover, send, useNow, type IconName } from './common';
 import { DiffView } from './controls';
-import { Button, Countdown as Drain, Kbd, MenuItem, MenuSep, MenuTitle, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
+import { Button, Countdown as Drain, FileRef, Kbd, MenuItem, MenuSep, MenuTitle, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
 
 /** What the decision keys do to a request on screen, by its id: set while it is shown. */
 export interface CardKeys {
@@ -468,9 +468,7 @@ function Preview({ a, item, chat, state, diff }: { a: Approval; item: Approvable
       {item.kind === 'permission' && !item.detail?.files?.length && (item.detail?.locations?.length ?? 0) > 1 && (
         <div class="apv-files">
           {item.detail!.locations!.map((l) => (
-            <button key={l} type="button" class="ref" title={l} onClick={() => send({ type: 'openFile', path: l })}>
-              {basename(l)}
-            </button>
+            <FileRef key={l} path={l} onOpen={() => send({ type: 'openFile', path: l })} />
           ))}
         </div>
       )}

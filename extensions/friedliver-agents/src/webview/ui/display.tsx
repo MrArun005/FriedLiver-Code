@@ -1,5 +1,5 @@
 // The design system's display components (COMPONENTS.md §2.3–2.4, §2.14, §2.16–2.26).
-import type { ComponentChildren } from 'preact';
+import type { ButtonHTMLAttributes, ComponentChildren } from 'preact';
 import { Icon, type IconName } from './icon';
 import { AGENT_FACES, type AgentKey } from '../../shared/model';
 import { IconButton, cx } from './controls';
@@ -63,6 +63,55 @@ export function FilterPill({
       {icon && <Icon name={icon} />}
       <span class="fl-pill__text">{children}</span>
     </button>
+  );
+}
+
+/** A file, by name, that opens when pressed: a pressable Pill in the editor's font; the full path in the tooltip. */
+export function FileRef({ path, label, onOpen, title }: { path: string; label?: ComponentChildren; onOpen(): void; title?: string }) {
+  return (
+    <button type="button" class="fl-pill fl-pill--mono" title={title ?? path} onClick={onOpen}>
+      <span class="fl-pill__text">{label ?? path.split(/[\\/]/).filter(Boolean).at(-1) ?? path}</span>
+    </button>
+  );
+}
+
+/** A chip that opens something, with an optional × that removes it (a pipe, a reference). */
+export function ChipButton({
+  icon,
+  lead,
+  tone,
+  children,
+  title,
+  onPress,
+  onRemove,
+  removeLabel = 'Remove',
+  class: className,
+}: {
+  icon?: IconName;
+  /** In place of the icon: an avatar. */
+  lead?: ComponentChildren;
+  tone?: Tone;
+  children: ComponentChildren;
+  title?: string;
+  onPress(): void;
+  onRemove?: () => void;
+  removeLabel?: string;
+  /** A hook for tests or layout; never for looks. */
+  class?: string;
+}) {
+  return (
+    <span class={cx('fl-pill', className)} data-tone={tone}>
+      <button type="button" class="fl-pill__main" title={title} onClick={onPress}>
+        {icon && <Icon name={icon} />}
+        {lead}
+        <span class="fl-pill__text">{children}</span>
+      </button>
+      {onRemove && (
+        <button type="button" class="fl-pill__x" aria-label={removeLabel} title={removeLabel} onClick={onRemove}>
+          <Icon name="close" size={12} />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -206,6 +255,30 @@ export const CardFoot = ({ start, children }: { start?: boolean; children: Compo
   </div>
 );
 
+/** One tab in a strip the caller lays out (role tablist): its own keyboard, an optional × to close it. */
+export function Tab({
+  selected,
+  onSelect,
+  onClose,
+  closeTitle = 'Close',
+  children,
+  ...rest
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'class' | 'role' | 'onClick'> & { selected: boolean; onSelect(): void; onClose?: () => void; closeTitle?: string; children: ComponentChildren }) {
+  return (
+    <span class="fl-tab-wrap tab-wrap" data-active={selected ? '' : undefined}>
+      <button {...rest} type="button" role="tab" class="fl-tab tab" aria-selected={selected} onClick={onSelect}>
+        {children}
+      </button>
+      {onClose && (
+        // For the pointer; the keyboard closes the focused tab with Delete, so the × is no Tab stop of its own.
+        <button type="button" class="fl-tab__x tab-close" tabIndex={-1} aria-hidden="true" title={closeTitle} onClick={onClose}>
+          <Icon name="close" size={12} />
+        </button>
+      )}
+    </span>
+  );
+}
+
 /** A strip of tabs (role tablist); the panel is the caller's. */
 export function Tabs<T extends string>({
   label,
@@ -241,6 +314,8 @@ export function Row({
   expanded,
   onPress,
   title,
+  label,
+  class: className,
 }: {
   icon?: IconName;
   children: ComponentChildren;
@@ -250,6 +325,10 @@ export function Row({
   expanded?: boolean;
   onPress?: () => void;
   title?: string;
+  /** Accessible name when the visible text isn't enough. */
+  label?: string;
+  /** A hook for tests or layout; never for looks. */
+  class?: string;
 }) {
   const body = (
     <>
@@ -265,11 +344,11 @@ export function Row({
   );
   const style = level && level > 1 ? { '--level': String(level) } : undefined;
   return onPress ? (
-    <button type="button" class="fl-row" aria-selected={selected} aria-expanded={expanded} title={title} style={style} onClick={onPress}>
+    <button type="button" class={cx('fl-row', className)} aria-selected={selected} aria-expanded={expanded} aria-label={label} title={title} style={style} onClick={onPress}>
       {body}
     </button>
   ) : (
-    <div class="fl-row" aria-selected={selected} title={title} style={style}>
+    <div class={cx('fl-row', className)} aria-selected={selected} title={title} style={style}>
       {body}
     </div>
   );

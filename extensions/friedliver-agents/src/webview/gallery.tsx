@@ -4,6 +4,7 @@ import type { AppState } from '../shared/model';
 import { ago } from '../shared/view';
 import { Glyph, Icon, useNearScreen, usePersisted, useTabStrip } from './common';
 import { Viewer, useSrc } from './viewer';
+import { FilterPill, Tab } from './ui';
 
 
 interface Props {
@@ -55,14 +56,12 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
           const id = c?.id ?? '';
           const selected = id === tab;
           return (
-            <span key={id || 'all'} class="tab-wrap" data-active={selected ? '' : undefined}>
-              <button
-                role="tab"
-                class="tab"
-                aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
+            <Tab
+              key={id || 'all'}
+              selected={selected}
+              tabIndex={selected ? 0 : -1}
                 title={c ? `${c.title}: ${c.count} image${c.count === 1 ? '' : 's'}` : `Every chat: ${images.length} images`}
-                onClick={() => setTab(id)}
+                onSelect={() => setTab(id)}
                 onKeyDown={(e) => {
                   if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
                   e.preventDefault();
@@ -72,20 +71,18 @@ export function Gallery({ state, outside, now, query: outerQuery }: Props) {
                 }}
               >
                 {c ? <Glyph agent={c.agent} size="sm" /> : <Icon name="grid" size={14} />}
-                <span class="tab-title">{c ? c.title : 'All'}</span>
-                <span class="tab-count">{c ? c.count : images.length}</span>
-              </button>
-            </span>
+                <span class="fl-tab__label tab-title">{c ? c.title : 'All'}</span>
+                <span class="fl-count tab-count">{c ? c.count : images.length}</span>
+            </Tab>
           );
         })}
       </div>
       <div class="gallery-bar">
         <div class="gallery-filters" role="group" aria-label="Show images that were">
           {IMAGE_SOURCES.filter((s) => counts[s] || sources.includes(s)).map((s) => (
-            <button key={s} type="button" class="filter-chip" aria-pressed={sources.includes(s)} onClick={() => toggle(s)}>
-              {SOURCE_LABEL[s]}
-              <span class="filter-count">{counts[s]}</span>
-            </button>
+            <FilterPill key={s} size="md" class="filter-chip" pressed={sources.includes(s)} onPress={() => toggle(s)}>
+              {SOURCE_LABEL[s]} <span class="fl-pill__sub filter-count">{counts[s]}</span>
+            </FilterPill>
           ))}
         </div>
         {outerQuery === undefined && (
