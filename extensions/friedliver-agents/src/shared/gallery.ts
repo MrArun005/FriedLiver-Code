@@ -2,6 +2,7 @@
 // Pure: the host and the webviews both use it, and the tests.
 import { AGENT_FACES, type AgentKey, type AppState, type ChatView, type ImageItem } from './model';
 import { stepImage } from './stepImages';
+import { chatName } from './names';
 
 /** How an image came into a chat. */
 export type ImageSource = 'read' | 'screenshot' | 'attached' | 'created';
@@ -101,7 +102,7 @@ export function collectGallery(state: AppState, outside: readonly OutsideImages[
     images.push(...mine);
     chats.push({ ...chat, count: mine.length, latest: Math.max(...mine.map((i) => i.at)) });
   };
-  for (const chat of state.chats) add({ id: chat.id, title: chat.title || chat.label, agent: chat.agent }, chatGallery(chat, state.images));
+  for (const chat of state.chats) add({ id: chat.id, title: chatName(chat), agent: chat.agent }, chatGallery(chat, state.images));
   for (const s of outside) {
     const id = `${OUTSIDE}${s.id}`;
     add(

@@ -6,6 +6,7 @@
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef } from '../shared/model';
+import { agentName, chatName, chatRef } from '../shared/names';
 import type { AgentCore, PendingReview, SendOptions } from './core';
 import { EditChats, runEdit, type EditOutcome } from './editFlow';
 import { editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
@@ -310,7 +311,7 @@ export class EditorAgent implements vscode.Disposable {
     let target = chat;
     let switching = false;
     const refresh = () => {
-      box.title = `Ask ${target.label} about ${where}`;
+      box.title = `Ask ${chatRef(target)} about ${where}`;
     };
     box.placeholder = 'Ask a question';
     box.prompt = `Goes to “${target.title}” with the code.`;
@@ -491,7 +492,7 @@ export class EditorAgent implements vscode.Disposable {
       .sort((a, b) => Number(b.id === current) - Number(a.id === current) || b.lastActivity - a.lastActivity);
     type Pick = vscode.QuickPickItem & { chat?: ChatView; agent?: AgentKey };
     const items: Pick[] = [
-      ...open.map((c) => ({ label: c.title, description: [c.label, c.busy ? 'working' : ''].filter(Boolean).join(' · '), chat: c })),
+      ...open.map((c) => ({ label: chatName(c), description: [agentName(c.agent), c.busy ? 'working' : ''].filter(Boolean).join(' · '), chat: c })),
       { label: 'New chat', kind: vscode.QuickPickItemKind.Separator },
       ...(this.host.shownAgents?.() ?? AGENT_KEYS).map((a) => ({ label: `$(add) New Chat with ${AGENT_FACES[a].name}`, description: a === 'demo' ? 'fake local agent, no account' : undefined, agent: a })),
     ];
@@ -499,7 +500,7 @@ export class EditorAgent implements vscode.Disposable {
     if (picked?.chat) {
       const chat = core.chat(picked.chat.id);
       if (chat && needIdle && chat.busy) {
-        void vscode.window.showInformationMessage(`${chat.label} is still working. Ask when it's done, or pick another chat.`);
+        void vscode.window.showInformationMessage(`${chatRef(chat)} is still working. Ask when it's done, or pick another chat.`);
         return undefined;
       }
       return chat;

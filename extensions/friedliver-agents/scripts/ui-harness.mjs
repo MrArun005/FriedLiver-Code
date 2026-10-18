@@ -16,14 +16,20 @@
 //        &fixture=permissions (approvals offering "Always allow", and ?surface=permissions: Manage Permissions, ui-fixture-permissions.mjs)
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 //        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
+//        &fixture=approvals[&countdown=1] (approvals at every weight: routine, review, careful; ui-fixture-approvals.mjs)
+//        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
+//   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
+//   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
+//   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
+//   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL, URLSearchParams } from 'node:url';
 import { parseArgs } from 'node:util';
 import { fixture } from './ui-fixture.mjs';
 import { COMMANDS, ROOT as STEPS_ROOT, stepsFixture } from './ui-fixture-steps.mjs';
@@ -33,6 +39,8 @@ import { permissionsFixture } from './ui-fixture-permissions.mjs';
 import { IMAGE_ROOTS, exists, imagesFixture } from './ui-fixture-images.mjs';
 import { createRequire } from 'node:module';
 import { accountsFixture } from './ui-fixture-accounts.mjs';
+import { inboxFixture } from './ui-fixture-inbox.mjs';
+import { approvalsFixture } from './ui-fixture-approvals.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -46,6 +54,8 @@ const { values: opts } = parseArgs({
     port: { type: 'string', default: '5178' },
     themes: { type: 'string', default: 'black-blue,light-blue' },
     only: { type: 'string' },
+    // --gutter-shot before|after: also save review/left-gutter-<it>-{480,1200}.png
+    'gutter-shot': { type: 'string' },
   },
 });
 
@@ -102,7 +112,9 @@ function readTheme(name) {
   const kind = theme.type === 'light' ? 'light' : 'dark';
   const colors = { ...theme.colors };
   // Colors this extension contributes take their defaults unless the theme sets them.
-  for (const c of pkg.contributes.colors) colors[c.id] ??= c.defaults[kind];
+  colors['notificationsInfoIcon.foreground'] ??= kind === 'light' ? '#1a85ff' : '#3794ff';
+  // A contributed default may name another colour, as VS Code resolves it.
+  for (const c of pkg.contributes.colors) colors[c.id] ??= c.defaults[kind].startsWith('#') ? c.defaults[kind] : colors[c.defaults[kind]];
   const vars = Object.entries(colors).map(([k, v]) => `--vscode-${k.replace(/\./g, '-')}: ${v};`);
   vars.push(
     "--vscode-font-family: system-ui, 'Ubuntu', 'Droid Sans', sans-serif;",
@@ -128,6 +140,10 @@ function page(params) {
           ? subagentsFixture(Date.now())
           : params.get('fixture') === 'reference'
             ? referenceFixture(Date.now())
+            : params.get('fixture') === 'approvals'
+              ? approvalsFixture(Date.now(), { countdown: params.get('countdown') === '1' })
+            : params.get('fixture') === 'inbox' || params.get('fixture') === 'inbox-empty'
+              ? inboxFixture(Date.now(), { answered: params.get('fixture') === 'inbox-empty' })
             : params.get('fixture') === 'permissions' || surface === 'permissions'
               ? permissionsFixture(Date.now())
               : params.get('fixture') === 'images'
@@ -190,7 +206,9 @@ function page(params) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>${theme.css} body { background-color: ${background}; }</style>
+<link rel="stylesheet" href="/media/tokens.css">
 <link rel="stylesheet" href="/media/webview.css">
+<link rel="stylesheet" href="/media/components.css">
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
@@ -254,8 +272,8 @@ async function shoot() {
   fs.mkdirSync(opts.out, { recursive: true });
   const problems = [];
 
-  const open = async (query, width, height) => {
-    const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  const open = async (query, width, height, scale = 1) => {
+    const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
     p.on('pageerror', (e) => problems.push(`${query}: ${e.message}`));
     p.on('console', (m) => m.type() === 'error' && problems.push(`${query}: ${m.text()}`));
     await p.goto(`${base}/?${query}`);
@@ -274,8 +292,9 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  if (opts.only === 'images') {
-    await imagesChecks({ open, check, posted });
+  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks }[opts.only ?? ''];
+  if (only) {
+    await only({ open, check, posted, save });
     await browser.close();
     if (problems.length) {
       console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -349,7 +368,7 @@ async function shoot() {
     const p = await open('surface=accounts&focus=gemini', 900, 700);
     await p.waitForTimeout(50);
     check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
-    check((await p.locator('.acct-card').count()) === 4, 'a card per agent, Demo included when shown');
+    check((await p.locator('.acct-card[id^="card-"]').count()) === 4, 'a card per agent, Demo included when shown');
     const codex = p.locator('#card-codex');
     check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
     await codex.locator('button:has-text("ChatGPT")').click();
@@ -362,8 +381,8 @@ async function shoot() {
     check((await gemini.locator('.acct-key[data-active]').innerText()).includes('GEMINI_API_KEY: set'), 'a saved key shows only as set');
     check(!(await p.content()).includes('sk-'), 'no key text on the page');
     check(!(await p.locator('select').count()), 'defaults use our menu, not a native select');
-    await gemini.locator('.acct-choice button.mini-select').first().click();
-    await p.locator('.popover [role="menuitemradio"][data-value="large"]').click();
+    await gemini.locator('.acct-choice button.fl-select').first().click();
+    await p.locator('.fl-menu [role="menuitemradio"][data-value="large"]').click();
     check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'setDefault', agent: 'gemini', key: 'model', value: 'large' }), 'picking a default model posts setDefault');
     await p.locator('#card-claude button:has-text("Sign out of Claude")').click();
     check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'signOut', agent: 'claude' }), 'Sign out posts signOut');
@@ -374,10 +393,10 @@ async function shoot() {
     const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
     await p.evaluate(() => window.postMessage({ type: 'roster', roster: { agents: ['claude', 'codex', 'gemini'], signIn: { claude: 'signed-in', gemini: 'needs-sign-in' } } }, '*'));
     await p.click('button[aria-label="New chat"]');
-    const items = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+    const items = await p.locator('.fl-menu [role="menuitem"]').allInnerTexts();
     check(!items.some((t) => t.includes('Demo')) && items.some((t) => t.includes('Agents & Accounts')), `New chat leaves Demo out and links Agents & Accounts [${items}]`);
-    check((await p.locator('.popover .signin-mark[data-state="needs-sign-in"]').count()) === 1, 'a sign-in mark shows on Gemini');
-    await p.click('.popover [role="menuitem"]:has-text("Agents & Accounts")');
+    check((await p.locator('.fl-menu .signin-mark[data-state="needs-sign-in"]').count()) === 1, 'a sign-in mark shows on Gemini');
+    await p.click('.fl-menu [role="menuitem"]:has-text("Agents & Accounts")');
     check((await posted(p)).some((m) => m.type === 'openAccounts'), 'the menu opens Agents & Accounts');
     await p.close();
   }
@@ -391,19 +410,22 @@ async function shoot() {
     const fan = (await posted(p)).find((m) => m.type === 'fanout');
     check(fan?.agents.join() === 'claude,codex,gemini' && fan.worktree === true, 'Ctrl+Enter with three agents sends a fan-out');
 
-    await p.click(`[data-nav="chat-c1"] button:has-text("Allow for this chat")`);
-    check((await posted(p)).some((m) => m.type === 'bridge' && m.requestId === 'bridge-c1' && m.answer === 'allowChat'), 'a bridge request is answered from its card');
+    await p.click(`[data-nav="chat-c1"] .fl-split-caret`);
+    await p.click('.fl-menu .apv-scope-row:has-text("For this chat")');
+    check((await posted(p)).some((m) => m.type === 'bridge' && m.requestId === 'bridge-c1' && m.answer === 'allowChat'), 'a bridge request is answered from its card, for this chat from the Allow menu');
 
     const trigger = p.locator(`[data-nav="chat-c3"] .card-connect button[aria-haspopup="menu"][aria-label="Hand off"]`);
     await trigger.click();
-    check(await p.locator('.popover[role="menu"]').isVisible(), 'Hand off opens a menu');
+    check(await p.locator('.fl-menu[role="menu"]').isVisible(), 'Hand off opens a menu');
     await p.keyboard.press('ArrowDown');
     await p.keyboard.press('Escape');
-    check((await p.locator('.popover').count()) === 0 && (await trigger.evaluate((el) => el === document.activeElement)), 'Escape closes the menu and focus returns');
+    check((await p.locator('.fl-menu').count()) === 0 && (await trigger.evaluate((el) => el === document.activeElement)), 'Escape closes the menu and focus returns');
 
-    await p.click('.pill.loud');
-    await p.waitForTimeout(100);
-    check(await p.evaluate(() => document.activeElement?.getAttribute('data-nav') === 'chat-c1'), 'the decisions pill jumps to the first decision');
+    await p.click('.mgr-waiting');
+    check((await p.locator('.inbox').count()) === 1, 'the decisions pill opens the Inbox');
+    // Esc says no in the Inbox; the view switch (1) goes back to the board.
+    await p.keyboard.press('1');
+    await p.locator('[data-nav="chat-c1"]').focus();
     await p.keyboard.press('j');
     check(await p.evaluate(() => document.activeElement?.getAttribute('data-nav') === 'chat-x1'), 'j moves to the next card');
     await p.keyboard.press('3');
@@ -428,7 +450,7 @@ async function shoot() {
     await p.keyboard.press('Enter');
     const consult = (await posted(p)).find((m) => m.type === 'consult');
     check(consult?.agent === 'gemini' && consult.text === 'is this safe for de-CH?' && consult.chatId === ids.side, 'a mention sends a consultation');
-    await p.click('button:has-text("Send to Claude 1")');
+    await p.click('button:has-text("Send to Claude")');
     check((await posted(p)).some((m) => m.type === 'forward' && m.fromChatId === 'chat-g1' && m.toChatId === ids.side), 'Send to forwards the reply');
     await p.click('.all-btn');
     await p.keyboard.type('swappable');
@@ -561,19 +583,27 @@ async function shoot() {
     await p.fill('.composer textarea', 'Fix the');
     const look = () =>
       p.evaluate(() => {
-        const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b), ring = window.getComputedStyle(b, '::after');
+        const b = document.querySelector('.cc-mic'), cs = window.getComputedStyle(b);
         const probe = document.createElement('i');
-        probe.style.color = '#0078d4'; // the mic's brand blue, the same in every theme
+        probe.style.color = '#0078d4'; // the mic's brand blue while it listens, the same in every theme
         document.body.append(probe);
-        const want = window.getComputedStyle(probe).color;
+        const blue = window.getComputedStyle(probe).color;
         probe.remove();
         const r = b.getBoundingClientRect();
-        return { blue: cs.backgroundColor === want, white: cs.color === 'rgb(255, 255, 255)', size: r.width === 26 && r.height === 26, ring: ring.content !== 'none' && ring.borderTopWidth === '2px' && ring.borderTopColor === 'rgb(255, 255, 255)', opacity: cs.opacity };
+        const bars = [...b.querySelectorAll('.mic-bars i')].map((i) => new window.DOMMatrix(window.getComputedStyle(i).transform).d);
+        return { bg: cs.backgroundColor, blue: cs.backgroundColor === blue, bare: cs.backgroundColor === 'rgba(0, 0, 0, 0)', white: cs.color === 'rgb(255, 255, 255)', width: r.width, size: r.width === 26 && r.height === 26, bars, dot: !!b.querySelector('.mic-dot'), opacity: cs.opacity };
       });
-    const idle = await look();
-    check(idle.blue && idle.white && idle.size && !idle.ring, 'the mic is a 26px blue button with a white glyph, no ring at rest');
+    // Loudness from the host, as the helper sends it (about 20 a second).
+    const speak = async (level, ms) => {
+      for (let t = 0; t < ms; t += 50) await host({ level });
+    };
     await p.mouse.move(0, 0);
-    await save(p, 'composer-mic-idle', { element: '.composer' });
+    const idle = await look();
+    check(idle.bare && idle.white && idle.size && !idle.bars.length, 'idle: a bare white mic glyph, 26px, no background (Dark 2026)');
+    await p.hover('.cc-mic');
+    check(!(await look()).bare && !(await look()).blue, 'idle hover: a subtle tint, not the blue');
+    await p.mouse.move(0, 0);
+    await save(p, 'mic-idle-dark', { element: '.composer' });
     await p.click('.cc-mic');
     check((await dictates()).at(-1)?.on === true && (await dictates()).at(-1)?.chatId === 'chat-c5', 'one click starts dictating into this chat');
     check(await p.evaluate(() => document.activeElement?.matches('.composer textarea') ?? false), 'the mic focuses the message box');
@@ -586,12 +616,23 @@ async function shoot() {
     check((await box()) === 'Fix the login redirect', 'the next partial replaces it');
     await p.mouse.move(0, 0);
     const listening = await look();
-    check(listening.blue && listening.ring && listening.opacity === '1', 'listening: still blue, with a white 2px ring');
-    await save(p, 'composer-mic-listening', { element: '.composer' });
+    check(listening.blue && listening.white && listening.width > 50 && listening.bars.length === 6, 'listening: the blue pill grows to fit the mic and 6 white bars');
+    await speak(0, 400);
+    const quiet = (await look()).bars;
+    await speak(0.9, 400);
+    const loud = (await look()).bars;
+    check(loud.every((h, i) => h > quiet[i] + 0.2), 'the bars rise with the loudness');
+    await speak(0.6, 300);
+    await save(p, 'mic-listening-dark', { element: '.composer' });
+    await p.waitForTimeout(600);
+    check((await look()).bars.every((h, i) => h < loud[i] - 0.2), 'the bars fall when the levels stop');
+    check(await p.evaluate(() => { const b = document.querySelector('.cc-mic').getBoundingClientRect(), t = document.querySelector('.composer textarea'); return parseFloat(window.getComputedStyle(t).paddingRight) >= b.width + 5; }), 'typed text stays clear of the pill');
     await p.click('.cc-mic');
     check((await dictates()).at(-1)?.on === false, 'a second click stops');
     check((await p.locator('.cc-mic[data-state="stopping"]').count()) === 1, 'the mic shows it is finishing');
-    check((await look()).opacity === '0.6', 'finishing: the mic at 60%');
+    await p.mouse.move(0, 0);
+    const stopped = await look();
+    check(stopped.size && stopped.bare && !stopped.bars.length, 'stopping shrinks the pill back to the bare mic');
     await host({ text: 'login redirect bug.', final: true });
     await host({ state: 'idle' });
     check((await box()) === 'Fix the login redirect bug.', 'the final words stay');
@@ -626,14 +667,28 @@ async function shoot() {
     check((await posted(p)).some((m) => m.type === 'attach'), '+ attaches images');
     await p.close();
     const light = await open('surface=chat&side=1&select=chat-c5&theme=light-2026', 900, 700);
-    await save(light, 'composer-mic-idle-light', { element: '.composer' });
+    const lightLook = await light.evaluate(() => {
+      const probe = document.createElement('i');
+      probe.style.color = 'var(--fg)';
+      document.body.append(probe);
+      const fg = window.getComputedStyle(probe).color;
+      probe.remove();
+      return window.getComputedStyle(document.querySelector('.cc-mic')).color === fg;
+    });
+    check(lightLook, 'idle in a light theme: the glyph takes the text colour');
+    await save(light, 'mic-idle-light', { element: '.composer' });
     await light.click('.cc-mic');
     await light.mouse.move(0, 0);
-    await save(light, 'composer-mic-listening-light', { element: '.composer' });
+    for (let t = 0; t < 400; t += 50) await light.evaluate(() => window.postMessage({ type: 'dictation', chatId: 'chat-c5', level: 0.6 }, '*'));
+    await light.waitForTimeout(100);
+    await save(light, 'mic-listening-light', { element: '.composer' });
     await light.close();
-    const blackBlue = await open('surface=chat&side=1&select=chat-c5&theme=black-blue', 900, 700);
-    await save(blackBlue, 'composer-mic-idle-black-blue', { element: '.composer' });
-    await blackBlue.close();
+    // Reduced motion: a pulsing dot instead of moving bars.
+    const still = await open('surface=chat&side=1&select=chat-c5&theme=dark-2026', 900, 700);
+    await still.emulateMedia({ reducedMotion: 'reduce' });
+    await still.click('.cc-mic');
+    check(await still.evaluate(() => !!document.querySelector('.cc-mic .mic-dot') && !document.querySelector('.cc-mic .mic-bars')), 'reduced motion: a pulsing dot, no bars');
+    await still.close();
     const linux = await open('surface=chat&side=1&select=chat-c5&platform=linux', 400, 700);
     check((await linux.locator('.cc-mic').count()) === 0, 'no mic off macOS');
     await linux.close();
@@ -676,7 +731,8 @@ async function shoot() {
     const box = await p.locator('.step-image img').first().boundingBox();
     check(!!box && box.width <= 240 && box.height <= 160, 'thumbnails fit 240×160');
     await p.locator('.step-image .image-thumb').nth(1).click();
-    check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
+    check((await p.locator('.viewer .preview-title').innerText()) === 'Login page mockup', 'a thumbnail opens the image viewer on it');
+    await p.keyboard.press('Escape');
     check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
     await p.screenshot({ path: path.join(opts.out, 'chat-images.png'), animations: 'disabled', caret: 'hide' });
     await p.click('.images-pill');
@@ -718,14 +774,14 @@ async function shoot() {
     const shows = (text) => p.locator('.chat-head-title', { hasText: text }).waitFor({ timeout: 2000 }).then(() => true, () => false);
     await p.locator('.link-card button:has-text("Open")').first().click();
     check((await shows('Make the session store swappable')) && (await posted(p)).some((m) => m.type === 'select' && m.chatId === 'chat-x3'), 'Open on a hand-off card shows that chat');
-    await p.locator('.link-card[aria-label="Asked Gemini 4"] button:has-text("Open")').click();
+    await p.locator('.link-card[aria-label="Asked Gemini"] button:has-text("Open")').click();
     check(await shows('Which session store fits serverless?'), 'Open on a consultation card shows that chat');
     await p.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c7' }, '*'));
-    check((await shows('Rename the price helpers')) && (await p.locator('.link-strip .tag:has-text("archived")').count()) === 1, 'Open from a notification shows an archived chat');
+    check((await shows('Rename the price helpers')) && (await p.locator('.link-strip .fl-pill:has-text("archived")').count()) === 1, 'Open from a notification shows an archived chat');
     await p.close();
   }
   {
-    // The document look: the editor's own background, a plain placeholder, one handoff note, numbered decisions.
+    // The document look: the editor's own background, a plain placeholder, one handoff note, decision cards.
     const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
     check(await p.evaluate(() => {
       const probe = document.createElement('div');
@@ -736,22 +792,10 @@ async function shoot() {
       return window.getComputedStyle(document.body).backgroundColor === want;
     }), 'the chat background is the editor background exactly');
     check((await p.getAttribute('.composer textarea', 'placeholder')) === 'Message…', 'the placeholder is just Message…');
-    check((await p.locator('.link-strip .badge[data-kind="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
+    check((await p.locator('.link-strip .badge[title*="handoff"]').count()) === 0, 'a handoff shows once, as its transcript card');
     await p.close();
     const d = await open('surface=chat&theme=black-blue&select=chat-c2', 1200, 800);
-    check((await d.locator('.ask .opt-num').first().innerText()) === '1.', 'decision options are numbered');
-    check(await d.evaluate(() => {
-      const yes = window.getComputedStyle(document.querySelector('.ask button.decide'));
-      const probe = document.createElement('div');
-      probe.style.background = 'var(--button-bg)';
-      probe.style.color = 'var(--button-fg)';
-      document.body.append(probe);
-      const want = window.getComputedStyle(probe);
-      const others = [...document.querySelectorAll('.ask .actions button:not(.decide):not(.link)')].map((b) => window.getComputedStyle(b));
-      const ok = yes.backgroundColor === want.backgroundColor && yes.color === want.color && others.length > 0 && others.every((o) => o.backgroundColor !== want.backgroundColor && o.boxShadow.includes('inset'));
-      probe.remove();
-      return ok;
-    }), 'the default option is in the button colours; the others are rows on a hairline ring (Claude Code’s card)');
+    check((await d.locator('.apv .opt-num, .apv .q-num').count()) === 0 && (await d.locator('.apv').count()) > 0, 'decisions are cards with one header row, no numbered option rows');
     check((await d.locator('.step-files').count()) === 0 && (await d.locator('.step-target').first().innerText()).includes('src/store.ts'), 'a tool line names its file once, as the link');
     await d.locator('.step-target').first().click();
     check((await posted(d)).some((m) => m.type === 'openFile' && m.path === 'src/store.ts'), 'the path opens the file');
@@ -761,10 +805,13 @@ async function shoot() {
     await d.fill('.composer textarea', '');
     await d.click('.composer textarea');
     // The decision keys wait out a short grace period once a card is marked (security: no retargeting).
-    await d.waitForTimeout(650);
     await d.keyboard.press('2');
+    check((await d.inputValue('.composer textarea')) === '2', 'a digit in the box is typed: approvals have no numbered options');
+    await d.fill('.composer textarea', '');
+    await d.waitForTimeout(650);
+    await d.keyboard.press('Enter');
     const picked = (await posted(d)).find((m) => m.type === 'permission');
-    check(picked?.requestId === 'perm-c2' && (await d.inputValue('.composer textarea')) === '', '2 in an empty box picks the second option');
+    check(picked?.requestId === 'perm-c2' && (await d.inputValue('.composer textarea')) === '', 'Enter in an empty box allows the marked request');
     await d.close();
   }
   for (const [name, theme, width] of [['chat-final-dark', 'black-blue', 1200], ['chat-final-light', 'light-blue', 1200], ['chat-final-narrow', 'black-blue', 480]]) {
@@ -899,8 +946,8 @@ async function shoot() {
     const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
     const card = p.locator('#item-perm-c1');
     check(await card.locator('.diff .dl[data-op="add"]').first().isVisible(), 'the permission card shows the diff');
-    check((await card.locator('button.decide').innerText()).replace(/^\d\.\s*/, '').trim() === 'Yes', "the loud button is the one-time yes, not \"don't ask again\"");
-    await card.locator('button:has-text("Open diff")').click();
+    check((await card.locator('.fl-split > .fl-btn').innerText()).startsWith('Allow once'), "the primary button allows once, not \"don't ask again\"");
+    await card.locator('button:has-text("full diff")').click();
     check((await posted(p)).some((m) => m.type === 'permissionDiff' && m.requestId === 'perm-c1'), 'Open diff asks for the whole file');
     await p.click('.composer textarea');
     await p.waitForTimeout(650);
@@ -922,9 +969,9 @@ async function shoot() {
   {
     // A command card offers "Always allow" for the exact line and for program + subcommand.
     const p = await open('surface=chat&side=1&select=chat-c2', 400, 900);
-    await p.click('#item-perm-c2 button:has-text("Always allow")');
-    check(await p.locator('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")').isVisible(), 'Always allow offers the exact command');
-    await p.click('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")');
+    await p.click('#item-perm-c2 .fl-split-caret');
+    check(await p.locator('.fl-menu .apv-scope-row:has-text("rm src/legacyStore.ts")').isVisible(), 'the Allow menu names the exact command for Always');
+    await p.click('.fl-menu .apv-scope-row:has-text("rm src/legacyStore.ts")');
     const rule = (await posted(p)).find((m) => m.type === 'allowAlways');
     check(rule?.requestId === 'perm-c2' && rule.grant.kind === 'exact', 'Always allow posts the rule');
     check((await p.locator('.cc-mode').getAttribute('aria-label')) === 'Mode: Edit automatically' && (await p.locator('.composer').getAttribute('data-mode')) === 'edits', 'the mode button shows the mode in use');
@@ -936,7 +983,7 @@ async function shoot() {
     check(await p.locator('[data-nav="chat-c6"] .auto-badge').isVisible(), 'a Full auto task shows its badge');
     await p.click('.approval-seg [data-level="edits"]');
     await p.click('.task-options button[aria-label^="Claude Model"]');
-    await p.click('.popover [role="menuitemradio"][data-value="small"]');
+    await p.click('.fl-menu [role="menuitemradio"][data-value="small"]');
     await p.fill('.new-task textarea', 'Tidy the README');
     await p.press('.new-task textarea', 'Enter');
     const task = (await posted(p)).find((m) => m.type === 'createTask');
@@ -1095,9 +1142,9 @@ async function shoot() {
     await card.focus();
     check((await shown()) === '1', 'and when the card has keyboard focus');
     await card.locator('.card-more').click();
-    const items = await p.locator('.popover[role="menu"] [role^="menuitem"]').allInnerTexts();
+    const items = await p.locator('.fl-menu[role="menu"] [role^="menuitem"]').allInnerTexts();
     check(['Open chat', 'View changes', 'Ask another agent…'].every((t) => items.some((i) => i.includes(t))) && items.some((i) => i.includes('Claude')) && items.some((i) => i.includes('Rename')), `⋯ holds Open, View changes, Hand off, Ask, Pipe to and the rest [${items.join(' | ')}]`);
-    check((await p.locator('.popover .pop-title:text-is("Hand off to")').count()) === 1 && (await p.locator('.popover .pop-title:has-text("Pipe each reply to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
+    check((await p.locator('.fl-menu .fl-menu__title:text-is("Hand off to")').count()) === 1 && (await p.locator('.fl-menu .fl-menu__title:has-text("Pipe each reply to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
     await p.keyboard.press('Escape');
     const calm = await p.evaluate(() => {
       const c = document.querySelector('.task-card');
@@ -1129,7 +1176,7 @@ async function shoot() {
           const inner = { left: r.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) };
           for (const el of box.querySelectorAll('*')) {
             const e = el.getBoundingClientRect();
-            if (!e.width || window.getComputedStyle(el).position === 'fixed' || el.closest('.popover')) continue;
+            if (!e.width || window.getComputedStyle(el).position === 'fixed' || el.closest('.fl-menu')) continue;
             if (e.left < inner.left - 0.5 || e.right > inner.right + 0.5) out.push(`${el.className || el.tagName} in ${box.getAttribute('data-nav') ?? sel} by ${Math.round(Math.max(inner.left - e.left, e.right - inner.right))}px`);
           }
         }
@@ -1166,31 +1213,35 @@ async function shoot() {
     // "Always allow" on every kind of approval, and the Manage Permissions page that lists and revokes them.
     const p = await open('surface=chat&fixture=permissions&select=chat-trip', 900, 1240);
     const card = p.locator('#item-perm-read');
-    await card.locator('button:has-text("Always allow…")').click();
-    const menu = p.locator('[role="menuitem"]');
-    check((await menu.allInnerTexts()).some((t) => t.includes('/Users/arun/Desktop/trip') && t.includes('read files here and below')), 'a file read offers its folder, read only');
+    await card.locator('.fl-split-caret').click();
+    const menu = p.locator('.fl-menu [role^="menuitem"]');
+    check((await menu.allInnerTexts()).some((t) => t.includes('~/Desktop/trip') && t.includes('Reading files')), 'a file read offers its folder, read only, named exactly');
     check((await menu.allInnerTexts()).some((t) => t.includes('Manage permissions')), 'the menu links to Manage Permissions');
     await save(p, 'permissions-approvals');
-    await menu.filter({ hasText: '/Users/arun/Desktop' }).filter({ hasNotText: 'trip' }).click();
+    await menu.filter({ hasText: '~/Desktop' }).filter({ hasNotText: 'trip' }).click();
     check((await posted(p)).some((m) => m.type === 'allowAlways' && m.requestId === 'perm-read' && m.grant?.kind === 'folder' && m.grant.folder === '/Users/arun/Desktop' && m.grant.access === 'read'), 'picking a folder sends that folder, read only');
     const site = p.locator('#item-bridge-irctc');
-    check((await site.locator('button').allInnerTexts()).join(' | ').replace(/\s+/g, ' ') === '1. Allow | 2. Allow for this chat | 3. Deny | Always allow https://www.irctc.co.in', 'a browser request offers Allow once, for this chat and Deny (numbered), then always for the site');
-    await site.locator('button:has-text("Always allow")').click();
+    await site.locator('.fl-split-caret').click();
+    const rows = (await p.locator('.fl-menu .apv-scope-row').allInnerTexts()).map((t) => t.replace(/\s+/g, ' '));
+    check(rows.length === 3 && rows[1].includes('Any site in the browser') && rows[2].includes('https://www.irctc.co.in'), `a browser request offers once, this chat and always for the site [${rows.join(' | ')}]`);
+    await p.locator('.fl-menu .apv-scope-row').nth(2).click();
     check((await posted(p)).some((m) => m.type === 'bridge' && m.requestId === 'bridge-irctc' && m.answer === 'allowAlways'), 'Always allow answers allowAlways');
-    check(await p.locator('#item-bridge-codex button:has-text("Always allow")').count() === 1, 'an agent-to-agent request offers Always allow');
+    await p.locator('#item-bridge-codex .fl-split-caret').click();
+    check((await p.locator('.fl-menu .apv-scope-row:not(:disabled)').count()) === 3, 'an agent-to-agent request offers Always allow');
+    await p.keyboard.press('Escape');
     check((await p.locator('.answered:has-text("Always allowed: https://www.irctc.co.in")').count()) === 1, 'a request a rule answered says so');
     await p.close();
 
     const m = await open('surface=permissions', 1200, 820);
-    check((await m.locator('.perms-group h2').allInnerTexts()).map((t) => t.replace(/\s*\d+$/, '')).join(',') === 'Websites,Folders,Commands,Agent tools', 'Manage Permissions groups websites, folders, commands and agent tools');
-    check((await m.locator('.perms tbody tr').count()) === 7, 'every remembered rule is listed');
+    check((await m.locator('.perms-group h2').allInnerTexts()).map((t) => t.replace(/\s*\d+$/, '')).join(',') === 'Websites,Folders,Commands,Agent tools,Mac & Windows control', 'Manage Permissions groups websites, folders, commands, agent tools and Mac & Windows control');
+    check((await m.locator('.perms tbody tr').count()) === 8, 'every remembered rule is listed');
     check((await m.locator('.perms tbody tr').first().innerText()).includes('https://www.irctc.co.in') && (await m.locator('.perms tbody tr').first().innerText()).includes('Claude'), 'a rule shows where and which agent asked');
     const wide = await m.evaluate(() => document.querySelector('.perms table').getBoundingClientRect().width / window.innerWidth);
     check(wide > 0.9, `the list uses the whole width (${Math.round(wide * 100)}%)`);
     await save(m, 'permissions-manage');
     await m.locator('.perms tbody tr').first().locator('button:has-text("Revoke")').click();
     check((await posted(m)).some((x) => x.type === 'revokePermission' && x.id === 'site https://www.irctc.co.in'), 'Revoke sends that rule');
-    await m.waitForFunction(() => document.querySelectorAll('.perms tbody tr').length === 6);
+    await m.waitForFunction(() => document.querySelectorAll('.perms tbody tr').length === 7);
     await m.locator('button:has-text("Revoke all")').click();
     check((await posted(m)).some((x) => x.type === 'revokeAllPermissions'), 'Revoke all asks the host');
     await m.close();
@@ -1204,7 +1255,7 @@ async function shoot() {
     const tagSameRow = await p.locator('.tl-step .step-row').evaluateAll((els) =>
       els.every((el) => {
         const tag = el.querySelector('.step-end .tag');
-        const dot = el.querySelector('.dot');
+        const dot = el.querySelector('.fl-dot');
         if (!tag || !dot) return true;
         const a = tag.getBoundingClientRect();
         const b = dot.getBoundingClientRect();
@@ -1215,13 +1266,14 @@ async function shoot() {
     check((await row('cat << EOF | python3 minidb.py').locator('.step-lines').innerText()) === '15 lines', 'a heredoc command shows its line count');
     check(await p.locator('.tl-step:has(.step-verb:text-is("Write")):has(.step-text:text-is("README.md"))').count() === 1, 'cat << EOF > README.md reads as Write README.md');
     check((await row('python3 minidb.py test.sql 2>&1').locator('.step-main').getAttribute('title'))?.includes(`cd ${STEPS_ROOT} && python3`) ?? false, 'the tooltip has the full command');
-    check(await p.locator('.tl-step[data-open]:has(.tag.bad:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
+    check(await p.locator('.tl-step[data-open]:has(.fl-pill[data-tone="failed"]:text("exit 2"))').count() === 1, 'a failed step opens with its exit code');
     const answered = p.locator('.answered:has(.step-label)');
     check((await answered.count()) === 1 && (await answered.evaluate((el) => Math.round(el.getBoundingClientRect().height))) <= 26, 'an answered request for a long command is one line');
     await row('cat << EOF | python3 minidb.py').locator('.step-main').click();
     const opened = p.locator('.tl-step[data-open]:has(.step-text:text("cat << EOF | python3 minidb.py"))');
     check((await opened.locator('.step-command pre.code').innerText()) === COMMANDS.users, 'the command shows in full with every line');
-    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre', 'the command never wraps');
+    // Owner, 2026-10-17: long lines wrap in IN/OUT (its own lines stay lines); the whole command opens wrapped in an editor tab.
+    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre-wrap', 'a long command line wraps, keeping its own lines');
     check(await opened.locator('.step-output pre.code.capped').count() === 1, 'long output starts capped');
     await opened.locator('.step-output button:has-text("Show all")').click();
     check(await opened.locator('.step-output pre.code.capped').count() === 0, 'Show all opens the whole output');
@@ -1256,6 +1308,9 @@ async function shoot() {
   }
 
   await imagesChecks({ open, check, posted });
+  await inboxChecks({ open, check, posted });
+  await labelChecks({ open, check, posted });
+  await gutterChecks({ open, check, posted, save });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1295,7 +1350,7 @@ async function imagesChecks({ open, check, posted }) {
       chats.every((c, n) => tabs[n + 1].includes(c.title) && tabs[n + 1].trim().endsWith(String(c.count))),
       `${width}: a tab per chat with images, newest first, with its topic and count`,
     );
-    check((await p.locator('.gallery-tabs button.tab .glyph[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
+    check((await p.locator('.gallery-tabs button.tab .fl-avatar[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
     const cards = await p.locator('.gallery-card').count();
     const asked = await thumbs(p);
     check(cards === all.length && asked > 0 && asked < cards / 2, `${width}: only cards near the screen ask for thumbnails (${asked} of ${cards})`);
@@ -1386,7 +1441,7 @@ async function imagesChecks({ open, check, posted }) {
     await p.waitForSelector('.gallery-preview .preview-img');
     await p.waitForFunction(() => document.querySelector('.preview-img')?.complete);
     const title = await p.locator('.preview-title').innerText();
-    check(title === mine[1].title && (await p.locator('.preview-meta').innerText()).includes(`2 of ${mine.length}`), `${width}: a card opens the large preview (${title})`);
+    check(title === mine[1].title && (await p.locator('.viewer-count').innerText()).replace(/\s+/g, ' ') === `2 / ${mine.length}`, `${width}: a card opens the large preview (${title})`);
     const fit = await p.evaluate(() => {
       const img = document.querySelector('.preview-img').getBoundingClientRect();
       const stage = document.querySelector('.preview-stage').getBoundingClientRect();
@@ -1448,8 +1503,500 @@ async function imagesChecks({ open, check, posted }) {
   }
 }
 
+// ---- No numbered agent labels ("Claude 9") anywhere a person reads, tooltips aside ----
+
+/** Text nodes and the attributes people read or hear (aria-label, placeholder, alt); `title` tooltips and SVG <title> are left out. */
+async function numberedLabels(p) {
+  return p.evaluate(() => {
+    const re = /\b(Claude|Codex|Gemini|Demo) \d+\b/;
+    const hits = [];
+    const walker = document.createTreeWalker(document.body, 4 /* NodeFilter.SHOW_TEXT */);
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (n.parentElement?.closest('title, script, style, textarea')) continue;
+      if (re.test(n.textContent ?? '')) hits.push((n.textContent ?? '').trim().slice(0, 80));
+    }
+    for (const el of document.querySelectorAll('[aria-label], [placeholder], [alt], [aria-description], [aria-valuetext]')) {
+      for (const a of ['aria-label', 'placeholder', 'alt', 'aria-description', 'aria-valuetext']) {
+        const v = el.getAttribute(a);
+        if (v && re.test(v)) hits.push(`${a}="${v.slice(0, 80)}"`);
+      }
+    }
+    return hits;
+  });
+}
+
+async function labelChecks({ open, check }) {
+  // The fixtures keep numbered labels, as an older version saved them: none may reach the screen.
+  const chats = fixture().state.chats.map((c) => c.id);
+  const pages = [
+    ...['board', 'list', 'map', 'inbox'].map((v) => `surface=tasks&theme=dark-2026&view=${v}`),
+    'surface=tasks&theme=dark-2026&view=images&fixture=images',
+    'surface=tasks&theme=dark-2026&view=inbox&fixture=inbox',
+    'surface=chat&theme=dark-2026&side=1&list=1&fixture=inbox',
+    ...chats.map((id) => `surface=chat&theme=dark-2026&select=${id}`),
+    'surface=chat&theme=dark-2026&fixture=approvals&select=chat-shop',
+    'surface=chat&theme=dark-2026&select=chat-pay&fixture=subagents',
+    'surface=chat&theme=dark-2026&fixture=permissions&select=chat-trip',
+    'surface=chat&theme=dark-2026&side=1&fixture=steps',
+    'surface=accounts&theme=dark-2026',
+    'surface=images&theme=dark-2026&side=1&fixture=images',
+  ];
+  for (const query of pages) {
+    const p = await open(query, 1200, 900);
+    const hits = await numberedLabels(p);
+    // The menus that list chats or name one: all chats, Hand off, Pipe to.
+    for (const opener of ['.all-btn', 'button:has-text("Hand off")', 'button:has-text("Pipe to")']) {
+      const b = p.locator(opener).first();
+      if (!(await b.count()) || !(await b.isVisible())) continue;
+      await b.click();
+      hits.push(...(await numberedLabels(p)).map((h) => `${opener}: ${h}`));
+      await p.keyboard.press('Escape');
+    }
+    check(hits.length === 0, `no numbered agent label on ${query}${hits.length ? ` [${[...new Set(hits)].slice(0, 5).join(' | ')}]` : ''}`);
+    await p.close();
+  }
+}
+
+// ---- The chat's left and right gutter: nothing in the transcript reaches past it ----
+
+/**
+ * Every box in the transcript (and its ::before/::after drawn with position: absolute, like a timeline's
+ * dots and spine), clipped by any scrolling or clipping box inside it, must sit within the transcript's
+ * gutter: left >= gutter - 0.5 and right <= width - gutter + 0.5, the scrollbar left out. And the page
+ * never scrolls sideways.
+ */
+async function gutterOffenders(p) {
+  return p.evaluate(() => {
+    const t = document.querySelector('.transcript');
+    if (!t) return { gutter: 0, offenders: ['no .transcript'], pageScroll: false, sideways: 0 };
+    const gutter = parseFloat(window.getComputedStyle(t).paddingLeft);
+    const box = t.getBoundingClientRect();
+    const min = box.left + gutter - 0.5;
+    const max = box.left + t.clientWidth - gutter + 0.5;
+    const offenders = [];
+    const name = (el) => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''}`;
+    const clipOf = (el) => {
+      let l = -Infinity;
+      let r = Infinity;
+      for (let a = el.parentElement; a && a !== t; a = a.parentElement) {
+        const cs = window.getComputedStyle(a);
+        if (cs.overflowX !== 'visible' || cs.contain.includes('paint')) {
+          const ar = a.getBoundingClientRect();
+          l = Math.max(l, ar.left);
+          r = Math.min(r, ar.right);
+        }
+      }
+      return [l, r];
+    };
+    const visible = (el, cs) => cs.display !== 'none' && cs.visibility !== 'hidden' && !(cs.position === 'absolute' && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clipPath === 'inset(50%)'));
+    for (const el of t.querySelectorAll('*')) {
+      const cs = window.getComputedStyle(el);
+      if (!visible(el, cs) || el.closest('svg') !== null && el.tagName.toLowerCase() !== 'svg') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 1 || r.height <= 1) continue;
+      const [cl, cr] = clipOf(el);
+      const left = Math.max(r.left, cl);
+      const right = Math.min(r.right, cr);
+      if (right - left <= 1) continue;
+      if (left < min || right > max) offenders.push(`${name(el)} ${Math.round(left - box.left)}..${Math.round(box.left + t.clientWidth - right)}`);
+      for (const pseudo of ['::before', '::after']) {
+        const ps = window.getComputedStyle(el, pseudo);
+        if (ps.content === 'none' || ps.position !== 'absolute' || ps.display === 'none') continue;
+        const w = parseFloat(ps.width);
+        if (!(w > 1) || !(parseFloat(ps.height) > 1)) continue;
+        const pl = parseFloat(ps.left);
+        if (Number.isNaN(pl)) continue;
+        // left is from the padding box of the containing block; for the element itself as that block, near enough.
+        const at = r.left + parseFloat(cs.borderLeftWidth) + pl;
+        if (Math.max(at, cl) < min || Math.min(at + w, cr) > max) offenders.push(`${name(el)}${pseudo} ${Math.round(at - box.left)}`);
+      }
+    }
+    return { gutter, offenders, pageScroll: document.scrollingElement.scrollWidth > window.innerWidth, sideways: Math.max(0, t.scrollWidth - t.clientWidth - 1) };
+  });
+}
+
+/** The same items with a long unbreakable word, path or URL added to every text: nothing may push the transcript wider. */
+function stretched(v, key) {
+  // Functions hoist, constants don't: shoot() runs before the module's later lines.
+  const LONG = 'averyveryverylongunbreakabletoken'.repeat(12);
+  const TEXTS = ['text', 'title', 'commandLine', 'path', 'line', 'message', 'output', 'name', 'target', 'always', 'cwd', 'summary', 'last'];
+  if (typeof v === 'string') return TEXTS.includes(key) && v.length > 2 ? `${v} ${key === 'path' || key === 'cwd' ? '/' : 'https://example.com/'}${LONG}` : v;
+  if (Array.isArray(v)) return v.map((x) => stretched(x, key));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'id' || k.endsWith('Id') ? x : stretched(x, k)]));
+  return v;
+}
+
+async function gutterChecks({ open, check }) {
+  const shots = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  const now = Date.now();
+  const sets = [
+    ['', fixture(now)],
+    ['fixture=approvals&', approvalsFixture(now)],
+    ['fixture=subagents&', subagentsFixture(now)],
+    ['fixture=permissions&', permissionsFixture(now)],
+    ['fixture=steps&', stepsFixture(now)],
+    ['fixture=reference&', referenceFixture(now)],
+  ];
+  // Each chat of each fixture, in the editor and in the side bar, plus the largest text size.
+  const pages = sets.flatMap(([q, fx]) => fx.state.chats.flatMap((c) => [`${q}select=${c.id}`, `side=1&${q}select=${c.id}`]).map((query) => ({ query, fx })));
+  pages.push({ query: 'textSize=17&fixture=reference&select=chat-long', fx: sets[5][1] }, { query: 'textSize=17&select=chat-c5', fx: sets[0][1] });
+  for (const theme of ['dark-2026', 'light-2026']) {
+    for (const width of [320, 480, 640, 900, 1200]) {
+      const bad = [];
+      for (const { query, fx } of pages) {
+        const p = await open(`surface=chat&theme=${theme}&${query}`, width, 900);
+        // A spinner mid-turn is a rotated square: measure it at rest.
+        await p.addStyleTag({ content: '*, *::before, *::after { animation: none !important; transition: none !important; }' });
+        const report = (r, how) => (r.offenders.length || r.pageScroll || r.sideways) && bad.push(`${query}${how} (gutter ${r.gutter}): ${r.pageScroll ? 'the page scrolls sideways; ' : ''}${r.sideways ? `the transcript scrolls sideways (${r.sideways}px); ` : ''}${[...new Set(r.offenders)].slice(0, 6).join(', ')}`);
+        report(await gutterOffenders(p), '');
+        // Long words, paths and URLs everywhere.
+        const selected = new URLSearchParams(query).get('select');
+        await p.evaluate((m) => window.postMessage(m, '*'), { type: 'snapshot', state: { ...fx.state, chats: fx.state.chats.map((c) => ({ ...c, items: stretched(c.items, 'items') })) }, selected, now: Date.now() });
+        await p.waitForTimeout(150);
+        report(await gutterOffenders(p), ' with long words');
+        if (theme === 'dark-2026' && (width === 480 || width === 1200) && query === 'fixture=approvals&select=chat-shop' && opts['gutter-shot']) {
+          // As after a sideways trackpad swipe (or a focus that scrolls it into view): as far right as it goes.
+          await p.evaluate(() => (document.querySelector('.transcript').scrollLeft = 1e6));
+          fs.mkdirSync(shots, { recursive: true });
+          await p.screenshot({ path: path.join(shots, `left-gutter-${opts['gutter-shot']}-${width}.png`), animations: 'disabled', caret: 'hide' });
+        }
+        await p.close();
+      }
+      check(bad.length === 0, `the transcript keeps its gutter at ${width}px, ${theme}${bad.length ? `:\n      ${bad.join('\n      ')}` : ''}`);
+    }
+  }
+}
+
+// ---- The Decision Inbox ----
+
+async function inboxChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const { ids } = inboxFixture();
+  const shot = async (p, name) => {
+    await p.screenshot({ path: path.join(out, `${name}.png`), animations: 'disabled', caret: 'hide' });
+    console.log(`  ${path.join(out, `${name}.png`)}`);
+  };
+  const sel = (p) => p.evaluate(() => document.querySelector('.inbox-row[aria-selected="true"]')?.dataset.id);
+  const answers = (p) => p.evaluate(() => window.__posted.filter((m) => m.type !== 'ready' && m.type !== 'imageThumb' && m.type !== 'imageSrc'));
+  const clear = (p) => p.evaluate(() => (window.__posted.length = 0));
+  const host = (p, action) => p.evaluate((a) => window.postMessage({ type: 'action', action: a }, '*'), action);
+  const grace = (p) => p.waitForTimeout(700);
+  // Careful, then review, then routine; the oldest first in each lane.
+  const order = ['bridge-c-click', 'perm-a-edit', 'bridge-c-open', 'bridge-b-ask', 'q-d-driver', 'review-d-store', 'perm-a-test', 'cmd-b-test', 'perm-e-test', 'perm-e-api'];
+
+  for (const [theme, tone] of [['dark-2026', 'dark'], ['light-2026', 'light']]) {
+    for (const [width, height] of [[1200, 800], [640, 900]]) {
+      const p = await open(`surface=tasks&theme=${theme}&view=board&fixture=inbox`, width, height, 2);
+      const tab = p.locator('.views button.seg-item').nth(4);
+      check((await tab.innerText()).replace(/\s+/g, ' ').trim() === 'Inbox · 10', `${width} ${tone}: the view switch says Inbox · 10`);
+      await p.keyboard.press('5');
+      await p.waitForSelector('.inbox-row');
+      await grace(p);
+      check(await p.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth), `${width} ${tone}: no sideways scroll`);
+      await shot(p, `inbox-${width}-${tone}`);
+      if (width === 1200 && tone === 'dark') {
+        await p.locator(`.inbox-row[data-id="${ids.first}"]`).click();
+        await grace(p);
+        await p.keyboard.press('b');
+        await p.waitForSelector('.inbox-confirm');
+        await grace(p);
+        await shot(p, `inbox-confirm-${width}-${tone}`);
+        await p.keyboard.press('Escape');
+        await p.locator(`.inbox-row[data-id="${ids.edit}"]`).click();
+        await grace(p);
+        await shot(p, `inbox-edit-${width}-${tone}`);
+      }
+      await p.close();
+    }
+  }
+
+  const p = await open('surface=tasks&theme=dark-2026&view=list&fixture=inbox', 1200, 800);
+  await p.keyboard.press('5');
+  await p.waitForSelector('.inbox-row');
+  check(JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.inbox-row')].map((r) => r.dataset.id))) === JSON.stringify(order), 'careful, review, routine; the oldest first in each lane');
+  check(JSON.stringify(await p.locator('.inbox-lane').evaluateAll((l) => l.map((x) => x.dataset.tone))) === JSON.stringify(['careful', 'review', 'routine']), 'each lane is headed by its risk');
+  check((await p.locator(`.inbox-row[data-id="${ids.first}"] .fl-avatar[data-agent="claude"]`).count()) === 1 && (await p.locator('.inbox-row .inbox-kind').count()) === 10 && (await p.locator(`.inbox-row[data-id="${ids.first}"] .inbox-age`).innerText()) === '7m', 'a row has its agent glyph, kind icon and age');
+  check((await p.locator(`.inbox-row[data-id="${ids.first}"] .inbox-chat`).innerText()) === 'Fix formatCents for negative amounts', 'a row names its chat');
+  check((await sel(p)) === 'bridge-c-click', 'the first in the careful lane is selected');
+  check((await p.locator('.mgr-head .search').count()) === 0 && (await p.locator('.new-task').count()) === 0, 'the Inbox has the room: no search, no new task');
+
+  // Grace: an answer key right after moving does nothing; after it, it answers the request on screen.
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('j');
+  await p.keyboard.press('a');
+  check((await sel(p)) === ids.edit && (await answers(p)).length === 0, 'an answer key just after moving does nothing (grace)');
+  check((await p.locator('.inbox-detail .diff .dl[data-op="add"]').count()) === 3, 'an edit shows its diff');
+  await grace(p);
+  await p.keyboard.press('a');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'permission', requestId: ids.edit, optionId: 'allow' }]), 'a allows the selected request once, through the permission path');
+
+  // A new arrival, older than everything, never takes the selection.
+  await host(p, { t: 'items', chatId: 'chat-c', items: [{ kind: 'permission', requestId: 'perm-new', title: 'Read .env', toolKind: 'read', options: [{ optionId: 'y', name: 'Yes', kind: 'allow_once' }, { optionId: 'n', name: 'No', kind: 'reject_once' }] }], at: Date.now() - 3_600_000 });
+  await p.waitForSelector('.inbox-row[data-id="perm-new"]');
+  check((await sel(p)) === ids.edit, 'a new arrival never takes the selection');
+  check((await tabText(p)) === 'Inbox · 11', 'the count follows live');
+
+  // Answered: the row folds away, and the selection goes to the first still waiting, with a fresh grace period.
+  await clear(p);
+  await host(p, { t: 'permissionAnswered', requestId: ids.edit, answer: 'Yes' });
+  check((await p.locator(`.inbox-row[data-id="${ids.edit}"][data-leaving]`).count()) === 1, 'an answered row animates out');
+  await p.waitForTimeout(300);
+  check((await p.locator(`.inbox-row[data-id="${ids.edit}"]`).count()) === 0, '...and is gone');
+  check((await sel(p)) === 'bridge-c-click', 'the selection moves to the first still waiting');
+  await p.keyboard.press('d');
+  check((await answers(p)).length === 0, 'and the keys wait out its grace period');
+
+  // Batch: only identical routine commands (same text, same folder), confirmed with the list, never Always allow.
+  await p.locator(`.inbox-row[data-id="${ids.first}"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('Shift+Enter');
+  const listed = await p.locator('.inbox-confirm-list li').allInnerTexts();
+  check(listed.length === 3 && listed.every((t) => t.includes('/Users/arun/code/shop')) && !listed.some((t) => t.includes('packages/api')), 'the confirmation lists the three identical requests, not the one in another folder');
+  await p.keyboard.press('Enter');
+  check((await answers(p)).length === 0, 'Enter right after the confirmation opens does nothing (grace)');
+  await grace(p);
+  await p.keyboard.press('Enter');
+  check(
+    JSON.stringify(await answers(p)) ===
+      JSON.stringify([
+        { type: 'permission', requestId: 'perm-a-test', optionId: 'allow' },
+        { type: 'command', commandId: 'cmd-b-test', approve: true },
+        { type: 'permission', requestId: 'perm-e-test', optionId: 'allow' },
+      ]),
+    'Allow all allows each identical request once, each through its own path',
+  );
+  check((await p.locator('.inbox-confirm').count()) === 0, 'the confirmation closes once answered');
+
+  await p.locator(`.inbox-row[data-id="${ids.elsewhere}"]`).click();
+  check((await p.locator('.inbox-detail .apv-batch').count()) === 0, 'the same command in another folder is never batched');
+  await p.locator(`.inbox-row[data-id="${ids.click}"]`).click();
+  check((await p.locator('.inbox-detail .apv-site').innerText()).includes('staging.shop.test'), 'a browser action shows its site');
+  check((await p.locator('.inbox-detail .apv[data-risk="careful"] .fl-btn--hold').count()) === 1, 'a payment click is careful: hold to allow');
+  await p.locator(`.inbox-row[data-id="bridge-c-open"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('Tab');
+  await p.keyboard.press('Tab');
+  await p.keyboard.press('Enter');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'bridge', requestId: 'bridge-c-open', answer: 'allowAlways' }]), 'Tab twice picks Always; Enter always allows the site');
+  await p.locator(`.inbox-row[data-id="${ids.review}"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('Tab');
+  await p.keyboard.press('Enter');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'review', reviewId: ids.review, action: 'open' }]), 'a review offers no other scope; Enter opens its diff');
+  await p.locator(`.inbox-row[data-id="${ids.question}"]`).click();
+  await grace(p);
+  await clear(p);
+  await p.keyboard.press('1');
+  await p.keyboard.press('o');
+  check(
+    JSON.stringify(await answers(p)) ===
+      JSON.stringify([
+        { type: 'answerQuestion', requestId: ids.question, action: 'accept', values: { driver: 'better-sqlite3' } },
+        { type: 'openChat', chatId: 'chat-d', item: ids.question },
+      ]),
+    '1 picks the recommended option; o opens the chat at the request',
+  );
+  await clear(p);
+  await p.keyboard.press('Escape');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'answerQuestion', requestId: ids.question, action: 'decline' }]), 'Esc says no (skips a question)');
+  await p.evaluate(() => window.postMessage({ type: 'showInbox' }, '*'));
+  await p.waitForSelector('.inbox');
+  check(true, 'Open Decision Inbox turns the Manager to its Inbox');
+  await p.close();
+
+  for (const tone of ['dark', 'light']) {
+    const e = await open(`surface=tasks&theme=${tone}-2026&view=inbox&fixture=inbox-empty`, 1200, 800, 2);
+    await e.waitForSelector('.inbox-empty');
+    check((await e.locator('.inbox-empty h2').innerText()) === 'Nothing waits for you', `${tone}: empty, it says nothing waits`);
+    const rows = await e.locator('.inbox-history-row').allInnerTexts();
+    check(rows.length === 8 && rows[0].includes('No') && rows[1].includes('Accepted') && rows.some((r) => r.includes('Denied')), `${tone}: and lists what was answered lately, newest first`);
+    await shot(e, `inbox-empty-1200-${tone}`);
+    await e.close();
+  }
+
+  const side = await open('surface=chat&theme=dark-2026&side=1&list=1&fixture=inbox', 300, 800);
+  await side.waitForSelector('.inbox-entry');
+  check((await side.locator('.inbox-entry').innerText()).trim() === 'Inbox · 10', 'the Chats view shows Inbox · 10');
+  await clear(side);
+  await side.locator('.inbox-entry').click();
+  check(JSON.stringify(await answers(side)) === JSON.stringify([{ type: 'openInbox' }]), '...and opens it');
+  await side.close();
+}
+
+function tabText(p) {
+  return p.locator('.views button.seg-item').nth(4).innerText().then((t) => t.replace(/\s+/g, ' ').trim());
+}
+
 function sharedGallery() {
   const out = path.join(path.dirname(hostCode), 'gallery.mjs');
   if (!fs.existsSync(out)) spawnSync(process.execPath, [path.join(ext, 'node_modules/esbuild/bin/esbuild'), path.join(ext, 'src/shared/gallery.ts'), '--bundle', '--format=esm', '--platform=node', `--outfile=${out}`, '--log-level=error']);
   return out;
+}
+
+// ---- Approvals: routine rows, review and careful cards, the Allow menu, hold to allow, the Inbox lanes ----
+
+async function approvalsChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const shot = async (p, name, element) => {
+    const file = path.join(out, `${name}.png`);
+    await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    console.log(`  ${file}`);
+  };
+  const answers = (p) => p.evaluate(() => window.__posted.filter((m) => !['ready', 'imageThumb', 'imageSrc', 'select', 'seen', 'draft'].includes(m.type)));
+  const clear = (p) => p.evaluate(() => (window.__posted.length = 0));
+  const grace = (p) => p.waitForTimeout(700);
+  const noScroll = (p) => p.evaluate(() => [...document.querySelectorAll('.transcript, .inbox-detail, .inbox-list, body')].every((e) => e.scrollWidth <= e.clientWidth + 1));
+
+  for (const [theme, tone] of [['dark-2026', 'dark'], ['light-2026', 'light']]) {
+    for (const width of [1200, 640]) {
+      const chat = await open(`surface=chat&theme=${theme}&fixture=approvals&select=chat-shop`, width, 1500, 2);
+      await chat.waitForSelector('.apv');
+      await grace(chat);
+      check(await noScroll(chat), `${width} ${tone}: the chat has no sideways scroll`);
+      await shot(chat, `approvals-chat-${width}-${tone}`);
+      await chat.locator('#item-perm-push').scrollIntoViewIfNeeded();
+      await shot(chat, `approvals-careful-${width}-${tone}`, '#item-perm-push');
+      await chat.close();
+      const inboxPage = await open(`surface=tasks&theme=${theme}&view=inbox&fixture=approvals`, width, 900, 2);
+      await inboxPage.waitForSelector('.inbox-row');
+      await grace(inboxPage);
+      check(await noScroll(inboxPage), `${width} ${tone}: the Inbox has no sideways scroll`);
+      await shot(inboxPage, `approvals-inbox-${width}-${tone}`);
+      await inboxPage.close();
+    }
+  }
+
+  // The weights: routine is a sentence row, review a card with the split Allow, careful a red card that holds.
+  const p = await open('surface=chat&theme=dark-2026&fixture=approvals&select=chat-shop', 1200, 1500);
+  await p.waitForSelector('.apv');
+  await grace(p);
+  check((await p.locator('#item-perm-test.apv-row .apv-token').count()) === 1, 'npm test is a routine sentence row with its scope token');
+  check((await p.locator('#item-perm-edit .fl-split').count()) === 1 && (await p.locator('#item-perm-edit[data-focus]').count()) === 1, 'the edit is a card with the split Allow, ringed as the one the keys act on');
+  for (const id of ['perm-push', 'perm-env', 'bridge-click'])
+    check((await p.locator(`#item-${id}[data-risk="careful"] .fl-btn--hold`).count()) === 1 && (await p.locator(`#item-${id} .fl-split`).count()) === 0, `${id}: careful, hold to allow, no scope menu`);
+  check((await p.locator('.fl-btn--brand:not(.fl-split-caret)').count()) === 1, 'one brand primary on screen (its split caret aside)');
+  check((await p.locator('#item-perm-push .apv-commit').count()) === 3 && (await p.locator('#item-perm-push').innerText()).includes('Safer:'), 'the force push lists the commits it would drop and the safer way');
+
+  // The Allow menu names each rule; picking one allows with it.
+  await clear(p);
+  await p.locator('#item-perm-edit .fl-split-caret').click();
+  const rows = await p.locator('.fl-menu .apv-scope-row').allInnerTexts();
+  check(rows.length === 3 && rows[0].startsWith('Once') && rows[1].includes('For this chat') && rows[2].includes('~/code/shop/src'), `the menu: Once, For this chat, Always with the exact rule [${rows.map((r) => r.replace(/\s+/g, ' ')).join(' | ')}]`);
+  await p.locator('.fl-menu .apv-scope-row').nth(2).click();
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'allowAlways', requestId: 'perm-edit', grant: { kind: 'folder', folder: '/Users/arun/code/shop/src', access: 'write' } }]), 'Always from the menu remembers the folder it named');
+
+  // Tab moves the scope, the label repeats it, Enter allows with it.
+  await clear(p);
+  await p.locator('.composer textarea').focus();
+  await p.keyboard.press('Tab');
+  check((await p.locator('#item-perm-edit .fl-split > .fl-btn').innerText()).startsWith('Allow for this chat'), 'Tab: the button says Allow for this chat');
+  await p.keyboard.press('Enter');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'permission', requestId: 'perm-edit', optionId: 'always' }]), 'Enter allows for this chat (the agent’s own session option)');
+
+  // Careful: a tap does nothing; a hold of 600 ms allows, once.
+  await clear(p);
+  await p.locator('#item-perm-push').click({ position: { x: 300, y: 80 } });
+  await grace(p);
+  await p.locator('.composer textarea').focus();
+  await p.keyboard.down('Enter');
+  await p.waitForTimeout(200);
+  await p.keyboard.up('Enter');
+  await p.waitForTimeout(700);
+  check((await answers(p)).length === 0, 'careful: a short Enter does nothing (the fill drains back)');
+  await p.keyboard.down('Enter');
+  await p.waitForTimeout(300);
+  check((await p.locator('#item-perm-push .fl-btn--hold[data-holding]').count()) === 1, 'careful: holding shows the fill');
+  await p.waitForTimeout(450);
+  await p.keyboard.up('Enter');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'permission', requestId: 'perm-push', optionId: 'allow' }]), 'careful: held 600 ms, it allows once');
+  await clear(p);
+  const hold = p.locator('#item-perm-env .fl-btn--hold');
+  await hold.hover();
+  await p.mouse.down();
+  await p.waitForTimeout(250);
+  await p.mouse.up();
+  await p.waitForTimeout(500);
+  check((await answers(p)).length === 0, 'careful: a click on Hold does nothing');
+  await p.mouse.down();
+  await p.waitForTimeout(750);
+  await p.mouse.up();
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'permission', requestId: 'perm-env', optionId: 'allow' }]), 'careful: a pointer held 600 ms allows once');
+
+  // Esc says no to the card the keys act on; Shift+Enter allows every identical routine request once.
+  await clear(p);
+  await p.locator('#item-bridge-ask').click({ position: { x: 300, y: 20 } });
+  await grace(p);
+  await p.locator('.composer textarea').focus();
+  await p.keyboard.press('Escape');
+  check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'bridge', requestId: 'bridge-ask', answer: 'deny' }]), 'Esc denies the marked request');
+  await clear(p);
+  await p.locator('#item-perm-test').click({ position: { x: 300, y: 18 } });
+  await grace(p);
+  await p.locator('.composer textarea').focus();
+  await p.keyboard.press('Shift+Enter');
+  check(
+    JSON.stringify(await answers(p)) ===
+      JSON.stringify([
+        { type: 'permission', requestId: 'perm-test', optionId: 'allow' },
+        { type: 'command', commandId: 'cmd-csv-test', approve: true },
+        { type: 'permission', requestId: 'perm-deps-test', optionId: 'allow' },
+      ]),
+    'Shift+Enter allows the three identical npm test requests once each',
+  );
+  await p.close();
+
+  // The countdown: visible, and Esc stops it.
+  const c = await open('surface=chat&theme=dark-2026&fixture=approvals&countdown=1&select=chat-shop', 1200, 1500, 2);
+  await c.waitForSelector('#item-perm-test .apv-auto');
+  check((await c.locator('#item-perm-test .apv-auto').innerText()).includes('Auto-allows in'), 'a routine request with the countdown on shows it');
+  await shot(c, 'approvals-countdown-1200-dark', '#item-perm-test');
+  await c.locator('#item-perm-test').click({ position: { x: 300, y: 18 } });
+  await grace(c);
+  await clear(c);
+  await c.locator('.composer textarea').focus();
+  await c.keyboard.press('Escape');
+  check(JSON.stringify(await answers(c)) === JSON.stringify([{ type: 'stopAuto', id: 'perm-test' }]), 'Esc stops the countdown first');
+  await c.close();
+
+  // The Inbox: risk lanes, the card in the detail, "Or tell … instead".
+  const ib = await open('surface=tasks&theme=dark-2026&view=inbox&fixture=approvals', 1200, 900);
+  await ib.waitForSelector('.inbox-row');
+  await grace(ib);
+  check(JSON.stringify(await ib.locator('.inbox-lane-head').allInnerTexts().then((t) => t.map((x) => x.replace(/\s+\d+$/, '').trim()))) === JSON.stringify(['Careful', 'Review', 'Routine']), 'the Inbox groups by Careful, Review, Routine');
+  check((await ib.locator('.inbox-lane[data-tone="careful"] .inbox-row').count()) === 3 && (await ib.locator('.inbox-lane[data-tone="routine"] .inbox-row').count()) === 3, 'three careful, three routine');
+  check((await ib.locator('.inbox-row').first().locator('.inbox-chat').innerText()) === 'Fix formatCents for negative amounts', 'each row names its chat');
+  check((await ib.locator('.inbox-detail .apv[data-risk="careful"] .fl-btn--hold').count()) === 1, 'the detail is the same card, holding for careful');
+  await clear(ib);
+  await ib.keyboard.press('Enter');
+  await ib.waitForTimeout(700);
+  check((await answers(ib)).length === 0, 'Inbox: Enter tapped on a careful request does nothing');
+  await ib.keyboard.press('r');
+  await ib.keyboard.type('Use --force-with-lease on the migration branch');
+  await ib.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
+  check(
+    JSON.stringify(await answers(ib)) ===
+      JSON.stringify([
+        { type: 'bridge', requestId: 'bridge-click', answer: 'deny' },
+        { type: 'send', chatId: 'chat-shop', text: 'Use --force-with-lease on the migration branch', images: [] },
+      ]),
+    'Or tell Claude instead: denies, then sends the message to its chat',
+  );
+  await ib.locator('.inbox-row[data-id="perm-test"]').click();
+  await grace(ib);
+  await clear(ib);
+  await ib.keyboard.press('Shift+Enter');
+  check((await ib.locator('.inbox-confirm-list li').count()) === 3, 'Shift+Enter on a routine request asks to allow all three identical ones');
+  await ib.keyboard.press('Escape');
+  await ib.locator('.inbox-row[data-id="perm-edit"]').click();
+  await grace(ib);
+  await ib.keyboard.press('Shift+Enter');
+  check((await ib.locator('.inbox-confirm').count()) === 0, 'never for a review request');
+  await ib.close();
 }

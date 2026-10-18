@@ -35,8 +35,8 @@ export function RefChip({ codeRef, cwd, onRemove }: { codeRef: CodeRef; cwd: str
         {label}
       </button>
       {onRemove && (
-        <button class="badge-x" aria-label={`Remove ${label}`} title="Remove" onClick={onRemove}>
-          <Icon name="close" />
+        <button type="button" class="fl-pill__x badge-x" aria-label={`Remove ${label}`} title="Remove" onClick={onRemove}>
+          <Icon name="close" size={12} />
         </button>
       )}
     </span>

@@ -1,7 +1,6 @@
 // Pure helpers for the agent views: search, sorting, badges, the agent map's
 // layout and the @-mention picker. No DOM here, so all of it is unit tested.
 import {
-  AGENT_FACES,
   AGENT_KEYS,
   age,
   boardColumn,
@@ -27,7 +26,8 @@ import {
 import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
 
-export const agentName = (agent: AgentKey) => AGENT_FACES[agent].name;
+import { agentName, chatTip } from './names';
+export { agentName };
 
 /** Shortens to `max` characters with an ellipsis. */
 export function clip(text: string, max: number): string {
@@ -158,6 +158,37 @@ export function claudeSubagents(s: ClaudeSession, now: number): Subagent[] {
       ...(!working && a.startedAt !== undefined && a.lastActivity !== undefined ? { ms: Math.max(0, a.lastActivity - a.startedAt) } : {}),
     };
   });
+}
+
+/** What the host knows of FriedLiver's chats: their views, and the agent session each continues. */
+interface ChatSessions {
+  state: { chats: ChatView[] };
+  chats: Record<string, { sessionId?: string }>;
+}
+
+/** The FriedLiver chat that continues this agent session, if any. */
+export function chatOfSession(saved: ChatSessions, sessionId: string): string | undefined {
+  return Object.entries(saved.chats).find(([, c]) => c.sessionId === sessionId)?.[0];
+}
+
+/**
+ * Ties each outside session to the FriedLiver chat that only resumed it: no turn run, none running. The reader lists
+ * such a session only while something else (the Claude Code extension, the CLI) wrote to it last, so the chat holds none
+ * of its work. The newest such chat wins; a chat that ran a turn keeps its own card.
+ */
+export function linkResumeChats(sessions: ClaudeSession[], saved: ChatSessions): ClaudeSession[] {
+  const idle = new Map<string, string>();
+  for (const c of saved.state.chats) {
+    const sid = saved.chats[c.id]?.sessionId;
+    if (sid && c.turns === 0 && !c.busy) idle.set(sid, c.id);
+  }
+  return sessions.map((s) => (idle.has(s.id) ? { ...s, chatId: idle.get(s.id) } : s));
+}
+
+/** The chats with their own card: a chat tied to an outside session shows in that session's card instead. Never removes one. */
+export function withoutLinkedChats(chats: ChatView[], sessions: ClaudeSession[]): ChatView[] {
+  const linked = new Set(sessions.flatMap((s) => (s.chatId ? [s.chatId] : [])));
+  return linked.size ? chats.filter((c) => !linked.has(c.id)) : chats;
 }
 
 /** Every word of the query must appear in the title or "claude code". */
@@ -340,7 +371,7 @@ export interface Badge {
 export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView): Badge[] {
   const byId = new Map(state.chats.map((c) => [c.id, c]));
   const out: Badge[] = [];
-  const to = (other: ChatView, text: string, extra: Partial<Badge> & Pick<Badge, 'kind'>): Badge => ({ text, chatId: other.id, tip: `${other.label}: ${other.title}`, ...extra });
+  const to = (other: ChatView, text: string, extra: Partial<Badge> & Pick<Badge, 'kind'>): Badge => ({ text, chatId: other.id, tip: chatTip(other), ...extra });
   const parent = chat.origin && byId.get(chat.origin.chatId);
   if (chat.origin && parent) out.push(to(parent, `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.title}`, { kind: 'origin' }));
   for (const l of state.links) {

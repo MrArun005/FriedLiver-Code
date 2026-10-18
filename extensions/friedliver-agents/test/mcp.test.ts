@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSIONS, TOOLS, handle } from '../src/bridge/mcp';
 import { BRIDGE_LIMITS, TOKEN_ENV, BRIDGE_ENV } from '../src/bridge/protocol';
 import { AGENT_KEYS } from '../src/shared/model';
+import { SYSTEM_TOOLS } from '../src/shared/system';
 import { buildBridge } from './helpers';
 
 const request = (id: number, method: string, params?: object) => ({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) });
@@ -27,10 +28,10 @@ describe('the FriedLiver tools server (MCP)', () => {
     expect(handle(request(4, 'resources/list'))).toEqual({ reply: { jsonrpc: '2.0', id: 4, error: { code: -32601, message: 'Method not found' } } });
   });
 
-  it('lists the five tools with schemas that match what the editor accepts', () => {
+  it('lists the tools with schemas that match what the editor accepts', () => {
     const listed = handle(request(5, 'tools/list'));
     expect(listed && 'reply' in listed && (listed.reply as { result: { tools: unknown } }).result.tools).toBe(TOOLS);
-    expect(TOOLS.map((t) => t.name)).toEqual(['list_agents', 'list_chats', 'ask_agent', 'send_to_chat', 'read_chat', 'remember', 'index_search', 'index_symbols', 'index_outline', 'index_related', 'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['list_agents', 'list_chats', 'ask_agent', 'send_to_chat', 'read_chat', 'remember', 'index_search', 'index_symbols', 'index_outline', 'index_related', 'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload', ...SYSTEM_TOOLS]);
     const ask = TOOLS[2].inputSchema as unknown as { properties: Record<string, { enum?: string[]; maxLength?: number }>; required: string[] };
     expect(ask.properties.agent.enum).toEqual([...AGENT_KEYS]);
     expect(ask.properties.prompt.maxLength).toBe(BRIDGE_LIMITS.text);

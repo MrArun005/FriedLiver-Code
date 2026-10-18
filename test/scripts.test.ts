@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
-import { codesignArgs, friedliverVersion, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
+import { checkRun, parseRef } from '../scripts/fetch-build.mjs';
+import { diffStyles } from '../scripts/workbench-shots.mjs';
+import { codesignArgs, friedliverVersion, keepChromiumLocale, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
 
@@ -180,5 +182,67 @@ describe('upstream check', () => {
     expect(body).toContain('scripts/checksums.json');
     expect(body).toContain('was 24.18.0');
     expect(prBody({ from: '1.142.0', to: '1.142.1', commit: 'c'.repeat(40), node: '24.18.0', previousNode: '24.18.0', ripgrep: '1.17.1', previousRipgrep: '1.17.1' })).not.toContain('checksums.json');
+  });
+});
+
+describe('Chromium locale packs in the packaged app', () => {
+  it('keeps English (always) and the keep-list, drops the rest, ignores everything else', () => {
+    for (const keep of ['en.lproj', 'en_GB.lproj', 'en-US.pak', 'en-GB.pak', 'Info.plist', 'resources.pak', 'chrome_100_percent.pak', 'Base.lproj', 'MainMenu.nib', 'icudtl.dat']) {
+      expect(keepChromiumLocale(keep, 'en,en-GB'), keep).toBe(true);
+    }
+    for (const drop of ['de.lproj', 'zh_CN.lproj', 'pt_BR.lproj', 'hi.pak', 'fr.pak', 'en-AU.pak']) {
+      expect(keepChromiumLocale(drop, 'en,en-GB'), drop).toBe(false);
+    }
+  });
+
+  it('reads the keep-list in either spelling, and "all" keeps every pack', () => {
+    expect(keepChromiumLocale('hi.pak', 'en, hi')).toBe(true);
+    expect(keepChromiumLocale('pt_BR.lproj', 'pt-br')).toBe(true);
+    expect(keepChromiumLocale('en-US.pak', '')).toBe(true);
+    expect(keepChromiumLocale('de.lproj', 'all')).toBe(true);
+  });
+
+  it('runs on the packaged app before the installer is made and signed', () => {
+    const build = fs.readFileSync(path.join(root, 'scripts', 'build.mjs'), 'utf8');
+    expect(build).toContain('keepChromiumLocale(n)');
+    expect(build.indexOf('trimPackagedApp(out);')).toBeLessThan(build.indexOf('buildInstaller(arch, out);'));
+  });
+});
+
+describe('workbench harness', () => {
+  const good = {
+    repository: { full_name: 'MrArun005/FriedLiver-Code' },
+    head_repository: { full_name: 'MrArun005/FriedLiver-Code' },
+    path: '.github/workflows/build.yml',
+    conclusion: 'success',
+    event: 'workflow_dispatch',
+    head_branch: 'ui/workbench-modern',
+  };
+
+  it('takes only "latest", v* tags and run ids as the build', () => {
+    expect(parseRef('latest')).toEqual({ kind: 'release', ref: null });
+    expect(parseRef('v1.142.0-5')).toEqual({ kind: 'release', ref: 'v1.142.0-5' });
+    expect(parseRef('39085377230')).toEqual({ kind: 'run', ref: '39085377230' });
+    for (const bad of ['', '--repo=x', 'v1; rm -rf /', '123/other-artifact', 'main']) expect(() => parseRef(bad)).toThrow();
+  });
+
+  it('runs builds only from trusted runs of build.yml', () => {
+    expect(() => checkRun(good)).not.toThrow();
+    expect(() => checkRun({ ...good, head_branch: 'main', event: 'push' })).not.toThrow();
+    expect(() => checkRun({ ...good, head_repository: { full_name: 'evil/FriedLiver-Code' } })).toThrow(/fork/);
+    expect(() => checkRun({ ...good, event: 'pull_request' })).toThrow(/event/);
+    expect(() => checkRun({ ...good, path: '.github/workflows/ci.yml' })).toThrow(/build.yml/);
+    expect(() => checkRun({ ...good, head_branch: 'feat/x' })).toThrow(/branch/);
+    expect(() => checkRun({ ...good, head_branch: 'ui/../main' })).toThrow(/branch/);
+    expect(() => checkRun({ ...good, conclusion: 'failure' })).toThrow(/conclusion/);
+  });
+
+  it('reports every composer style that changed', () => {
+    const base = { '.composer': { color: 'red', 'border-radius': '8px' }, '.send-btn': { color: 'blue' } };
+    expect(diffStyles(base, structuredClone(base))).toEqual([]);
+    expect(diffStyles(base, { '.composer': { color: 'red', 'border-radius': '6px' }, '.send-btn': null })).toEqual([
+      '.composer border-radius: "8px" -> "6px"',
+      '.send-btn: present -> absent',
+    ]);
   });
 });

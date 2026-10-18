@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Turn the pristine upstream checkout into FriedLiver source:
 //   1. undo a previous prepare (git reset --hard + remove files it added)
-//   2. apply patches/*.patch in name order, remove unwanted upstream built-ins
+//   2. apply patches/*.patch in name order, remove unwanted upstream built-ins, add the workbench
+//      stylesheet (workbench/friedliver.css) and the design-system tokens it reads
 //   3. deep-merge product.json into upstream product.json (null deletes a key)
 //   4. use branding/icon.png as the Linux icon
 //   5. copy extensions/<name>/ (or $FRIEDLIVER_EXTENSIONS_DIR/<name>/) into upstream extensions/<name>/ (without node_modules),
@@ -12,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT_DIR, EXTENSIONS_DIR, VSCODE_DIR, copyDir, deepMerge, fail, friedliverVersion, git, log, readJson, run, upstream, writeJson } from './lib.mjs';
+import { readTokensSource, workbenchTokens } from './workbench-tokens.mjs';
 
 const MARKER = path.join(VSCODE_DIR, '.friedliver-prepare.json');
 
@@ -66,6 +68,13 @@ for (const name of REMOVED_BUILTINS) {
 		log(`removed upstream built-in extensions/${name}`);
 	}
 }
+
+// 2c. The workbench look (patch 0110 imports both): the design system's tokens, rewritten for the
+//     workbench from the Agents extension's media/tokens.css, and FriedLiver's workbench stylesheet.
+const workbenchMedia = path.join(VSCODE_DIR, 'src', 'vs', 'workbench', 'browser', 'media');
+fs.writeFileSync(path.join(workbenchMedia, 'friedliver-tokens.css'), workbenchTokens(readTokensSource()));
+fs.copyFileSync(path.join(ROOT_DIR, 'workbench', 'friedliver.css'), path.join(workbenchMedia, 'friedliver.css'));
+log('workbench: friedliver-tokens.css (from tokens.css) and friedliver.css');
 
 // 3. product.json.
 const productFile = path.join(VSCODE_DIR, 'product.json');

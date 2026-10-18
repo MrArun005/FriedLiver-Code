@@ -1,4 +1,5 @@
 import type * as acp from '@agentclientprotocol/sdk';
+import { chatRef } from '../shared/names';
 import type { Attachment } from '../shared/messages';
 import { MAX_LINK_DEPTH, lastReply, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
 import type { ApprovalLevel } from '../shared/session';
@@ -23,6 +24,8 @@ export interface NewChat {
   choices?: Record<string, string | boolean>;
   /** The chat's approval level; the user's default when not given. Full auto must already be confirmed. */
   approval?: ApprovalLevel;
+  /** Work in this workspace folder rather than the first one; ignored unless it is one of them. */
+  cwd?: string;
   /** Continue this agent session (one started outside FriedLiver) in one of the workspace folders. */
   resume?: { sessionId: string; cwd: string };
   /** Answers only: no FriedLiver tools, and every write, read, command, permission and question is refused up front. */
@@ -95,8 +98,8 @@ export class Connections {
     const source = this.require(chatId);
     let target = options.chatId ? this.require(options.chatId) : this.consultation(source.id, agent);
     if (target?.id === source.id) throw new Error('A chat cannot ask itself.');
-    if (target && target.agent !== agent) throw new Error(`${target.label} is a ${target.agent} chat, not ${agent}.`);
-    if (target?.busy) throw new Error(`${target.label} is still working. Wait for it to finish, or ask again later.`);
+    if (target && target.agent !== agent) throw new Error(`${chatRef(target)} is a ${target.agent} chat, not ${agent}.`);
+    if (target?.busy) throw new Error(`${chatRef(target)} is still working. Wait for it to finish, or ask again later.`);
     if (!target) {
       const depth = source.depth + 1;
       if (by === 'agent' && depth > MAX_LINK_DEPTH) {
@@ -119,11 +122,11 @@ export class Connections {
     ];
     const result = await this.host.prompt(target.id, blocks);
     const answered = this.chat(target.id);
-    if (!answered) throw new Error(`${target.label} was closed before it answered.`);
+    if (!answered) throw new Error(`${chatRef(target)} was closed before it answered.`);
     if (!result.reply) {
       const why = result.stopReason && result.stopReason !== 'end_turn' ? ` (${result.stopReason})` : '';
-      this.notice(source.id, `${answered.label} stopped without answering${why}.`);
-      throw new Error(`${answered.label} stopped without answering${why}.`);
+      this.notice(source.id, `${chatRef(answered)} stopped without answering${why}.`);
+      throw new Error(`${chatRef(answered)} stopped without answering${why}.`);
     }
     this.items(source.id, [this.linkItem(link, answered, 'reply', result.reply, by)]);
     this.count(link.id);
@@ -148,7 +151,7 @@ export class Connections {
     const existing = this.host.state.links.find((l) => l.kind === 'pipe' && l.from === from && l.to === to);
     if (existing?.active) return existing;
     if (pipeReaches(this.host.state.links, to, from)) {
-      throw new Error(`That would make a loop: ${b.label} already forwards to ${a.label}, directly or through other chats.`);
+      throw new Error(`That would make a loop: ${chatRef(b)} already forwards to ${chatRef(a)}, directly or through other chats.`);
     }
     if (existing) {
       this.used.set(existing.id, 0);
@@ -170,7 +173,7 @@ export class Connections {
   async forward(from: string, to: string): Promise<TurnResult> {
     const source = this.require(from);
     const text = lastReply(source);
-    if (!text) throw new Error(`${source.label} has no reply to forward yet.`);
+    if (!text) throw new Error(`${chatRef(source)} has no reply to forward yet.`);
     return this.message(from, to, text, 'user');
   }
 
@@ -182,7 +185,7 @@ export class Connections {
     const source = this.require(from);
     const target = this.require(to);
     if (from === to) throw new Error('A chat cannot message itself.');
-    if (target.busy) throw new Error(`${target.label} is busy. Wait for it to finish, or stop it.`);
+    if (target.busy) throw new Error(`${chatRef(target)} is busy. Wait for it to finish, or stop it.`);
     const via = link ?? this.linkBetween(from, to) ?? this.linkBetween(to, from);
     const linkId = via?.id ?? this.host.id('msg');
     this.items(from, [{ kind: 'link', linkId, role: 'piped-out', chatId: to, agent: target.agent, label: target.label, text, by }]);
@@ -250,7 +253,7 @@ export class Connections {
     if (n >= MAX_PIPE_FORWARDS) {
       this.host.dispatch({ t: 'linkPatch', linkId: link.id, patch: { active: false } });
       const to = this.chat(link.to);
-      this.notice(link.from, `Paused the pipe to ${to?.label ?? 'the other chat'} after ${MAX_PIPE_FORWARDS} messages, so the agents can't keep each other going forever. Pipe it again to continue.`);
+      this.notice(link.from, `Paused the pipe to ${to ? `${chatRef(to)}` : 'the other chat'} after ${MAX_PIPE_FORWARDS} messages, so the agents can't keep each other going forever. Pipe it again to continue.`);
     }
   }
 

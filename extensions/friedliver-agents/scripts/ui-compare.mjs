@@ -283,9 +283,9 @@ async function measure(page, state, width) {
     row(`Composer ${c}`, 'pill padding', 8, px(await css('.cc-model', 'padding-left')));
     row(`Composer ${c}`, 'pill margin-left', 6, px(await css('.cc-model', 'margin-left')));
     row(`Composer ${c}`, 'pill fill', '#2a2b2b', await P('bg', '.cc-model'));
-    row(`Composer ${c}`, 'agents dot', 6, (await box('.cc-agents .dot')).width);
+    row(`Composer ${c}`, 'agents dot', 6, (await box('.cc-agents .fl-dot')).width);
     // One status palette (QA F06, owner decision 2026-10-17): working is the theme's blue, not the spec's green.
-    row(`Composer ${c}`, 'agents dot colour (running)', '#57a3f8', await P('color', '.cc-agents .dot', 'background-color'));
+    row(`Composer ${c}`, 'agents dot colour (running)', '#57a3f8', await P('color', '.cc-agents .fl-dot', 'background-color'));
     row(`Composer ${c}`, 'mode button height', 26, (await box('.cc-mode')).height);
     const sendBox = await box('.send-btn');
     row(`Composer ${c}`, 'send size', 26, sendBox.width);
@@ -340,9 +340,9 @@ async function measure(page, state, width) {
       row(name, 'effort track', '76x18', `${track.width}x${track.height}`);
       row(name, 'effort track radius', 9, radius(await css('.cc-slider', 'border-top-left-radius'), track.height));
       row(name, 'effort thumb', 14, (await box('.cc-thumb')).width);
-      const sw = await box('.cc-switch');
+      const sw = await box('.cc-toggle');
       row(name, 'toggle', '32x18', `${sw.width}x${sw.height}`);
-      row(name, 'toggle thumb', 14, px(await css('.cc-switch', 'width', '::after')));
+      row(name, 'toggle thumb', 14, px(await css('.cc-toggle', 'width', '::after')));
       row(name, 'divider', 1, (await box('.cc-divider')).height);
     }
     if (state === 'modes-menu') {
@@ -400,8 +400,8 @@ async function measure(page, state, width) {
     row(name, 'row fill', '#202122', await P('bg', '.cc-map-children .cc-map-node'));
     const kids = await page.evaluate(() => [...document.querySelectorAll('.cc-map-children .cc-map-node')].slice(0, 2).map((e) => e.getBoundingClientRect()));
     row(name, 'row gap', 8, kids[1].top - kids[0].bottom);
-    row(name, 'running dot (status palette, QA F06)', '#57a3f8', await P('color', '.cc-map-children .dot[data-state="working"]', 'background-color'));
-    row(name, 'dot size', 8, (await box('.cc-map-children .dot')).width);
+    row(name, 'running dot (status palette, QA F06)', '#57a3f8', await P('color', '.cc-map-children .fl-dot[data-state="working"]', 'background-color'));
+    row(name, 'dot size', 8, (await box('.cc-map-children .fl-dot')).width);
     row(name, 'meta size', 11.05, px(await css('.cc-map-meta', 'font-size')));
     row(name, 'main row weight', '600', await css('.cc-map-main .cc-map-name', 'font-weight'));
     row(name, 'no footer button', 0, await page.locator('.cc-map-foot').count());
@@ -459,6 +459,9 @@ async function spacing(page, width, P, box, css) {
   row(name, 'transcript bottom', 40, px(await css('.transcript', 'padding-bottom')));
   row(name, 'title lines up with the transcript', 0, (await box('.chat-head-title')).left + 6 - (tr.left + gutter));
   row(name, 'user message padding', '4px 6px', await css('.user-msg .bubble', 'padding'));
+  // Owner, 2026-10-17: the box spans the transcript like Claude Code's prompt box, however short the message.
+  row(name, 'user message box = transcript content width', tr.width - 2 * gutter, (await box('.user-msg .bubble')).width);
+  row(name, 'user message box starts at the gutter', 0, (await box('.user-msg .bubble')).left - (tr.left + gutter));
   row(name, 'user message margin (4px 0; the first one 0 on top)', 4, px(await css('.user-msg', 'padding-bottom')));
   const rows = await page.evaluate(() => [...document.querySelectorAll('.transcript > .tl')].slice(0, 2).map((e) => e.getBoundingClientRect().top));
   row(name, 'timeline pitch (6.png: 36)', 36, rows[1] - rows[0]);
@@ -490,9 +493,9 @@ async function spacing(page, width, P, box, css) {
   row(name, 'gap between turns', 24, gaps.turn);
   row(name, 'gap between steps in a turn', 16, gaps.within);
   await other.goto(`${base}/?surface=chat&theme=dark-2026&select=chat-c2`);
-  await other.waitForSelector('.ask');
-  row(name, 'decision card margin', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.ask')).marginTop)));
-  row(name, 'decision card padding', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.ask')).paddingTop)));
+  await other.waitForSelector('.fl-card.apv');
+  row(name, 'decision card margin', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.fl-card.apv')).marginTop)));
+  row(name, 'decision card padding', 8, px(await other.evaluate(() => window.getComputedStyle(document.querySelector('.fl-card.apv')).paddingTop)));
   await other.close();
 }
 
