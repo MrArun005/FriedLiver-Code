@@ -1,0 +1,332 @@
+/*
+ * FriedLiver design tokens: the only file that holds raw colours, sizes, shadows and blur.
+ * Spec: ~/code/FriedLiver-Code-design/COMPONENTS.md (§1 tokens). Colours are the editor
+ * theme's own --vscode-* keys, each with its resolved Dark 2026 value as the fallback, so
+ * Light 2026 and High Contrast follow the theme. components.css builds every control from
+ * these; webview.css (layout) may only read them (test/designSystem.test.ts enforces it).
+ */
+
+/* tokens:start */
+:root {
+  /* Surfaces */
+  --bg: var(--vscode-editor-background, #121314);
+  --input-bg: var(--vscode-input-background, #191a1b);
+  --field-border: transparent;
+  --thumb: var(--fg);
+  --menu-bg: var(--vscode-menu-background, #202122);
+  --dialog-bg: var(--vscode-sideBar-background, #191a1b);
+  --code-bg: var(--vscode-textCodeBlock-background, #242526);
+  --inline-code-bg: var(--vscode-textPreformat-background, #262626);
+  --tool-bg: var(--bg);
+  --sel-bg: var(--vscode-list-activeSelectionBackground, #ffffff22);
+  --hover-bg: var(--vscode-list-hoverBackground, #ffffff14);
+  --ghost-hover: var(--vscode-toolbar-hoverBackground, #5a5d5e50);
+  --pill-bg: color-mix(in srgb, var(--fg) 10%, transparent);
+  --pill-hover: color-mix(in srgb, var(--fg) 18%, transparent);
+  --pill-active: color-mix(in srgb, var(--fg) 24%, transparent);
+  /* A selected segment: the selection fill in dark themes, a raised white chip in light ones. */
+  --seg-on: var(--sel-bg);
+  --chip-bg: color-mix(in srgb, var(--input-bg) 85%, var(--fg-2));
+  --overlay: #000000bf;
+  /* Glass: floating surfaces only (menus, popovers, toasts, sheets, dialogs). Off in High Contrast
+     and under prefers-reduced-transparency, where the alpha goes to 100%. */
+  --glass-alpha: 84%;
+  --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+  --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
+  --glass-blur: blur(20px) saturate(140%);
+
+  /* Lines */
+  --border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, #2a2b2c)));
+  --hairline: color-mix(in srgb, var(--border) 60%, transparent);
+  --dialog-border: color-mix(in srgb, var(--vscode-inputOption-activeBorder, #2a2b2c) 65%, transparent);
+  --option-ring: #ffffff1a;
+  /* Every control's border: none you can see, except in High Contrast (the theme's contrast border). */
+  --ctl-border: transparent;
+  --ctl-border-active: transparent;
+  /* High Contrast draws selection and hover as outlines (fills are off there). */
+  --sel-outline: none;
+  --hover-outline: none;
+  --line: 1px;
+  --line-half: 0.5px;
+
+  /* Text: five colours */
+  --sel-fg: var(--vscode-list-activeSelectionForeground, #ededed);
+  --fg: var(--vscode-foreground, #bfbfbf);
+  --fg-2: var(--vscode-descriptionForeground, #8c8c8c);
+  --fg-50: color-mix(in srgb, var(--fg) 50%, transparent);
+  --placeholder: var(--vscode-input-placeholderForeground, #555555);
+  --disabled: var(--vscode-disabledForeground, #555555);
+  --link: var(--vscode-textLink-foreground, #48a0c7);
+  --inline-code-fg: var(--vscode-textPreformat-foreground, #8c8c8c);
+
+  /* Accent and modes: the composer's ring and send button take their mode's pair */
+  --accent: var(--fl-accent, #d97757);
+  --send-bg: var(--fl-accent, #c6613f);
+  --send-fg: #faf9f5;
+  --focus-border: var(--vscode-focusBorder, #3994bcb3);
+  --button-bg: var(--vscode-button-background, #297aa0);
+  --button-fg: var(--vscode-button-foreground, #ffffff);
+  --error: var(--vscode-errorForeground, #f48771);
+  --warn: var(--vscode-editorWarning-foreground, #e1c08d);
+  --toggle-on: var(--button-bg);
+  --effort-fill: var(--vscode-inputOption-activeBorder, #2a2b2c);
+  /* The one primary: an inverted neutral (the selected text colour on the page colour). */
+  --primary-bg: var(--sel-fg);
+  --primary-fg: var(--bg);
+  /* Tints: a tone at 14% (rest) and 22% (hover) over whatever is under it. */
+  --tint: 14%;
+  --tint-hover: 22%;
+  /* The composer's mic: one brand blue in every theme, a white glyph (4.53:1, hover 5.2:1). */
+  --mic-bg: #0078d4;
+  --mic-hover: #026ec1;
+  --mic-fg: #fff;
+  /* The one loud colour of the Agent Manager: "you must decide". */
+  --decision: var(--vscode-friedliver-decision, var(--focus-border));
+  --decision-fg: var(--vscode-friedliver-decisionForeground, var(--button-fg));
+  --decision-soft: color-mix(in srgb, var(--decision) 12%, transparent);
+  --decision-line: color-mix(in srgb, var(--decision) 45%, transparent);
+  /* Focus rings drop the theme's transparency so they stay visible on any surface. */
+  --focus: rgb(from var(--focus-border) r g b / 1);
+  --focus-w: 2px;
+  --focus-off: 1px;
+  --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
+
+  /* Status */
+  /* One status palette on every surface (QA F06): working blue, done green, problem red, needs you the accent. */
+  --status-working: var(--vscode-charts-blue, #57a3f8);
+  --status-done: var(--tl-success);
+  --status-failed: var(--error);
+  --status-waiting: var(--decision);
+  --dot-idle: color-mix(in srgb, var(--fg-2) 40%, transparent);
+  --tl-success: #74c991;
+  --tl-default: var(--fg-2);
+  --added: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+  --removed: var(--vscode-gitDecoration-deletedResourceForeground, #f48771);
+  --recording: var(--vscode-charts-blue, #57a3f8);
+
+  /* Agents */
+  --hue-claude: var(--vscode-friedliver-agentClaude, var(--vscode-charts-orange, #d97757));
+  --hue-codex: var(--vscode-friedliver-agentCodex, var(--vscode-charts-green, #89d185));
+  --hue-gemini: var(--vscode-friedliver-agentGemini, var(--vscode-charts-blue, #57a3f8));
+  --hue-demo: var(--fg-2);
+
+  /* Type: one family, one base size (Cmd/Ctrl + = - 0 scales --fl-font-size), em steps */
+  --font: var(--vscode-chat-font-family, system-ui, sans-serif);
+  --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+  --fl-font-size: var(--vscode-chat-font-size, 13px);
+  --fs: var(--fl-font-size);
+  --fs-mono: var(--vscode-editor-font-size, 12px);
+  --t-100: 1em;
+  --t-90: 0.9em;
+  --t-85: 0.85em;
+  --t-80: 0.8em;
+  --t-75: 0.75em;
+  --t-title: 16px;
+  --t-touch: 15px;
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-strong: 600;
+  --w-bold: 700;
+  --lh: 1.5;
+  --lh-tight: 1.2;
+
+  /* Shape */
+  --r-1: 1px;
+  --r-3: 3px;
+  --r-4: 4px;
+  --r-5: 5px;
+  --r-6: 6px;
+  --r-8: 8px;
+  /* Sheets that rise from the bottom edge. */
+  --r-12: 12px;
+  --r-pill: 9999px;
+  --r-round: 50%;
+  /* Families (COMPONENTS.md §1.4): every control r5, every row r4, every container r8. */
+  --r-ctl: var(--r-5);
+  --r-row: var(--r-4);
+  --r-box: var(--r-8);
+  --sp-half: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  /* Control heights: xs pills, sm dense rows, md the composer's 26, lg one call to action, touch the phone. */
+  --h-2xs: 16px;
+  --h-xs: 18px;
+  --h-sm: 22px;
+  --h-md: 26px;
+  --h-lg: 32px;
+  --h-touch: 44px;
+  /* Icon boxes: the glyph's square. Stroke is 1.2px at every size (vector-effect: non-scaling-stroke). */
+  --i-xs: 12px;
+  --i-sm: 14px;
+  --i-md: 16px;
+  --i-lg: 20px;
+  --i-xl: 24px;
+  /* Layout spacing (the spacing pass, 2026-10-17): the chat's side gutter (16 when narrow, to line up with
+     the composer), the tab strip's height, and the extra space above a message that starts a new turn. */
+  --gutter: 20px;
+  --tab-h: 30px;
+  --turn-gap: 8px;
+
+  /* Elevation: inline things are flat; only floating surfaces lift. */
+  --elev-0: none;
+  --elev-1: 0 1px 2px #0000001a;
+  --elev-2: 0 2px 8px #00000026;
+  --elev-3: 0 12px 32px -8px #00000080;
+  --elev-4: 0 24px 64px -12px #000000a6;
+  --shadow-composer: var(--elev-1);
+  --shadow-thumb: 0 1px 2px #0003;
+  --shadow-ctx: var(--elev-2);
+  --shadow-tip: 0 2px 6px #00000026;
+  --shadow-sheet: 0 -8px 24px #00000059;
+  --shadow-flash: 0 0 0 4px var(--focus);
+  --shadow-flash-end: 0 0 0 4px transparent;
+
+  /* Layers */
+  --z-content: 1;
+  --z-sticky: 2;
+  --z-sticky-open: 3;
+  --z-footer: 6;
+  --z-menu: 10;
+  --z-composer: 20;
+  --z-toast: 900;
+  --z-overlay: 1000;
+  --z-tip: 1100;
+
+  /* Motion: hover is instant; things that appear take 150ms; a hold takes 600ms. */
+  --dur-fast: 100ms;
+  --dur: 150ms;
+  --dur-slow: 200ms;
+  --dur-hold: 600ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-linear: linear;
+  --rise: 4px;
+  --fade-menu: fadeIn 0.15s ease-out;
+  --fade-banner: fadeIn 0.2s ease-out;
+  --ease-toggle: 0.15s;
+}
+/* tokens:end */
+@media (max-width: 720px) {
+  :root {
+    --gutter: 16px;
+  }
+}
+/* Light themes: the option ring and depth turn dark, shadows lighter. */
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --option-ring: #0000001a;
+  --decision-soft: color-mix(in srgb, var(--decision) 9%, transparent);
+  --decision-line: color-mix(in srgb, var(--decision) 50%, transparent);
+  --field-border: color-mix(in srgb, var(--fg-2) 40%, transparent);
+  /* A dark knob on a light track reads as on: knobs are white, with a ring. */
+  --thumb: #ffffff;
+  --shadow-thumb: 0 0 0 1px #00000033, 0 1px 2px #00000029;
+  --elev-1: 0 1px 2px #0000000f;
+  --elev-2: 0 2px 8px #0000001a;
+  --elev-3: 0 12px 32px -8px #00000033;
+  --elev-4: 0 24px 64px -12px #00000047;
+  --overlay: #00000066;
+  --glass-alpha: 80%;
+  --seg-on: var(--bg);
+  /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
+  --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+  --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
+}
+/* High Contrast: every control and container shows the theme's contrast border; the active one its
+   active border. No glass, no shadows, no tints standing in for edges. */
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --border: var(--vscode-contrastBorder, #6fc3df);
+  --hairline: var(--border);
+  --dialog-border: var(--border);
+  --ctl-border: var(--border);
+  --field-border: var(--border);
+  --ctl-border-active: var(--vscode-contrastActiveBorder, #f38518);
+  --focus: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder, #f38518));
+  --focus-halo: 0 0 0 0 transparent;
+  --sel-outline: 1px solid var(--ctl-border-active);
+  --hover-outline: 1px dashed var(--ctl-border-active);
+  --sel-bg: transparent;
+  --hover-bg: transparent;
+  --pill-bg: transparent;
+  --pill-hover: transparent;
+  --pill-active: transparent;
+  --glass-alpha: 100%;
+  --glass-blur: none;
+  --elev-1: none;
+  --elev-2: none;
+  --elev-3: none;
+  --elev-4: none;
+  --primary-bg: var(--fg);
+  --primary-fg: var(--bg);
+  --seg-on: transparent;
+  --ghost-hover: transparent;
+  /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
+  --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+  --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  body {
+    --glass-alpha: 100%;
+    --glass-blur: none;
+    /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
+    --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
+    --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+@keyframes fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}

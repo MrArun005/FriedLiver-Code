@@ -326,7 +326,7 @@ function Manager() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t?.closest('.popover') || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (t?.closest('.fl-menu') || e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTyping(t)) {
         if (e.key === 'Escape' && t === search.current) {
           setQuery('');
@@ -855,8 +855,8 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
           <button role="menuitem" onClick={() => (close(false), ask())}>
             <Icon name="ask" /> Ask another agent…
           </button>
-          <div class="pop-sep" role="separator" />
-          <div class="pop-title" aria-hidden="true">Hand off to</div>
+          <div class="fl-menu__sep" role="separator" />
+          <div class="fl-menu__title" aria-hidden="true">Hand off to</div>
           {agents.map((agent) => (
             <button key={agent} role="menuitem" onClick={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}>
               <Glyph agent={agent} size="sm" />
@@ -864,9 +864,9 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
               {agent === chat.agent && <span class="hint">new chat</span>}
             </button>
           ))}
-          <div class="pop-sep" role="separator" />
+          <div class="fl-menu__sep" role="separator" />
           <PipeTargets chat={chat} close={close} />
-          <div class="pop-sep" role="separator" />
+          <div class="fl-menu__sep" role="separator" />
           <button role="menuitem" onClick={() => (close(), send({ type: 'renameChat', chatId: chat.id }))}>
             <Icon name="rename" /> Rename chat
           </button>

@@ -268,15 +268,15 @@ BLOCKS.F06 = async () => {
   check(new Set([W, D, N, E]).size === 4, `four distinct status colours [${W} ${D} ${N} ${E}]`);
   check((await bg(c, '.tl.sa-card[data-state="working"]', '::before')) === W, 'a running subagent in the transcript is the working colour');
   check((await bg(c, '.tl.sa-card[data-state="done"]', '::before')) === D, 'a finished subagent in the transcript is the done colour');
-  check((await bg(c, '.cc-agents .dot')) === W, 'the agents pill (agents running) is the working colour');
+  check((await bg(c, '.cc-agents .fl-dot')) === W, 'the agents pill (agents running) is the working colour');
   await c.click('.cc-agents');
-  check((await bg(c, '.cc-map-children .dot[data-state="working"]')) === W, 'a running agent in the agent map is the working colour');
-  check((await c.locator('.cc-map-children .dot[data-state="done"]').count()) > 0 && (await bg(c, '.cc-map-children .dot[data-state="done"]')) === D, 'a finished agent in the agent map is the done colour');
+  check((await bg(c, '.cc-map-children .fl-dot[data-state="working"]')) === W, 'a running agent in the agent map is the working colour');
+  check((await c.locator('.cc-map-children .fl-dot[data-state="done"]').count()) > 0 && (await bg(c, '.cc-map-children .fl-dot[data-state="done"]')) === D, 'a finished agent in the agent map is the done colour');
   await c.close();
   // Agent Manager: header counts and columns.
   const m = await open('surface=tasks&theme=dark-2026&view=board', 1440, 900);
   const W2 = await tone(m, '--status-working'), D2 = await tone(m, '--status-done'), N2 = await tone(m, '--status-waiting');
-  check((await bg(m, '.mgr-counts .dot[data-state="working"]')) === W2 && (await bg(m, '.mgr-counts .dot[data-state="done"]')) === D2 && (await bg(m, '.mgr-counts .dot[data-state="needs-you"]')) === N2, 'the Manager counts use the same palette (working ≠ done)');
+  check((await bg(m, '.mgr-counts .fl-dot[data-state="working"]')) === W2 && (await bg(m, '.mgr-counts .fl-dot[data-state="done"]')) === D2 && (await bg(m, '.mgr-counts .fl-dot[data-state="needs-you"]')) === N2, 'the Manager counts use the same palette (working ≠ done)');
   check((await bg(m, '.seg-bar i[data-step="working"]')) !== (await bg(m, '.seg-bar i[data-step="done"]')), 'a plan’s step in progress differs from its done steps');
   await m.close();
   const map = await open('surface=tasks&theme=dark-2026&view=map', 1440, 900);
@@ -368,9 +368,9 @@ BLOCKS.F11 = async () => {
     check((await chip.evaluate((b) => b.tagName)) === 'BUTTON' && (await chip.getAttribute('aria-haspopup')) === 'menu', `at ${width}px the rules chip is a button with a menu`);
     await chip.focus();
     await p.keyboard.press('Enter');
-    const files = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+    const files = await p.locator('.fl-menu [role="menuitem"]').allInnerTexts();
     check(files.some((f) => f.includes('AGENTS.md')) && files.length >= 3, `at ${width}px it lists the rules files [${files.join(' | ')}]`);
-    await p.locator('.popover [role="menuitem"]:has-text("AGENTS.md")').click();
+    await p.locator('.fl-menu [role="menuitem"]:has-text("AGENTS.md")').click();
     check((await posted(p)).some((m) => m.type === 'openFile' && m.path.endsWith('AGENTS.md')), `at ${width}px a file opens from it`);
     const cut = await p.evaluate(() => [...document.querySelectorAll('.chat-head .chip-text')].every((t) => window.getComputedStyle(t).textOverflow === 'ellipsis'));
     check(cut, `at ${width}px header chips cut with an ellipsis`);
@@ -413,7 +413,7 @@ BLOCKS.F13 = async () => {
   const inside = async (p) =>
     (await p.waitForTimeout(300)) ||
     p.evaluate(() => {
-      const m = document.querySelector('.popover');
+      const m = document.querySelector('.fl-menu');
       const r = m.getBoundingClientRect();
       return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: window.innerHeight, scrolls: m.scrollHeight > m.clientHeight + 1 };
     });
@@ -467,7 +467,7 @@ BLOCKS.F15 = async () => {
   }
   const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
   await p.click('.chat-head-actions button[aria-label^="More"]');
-  const more = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+  const more = await p.locator('.fl-menu [role="menuitem"]').allInnerTexts();
   check(more.some((t) => t.trim() === 'Rewind…') && !more.some((t) => /Checkpoints/.test(t)), `the ⋯ menu says Rewind… [${more.map((t) => t.trim()).join(' | ')}]`);
   await p.keyboard.press('Escape');
   await p.click('.cc-slash-btn');
@@ -486,8 +486,8 @@ BLOCKS.F16 = async () => {
   check((await pick.count()) === 1, 'the model picker is a menu button');
   if (await pick.count()) {
     await pick.click();
-    const items = p.locator('.popover [role="menuitemradio"]');
-    check((await items.count()) > 1 && (await p.locator('.popover [role="menuitemradio"][aria-checked="true"]').count()) === 1, 'it lists the choices with the current one checked');
+    const items = p.locator('.fl-menu [role="menuitemradio"]');
+    check((await items.count()) > 1 && (await p.locator('.fl-menu [role="menuitemradio"][aria-checked="true"]').count()) === 1, 'it lists the choices with the current one checked');
     const want = (await items.nth(1).locator('.grow').innerText()).trim();
     await items.nth(1).click();
     const label = (await pick.innerText()).trim();
@@ -512,7 +512,7 @@ BLOCKS.F17 = async () => {
     const g = await p.evaluate(() => {
       const box = document.querySelector('.empty').getBoundingClientRect();
       const cards = [...document.querySelectorAll('.pick-agent')].map((c) => c.getBoundingClientRect());
-      const glyphs = [...document.querySelectorAll('.pick-agent .glyph, .pick-agent svg')].map((c) => Math.round(c.getBoundingClientRect().top));
+      const glyphs = [...document.querySelectorAll('.pick-agent .fl-avatar, .pick-agent svg')].map((c) => Math.round(c.getBoundingClientRect().top));
       return {
         left: Math.round(cards[0].left - box.left),
         right: Math.round(box.right - cards.at(-1).right),
@@ -624,8 +624,8 @@ BLOCKS.F26 = async () => {
   const p = await open('surface=chat&theme=dark-2026&side=1&list=1', 300, 800);
   const rows = p.locator('.chat-item');
   await rows.first().waitFor();
-  const r = await rows.evaluateAll((rs) => rs.map((e) => ({ glyph: !!e.querySelector('.glyph'), time: e.querySelector('.chat-item-time')?.textContent ?? '' })));
-  check(r.length > 0 && r.every((x) => x.glyph && x.time), `every row has a glyph and a time [${r.slice(0, 3).map((x) => JSON.stringify(x)).join(' ')}]`);
+  const r = await rows.evaluateAll((rs) => rs.map((e) => ({ glyph: !!e.querySelector('.fl-avatar'), time: e.querySelector('.chat-item-time')?.textContent ?? '' })));
+  check(r.length > 0 && r.every((x) => x.fl-avatar && x.time), `every row has a glyph and a time [${r.slice(0, 3).map((x) => JSON.stringify(x)).join(' ')}]`);
   await p.close();
 };
 
