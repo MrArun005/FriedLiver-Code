@@ -32,7 +32,7 @@ function core(folder: string, over: Partial<CoreOptions> = {}, ui: Partial<CoreU
       closeReview: () => {},
       askCommand: (a) => seen.commands.push(a.commandLine),
       showProposal: (p) => seen.proposals.push({ path: p.path, after: p.after }),
-      turnEnded: (t) => seen.ended.push(`${t.label}:${t.stopReason}:${t.files}`),
+      turnEnded: (t) => seen.ended.push(`${t.agent}:${t.stopReason}:${t.files}`),
       confirmFullAuto: async () => {
         seen.confirms++;
         return true;
@@ -398,7 +398,7 @@ describe('messages while the agent works', () => {
     const { core: c, seen } = core(dir);
     const chat = await c.createChat('demo');
     await c.send(chat.id, 'hi');
-    expect(seen.ended).toEqual(['Demo:end_turn:0']);
+    expect(seen.ended).toEqual(['demo:end_turn:0']);
   });
 });
 

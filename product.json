@@ -60,6 +60,6 @@
     "latestUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
     "controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
   },
-  "extensionEnabledApiProposals": { "friedliver.friedliver-agents": ["browser"] },
+  "extensionEnabledApiProposals": { "friedliver.friedliver-agents": ["browser", "externalUriOpener"] },
   "linkProtectionTrustedDomains": ["https://open-vsx.org"]
 }

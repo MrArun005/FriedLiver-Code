@@ -3,6 +3,7 @@
 // The Agents extension spawns this from inside FriedLiver.app, so macOS asks for microphone and
 // speech recognition permission once, for FriedLiver. It listens to the default input and writes
 // one JSON object per line on stdout:
+//   {"level":0.42}   the input's loudness, 0…1, about 20 times a second while listening
 //   {"partial":"…"}  the whole transcription so far (replaces the previous partial)
 //   {"final":"…"}    the finished transcription (may be ""), then it exits 0
 //   {"error":"…","code":"mic-denied|speech-denied|unavailable|audio|recognition"}, then it exits 1
@@ -18,7 +19,7 @@ import Speech
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
-func emit(_ object: [String: String]) {
+func emit(_ object: [String: Any]) {
 	guard let data = try? JSONSerialization.data(withJSONObject: object), let line = String(data: data, encoding: .utf8) else { return }
 	print(line)
 }
@@ -87,7 +88,30 @@ let engine = AVAudioEngine()
 let input = engine.inputNode
 let format = input.outputFormat(forBus: 0)
 guard format.sampleRate > 0 else { fail("No microphone found.", "audio") }
-input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in request.append(buffer) }
+// Loudness for the composer's visualizer: RMS → dBFS, -50…0 dB mapped to 0…1, rising fast and
+// falling slowly, sent at most every 50 ms.
+var level = 0.0
+var lastLevelAt = 0.0
+func loudness(_ buffer: AVAudioPCMBuffer) -> Double {
+	guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
+	var sum: Float = 0
+	for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
+	let rms = sqrt(Double(sum) / Double(buffer.frameLength))
+	let db = 20 * log10(max(rms, 1e-7))
+	return min(max((db + 50) / 50, 0), 1)
+}
+input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+	request.append(buffer)
+	let now = Date().timeIntervalSince1970
+	let heard = loudness(buffer)
+	DispatchQueue.main.async {
+		level += (heard - level) * (heard > level ? 0.6 : 0.25)
+		if now - lastLevelAt >= 0.05 && !stopping {
+			lastLevelAt = now
+			emit(["level": (level * 100).rounded() / 100])
+		}
+	}
+}
 engine.prepare()
 do { try engine.start() } catch { fail("The microphone didn't start: \(error.localizedDescription)", "audio") }
 

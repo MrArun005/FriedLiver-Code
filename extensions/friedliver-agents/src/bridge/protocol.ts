@@ -3,6 +3,7 @@
 // The host treats every line as untrusted and checks it here first.
 import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
+import { SYSTEM_LIMITS } from '../shared/system';
 
 /** Where the host listens: a Unix socket path or a Windows pipe name. */
 export const BRIDGE_ENV = 'FRIEDLIVER_BRIDGE';
@@ -36,7 +37,23 @@ export type BridgeCall =
   | { tool: 'browser_click'; selector?: string; text?: string }
   | { tool: 'browser_type'; selector: string; text: string }
   | { tool: 'browser_snapshot' | 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' }
-  | IndexCall;
+  | IndexCall
+  | SystemCall;
+
+/** The OS actions (shared/system.ts): exactly one target for open and focus. */
+export type SystemCall =
+  | { tool: 'system_open'; app: string }
+  | { tool: 'system_open'; path: string }
+  | { tool: 'system_open'; url: string }
+  | { tool: 'system_apps' | 'system_clipboard_read' }
+  | { tool: 'system_focus'; app: string }
+  | { tool: 'system_focus'; window: number }
+  | { tool: 'system_shortcut'; name: string }
+  | { tool: 'system_clipboard_write'; text: string }
+  | { tool: 'system_notify'; title: string; body: string }
+  | { tool: 'system_volume'; action: 'get' | 'mute' | 'unmute' }
+  | { tool: 'system_volume'; action: 'set'; level: number }
+  | { tool: 'system_screenshot_window'; window: number };
 
 export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
 
@@ -52,6 +69,8 @@ export const isExternal = (id: string): boolean => id === EXTERNAL_CLIENT || id.
 export const isIndexCall = (call: BridgeCall): call is IndexCall => call.tool.startsWith('index_');
 
 export const isBrowserCall = (call: BridgeCall): call is BrowserCall => call.tool.startsWith('browser_');
+
+export const isSystemCall = (call: BridgeCall): call is SystemCall => call.tool.startsWith('system_');
 
 export interface BridgeRequest {
   id: number;
@@ -70,6 +89,17 @@ const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== 
 const chatId = (v: unknown): v is string => typeof v === 'string' && CHAT_ID.test(v);
 const short = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.url;
 const query = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.query;
+/** No control characters (newlines, NUL, escapes) and no direction overrides: names that show as what they are. */
+// eslint-disable-next-line no-control-regex
+const PLAIN = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$/;
+const name = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= SYSTEM_LIMITS.name && PLAIN.test(v);
+const windowId = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
+/** Exactly one of these keys is present (and nothing else is checked here). */
+const oneOf = (a: Obj, keys: string[]): string | undefined => {
+  const present = keys.filter((k) => a[k] !== undefined);
+  return present.length === 1 ? present[0] : undefined;
+};
+
 /** A workspace-relative path: no absolute paths, drive letters or `..`. */
 const relPath = (v: unknown): v is string => query(v) && !/^([/\\]|[A-Za-z]:)/.test(v) && !v.split(/[/\\]/).includes('..');
 
@@ -118,6 +148,35 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
     case 'index_outline':
     case 'index_related':
       return relPath(a.path) ? { tool, path: a.path } : null;
+    case 'system_apps':
+    case 'system_clipboard_read':
+      return { tool };
+    case 'system_open': {
+      const key = oneOf(a, ['app', 'path', 'url']);
+      if (key === 'app') return name(a.app) ? { tool, app: a.app } : null;
+      if (key === 'path') return name(a.path) ? { tool, path: a.path } : null;
+      if (key === 'url') return short(a.url) && PLAIN.test(a.url) ? { tool, url: a.url } : null;
+      return null;
+    }
+    case 'system_focus': {
+      const key = oneOf(a, ['app', 'window']);
+      if (key === 'app') return name(a.app) ? { tool, app: a.app } : null;
+      if (key === 'window') return windowId(a.window) ? { tool, window: a.window } : null;
+      return null;
+    }
+    case 'system_shortcut':
+      return name(a.name) ? { tool, name: a.name } : null;
+    case 'system_clipboard_write':
+      return typeof a.text === 'string' && a.text !== '' && Buffer.byteLength(a.text, 'utf8') <= SYSTEM_LIMITS.clipboard ? { tool, text: a.text } : null;
+    case 'system_notify':
+      return name(a.title) && a.title.length <= SYSTEM_LIMITS.title && typeof a.body === 'string' && a.body.length <= SYSTEM_LIMITS.body && !a.body.includes('\0')
+        ? { tool, title: a.title, body: a.body }
+        : null;
+    case 'system_volume':
+      if (a.action === 'set') return Number.isInteger(a.level) && (a.level as number) >= 0 && (a.level as number) <= 100 ? { tool, action: 'set', level: a.level as number } : null;
+      return (a.action === 'get' || a.action === 'mute' || a.action === 'unmute') && a.level === undefined ? { tool, action: a.action } : null;
+    case 'system_screenshot_window':
+      return windowId(a.window) ? { tool, window: a.window } : null;
     default:
       return null;
   }

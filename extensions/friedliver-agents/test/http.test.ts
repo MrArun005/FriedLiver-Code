@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { HttpTools } from '../src/bridge/http';
-import { BROWSER_TOOLS } from '../src/bridge/mcp';
+import { EXTERNAL_TOOLS } from '../src/bridge/mcp';
 import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV } from '../src/bridge/protocol';
 import { BridgeServer, type BridgeHandler } from '../src/host/bridge';
 import { writeTokenFile } from '../src/host/externalBrowser';
@@ -285,14 +285,14 @@ describe('the external stdio server Claude Code starts (externalStdio.ts)', () =
     });
   }
 
-  it('reaches the browser tools only, as its own MCP session, without ever sending the token', async () => {
+  it('reaches the browser and system tools only, as its own MCP session, without ever sending the token', async () => {
     const calls: string[] = [];
     server = await BridgeServer.start(async (chatId, call) => (calls.push(`${chatId} ${call.tool}`), 'ok'));
     const url = await server.httpUrl();
     const file = await writeTokenFile(await mkdtemp(path.join(os.tmpdir(), 'flx-')), url, server.token(EXTERNAL_CLIENT));
     const { replies } = await run(file, [rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {} }), rpc(2, 'tools/list'), rpc(3, 'tools/call', { name: 'list_chats' }), rpc(4, 'tools/call', { name: 'browser_snapshot' })]);
     const byId = new Map(replies.map((r) => [r.id, r]));
-    expect(byId.get(2)!.result!.tools!.map((t) => t.name)).toEqual(BROWSER_TOOLS.map((t) => t.name));
+    expect(byId.get(2)!.result!.tools!.map((t) => t.name)).toEqual(EXTERNAL_TOOLS.map((t) => t.name));
     expect(byId.get(3)!.result).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/not found/) }] });
     expect(byId.get(4)!.result).toMatchObject({ content: [{ text: 'ok' }] });
     expect(calls).toEqual([expect.stringMatching(new RegExp(`^${EXTERNAL_CLIENT}:[0-9a-f]{32} browser_snapshot$`))]);

@@ -142,7 +142,8 @@ describe('restoring chats', () => {
     expect(lastReply(second.chat(b.id)!)).toContain('taking over a task');
     const c = await second.createChat('demo');
     expect([a.id, b.id]).not.toContain(c.id);
-    expect(c.label).toBe('Demo 2');
+    // Counted on from the saved state, but never numbered: chats are named by topic.
+    expect(c.label).toBe('Demo');
   });
 
   it('continues a session started outside FriedLiver', async () => {

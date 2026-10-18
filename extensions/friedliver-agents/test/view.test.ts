@@ -166,7 +166,7 @@ describe('cards', () => {
     expect(texts('b')).toEqual(['asked by Fix formatCents']);
     expect(texts('c')).toEqual(['from Fix formatCents', 'pipes to Add CSV export']);
     expect(texts('d')).toEqual(['piped from Make the store swappable', '1 of 2 · compare']);
-    expect(linkBadges(s, s.chats[0]).map((b) => b.tip)).toEqual(['Gemini 1: Is the minus right?', 'Codex 3: Make the store swappable']);
+    expect(linkBadges(s, s.chats[0]).map((b) => b.tip)).toEqual(['Is the minus right? · Gemini', 'Make the store swappable · Codex']);
     expect(linkBadges(s, s.chats[3]).find((b) => b.kind === 'pipe')?.linkId).toBe('l3');
   });
 

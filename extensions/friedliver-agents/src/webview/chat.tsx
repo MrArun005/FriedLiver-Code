@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
+import { MicVisualizer } from './micVisualizer';
 import {
   AGENT_FACES,
   boardColumn,
@@ -46,18 +47,23 @@ import {
   transcriptGroups,
   statusOf,
 } from '../shared/view';
+import { agentName, chatName, chatTip, chatRef } from '../shared/names';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { questionGroups } from '../shared/questions';
+import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
+import { Viewer } from './viewer';
+import { chatGallery } from '../shared/gallery';
 import { AskMenu, PipeTargets } from './connect';
-import { AlwaysAllow, AutoBadge, KeyHint, chooseOn, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, decisionKey } from './controls';
+import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
+import { Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -75,6 +81,7 @@ function App() {
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
   const [refs, setRefs] = useState<Record<string, CodeRef[]>>({});
   const [focusTick, setFocusTick] = useState(0);
+  const [viewer, setViewer] = useState<{ path: string; from: HTMLElement } | null>(null);
   const [found, setFound] = useState<{ chatId: string; query: string; files: string[] } | null>(null);
   const shown = useRef<string | undefined>(undefined);
   const { state, selected, setSelected } = useHost((m) => {
@@ -129,6 +136,7 @@ function App() {
   const conflicts = chat ? fileConflicts(state).filter((f) => f.chats.includes(chat.id)) : [];
   // Wide (the chat in the editor area): the chat list stays open beside it. Narrow: tabs and a dropdown.
 
+  const openImage = useCallback((path: string, from: HTMLElement) => setViewer({ path, from }), []);
   if (LIST) {
     // The side bar's chat list (its own activity-bar view): picking a chat opens it in the chat tab.
     return (
@@ -140,8 +148,27 @@ function App() {
     );
   }
 
+  // The image viewer: the open chat's images, transcript order, opened on the one clicked; focus goes back to it on close.
+  const gallery = viewer && chat ? chatGallery(chat, state.images) : [];
+  const viewerAt = gallery.findIndex((g) => g.path === viewer?.path);
+
   return (
     <LiveState.Provider value={state}>
+      <OpenImage.Provider value={openImage}>
+      {viewer && chat && viewerAt >= 0 && (
+        <Viewer
+          images={gallery}
+          start={viewerAt}
+          state={state}
+          now={Date.now()}
+          chatOf={(id) => state.chats.find((c) => c.id === id)}
+          onClose={() => {
+            const from = viewer.from;
+            setViewer(null);
+            requestAnimationFrame(() => from.isConnected && from.focus());
+          }}
+        />
+      )}
       <div class="chat-app">
         <TextSize />
         <Switcher state={state} active={chat?.id} onSelect={select} tabs={tabs} onClose={close} />
@@ -175,6 +202,7 @@ function App() {
         )}
         </div>
       </div>
+      </OpenImage.Provider>
     </LiveState.Provider>
   );
 }
@@ -210,28 +238,23 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
     <div class="switcher">
       <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
         {strip.map((c) => (
-          <span key={c.id} class="tab-wrap" role="presentation" data-active={c.id === active ? '' : undefined}>
-            <button
-              role="tab"
-              class="tab"
-              data-chat={c.id}
-              tabIndex={c.id === focusable ? 0 : -1}
-              aria-keyshortcuts="Delete"
-              aria-selected={c.id === active}
-              title={`${c.title} (${c.label})`}
-              onClick={() => onSelect(c.id)}
-              onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
-            >
-              <Glyph agent={c.agent} size="sm" />
-              <span class="tab-title">{c.title}</span>
-              <AutoBadge chat={c} short />
-              <Dot state={statusOf(c)} />
-            </button>
-            {/* For the pointer; the keyboard closes the focused tab with Delete, so it is no Tab stop of its own. */}
-            <button type="button" class="tab-close" tabIndex={-1} aria-hidden="true" title={`Close tab (${shortcut} · Delete)`} onClick={() => onClose(c.id)}>
-              <Icon name="close" size={12} />
-            </button>
-          </span>
+          <Tab
+            key={c.id}
+            selected={c.id === active}
+            data-chat={c.id}
+            tabIndex={c.id === focusable ? 0 : -1}
+            aria-keyshortcuts="Delete"
+            title={chatTip(c)}
+            onSelect={() => onSelect(c.id)}
+            onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
+            onClose={() => onClose(c.id)}
+            closeTitle={`Close tab (${shortcut} · Delete)`}
+          >
+            <Glyph agent={c.agent} size="sm" />
+            <span class="fl-tab__label tab-title">{c.title}</span>
+            <AutoBadge chat={c} short />
+            <Dot state={statusOf(c)} />
+          </Tab>
         ))}
       </div>
       <Popover
@@ -239,7 +262,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
         label="All chats"
         title="All chats"
         align="end"
-        buttonClass="ghost sm all-btn"
+        buttonClass="fl-btn fl-btn--quiet fl-btn--sm all-btn"
         trigger={
           <>
             <Icon name="grid" />
@@ -263,10 +286,10 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
           />
         )}
       </Popover>
-      <Popover label="New chat with" title="New chat" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="plus" />}>
+      <Popover label="New chat with" title="New chat" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" trigger={<Icon name="plus" />}>
         {(close) => (
           <>
-            <div class="pop-title" aria-hidden="true">New chat with</div>
+            <div class="fl-menu__title" aria-hidden="true">New chat with</div>
             {agents.map((agent) => (
               <button
                 key={agent}
@@ -282,17 +305,12 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                 <SignInMark agent={agent} />
               </button>
             ))}
-            <div class="pop-sep" role="separator" />
-            <button role="menuitem" onClick={() => (close(false), send({ type: 'openAccounts' }))}>
-              <Icon name="key" />
-              <span class="grow">Agents &amp; Accounts…</span>
-            </button>
+            <div class="fl-menu__sep" role="separator" />
+            <MenuItem icon="key" label="Agents &amp; Accounts…" onSelect={() => (close(false), send({ type: 'openAccounts' }))} />
           </>
         )}
       </Popover>
-      <button class="ghost icon-btn" aria-label="Agent Manager" title="Agent Manager" onClick={() => send({ type: 'openTasks' })}>
-        <Icon name="tasks" />
-      </button>
+      <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" onClick={() => send({ type: 'openTasks' })} />
     </div>
   );
 }
@@ -306,17 +324,18 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
   const flat = groups.flatMap((g) => g.chats);
   const current = flat[Math.min(at, flat.length - 1)];
   const archived = state.chats.filter((c) => c.archived).length;
+  const waiting = useMemo(() => inbox(state).entries.length, [state]);
   useEffect(() => {
     if (current) document.getElementById(`${listId}-${current.id}`)?.scrollIntoView({ block: 'nearest' });
   }, [current?.id]);
   return (
     <div class="all-chats">
-      <button class="primary new-chat" onClick={() => send({ type: 'newChat', agent: newAgent ?? 'claude' })} title="New chat">
+      <Button variant="primary" class="new-chat" onClick={() => send({ type: 'newChat', agent: newAgent ?? 'claude' })} title="New chat">
         <span>
           <Icon name="plus" /> New chat
         </span>
         <kbd>{IS_MAC ? '⌘N' : 'Ctrl+N'}</kbd>
-      </button>
+      </Button>
       <label class="search">
         <Icon name="search" />
         <input
@@ -363,42 +382,27 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
               >
                 <Glyph agent={c.agent} size="sm" />
                 <span class="chat-item-text">
-                  <span class="pick-title" title={`${c.title} (${c.label}) · ${switcherMeta(c, now)}`}>
+                  <span class="pick-title" title={`${chatTip(c)} · ${switcherMeta(c, now)}`}>
                     {c.title}
                   </span>
                 </span>
                 <span class="chat-item-time">{ago(c.lastActivity, now)}</span>
                 <span class="chat-item-more" onClick={(e) => e.stopPropagation()}>
-                  <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="ghost icon-btn sm" trigger={<Icon name="more" />}>
+                  <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm" trigger={<Icon name="more" />}>
                     {(close) => (
                       <>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
+                        <MenuItem icon="rename" label="Rename" onSelect={() => {
                             close();
                             send({ type: 'renameChat', chatId: c.id });
-                          }}
-                        >
-                          <Icon name="rename" /> Rename
-                        </button>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
+                          }} />
+                        <MenuItem icon="star" label={<>{c.starred ? 'Unstar' : 'Star'}</>} onSelect={() => {
                             close();
                             send({ type: 'star', chatId: c.id, starred: !c.starred });
-                          }}
-                        >
-                          <Icon name="star" /> {c.starred ? 'Unstar' : 'Star'}
-                        </button>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
+                          }} />
+                        <MenuItem icon="archive" label="Archive" onSelect={() => {
                             close();
                             send({ type: 'archive', chatId: c.id, archived: true });
-                          }}
-                        >
-                          <Icon name="archive" /> Archive
-                        </button>
+                          }} />
                       </>
                     )}
                   </Popover>
@@ -410,9 +414,12 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
         {!flat.length && <div class="pop-empty">{query ? 'No chat matches.' : 'No open chats.'}</div>}
       </div>
       <div class="pop-foot">
-        <button class="ghost sm" onClick={() => send({ type: 'openTasks' })}>
-          <Icon name="tasks" /> Agent Manager
-        </button>
+        <Button variant="quiet" size="sm" icon="inbox" class="inbox-entry" data-waiting={waiting ? '' : undefined} title={`Everything any agent waits on (${IS_MAC ? '⇧⌘I' : 'Ctrl+Alt+Shift+I'})`} onClick={() => send({ type: 'openInbox' })}>
+          Inbox{waiting ? ` · ${waiting}` : ''}
+        </Button>
+        <Button variant="quiet" icon="tasks" size="sm" onClick={() => send({ type: 'openTasks' })}>
+          Agent Manager
+        </Button>
         <span class="spacer" />
         {archived > 0 && <span class="hint">{archived} archived</span>}
       </div>
@@ -436,25 +443,25 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
       <header class="chat-head">
         <div class="chat-head-text">
           <div class="chat-head-row">
-            <button class="chat-head-title" title={`${chat.title} (${chat.label}) · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
+            <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
               {chat.title}
             </button>
             {chat.branch && (
-              <span class="chip branch-chip" title={`${chat.branch}\n${chat.cwd}`}>
+              <span class="fl-pill branch-chip" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
                 <Icon name="branch" />
-                <span class="chip-text">{chat.branch}</span>
+                <span class="fl-pill__text">{chat.branch}</span>
               </span>
             )}
-            {chat.merged && <span class="tag">merged</span>}
+            {chat.merged && <span class="fl-pill" data-tone="muted">merged</span>}
             {chat.session?.rules?.length ? (
               <Popover
                 label="Shared rules this session got"
-                buttonClass="chip rules-chip"
-                trigger={<span class="chip-text">Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}</span>}
+                buttonClass="fl-pill rules-chip"
+                trigger={<span class="fl-pill__text">Rules · {chat.session.rules.length} file{chat.session.rules.length === 1 ? '' : 's'}</span>}
               >
                 {(close) => (
                   <>
-                    <div class="pop-title" aria-hidden="true">Shared rules this session got</div>
+                    <div class="fl-menu__title" aria-hidden="true">Shared rules this session got</div>
                     {chat.session!.rules!.map((path) => (
                       <button
                         key={path}
@@ -477,7 +484,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </div>
         </div>
         {images.length > 0 && (
-          <Popover label="Images in this chat" title="Images in this chat" kind="dialog" align="end" buttonClass="chip-btn images-pill" trigger={<span class="chip-text">Images · {images.length}</span>}>
+          <Popover label="Images in this chat" title="Images in this chat" kind="dialog" align="end" buttonClass="fl-pill fl-pill--md images-pill" trigger={<span class="fl-pill__text">Images · {images.length}</span>}>
             {() => (
               <div class="image-strip">
                 {images.map((img) => (
@@ -487,24 +494,16 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
             )}
           </Popover>
         )}
-        <span class="status-pill" data-state={status}>
+        <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
           {chat.session?.starting && status === 'idle' ? 'Starting' : DOT_LABEL[status]}
-        </span>
+        </Pill>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />
-          <button
-            class="ghost icon-btn"
-            title={chat.starred ? 'Unstar' : 'Star: keep it at the top of the list'}
-            aria-label={chat.starred ? 'Unstar' : 'Star'}
-            aria-pressed={!!chat.starred}
-            onClick={() => send({ type: 'star', chatId: chat.id, starred: !chat.starred })}
-          >
-            <Icon name="star" />
-          </button>
-          <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="more" />}>
+          <IconButton icon="star" label={chat.starred ? 'Unstar' : 'Star'} muted title={chat.starred ? 'Unstar' : 'Star: keep it at the top of the list'} aria-pressed={!!chat.starred} onClick={() => send({ type: 'star', chatId: chat.id, starred: !chat.starred })} />
+          <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" trigger={<Icon name="more" />}>
             {(close) => (
               <>
-                <div class="pop-title" aria-hidden="true">Hand off to</div>
+                <div class="fl-menu__title" aria-hidden="true">Hand off to</div>
                 {agents.map((agent) => (
                   <button
                     key={agent}
@@ -520,20 +519,12 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                   </button>
                 ))}
                 <PipeTargets chat={chat} close={close} />
-                <div class="pop-sep" role="separator" />
-                <button role="menuitem" onClick={() => (close(), send({ type: 'openRules' }))}>
-                  Rules…
-                </button>
-                <button
-                  role="menuitem"
-                  disabled={chat.busy}
-                  onClick={() => {
+                <div class="fl-menu__sep" role="separator" />
+                <MenuItem label="Rules…" onSelect={() => (close(), send({ type: 'openRules' }))} />
+                <MenuItem icon="history" label="Rewind…" disabled={chat.busy} onSelect={() => {
                     close();
                     send({ type: 'rewind', chatId: chat.id });
-                  }}
-                >
-                  <Icon name="history" /> Rewind…
-                </button>
+                  }} />
                 <button
                   role="menuitem"
                   onClick={() => {
@@ -552,29 +543,28 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
         <div class="origin-banner" data-kind={chat.origin.kind}>
           <Icon name={chat.origin.kind === 'handoff' ? 'handoff' : 'ask'} />
           <span>{chat.origin.kind === 'handoff' ? 'Continues' : 'Asked by'}</span>
-          <button class="link-chip" title={parent.title} onClick={() => onSelect(parent.id)}>
-            <Glyph agent={parent.agent} size="sm" />
-            {parent.label}
-          </button>
+          <ChipButton lead={<Glyph agent={parent.agent} size="sm" />} title={parent.title} onPress={() => onSelect(parent.id)}>
+            {agentName(parent.agent)}
+          </ChipButton>
           <span class="origin-title">{parent.title}</span>
-          {chat.origin.by === 'agent' && <span class="tag">by agent</span>}
+          {chat.origin.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
         </div>
       )}
       {(chips.length > 0 || chat.archived) && (
         <div class="link-strip">
-          {chat.archived && <span class="tag">archived</span>}
+          {chat.archived && <span class="fl-pill" data-tone="muted">archived</span>}
           {chips.map((b) => (
-            <span key={b.text} class="badge" data-kind={b.kind}>
-              <button class="badge-btn" onClick={() => (b.chatId ? onSelect(b.chatId) : send({ type: 'openTasks' }))} title={b.chatId ? 'Open that chat' : 'Compare in the Agent Manager'}>
-                <Icon name={b.kind === 'pipe' ? 'pipe' : b.kind === 'consult' ? 'ask' : b.kind === 'group' ? 'compare' : 'handoff'} />
-                {b.text}
-              </button>
-              {b.linkId && (
-                <button class="badge-x" aria-label={`Stop: ${b.text}`} title="Stop the pipe" onClick={() => send({ type: 'unlink', linkId: b.linkId! })}>
-                  <Icon name="close" />
-                </button>
-              )}
-            </span>
+            <ChipButton
+              key={b.text}
+              class="badge"
+              icon={b.kind === 'pipe' ? 'pipe' : b.kind === 'consult' ? 'ask' : b.kind === 'group' ? 'compare' : 'handoff'}
+              title={b.chatId ? 'Open that chat' : 'Compare in the Agent Manager'}
+              onPress={() => (b.chatId ? onSelect(b.chatId) : send({ type: 'openTasks' }))}
+              onRemove={b.linkId ? () => send({ type: 'unlink', linkId: b.linkId! }) : undefined}
+              removeLabel={`Stop: ${b.text}`}
+            >
+              {b.text}
+            </ChipButton>
           ))}
         </div>
       )}
@@ -608,9 +598,9 @@ function AskingBar({ chat }: { chat: ChatView }) {
       <span class="banner-text">
         {AGENT_FACES[chat.agent].name} is asking · {n} question{n === 1 ? '' : 's'}
       </span>
-      <button class="sm" onClick={show}>
+      <Button size="sm" onClick={show}>
         Show
-      </button>
+      </Button>
     </div>
   );
 }
@@ -636,9 +626,9 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
       </div>
       <p class="hint">
         {agents.some((a) => signIn[a] === 'signed-in') ? 'Sign-in, API keys and models' : 'Not signed in yet? Sign in, add an API key or install an agent'} in{' '}
-        <button class="link" onClick={() => send({ type: 'openAccounts' })}>
+        <Button variant="link" onClick={() => send({ type: 'openAccounts' })}>
           Agents &amp; Accounts
-        </button>
+        </Button>
         .
       </p>
       {agents.includes('demo') && (
@@ -647,15 +637,15 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         </p>
       )}
       <p class="hint">
-        <button class="link" onClick={() => send({ type: 'otherAgents' })}>
+        <Button variant="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…
-        </button>
+        </Button>
       </p>
       {recent.length > 0 && (
         <section class="reopen" aria-label="Reopen a chat">
-          <h3 class="pop-title">Reopen</h3>
+          <h3 class="fl-menu__title">Reopen</h3>
           {recent.map((c) => (
-            <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={`${c.title} (${c.label})`} onClick={() => onSelect(c.id)}>
+            <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={chatTip(c)} onClick={() => onSelect(c.id)}>
               <Glyph agent={c.agent} size="sm" />
               <span class="pick-title">{c.title}</span>
               <span class="pick-label">{switcherMeta(c, now)}</span>
@@ -835,7 +825,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       )}
       {/* Read out what matters, not every streamed word. */}
       <div class="sr" aria-live="polite">
-        {waitingNow ? `${chat.label} needs your decision` : chat.busy ? '' : chat.turns ? `${chat.label} finished` : ''}
+        {waitingNow ? `${agentName(chat.agent)} needs your decision` : chat.busy ? '' : chat.turns ? `${agentName(chat.agent)} finished` : ''}
       </div>
     </div>
       {pastText && (
@@ -947,6 +937,9 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
         <div class="user-msg" id={`msg-${msgKey}`}>
           {/* Not a button: it holds Show more and reference buttons (QA F19). */}
           <div class="bubble">
+            {item.checkpoint && !chat.busy && (
+              <IconButton icon="history" label="Rewind to here" size="sm" muted class="rewind-btn" onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })} />
+            )}
             {item.text && <ClampedText text={item.text} />}
             <RefList refs={refsOf(item)} cwd={chat.cwd} />
             {item.images.length > 0 && (
@@ -958,17 +951,6 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
               </div>
             )}
           </div>
-          {item.checkpoint && !chat.busy && (
-            <button
-              type="button"
-              class="ghost icon-btn sm rewind-btn"
-              title="Rewind to here"
-              aria-label="Rewind to here"
-              onClick={() => send({ type: 'rewind', chatId: chat.id, turnId: item.checkpoint })}
-            >
-              <Icon name="history" />
-            </button>
-          )}
         </div>
       );
     case 'agent':
@@ -996,11 +978,8 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       const doneCount = item.entries.filter((e) => e.status === 'completed').length;
       const current = item.entries.findIndex((e) => e.status !== 'completed');
       return (
-        <section class="card plan" aria-label="Plan">
-          <div class="card-head">
-            <span>Plan</span>
-            <span class="hint">{current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`}</span>
-          </div>
+        <Card size="sm" class="msg-card plan" label="Plan">
+          <CardHead icon="plan" title="Plan" meta={current < 0 ? `All ${item.entries.length} steps done` : `Step ${current + 1} of ${item.entries.length}`} />
           <ol class="plan-steps">
             {item.entries.map((e, i) => {
               const s = PLAN_STATE[e.status] ?? 'next';
@@ -1017,7 +996,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
               <i key={i} data-step={e.status === 'completed' ? 'done' : i === current ? 'working' : 'next'} />
             ))}
           </div>
-        </section>
+        </Card>
       );
     }
     case 'permission':
@@ -1028,51 +1007,47 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       return <Command item={item} chat={chat} />;
     case 'notice':
       return (
-        <div class="notice" data-tone={item.tone} role={item.tone === 'error' ? 'alert' : undefined}>
-          <div>{item.text}</div>
-          {item.detail && <code class="detail">{item.detail}</code>}
-          {item.actions && (
-            <div class="actions">
-              {item.actions.map((a) => (
-                <button key={a.label} class="sm" onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          )}
+        <div class="msg-card notice">
+          <Banner
+            tone={item.tone === 'error' ? 'error' : undefined}
+            actions={item.actions?.map((a) => (
+              <Button key={a.label} size="sm" onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
+                {a.label}
+              </Button>
+            ))}
+          >
+            <div>{item.text}</div>
+            {item.detail && <code class="notice-detail">{item.detail}</code>}
+          </Banner>
         </div>
       );
     case 'changes':
       return (
-        <section class="card changes" data-undone={item.undone ? 'true' : undefined}>
-          <div class="card-head">
-            <span>{item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`}</span>
-          </div>
+        <Card size="sm" class="msg-card changes" data-muted={item.undone ? '' : undefined}>
+          <CardHead icon="diff" title={item.undone ? 'Turn undone' : `Changed ${item.files.length} file${item.files.length === 1 ? '' : 's'}`} />
           <div class="files">
             {item.files.map((f) => (
-              <button key={f} class="ref" title={f} onClick={() => send({ type: 'openFile', path: f })}>
-                {basename(f)}
-              </button>
+              <FileRef key={f} path={f} onOpen={() => send({ type: 'openFile', path: f })} />
             ))}
           </div>
           {!item.undone && (
-            <div class="actions">
+            <div class="fl-card__foot" data-start="">
               {canUndo && (
-                <button class="sm" onClick={() => send({ type: 'undo', chatId: chat.id, turnId: item.turnId })}>
-                  <Icon name="undo" /> Undo this turn
-                </button>
+                <Button size="sm" icon="undo" onClick={() => send({ type: 'undo', chatId: chat.id, turnId: item.turnId })}>
+                  Undo this turn
+                </Button>
               )}
-              <button class="ghost sm" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
-                <Icon name="diff" /> Changes
-              </button>
+              <Button variant="quiet" size="sm" icon="diff" onClick={() => send({ type: 'viewChanges', chatId: chat.id })}>
+                Changes
+              </Button>
             </div>
           )}
-        </section>
+        </Card>
       );
     case 'link':
       return <LinkView item={item} chat={chat} state={state} onSelect={onSelect} />;
     case 'bridge':
-      return <BridgeView item={item} chat={chat} state={state} onSelect={onSelect} />;
+      return <BridgeView item={item} chat={chat} state={state} />;
     case 'question':
       return <QuestionCard item={item} chat={chat} />;
   }
@@ -1096,24 +1071,24 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   const other = state.chats.find((c) => c.id === item.chatId);
   const long = item.text.length > 700 || item.text.split('\n').length > 12;
   const [expanded, setExpanded] = useState(!long);
-  // A hand-off names the chat it went to (or came from) by its topic, like the header chips; the label is in the tooltip.
-  const name = item.role.startsWith('handoff') && other ? other.title : item.label;
+  // A hand-off names the chat it went to (or came from) by its topic, like the header chips; "<topic> · Agent" is its tooltip.
+  const name = item.role.startsWith('handoff') && other ? other.title : agentName(item.agent);
   const head = LINK_HEAD[item.role](name);
   return (
     <section class="link-card" data-role={item.role} aria-label={head}>
       <div class="link-head">
         <Icon name={LINK_ICON[item.role]} />
         <Glyph agent={item.agent} size="sm" />
-        <span class="link-title" title={other ? `${other.label}: ${other.title}` : item.label}>
+        <span class="link-title" title={other ? chatTip(other) : agentName(item.agent)}>
           {head}
         </span>
-        {item.role.startsWith('piped') && <span class="tag">pipe</span>}
-        {item.by === 'agent' && <span class="tag">by agent</span>}
+        {item.role.startsWith('piped') && <span class="fl-pill" data-tone="muted">pipe</span>}
+        {item.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
         <span class="spacer" />
         {other && other.id !== chat.id && (
-          <button class="ghost sm" onClick={() => onSelect(other.id)}>
+          <Button variant="quiet" size="sm" onClick={() => onSelect(other.id)}>
             Open <Icon name="open" />
-          </button>
+          </Button>
         )}
       </div>
       {item.text && (
@@ -1124,19 +1099,14 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
       {(long || item.role === 'reply') && (
         <div class="actions">
           {item.role === 'reply' && (
-            <button
-              class="sm"
-              disabled={!other}
-              title={other ? `Give this answer to ${chat.label} as a message` : 'That chat is gone'}
-              onClick={() => send({ type: 'forward', fromChatId: item.chatId, toChatId: chat.id })}
-            >
-              <Icon name="send" /> Send to {chat.label}
-            </button>
+            <Button icon="send" size="sm" disabled={!other} title={other ? `Give this answer to ${agentName(chat.agent)} in ${chatRef(chat)} as a message` : 'That chat is gone'} onClick={() => send({ type: 'forward', fromChatId: item.chatId, toChatId: chat.id })}>
+              Send to {agentName(chat.agent)}
+            </Button>
           )}
           {long && (
-            <button class="ghost sm" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            <Button variant="quiet" size="sm" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
               {expanded ? 'Show less' : 'Show all'}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -1144,23 +1114,9 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
   );
 }
 
-const BRIDGE_TOOL: Record<BridgeItem['tool'], string> = {
-  remember: 'Fact',
-  ask_agent: 'Question',
-  send_to_chat: 'Message',
-  read_chat: 'Read the transcript',
-  browser_open: 'Open',
-  browser_click: 'Click',
-  browser_type: 'Type',
-  browser_back: 'Back',
-  browser_reload: 'Reload',
-};
-
 /** An agent asks to reach another agent or chat through the FriedLiver tools: a decision. */
-function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: ChatView; state: AppState; onSelect: Select }) {
+function BridgeView({ item, chat, state }: { item: BridgeItem; chat: ChatView; state: AppState }) {
   const title = bridgeTitle(state, chat, item);
-  const target = 'chatId' in item.target ? state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId) : undefined;
-  const targetAgent = 'agent' in item.target ? item.target.agent : target?.agent;
   if (item.state !== 'awaiting') {
     return (
       <div class="answered">
@@ -1172,56 +1128,7 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
       </div>
     );
   }
-  return (
-    <section class="ask bridge" id={`item-${item.requestId}`} aria-label={title} {...chooseOn(chat, item.requestId)}>
-      <div class="ask-head">
-        <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" />
-        <span>{title}</span>
-        {targetAgent && (
-          <>
-            <Icon name="handoff" />
-            <Glyph agent={targetAgent} size="sm" />
-          </>
-        )}
-      </div>
-      {target && (
-        <button class="link-chip" onClick={() => onSelect(target.id)} title={target.title}>
-          <Glyph agent={target.agent} size="sm" />
-          {target.label}
-          <span class="hint">{clip(target.title, 40)}</span>
-        </button>
-      )}
-      {item.text && (
-        <div class="bridge-text">
-          <div class="bridge-label">{BRIDGE_TOOL[item.tool]}</div>
-          {item.text}
-        </div>
-      )}
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allow' })}>
-          <span class="opt-num">1.</span>Allow
-        </button>
-        <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
-          <span class="opt-num">2.</span>Allow for this chat
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
-          <span class="opt-num">3.</span>Deny
-        </button>
-        {/* Last and a link, as on a permission card: not one more numbered choice. */}
-        {item.always && (
-          <button
-            class="link always-allow"
-            title={`Don't ask again for ${item.always}: every chat, every agent, after restarts. Revoke in Manage Permissions.`}
-            onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowAlways' })}
-          >
-            Always allow <span class="always-scope">{item.always}</span>
-          </button>
-        )}
-      </div>
-      <KeyHint chat={chat} id={item.requestId} n={3} />
-    </section>
-  );
+  return <WaitingCard item={item} chat={chat} state={state} />;
 }
 
 function Stats({ item }: { item: ReviewItem }) {
@@ -1232,14 +1139,17 @@ function Stats({ item }: { item: ReviewItem }) {
   );
 }
 
-/** "also in Codex 2" when another open chat changed the same file. */
+/** "also in <that chat's topic>" when another open chat changed the same file. */
 function ConflictChip({ item, chat, state, conflicts }: { item: ReviewItem; chat: ChatView; state: AppState; conflicts: FileConflict[] }) {
   const file = relativePath(chat.cwd, item.path);
   const hit = conflicts.find((f) => f.file === file);
   if (!hit) return null;
-  const others = hit.chats.filter((id) => id !== chat.id).flatMap((id) => state.chats.find((c) => c.id === id)?.label ?? []);
+  const others = hit.chats.filter((id) => id !== chat.id).flatMap((id) => {
+    const other = state.chats.find((c) => c.id === id);
+    return other ? [chatName(other)] : [];
+  });
   return (
-    <span class="badge conflict" title={`${file} is changed in ${others.join(', ')} too: they clash when merged`}>
+    <span class="fl-pill" data-tone="warn" title={`${file} is changed in ${others.join(', ')} too: they clash when merged`}>
       <Icon name="diff" />
       also in {others.join(', ')}
     </span>
@@ -1252,9 +1162,9 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
     return (
       <div class="answered">
         <Icon name={item.state === 'accepted' ? 'check' : 'close'} /> {item.state === 'accepted' ? 'Accepted' : 'Rejected'} edit to{' '}
-        <button class="link" title={item.path} onClick={() => send({ type: 'openFile', path: item.path })}>
+        <Button variant="link" title={item.path} onClick={() => send({ type: 'openFile', path: item.path })}>
           {name}
-        </button>{' '}
+        </Button>{' '}
         <Stats item={item} />
         {item.auto && <span class="hint">· {item.auto}</span>}
         <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
@@ -1262,64 +1172,17 @@ function Review({ item, chat, state, conflicts }: { item: ReviewItem; chat: Chat
     );
   }
   return (
-    <section class="ask" id={`item-${item.reviewId}`} aria-label="Edit to review" {...chooseOn(chat, item.reviewId)}>
-      <div class="ask-head">
-        <Dot state="needs-you" />
-        <Glyph agent={chat.agent} size="sm" /> {item.isNew ? 'New file to review' : 'Edit to review'}
-      </div>
-      <div class="file-line">
-        <button class="file-row" title={`${item.path}: open the diff`} onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
-          <Icon name="file" /> <span class="file-name">{name}</span> <Stats item={item} />
-        </button>
-        <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
-      </div>
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'accept' })}>
-          <span class="opt-num">1.</span>Accept
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'reject' })}>
-          <span class="opt-num">2.</span>Reject
-        </button>
-        <button class="ghost sm" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
-          Open diff
-        </button>
-      </div>
-      <KeyHint chat={chat} id={item.reviewId} n={2} />
-    </section>
+    <>
+      <WaitingCard item={item} chat={chat} />
+      <ConflictChip item={item} chat={chat} state={state} conflicts={conflicts} />
+    </>
   );
 }
 
 const COMMAND_STATE: Record<CommandItem['state'], string> = { awaiting: 'needs-you', running: 'working', denied: 'idle', exited: 'done' };
 
 function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
-  if (item.state === 'awaiting') {
-    return (
-      <section class="ask" id={`item-${item.commandId}`} aria-label="Command to approve" {...chooseOn(chat, item.commandId)}>
-        <div class="ask-head">
-          <Dot state="needs-you" />
-          <Glyph agent={chat.agent} size="sm" /> {chat.label} wants to run a command
-        </div>
-        <pre class="cmdline">
-          <span class="prompt">$ </span>
-          {item.commandLine}
-        </pre>
-        <div class="hint mono" title={item.cwd}>
-          in {item.cwd}
-        </div>
-        {item.outside && <div class="warn">This folder is outside the workspace.</div>}
-        <div class="actions">
-          <button class="decide sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: true })}>
-            <span class="opt-num">1.</span>Run
-          </button>
-          <button class="ghost danger sm" onClick={() => send({ type: 'command', commandId: item.commandId, approve: false })}>
-            <span class="opt-num">2.</span>Deny
-          </button>
-          {!item.outside && <AlwaysAllow line={item.commandLine} target={{ commandId: item.commandId }} />}
-        </div>
-        <KeyHint chat={chat} id={item.commandId} n={2} />
-      </section>
-    );
-  }
+  if (item.state === 'awaiting') return <WaitingCard item={item} chat={chat} />;
   const failed = item.state === 'exited' && item.exitCode !== 0;
   const meta =
     item.state === 'denied'
@@ -1335,7 +1198,7 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
           <span class="prompt">$ </span>
           {shortCommand(item.commandLine, 200)}
         </code>
-        {item.auto && <span class="tag" title="Ran without asking">{item.auto}</span>}
+        {item.auto && <span class="fl-pill" data-tone="muted" title="Ran without asking">{item.auto}</span>}
         <span class="hint">{meta}</span>
       </div>
       {item.output && <pre class="output">{item.output}</pre>}
@@ -1468,8 +1331,14 @@ function Composer({
       if (e.defaultPrevented || isTyping(e.target)) return;
       decisionKey(e, live.current, true);
     };
+    // Enter let go anywhere (the message box included) ends a hold that hasn't finished.
+    const onUp = (e: KeyboardEvent) => decisionKeyUp(e, live.current);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onUp);
+    };
   }, []);
 
   const addFiles = (files: File[]) => {
@@ -1504,6 +1373,8 @@ function Composer({
   // The mic: what the host's helper hears goes into the box at the caret, each partial replacing the last.
   const [mic, setMic] = useState<DictationState>('idle');
   const spoken = useRef<Segment | null>(null);
+  // The input's loudness, for the visualizer; a ref, so 30 levels a second don't redraw the composer.
+  const level = useRef({ level: 0, at: 0 });
   const latestInsert = useRef(insert);
   latestInsert.current = insert;
   const dictate = (on: boolean) => {
@@ -1523,6 +1394,10 @@ function Composer({
     const onMessage = (e: MessageEvent) => {
       const m = e.data as HostMessage;
       if (m?.type !== 'dictation' || m.chatId !== chat.id) return;
+      if ('level' in m) {
+        if (typeof m.level === 'number' && Number.isFinite(m.level)) level.current = { level: Math.min(1, Math.max(0, m.level)), at: performance.now() };
+        return;
+      }
       if ('text' in m) {
         if (!spoken.current) return;
         const next = spliceDictation(area.current?.value ?? '', spoken.current, m.text, m.final, LIMITS.text);
@@ -1593,15 +1468,12 @@ function Composer({
           {removed && (
             <div class="banner" role="status">
               <span class="banner-text">Removed {removed.a.name}</span>
-              <button
-                class="sm"
-                onClick={() => {
+              <Button size="sm" onClick={() => {
                   setAttachments((list) => [...list.slice(0, removed.at), removed.a, ...list.slice(removed.at)].slice(0, 10));
                   setRemoved(null);
-                }}
-              >
+                }}>
                 Undo
-              </button>
+              </Button>
             </div>
           )}
           <EditsBar chat={chat} />
@@ -1679,7 +1551,7 @@ function Composer({
               ref={area}
               value={text}
               rows={1}
-              aria-label={`Message ${chat.label}`}
+              aria-label={`Message ${agentName(chat.agent)}`}
               aria-autocomplete="list"
               aria-controls={picking ? listId : undefined}
               aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
@@ -1764,6 +1636,7 @@ function Composer({
                 onClick={() => dictate(mic === 'idle')}
               >
                 <Icon name="mic" />
+                {mic === 'listening' && <MicVisualizer level={level} />}
               </button>
             )}
           </div>
@@ -1797,7 +1670,7 @@ function Composer({
               disabled={!stopping && !canSend}
               data-stop={stopping ? '' : undefined}
               aria-label={stopping ? 'Stop' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${chat.label} finishes this turn` : 'Send (Enter)'}
+              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${agentName(chat.agent)} finishes this turn` : 'Send (Enter)'}
             >
               <Icon name={stopping ? 'stop' : asking ? 'ask' : queueing ? 'queue' : 'up'} size={stopping ? 16 : 20} />
             </button>

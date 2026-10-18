@@ -11,6 +11,7 @@ import path from 'node:path';
 import type { OutsideImage, OutsideImages } from '../shared/gallery';
 import type { ClaudeSession, ClaudeSubagent } from '../shared/messages';
 import { humanTitle } from '../shared/stepImages';
+import { claudeColumn, claudeSubagents } from '../shared/view';
 
 const SESSION_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const AGENT_META = /^agent-([0-9a-z]+)\.meta\.json$/i;
@@ -70,6 +71,8 @@ interface SessionState {
   cwd?: string;
   /** What ran it, per record: claude-vscode, cli, sdk-ts (FriedLiver's own chats), sdk-py, sdk-cli (`claude -p`)… */
   entrypoints: Set<string>;
+  /** The entrypoint of its latest record that names one: who wrote to it last. */
+  lastEntrypoint?: string;
   custom: string;
   auto: string;
   prompt: string;
@@ -99,7 +102,10 @@ const newSession = (): SessionState => ({
 
 function feedSession(s: SessionState, o: Line): void {
   if (s.cwd === undefined && typeof o.cwd === 'string') s.cwd = o.cwd;
-  if (typeof o.entrypoint === 'string') s.entrypoints.add(o.entrypoint);
+  if (typeof o.entrypoint === 'string') {
+    s.entrypoints.add(o.entrypoint);
+    s.lastEntrypoint = o.entrypoint;
+  }
   // The latest title wins: Claude Code appends a new one as the session goes on, and a name the user gave beats its own.
   if (o.type === 'custom-title' && typeof o.customTitle === 'string') s.custom = o.customTitle;
   else if (o.type === 'ai-title' && typeof o.aiTitle === 'string') s.auto = o.aiTitle;
@@ -355,13 +361,18 @@ export interface ListOptions {
   home: string;
   /** The workspace folders. None (a window with no folder): every project's sessions from the last week, grouped by project. */
   folders: readonly string[];
-  /** Session ids FriedLiver's own chats already have. */
+  /**
+   * Session ids FriedLiver's own chats already have. Such a session is left out only while FriedLiver wrote to it last:
+   * one a chat opened and the Claude Code extension or CLI then went on with is listed (the chat never shows that work).
+   */
   skip?: ReadonlySet<string>;
   /** Sessions listed at most: 50 for a window's folders, 100 across every project. */
   limit?: number;
   /** Keep trivial and headless sessions and don't archive idle ones (`friedliver.claudeSessions.showAll`). */
   showAll?: boolean;
   now?: number;
+  /** Gets a line per folder and per session saying what was read and why each is shown or hidden. */
+  report?: string[];
 }
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -378,10 +389,13 @@ export function listClaudeSessions(opts: ListOptions): Promise<ClaudeSession[]> 
   return run;
 }
 
-async function list({ home, folders, skip, limit, showAll = false, now = Date.now() }: ListOptions): Promise<ClaudeSession[]> {
+async function list({ home, folders, skip, limit, showAll = false, now = Date.now(), report }: ListOptions): Promise<ClaudeSession[]> {
   const base = path.join(home, '.claude', 'projects');
   const realBase = await realpath(base).catch(() => null);
-  if (!realBase) return [];
+  if (!realBase) {
+    report?.push(`${base}: missing`);
+    return [];
+  }
   const all = folders.length === 0;
   const max = limit ?? (all ? 100 : 50);
   listed.clear();
@@ -392,14 +406,22 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
   const found: { id: string; cwd?: string; dir: string; file: string; mtime: number; ino: number; size: number }[] = [];
   for (const { cwd, dir } of projects) {
     const real = await realpath(dir).catch(() => null);
-    if (!real || path.dirname(real) !== realBase) continue;
+    if (!real || path.dirname(real) !== realBase) {
+      report?.push(`folder ${cwd}: ${real ? `project folder ${dir} links out of ${realBase}` : `no project folder (${dir})`}`);
+      continue;
+    }
+    if (cwd) report?.push(`folder ${cwd}: ${real}`);
     const names = await readdir(real).catch(() => [] as string[]);
     for (const name of names) {
       const m = SESSION_FILE.exec(name);
-      if (!m || skip?.has(m[1])) continue;
+      if (!m) continue;
       const file = path.join(real, name);
       const st = await lstat(file).catch(() => null);
-      if (!st?.isFile() || (all && !showAll && now - st.mtimeMs > WEEK_MS)) continue;
+      if (!st?.isFile()) {
+        report?.push(`${m[1]}: hidden: not a plain file`);
+        continue;
+      }
+      if (all && !showAll && now - st.mtimeMs > WEEK_MS) continue;
       found.push({ id: m[1], cwd, dir: real, file, mtime: st.mtimeMs, ino: st.ino, size: st.size });
     }
   }
@@ -408,18 +430,40 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
   const out: ClaudeSession[] = [];
   // Counts only what it shows: headless runs can outnumber a person's sessions many times over.
   for (const f of found) {
-    if (out.length >= max) break;
+    const hide = (why: string) => report?.push(`${f.id}: hidden: ${why}`);
+    if (out.length >= max) {
+      hide(`over the ${max}-session limit`);
+      continue;
+    }
     touched.add(f.file);
-    const state = await advance(f.file, f, newSession, feedSession).catch(() => null);
-    if (!state) continue;
+    let error = '';
+    const state = await advance(f.file, f, newSession, feedSession).catch((e: unknown) => ((error = String(e)), null));
+    if (!state) {
+      hide(`unreadable (${error})`);
+      continue;
+    }
+    // FriedLiver's chat shows it while FriedLiver (the TypeScript SDK) wrote to it last; no entrypoint at all is an older transcript.
+    if (skip?.has(f.id) && (state.lastEntrypoint ?? 'sdk-ts') === 'sdk-ts') {
+      hide('a FriedLiver chat drives it');
+      continue;
+    }
     // Only a folder whose name is this project folder's: resuming runs Claude Code there.
     const cwd = f.cwd ?? (state.cwd && encodeCwd(state.cwd) === path.basename(f.dir) ? state.cwd : undefined);
-    if (!cwd) continue;
+    if (!cwd) {
+      hide(`its folder (${state.cwd ?? 'none recorded'}) doesn't match ${path.basename(f.dir)}`);
+      continue;
+    }
     const { trivial, headless, title, messages } = summarize(state);
-    if (headless && !showAll) continue;
+    if (headless && !showAll) {
+      hide(`headless run (${[...state.entrypoints].join(', ')})`);
+      continue;
+    }
     const { subs, lastActivity: agentsActive } = await sessionSubagents(path.join(f.dir, f.id, 'subagents'), state, touched);
     // A session that launched subagents is never trivial.
-    if (trivial && !subs.length && !showAll) continue;
+    if (trivial && !subs.length && !showAll) {
+      hide('trivial (no tools, two short messages at most)');
+      continue;
+    }
     const lastActivity = Math.max(f.mtime, agentsActive);
     listed.set(f.id, { file: f.file, dir: f.dir });
     out.push({
@@ -432,6 +476,15 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
       title: title || `${path.basename(cwd) || cwd} · ${new Date(f.mtime).toISOString().slice(0, 10)}`,
       ...(!showAll && now - lastActivity > WEEK_MS ? { archived: true } : {}),
     });
+    if (report) {
+      const s = out[out.length - 1];
+      const by: Record<string, number> = {};
+      for (const a of claudeSubagents(s, now)) by[a.state] = (by[a.state] ?? 0) + 1;
+      const counts = Object.entries(by).map(([k, n]) => `${n} ${k}`).join(', ');
+      report.push(
+        `${f.id} "${s.title}": shown${s.archived ? ' (archived: idle over a week)' : ''}, ${claudeColumn(s, now)}, ${f.size} bytes, last written by ${state.lastEntrypoint ?? 'unknown'}; ${subs.length} subagents${counts ? ` (${counts})` : ''}`,
+      );
+    }
   }
   // Forget files no longer listed, so memory follows what the Manager shows.
   for (const file of tails.keys()) if (!touched.has(file)) tails.delete(file);
@@ -528,13 +581,18 @@ async function scanFile(file: string, cwd: string): Promise<OutsideImage[]> {
   const fh = await open(file, 'r').catch(() => null);
   if (!fh) return s.scan.images;
   try {
-    const len = st.size - s.offset;
+    // Refreshes overlap: another scan may have read on since this one's lstat, so read from where this one starts and
+    // move the offset to where it got, never by what it read (which pushed it past the end of the file).
+    const from = s.offset;
+    const len = st.size - from;
+    if (len <= 0) return s.scan.images;
     const buf = Buffer.alloc(len);
-    const { bytesRead } = await fh.read(buf, 0, len, s.offset);
+    const { bytesRead } = await fh.read(buf, 0, len, from);
     // Only whole lines: the last may still be being written.
     const end = buf.lastIndexOf(0x0a, bytesRead - 1) + 1;
+    // ponytail: overlapping scans can feed the same lines twice; ImageScan keeps each image once.
     s.scan.feed(buf.toString('utf8', 0, end));
-    s.offset += end;
+    s.offset = Math.max(s.offset, from + end);
     s.size = st.size;
     s.mtime = st.mtimeMs;
   } finally {

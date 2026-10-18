@@ -265,3 +265,33 @@ describe('a window with no folder', () => {
     expect(s.project).toBeUndefined();
   });
 });
+
+describe('a session a FriedLiver chat opened', () => {
+  // The owner's real session: opened once in FriedLiver (whose resume wrote three sdk-ts records), then carried on in the
+  // Claude Code extension, which launched the agents still running. FriedLiver's chat for it never ran a turn, so it
+  // mustn't hide the session.
+  it('lists a session FriedLiver opened once but the Claude Code extension went on with, running agents included', async () => {
+    const { home, parent } = build();
+    const vs = { entrypoint: 'claude-vscode' };
+    fs.appendFileSync(parent, user(NOW - 30 * min, 'Fix the board', { entrypoint: 'sdk-ts' }) + user(NOW - 29 * min, 'carry on with the board', vs));
+    fs.utimesSync(parent, new Date(NOW - 3 * min), new Date(NOW - 3 * min));
+    const [s] = await listClaudeSessions({ home, folders: [WS], skip: new Set([S]), now: NOW });
+    expect(s?.id).toBe(S);
+    expect(states(s)['Integrate branches, rebuild UI']).toBe('working');
+    // Once FriedLiver's chat writes to it again, the chat shows it.
+    fs.appendFileSync(parent, user(NOW - 2 * min, 'and the list', { entrypoint: 'sdk-ts' }));
+    expect(await listClaudeSessions({ home, folders: [WS], skip: new Set([S]), now: NOW })).toEqual([]);
+  });
+
+  it('says why each session is shown or hidden', async () => {
+    const { home, parent } = build();
+    fs.appendFileSync(parent, user(NOW - 2 * min, 'go on', { entrypoint: 'sdk-ts' }));
+    const report: string[] = [];
+    await listClaudeSessions({ home, folders: [WS, '/nowhere'], skip: new Set([S]), now: NOW, report });
+    expect(report.join('\n')).toMatch(/\/nowhere.*no project folder/);
+    expect(report.join('\n')).toMatch(new RegExp(`${S}.*hidden: a FriedLiver chat drives it`));
+    report.length = 0;
+    await listClaudeSessions({ home, folders: [WS], now: NOW, report });
+    expect(report.join('\n')).toMatch(new RegExp(`${S}.*shown.*6 subagents \\(.*3 working`));
+  });
+});

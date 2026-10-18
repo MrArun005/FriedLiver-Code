@@ -92,25 +92,34 @@ BLOCKS.F01 = async () => {
 };
 
 // ---- F02 + security: the keys act on the one marked card; arrivals never take it over ----
+// The ApprovalCard (src/webview/approval.tsx) marks the card the keys act on with data-focus and a
+// box-shadow ring; Enter allows it, Esc denies, Tab cycles its scope (src/webview/controls.tsx decisionKey).
 const GRACE = 650;
+const marked = (pg) => pg.locator('.fl-card[data-focus]').evaluateAll((cs) => cs.map((c) => c.id));
 BLOCKS.F02 = async () => {
   // chat-c1 waits on two things: an agent's request to message another chat (older), then an edit permission.
   const p = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
-  const hinted = () => p.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id));
-  check(JSON.stringify(await hinted()) === JSON.stringify(['item-bridge-c1']), `only the oldest waiting card is marked [${await hinted()}]`);
-  const outline = await p.locator('#item-bridge-c1').evaluate((c) => window.getComputedStyle(c).outlineStyle);
-  check(outline === 'solid', 'the marked card has a visible outline');
+  check(JSON.stringify(await marked(p)) === JSON.stringify(['item-bridge-c1']), `only the oldest waiting card is marked [${await marked(p)}]`);
+  const ring = (id) => p.locator(id).evaluate((c) => window.getComputedStyle(c).boxShadow);
+  const [onRing, offRing] = [await ring('#item-bridge-c1'), await ring('#item-perm-c1')];
+  check(onRing !== 'none' && offRing === 'none', `the marked card, and only it, has a visible ring [${onRing} | ${offRing}]`);
+  check((await p.locator('.apv .fl-btn--brand:not(.fl-split-caret)').count()) === 1 && (await p.locator('#item-bridge-c1 .fl-btn--brand').count()) > 0, 'one brand Allow button on screen, on the marked card');
   await p.click('.composer textarea');
   await p.waitForTimeout(GRACE);
-  await p.keyboard.press('1');
+  await p.keyboard.press('Enter');
   let last = (await posted(p)).at(-1);
-  check(last?.type === 'bridge' && last.answer === 'allow' && (await p.inputValue('.composer textarea')) === '', `1 picks the marked card's first option and types nothing [${JSON.stringify(last)}]`);
-  await p.keyboard.press('9');
-  check((await p.inputValue('.composer textarea')) === '', 'a digit is never typed into the empty composer while a decision waits');
+  check(last?.type === 'bridge' && last.answer === 'allow' && (await p.inputValue('.composer textarea')) === '', `Enter allows the marked card and types nothing [${JSON.stringify(last)}]`);
+  check(!(await posted(p)).some((m) => m.type === 'send'), 'Enter on a waiting decision never sends the empty composer');
+  const scopeLabel = () => p.locator('#item-bridge-c1 .fl-split > .fl-btn:first-child').innerText();
+  const scopeBefore = await scopeLabel();
+  await p.keyboard.press('Tab');
+  const scopeAfter = await scopeLabel();
+  const inComposer = await p.evaluate(() => document.activeElement?.matches('.composer textarea'));
+  check(scopeAfter !== scopeBefore && inComposer && (await p.inputValue('.composer textarea')) === '', `Tab cycles the marked card's scope, never typed and never moves focus [${scopeBefore} → ${scopeAfter}]`);
   // Choosing the other card moves the keys and the mark, after the grace period.
   const before = (await posted(p)).length;
-  await p.click('#item-perm-c1 .ask-head');
-  check(JSON.stringify(await hinted()) === JSON.stringify(['item-perm-c1']), 'clicking a card marks it');
+  await p.click('#item-perm-c1 .apv-verb');
+  check(JSON.stringify(await marked(p)) === JSON.stringify(['item-perm-c1']), 'clicking a card marks it');
   await p.click('.composer textarea');
   await p.keyboard.press('ControlOrMeta+Enter');
   check((await posted(p)).length === before, 'a shortcut right after the mark moved does nothing');
@@ -118,24 +127,32 @@ BLOCKS.F02 = async () => {
   await p.keyboard.press('ControlOrMeta+Enter');
   last = (await posted(p)).at(-1);
   check(last?.type === 'permission' && last.requestId === 'perm-c1', `after the grace period Ctrl/Cmd+Enter answers the marked card [${JSON.stringify(last)}]`);
-  check((await p.locator('#item-bridge-c1 .opt-num').count()) === 3, 'the request card numbers its options too');
+  // Every request card carries the same key hints (Esc denies, ⏎ allows): the bridge card as the permission card.
+  const hints = (id) => p.locator(`${id} .apv-act kbd`).allInnerTexts();
+  const [bh, ph] = [await hints('#item-bridge-c1'), await hints('#item-perm-c1')];
+  check(bh.includes('Esc') && bh.includes('⏎') && JSON.stringify(bh) === JSON.stringify(ph), `the request card shows the same key hints as the permission card [${bh} | ${ph}]`);
   await p.close();
   // A new request that arrives just before the keypress never takes the keys.
   const q = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 900);
   await q.click('.composer textarea');
   await q.waitForTimeout(GRACE);
   await q.evaluate(() => window.postMessage({ type: 'action', action: { t: 'items', chatId: 'chat-c2', items: [{ kind: 'command', commandId: 'cmd-new', commandLine: 'rm -rf build', cwd: '/w', state: 'awaiting' }] } }, '*'));
-  await q.keyboard.press('1');
+  await q.waitForSelector('#item-cmd-new');
+  await q.keyboard.press('Enter');
   last = (await posted(q)).at(-1);
-  check(last?.type === 'permission' && last.requestId === 'perm-c2', `1 pressed as a new request arrives applies to the card already marked [${JSON.stringify(last)}]`);
-  check(JSON.stringify(await q.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
+  check(last?.type === 'permission' && last.requestId === 'perm-c2', `Enter pressed as a new request arrives applies to the card already marked [${JSON.stringify(last)}]`);
+  check(!(await posted(q)).some((m) => m.type === 'command'), 'the new request is not answered');
+  check(JSON.stringify(await marked(q)) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
   await q.close();
   // Each chat keeps its own mark.
   const r = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
-  await r.click('#item-perm-c1 .ask-head');
+  await r.click('#item-perm-c1 .apv-verb');
   await r.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c2' }, '*'));
   await r.waitForTimeout(200);
-  check(JSON.stringify(await r.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
+  check(JSON.stringify(await marked(r)) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
+  await r.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c1' }, '*'));
+  await r.waitForTimeout(200);
+  check(JSON.stringify(await marked(r)) === JSON.stringify(['item-perm-c1']), 'and coming back, the first chat still has the card you marked');
   await r.close();
 };
 
@@ -147,14 +164,19 @@ BLOCKS.F09 = async () => {
   c5.items = [...c5.items, questionItem()];
   await snapshot(p, state, 'chat-c5');
   await p.waitForSelector('#item-q-1');
-  const opts = await p.locator('#item-q-1 .q-opt').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+  // Each row is a ChoiceRow: label, description line, and its digit as a key hint.
+  const opts = await p.locator('#item-q-1 .q-opt').evaluateAll((bs) =>
+    bs.map((b) => [b.querySelector('.fl-radio__key')?.textContent, b.querySelector('.fl-radio__text > span:first-child')?.textContent?.trim(), b.querySelector('.fl-radio__desc')?.textContent].join(' ')),
+  );
   check(opts[0]?.startsWith('1 Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3 In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
-  check(await p.locator('#item-q-1 .hint.keys[data-on]').isVisible(), 'the question shows the key hint');
+  const keyHints = await p.locator('#item-q-1 .fl-radio__key').evaluateAll((ks) => ks.filter((k) => k.getBoundingClientRect().width > 0 && window.getComputedStyle(k).visibility !== 'hidden').length);
+  check((await p.locator('#item-q-1[data-focus]').count()) === 1 && keyHints === opts.length, `the question is the marked card and shows its key hints [${keyHints}/${opts.length}]`);
   await p.click('.composer textarea');
   await p.waitForTimeout(GRACE);
   await p.keyboard.press('2');
   const last = (await posted(p)).at(-1);
   check(last?.type === 'answerQuestion' && last.values?.store === 'sqlite', `2 answers with the second option [${JSON.stringify(last)}]`);
+  check((await p.inputValue('.composer textarea')) === '', 'the digit is never typed into the empty composer while the question waits');
   await p.close();
 };
 
@@ -268,15 +290,15 @@ BLOCKS.F06 = async () => {
   check(new Set([W, D, N, E]).size === 4, `four distinct status colours [${W} ${D} ${N} ${E}]`);
   check((await bg(c, '.tl.sa-card[data-state="working"]', '::before')) === W, 'a running subagent in the transcript is the working colour');
   check((await bg(c, '.tl.sa-card[data-state="done"]', '::before')) === D, 'a finished subagent in the transcript is the done colour');
-  check((await bg(c, '.cc-agents .dot')) === W, 'the agents pill (agents running) is the working colour');
+  check((await bg(c, '.cc-agents .fl-dot')) === W, 'the agents pill (agents running) is the working colour');
   await c.click('.cc-agents');
-  check((await bg(c, '.cc-map-children .dot[data-state="working"]')) === W, 'a running agent in the agent map is the working colour');
-  check((await c.locator('.cc-map-children .dot[data-state="done"]').count()) > 0 && (await bg(c, '.cc-map-children .dot[data-state="done"]')) === D, 'a finished agent in the agent map is the done colour');
+  check((await bg(c, '.cc-map-children .fl-dot[data-state="working"]')) === W, 'a running agent in the agent map is the working colour');
+  check((await c.locator('.cc-map-children .fl-dot[data-state="done"]').count()) > 0 && (await bg(c, '.cc-map-children .fl-dot[data-state="done"]')) === D, 'a finished agent in the agent map is the done colour');
   await c.close();
   // Agent Manager: header counts and columns.
   const m = await open('surface=tasks&theme=dark-2026&view=board', 1440, 900);
   const W2 = await tone(m, '--status-working'), D2 = await tone(m, '--status-done'), N2 = await tone(m, '--status-waiting');
-  check((await bg(m, '.mgr-counts .dot[data-state="working"]')) === W2 && (await bg(m, '.mgr-counts .dot[data-state="done"]')) === D2 && (await bg(m, '.mgr-counts .dot[data-state="needs-you"]')) === N2, 'the Manager counts use the same palette (working ≠ done)');
+  check((await bg(m, '.mgr-counts .fl-dot[data-state="working"]')) === W2 && (await bg(m, '.mgr-counts .fl-dot[data-state="done"]')) === D2 && (await bg(m, '.mgr-counts .fl-dot[data-state="needs-you"]')) === N2, 'the Manager counts use the same palette (working ≠ done)');
   check((await bg(m, '.seg-bar i[data-step="working"]')) !== (await bg(m, '.seg-bar i[data-step="done"]')), 'a plan’s step in progress differs from its done steps');
   await m.close();
   const map = await open('surface=tasks&theme=dark-2026&view=map', 1440, 900);
@@ -368,9 +390,9 @@ BLOCKS.F11 = async () => {
     check((await chip.evaluate((b) => b.tagName)) === 'BUTTON' && (await chip.getAttribute('aria-haspopup')) === 'menu', `at ${width}px the rules chip is a button with a menu`);
     await chip.focus();
     await p.keyboard.press('Enter');
-    const files = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+    const files = await p.locator('.fl-menu [role="menuitem"]').allInnerTexts();
     check(files.some((f) => f.includes('AGENTS.md')) && files.length >= 3, `at ${width}px it lists the rules files [${files.join(' | ')}]`);
-    await p.locator('.popover [role="menuitem"]:has-text("AGENTS.md")').click();
+    await p.locator('.fl-menu [role="menuitem"]:has-text("AGENTS.md")').click();
     check((await posted(p)).some((m) => m.type === 'openFile' && m.path.endsWith('AGENTS.md')), `at ${width}px a file opens from it`);
     const cut = await p.evaluate(() => [...document.querySelectorAll('.chat-head .chip-text')].every((t) => window.getComputedStyle(t).textOverflow === 'ellipsis'));
     check(cut, `at ${width}px header chips cut with an ellipsis`);
@@ -413,7 +435,7 @@ BLOCKS.F13 = async () => {
   const inside = async (p) =>
     (await p.waitForTimeout(300)) ||
     p.evaluate(() => {
-      const m = document.querySelector('.popover');
+      const m = document.querySelector('.fl-menu');
       const r = m.getBoundingClientRect();
       return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: window.innerHeight, scrolls: m.scrollHeight > m.clientHeight + 1 };
     });
@@ -467,7 +489,7 @@ BLOCKS.F15 = async () => {
   }
   const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
   await p.click('.chat-head-actions button[aria-label^="More"]');
-  const more = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+  const more = await p.locator('.fl-menu [role="menuitem"]').allInnerTexts();
   check(more.some((t) => t.trim() === 'Rewind…') && !more.some((t) => /Checkpoints/.test(t)), `the ⋯ menu says Rewind… [${more.map((t) => t.trim()).join(' | ')}]`);
   await p.keyboard.press('Escape');
   await p.click('.cc-slash-btn');
@@ -486,9 +508,9 @@ BLOCKS.F16 = async () => {
   check((await pick.count()) === 1, 'the model picker is a menu button');
   if (await pick.count()) {
     await pick.click();
-    const items = p.locator('.popover [role="menuitemradio"]');
-    check((await items.count()) > 1 && (await p.locator('.popover [role="menuitemradio"][aria-checked="true"]').count()) === 1, 'it lists the choices with the current one checked');
-    const want = (await items.nth(1).locator('.grow').innerText()).trim();
+    const items = p.locator('.fl-menu [role="menuitemradio"]');
+    check((await items.count()) > 1 && (await p.locator('.fl-menu [role="menuitemradio"][aria-checked="true"]').count()) === 1, 'it lists the choices with the current one checked');
+    const want = (await items.nth(1).locator('.fl-menu__label').innerText()).trim();
     await items.nth(1).click();
     const label = (await pick.innerText()).trim();
     check(label === want && !(await items.count()), `the button shows the new choice [${label}]`);
@@ -512,7 +534,7 @@ BLOCKS.F17 = async () => {
     const g = await p.evaluate(() => {
       const box = document.querySelector('.empty').getBoundingClientRect();
       const cards = [...document.querySelectorAll('.pick-agent')].map((c) => c.getBoundingClientRect());
-      const glyphs = [...document.querySelectorAll('.pick-agent .glyph, .pick-agent svg')].map((c) => Math.round(c.getBoundingClientRect().top));
+      const glyphs = [...document.querySelectorAll('.pick-agent .fl-avatar, .pick-agent svg')].map((c) => Math.round(c.getBoundingClientRect().top));
       return {
         left: Math.round(cards[0].left - box.left),
         right: Math.round(box.right - cards.at(-1).right),
@@ -570,6 +592,9 @@ BLOCKS.F19 = async () => {
   c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'Run this:\n\n```ts\nexport const SESSION_STORE_CONNECTION_STRING = process.env.SESSION_STORE_URL ?? \'redis://localhost:6379/0?pool=16&timeout=2500\';\n```' }];
   await snapshot(p, state, 'chat-c5');
   await p.waitForTimeout(200);
+  // Wrap is on by default; with it off, a long line scrolls.
+  await p.locator('.prose .code-block').last().hover();
+  await p.locator('.prose .code-block').last().locator('button.wrap-btn').click();
   const pre = p.locator('pre.code').last();
   const info = await pre.evaluate((el) => ({ over: el.scrollWidth > el.clientWidth, tab: el.tabIndex, bg: window.getComputedStyle(el).backgroundImage, attach: window.getComputedStyle(el).backgroundAttachment }));
   check(info.over && info.tab === 0, `code that scrolls can be focused to scroll by keyboard [${JSON.stringify({ over: info.over, tab: info.tab })}]`);
@@ -608,7 +633,7 @@ BLOCKS.F21 = async () => {
   };
   const thumb = await p.locator('.cc-thumb').evaluate((t) => window.getComputedStyle(t).backgroundColor);
   check(lum(thumb) > 0.9, `the effort thumb is light on a light theme [${thumb}]`);
-  const off = p.locator('button.cc-switch[aria-checked="false"]').first();
+  const off = p.locator('button.fl-toggle[aria-checked="false"]').first();
   if (await off.count()) {
     const knob = await off.evaluate((b) => window.getComputedStyle(b, '::after').backgroundColor);
     check(lum(knob) > 0.9, `an off switch's knob is light too [${knob}]`);
@@ -621,7 +646,7 @@ BLOCKS.F26 = async () => {
   const p = await open('surface=chat&theme=dark-2026&side=1&list=1', 300, 800);
   const rows = p.locator('.chat-item');
   await rows.first().waitFor();
-  const r = await rows.evaluateAll((rs) => rs.map((e) => ({ glyph: !!e.querySelector('.glyph'), time: e.querySelector('.chat-item-time')?.textContent ?? '' })));
+  const r = await rows.evaluateAll((rs) => rs.map((e) => ({ glyph: !!e.querySelector('.fl-avatar'), time: e.querySelector('.chat-item-time')?.textContent ?? '' })));
   check(r.length > 0 && r.every((x) => x.glyph && x.time), `every row has a glyph and a time [${r.slice(0, 3).map((x) => JSON.stringify(x)).join(' ')}]`);
   await p.close();
 };
@@ -653,10 +678,16 @@ BLOCKS.F24 = async () => {
 BLOCKS.F23 = async () => {
   const p = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 800);
   const card = p.locator('#item-perm-c2');
-  const body = (await card.locator('.ask-body').innerText()).trim();
-  check(body !== 'rm src/legacyStore.ts', `the card's title isn't the command again [${body}]`);
-  const allow = card.locator('.actions [aria-haspopup="menu"]');
-  check((await allow.getAttribute('class'))?.split(' ').includes('link'), 'Always allow… is a link');
+  // The ApprovalCard: a header row (verb + mono target), the preview under it ($ command).
+  const text = await card.innerText();
+  const times = text.split('rm src/legacyStore.ts').length - 1;
+  check(times === 1, `the card says the command once [${times}× in: ${text.replace(/\s+/g, ' ')}]`);
+  // Always is a row in the Allow menu (the split button's caret), not another answer button beside Allow.
+  const answers = await card.locator('.apv-act .fl-btn:not([aria-haspopup])').allInnerTexts();
+  check(answers.length === 2 && !answers.some((t) => /always/i.test(t)), `the card offers Deny and Allow, no Always button [${answers.map((t) => t.replace(/\s+/g, ' ')).join(' | ')}]`);
+  await card.locator('.apv-act [aria-haspopup="menu"]').click();
+  const rows = await p.locator('[role="menu"] [role^="menuitem"]').allInnerTexts();
+  check(rows.some((t) => /^Always/.test(t.trim())), `Always allow is in the Allow menu [${rows.map((t) => t.split('\n')[0]).join(' | ')}]`);
   await p.close();
 };
 
@@ -749,7 +780,7 @@ BLOCKS.CLICK = async () => {
   const q3 = await last(p, 'answerQuestion');
   check(q3?.requestId === 'q-form' && q3.values?.question_0 === 'Redis' && q3.values?.question_1 === 'Memory', `the last click sends every answer [${JSON.stringify(q3)}]`);
   // Command and review cards.
-  await p.locator('#item-cmd-1 button').first().click();
+  await p.locator('#item-cmd-1 .apv-act .fl-btn:not([aria-haspopup])').last().click();
   const cmd = await last(p, 'command');
   check(cmd?.commandId === 'cmd-1' && cmd.approve === true, `a click runs the command [${JSON.stringify(cmd)}]`);
   await p.locator('#item-rev-1 button:has-text("Accept")').click();
@@ -768,10 +799,10 @@ BLOCKS.CLICK = async () => {
   // Permission and bridge cards in a chat with two waiting: a click on the second (not the key target) acts on it.
   const c = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
   await c.waitForSelector('#item-perm-c1');
-  await c.locator('#item-perm-c1 .actions button').first().click();
+  await c.locator('#item-perm-c1 .apv-act .fl-btn:not([aria-haspopup])').last().click();
   const perm = await last(c, 'permission');
   check(perm?.requestId === 'perm-c1' && !!perm.optionId, `a click on a permission option answers that card at once [${JSON.stringify(perm)}]`);
-  await c.locator('#item-bridge-c1 .actions button').first().click();
+  await c.locator('#item-bridge-c1 .apv-act .fl-btn:not([aria-haspopup])').last().click();
   const bridge = await last(c, 'bridge');
   check(bridge?.requestId === 'bridge-c1', `a click on a bridge option answers it [${JSON.stringify(bridge)}]`);
   const st = fixture(Date.now()).state;
@@ -780,7 +811,7 @@ BLOCKS.CLICK = async () => {
   c1.items.find((i) => i.requestId === 'bridge-c1').state = 'allowed';
   await snapshot(c, st, 'chat-c1');
   await c.waitForTimeout(150);
-  check(!(await c.locator('#item-perm-c1 .actions').count()), 'the answered permission card resolves');
+  check(!(await c.locator('#item-perm-c1 .apv-act').count()) && (await c.locator('#item-perm-c1, .answered').filter({ hasText: 'Edit src/format.ts' }).count()) > 0, 'the answered permission card resolves');
   await c.close();
 };
 
@@ -808,9 +839,9 @@ BLOCKS.QUESTION = async () => {
   const after = { kind: 'agent', text: Array.from({ length: 40 }, (_, n) => `Meanwhile, step ${n + 1} of the plan.`).join('\n\n') };
   for (const width of [1200, 640]) {
     const p = await load(width, [rich(), after]);
-    const labels = await p.locator('#item-q-rich .q-opt-label').allInnerTexts();
+    const labels = await p.locator('#item-q-rich .q-opt .fl-radio__text > span:first-child').allInnerTexts();
     check(/^Redis\s*Recommended/.test(labels[0]) && labels.at(-1).startsWith('Other'), `at ${width}px the recommended option comes first with its tag, Other… last [${labels.join(' | ')}]`);
-    const nums = await p.locator('#item-q-rich .q-num').allInnerTexts();
+    const nums = await p.locator('#item-q-rich .q-opt .fl-radio__key').allInnerTexts();
     check(nums.join(',') === '1,2,3,4', `rows are numbered [${nums}]`);
     await p.locator('#item-q-rich .q-opt').nth(1).hover();
     const pre = (await p.locator('#item-q-rich .q-preview pre').innerText()).trim();
@@ -897,7 +928,7 @@ BLOCKS.HANDOFF = async () => {
   await card.waitFor();
   const title = (await card.locator('.link-title').innerText()).trim();
   check(title === 'Handed off to Make the session store swappable', `the card names the target chat's topic [${title}]`);
-  check((await card.locator('.link-title').getAttribute('title')) === 'Codex 3: Make the session store swappable', 'the agent label is in its tooltip');
+  check((await card.locator('.link-title').getAttribute('title')) === 'Make the session store swappable · Codex', 'the topic and the plain agent name are in its tooltip');
   await p.close();
 };
 
@@ -931,6 +962,228 @@ BLOCKS.ACCOUNTS = async () => {
       if (width === 1200) await p.screenshot({ path: path.join(review, `accounts-${theme}.png`), fullPage: false });
       await p.close();
     }
+  }
+};
+
+// ---- FULLWIDTH: your message's box spans the transcript, however short (like Claude Code's prompt box) ----
+BLOCKS.FULLWIDTH = async () => {
+  const content = (p) =>
+    p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      const cs = window.getComputedStyle(t);
+      return t.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    });
+  const width = (p, sel) => p.locator(sel).first().evaluate((e) => e.getBoundingClientRect().width);
+  for (const w of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', w, 800);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    const filler = { kind: 'agent', at: Date.now(), text: Array.from({ length: 40 }, (_, n) => `Line ${n + 1}.`).join('\n\n') };
+    c5.items = [{ kind: 'user', text: 'Fix the login bug.', images: [], checkpoint: 'turn-1' }, filler, ...c5.items];
+    await snapshot(p, state, 'chat-c5');
+    await p.waitForTimeout(200);
+    const want = await content(p);
+    const left = await p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      return t.getBoundingClientRect().left + parseFloat(window.getComputedStyle(t).paddingLeft);
+    });
+    const box = await p.locator('.user-msg .bubble').first().evaluate((e) => e.getBoundingClientRect().toJSON());
+    check(Math.abs(box.width - want) <= 0.5 && Math.abs(box.left - left) <= 0.5, `at ${w}px a 4-word message's box spans the transcript [${Math.round(box.width)} of ${Math.round(want)}]`);
+    const text = await p.locator('.user-msg .bubble-text').first().evaluate((e) => window.getComputedStyle(e).textAlign);
+    check(/start|left/.test(text), 'its text stays left');
+    // The sticky copy, once scrolled past.
+    await p.evaluate(() => (document.querySelector('.transcript').scrollTop = 0));
+    await p.waitForTimeout(100);
+    await p.evaluate(() => {
+      const t = document.querySelector('.transcript');
+      t.scrollTop = document.querySelector('.user-msg').getBoundingClientRect().bottom - t.getBoundingClientRect().top + 300;
+    });
+    await p.waitForTimeout(200);
+    const sticky = await width(p, '.sticky-prompt .bubble').catch(() => -1);
+    check(Math.abs(sticky - want) <= 0.5, `at ${w}px the sticky copy spans it too [${Math.round(sticky)}]`);
+    await p.close();
+  }
+  const q = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 800);
+  const want = await content(q);
+  const queued = await width(q, '.bubble.queued').catch(() => -1);
+  check(Math.abs(queued - want) <= 0.5, `a queued message spans it too [${Math.round(queued)} of ${Math.round(want)}]`);
+  await q.close();
+};
+
+// ---- VIEWER: one image viewer from every entry point, with the whole set: arrows, filmstrip, counter, zoom, Esc ----
+BLOCKS.VIEWER = async () => {
+  const review = path.join(os.homedir(), 'code/FriedLiver-Code-design/review');
+  const count = (p) => p.locator('.viewer-count').innerText().then((t) => t.replace(/\s+/g, ' ').trim());
+  const title = (p) => p.locator('.viewer .preview-title').innerText();
+  for (const width of [1200, 640]) {
+    // A step's thumbnail: the chat's images, in transcript order.
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 800);
+    await p.waitForSelector('.step-image img');
+    const thumb = p.locator('.step-image .image-thumb').nth(1);
+    await thumb.click();
+    await p.waitForSelector('.viewer .preview-img');
+    check((await count(p)) === '2 / 2' && (await title(p)) === 'Login page mockup', `${width}: a step thumbnail opens the viewer on it, with the chat's set [${await count(p)}]`);
+    check((await p.locator('.viewer-strip .viewer-thumb').count()) === 2 && (await p.locator('.viewer-thumb[aria-selected="true"]').count()) === 1, `${width}: the filmstrip shows the set, the current one marked`);
+    await p.keyboard.press('ArrowLeft');
+    check((await count(p)) === '1 / 2' && (await title(p)) === 'Screenshot of localhost:3000/login', `${width}: ← goes to the previous image`);
+    await p.keyboard.press('ArrowLeft');
+    check((await count(p)) === '1 / 2', `${width}: and stops at the first`);
+    await p.keyboard.press('End');
+    check((await count(p)) === '2 / 2', `${width}: End goes to the last`);
+    await p.keyboard.press('Home');
+    check((await count(p)) === '1 / 2', `${width}: Home to the first`);
+    await p.locator('.viewer-thumb').nth(1).click();
+    check((await count(p)) === '2 / 2', `${width}: a filmstrip thumbnail jumps to it`);
+    await p.waitForFunction(() => document.querySelector('.viewer .preview-img')?.complete);
+    // Zoom: + in, − out, 0 back to fit; double-click toggles 100%.
+    const scale = () => p.locator('.viewer-scale').innerText().then((t) => t.trim());
+    await p.keyboard.press('+');
+    const zin = await scale();
+    await p.keyboard.press('+');
+    const zin2 = await scale();
+    await p.keyboard.press('-');
+    const zout = await scale();
+    await p.keyboard.press('0');
+    check(zin !== 'Fit' && parseInt(zin2) > parseInt(zin) && zout === zin && (await scale()) === 'Fit', `${width}: + zooms in, − out, 0 fits [${zin} ${zin2} ${zout}]`);
+    await p.locator('.viewer-canvas').dblclick();
+    const hundred = await scale();
+    await p.locator('.viewer-canvas').dblclick();
+    check(/^(100|200)%$/.test(hundred) && (await scale()) === 'Fit', `${width}: double-click toggles 100% (2× for a small image) and fit [${hundred}]`);
+    if (width === 1200 || width === 640) await p.screenshot({ path: path.join(review, `viewer-${width}.png`) });
+    await p.keyboard.press('Escape');
+    check(!(await p.locator('.viewer').count()), `${width}: Esc closes it`);
+    await p.waitForTimeout(50);
+    check(await thumb.evaluate((t) => document.activeElement === t), `${width}: focus goes back to the thumbnail`);
+    // The header's Images strip opens the same viewer.
+    await p.click('.images-pill');
+    await p.locator('.image-strip .image-thumb').first().click();
+    check((await count(p)) === '1 / 2', `${width}: the header's Images strip opens it too`);
+    await p.keyboard.press('Escape');
+    await p.close();
+  }
+  // The Images view: its tab, filter and search order.
+  const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', 1200, 900);
+  await p.waitForSelector('.gallery-card');
+  const n = await p.locator('.gallery-card').count();
+  await p.locator('.gallery-card').nth(2).click();
+  await p.waitForSelector('.viewer');
+  check((await count(p)) === `3 / ${n}` && (await p.locator('.viewer-thumb').count()) === n, `the Images view opens it on the card with its whole result [${await count(p)}]`);
+  await p.keyboard.press('ArrowRight');
+  const shown = (await p.locator('.gallery-card .gallery-title').allInnerTexts())[3];
+  check((await title(p)) === shown, `→ follows the view’s order [${await title(p)} | ${shown}]`);
+  await p.close();
+};
+
+// ---- WRAP: long lines wrap in a step's IN/OUT; code blocks wrap too, with a Wrap toggle; output opens in a wrapping editor tab ----
+BLOCKS.WRAP = async () => {
+  const long = 'echo ' + 'a-very-long-argument '.repeat(30);
+  for (const width of [1200, 640]) {
+    const p = await open('surface=chat&theme=dark-2026&select=chat-c5', width, 900);
+    const state = fixture(Date.now()).state;
+    const c5 = state.chats.find((c) => c.id === 'chat-c5');
+    c5.items = [
+      ...c5.items,
+      { kind: 'tool', id: 'wrap-1', title: long, tool: 'Bash', toolKind: 'execute', status: 'completed', locations: [], cmd: { line: long }, out: [{ t: 'text', text: 'OUT ' + 'x'.repeat(600) }] },
+      { kind: 'agent', at: Date.now(), text: 'Here:\n\n```sh\n' + long + '\n```' },
+    ];
+    await snapshot(p, state, 'chat-c5');
+    const step = p.locator('#item-wrap-1');
+    await step.waitFor();
+    if (!(await step.locator('.tool-body').count())) await step.locator('.step-main').click();
+    const wide = (sel) => p.locator(sel).evaluateAll((els) => els.map((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 })));
+    const io = await wide('#item-wrap-1 .tool-cell pre.code');
+    check(io.length >= 2 && io.every((r) => r.ws === 'pre-wrap' && !r.over), `at ${width}px IN and OUT wrap long lines [${JSON.stringify(io)}]`);
+    const block = p.locator('.prose .code-block').last();
+    const before = await block.locator('pre.code').evaluate((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 }));
+    check(before.ws === 'pre-wrap' && !before.over, `at ${width}px a code block wraps by default [${JSON.stringify(before)}]`);
+    await block.hover();
+    const toggle = block.locator('button.wrap-btn');
+    check((await toggle.getAttribute('aria-pressed')) === 'true', 'its toolbar has Wrap, on');
+    await toggle.click();
+    const after = await block.locator('pre.code').evaluate((e) => ({ ws: window.getComputedStyle(e).whiteSpace, over: e.scrollWidth > e.clientWidth + 1 }));
+    check(after.ws === 'pre' && after.over && (await toggle.getAttribute('aria-pressed')) === 'false', `at ${width}px Wrap off scrolls it sideways [${JSON.stringify(after)}]`);
+    // Open in editor: the host opens it as friedliver-output, which wraps.
+    await step.locator('.step-output .tool-cell').hover();
+    await step.locator('.step-output button[aria-label="Open in editor"]').click();
+    const sent = (await posted(p)).filter((m) => m.type === 'openText').at(-1);
+    check(sent?.text?.startsWith('OUT xxx'), 'Open in editor sends the output to an editor tab');
+    await p.close();
+  }
+};
+
+// ---- LINKS: a web link clicked in any view goes to the host to open (FriedLiver's browser or, with Cmd/Ctrl, the system's); other schemes don't open ----
+BLOCKS.LINKS = async () => {
+  const p = await open('surface=chat&theme=dark-2026&select=chat-c5', 1200, 800);
+  const state = fixture(Date.now()).state;
+  const c5 = state.chats.find((c) => c.id === 'chat-c5');
+  c5.items = [...c5.items, { kind: 'agent', at: Date.now(), text: 'See [the docs](https://example.com/docs?a=1) and [bad](javascript:alert(1)) and [data](data:text/html,x).' }];
+  await snapshot(p, state, 'chat-c5');
+  const reply = p.locator('.prose').last();
+  await reply.locator('a:has-text("the docs")').click();
+  let last = (await posted(p)).filter((m) => m.type === 'openLink').at(-1);
+  check(last?.url === 'https://example.com/docs?a=1' && last.modifier === false, `a click on a web link asks the host to open it [${JSON.stringify(last)}]`);
+  await reply.locator('a:has-text("the docs")').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
+  last = (await posted(p)).filter((m) => m.type === 'openLink').at(-1);
+  check(last?.modifier === true, 'Cmd/Ctrl-click says so, for the other browser');
+  const before = (await posted(p)).length;
+  for (const name of ['bad', 'data']) if (await reply.locator(`a:has-text("${name}")`).count()) await reply.locator(`a:has-text("${name}")`).click();
+  const after = (await posted(p)).slice(before);
+  check(!after.some((m) => m.type === 'openLink') && p.url().startsWith('http://127.0.0.1'), `javascript: and data: links open nothing [${JSON.stringify(after)}]`);
+  await p.close();
+  // The Accounts page: "Open links in" as a two-way choice.
+  const a = await open('surface=accounts&theme=dark-2026', 1200, 900);
+  const seg = a.locator('.acct-links [role="radio"]');
+  check((await seg.allInnerTexts()).join('|') === 'FriedLiver browser|System browser' && (await a.locator('.acct-links [aria-checked="true"]').innerText()) === 'FriedLiver browser', 'Agents & Accounts shows where links open');
+  await seg.nth(1).click();
+  check((await posted(a)).some((m) => m.type === 'setLinks' && m.mode === 'external'), 'choosing System browser sets it');
+  await a.close();
+};
+
+// ---- DETAIL: the map's detail panel stays in view wherever you scrolled; a bottom sheet when narrow ----
+BLOCKS.DETAIL = async () => {
+  for (const width of [1200, 640]) {
+    const p = await open('surface=tasks&theme=dark-2026&view=map', width, 800);
+    await p.evaluate((ss) => window.postMessage({ type: 'claudeSessions', sessions: ss }, '*'), [bigSession(Date.now())]);
+    await p.locator('.map-fold').last().waitFor();
+    await p.locator('.map-fold').last().click();
+    await p.waitForTimeout(150);
+    // Scroll to the bottom, then pick the last agent.
+    await p.evaluate(() => {
+      const m = document.querySelector('.manager');
+      m.scrollTop = m.scrollHeight;
+    });
+    // SVG takes the attribute in lower case: with "tabIndex" the nodes were never focusable.
+    check(await p.locator('.map-sub').first().evaluate((g) => g.getAttribute('tabindex') === '0' && (g.focus(), document.activeElement === g)), 'map nodes take keyboard focus');
+    const last = p.locator('.map-sub:not(.map-fold)').last();
+    const name = (await last.getAttribute('aria-label')).replace('Subagent: ', '');
+    await last.click();
+    const panel = p.locator('.map-detail');
+    await panel.waitFor();
+    await p.waitForTimeout(300);
+    const r = await panel.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: window.innerHeight, w: Math.round(b.width), vw: window.innerWidth, pos: window.getComputedStyle(el).position, radius: window.getComputedStyle(el).borderTopLeftRadius };
+    });
+    const shown = await panel.locator('.tip-title').innerText();
+    check(r.top >= 0 && r.top < r.h && shown === name, `at ${width}px the panel is in view and shows the agent clicked at the bottom [${JSON.stringify(r)} ${shown}]`);
+    if (width === 640) check(r.pos === 'fixed' && r.bottom === r.h && r.w === r.vw && r.radius === '12px' && (await panel.locator('.sheet-handle').count()) === 1, `at 640px it is a bottom sheet with a handle [${JSON.stringify(r)}]`);
+    else check(r.pos === 'sticky' && r.bottom <= r.h, `at 1200px it sticks in the right column [${r.pos}]`);
+    check(await p.evaluate(() => !!document.activeElement?.closest('.map-detail')), 'focus moves into it');
+    // Another agent updates it in place; the page doesn't jump.
+    const prev = p.locator('.map-sub:not(.map-fold)').nth(-2);
+    // Above the sheet when narrow.
+    await prev.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    const scroll = await p.evaluate(() => document.querySelector('.manager').scrollTop);
+    const prevName = (await prev.getAttribute('aria-label')).replace('Subagent: ', '');
+    await prev.click({ force: true });
+    const now2 = { title: await panel.locator('.tip-title').innerText(), scroll: await p.evaluate(() => document.querySelector('.manager').scrollTop) };
+    check(now2.title === prevName && Math.abs(now2.scroll - scroll) < 2, `picking another agent updates it in place [${now2.title} vs ${prevName}; ${scroll} -> ${now2.scroll}]`);
+    await p.screenshot({ path: path.join(os.homedir(), `code/FriedLiver-Code-design/review/detail-${width === 640 ? 'sheet-640' : 'panel-1200'}.png`) }).catch(() => {});
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(100);
+    const back = await p.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    check(!(await p.locator('.map-detail').count()) && back === `Subagent: ${prevName}`, `Esc closes it and focus goes back to the agent [${back}]`);
+    await p.close();
   }
 };
 

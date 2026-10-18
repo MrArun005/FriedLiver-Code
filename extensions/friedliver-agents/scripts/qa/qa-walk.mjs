@@ -91,7 +91,16 @@ async function focusAudit(p, id, presses = 25) {
       const el = document.activeElement;
       if (!el || el === document.body) return null;
       const cs = getComputedStyle(el);
-      const visible = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || (cs.boxShadow && cs.boxShadow !== 'none');
+      let visible = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || (cs.boxShadow && cs.boxShadow !== 'none');
+      if (!visible) {
+        // A field inside a box (the board's search, the new-task card) shows focus on the box via :focus-within.
+        const look = () => [el.parentElement, el.parentElement?.parentElement].map((a) => a && ((s) => `${s.outline}|${s.boxShadow}|${s.borderColor}`)(getComputedStyle(a)));
+        const on = look();
+        el.blur();
+        const off = look();
+        el.focus();
+        visible = on.some((v, i) => v && v !== off[i]);
+      }
       return { el: el.tagName.toLowerCase() + '.' + [...el.classList].join('.'), label: (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30), visible, outline: `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineColor}`, shadow: cs.boxShadow.slice(0, 60) };
     });
     if (f && !f.visible) silent.push(f);

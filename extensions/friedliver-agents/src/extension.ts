@@ -25,7 +25,9 @@ import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
+import { SystemControl, systemSettings } from './host/system';
 import { ReviewUi } from './host/review';
+import { RemoteControl } from './remote/host';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
@@ -39,7 +41,14 @@ import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
-import { clip, panelTitle } from './shared/view';
+import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
+import { agentName, chatName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
+import { linkDestination, linkTarget } from './shared/links';
+
+/** friedliver.links.openIn: where web links you click open. */
+const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
+/** The system browser, skipping FriedLiver's own link opener. */
+const openInSystemBrowser = (url: string) => vscode.env.openExternal(vscode.Uri.parse(url, true), { allowContributedOpeners: false });
 import type { OutsideImages } from './shared/gallery';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -97,6 +106,8 @@ export class Controller {
   /** The editor commands: Edit with Agent, Ask About Selection, Review My Changes. */
   editor?: EditorAgent;
   readonly log = vscode.window.createOutputChannel('FriedLiver Agents', { log: true });
+  /** Every system_* attempt (host/system.ts auditLine): who, which chat, what, and how it ended; clipboard text only as its length. */
+  private readonly systemLog = vscode.window.createOutputChannel('FriedLiver: System Actions');
   /** The built-in browser on the right (host/browser.ts). */
   private readonly browser: BrowserPanel;
   /** The last code editor shown in the left group, for the code/chat toggle. */
@@ -108,9 +119,13 @@ export class Controller {
   private projectIndex?: ProjectIndexHost;
   private readonly autoItem = vscode.window.createStatusBarItem('friedliver.fullAuto', vscode.StatusBarAlignment.Right, 101);
   private shownStatus?: string;
+  /** Open Decision Inbox ran while the Agent Manager was loading. */
+  private inboxWanted = false;
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
+  /** Where the Diagnose Claude Code Sessions command writes. */
+  private claudeReport?: vscode.OutputChannel;
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
   private claudeWatchers = new Map<string, FSWatcher>();
@@ -146,6 +161,8 @@ export class Controller {
   private replay: { message: HostMessage; until: number }[] = [];
   /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
+  /** FriedLiver Remote: phones paired over the LAN or Tailscale (remote/host.ts). */
+  private remote?: RemoteControl;
   /** The composer's mic on macOS (host/dictation.ts). */
   private readonly dictation = new Dictation<Surface>({
     helper: () => helperPath(this.context.extensionUri.fsPath),
@@ -193,6 +210,14 @@ export class Controller {
     } catch {
       // Without it agents start in home, as before.
     }
+    const system = new SystemControl({
+      home: os.homedir(),
+      shotsBase: context.globalStorageUri.fsPath,
+      // Never opened for agents, like the places "Always allow" never covers.
+      sensitive: [appBundle(vscode.env.appRoot), userDataDir(context.globalStorageUri.fsPath)],
+      links: () => (vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin'),
+      openInBrowser: (url, signal) => this.browser.call({ tool: 'browser_open', url }, signal),
+    });
     this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => this.showDemo(), (line) => this.log.warn(line));
     this.core = new AgentCore({
       folders: () => this.folders(),
@@ -206,7 +231,16 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
+      system: {
+        settings: () => systemSettings((key) => vscode.workspace.getConfiguration('friedliver.system').inspect<unknown>(key)),
+        prepare: (call) => system.prepare(call),
+        audit: (line) => this.systemLog.appendLine(line),
+        // Codicon syntax in an agent's words stays text.
+        done: (summary) => void vscode.window.setStatusBarMessage(`$(device-desktop) Agent used: ${plainText(summary).replace(/\$\(/g, '$ (')}`, 5000),
+      },
       approvalDefault: () => this.approvalDefault(),
+      // User settings only: a repository must not make requests allow themselves.
+      autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {
         const folder = this.folders()[0];
@@ -254,13 +288,14 @@ export class Controller {
             },
             'Always allow',
           )) === 'Always allow',
+        confirmRemote: (ask) => this.remote?.confirm(ask) ?? Promise.resolve(false),
         signInUrl: (agent, url) => void this.offerSignInUrl(agent, url),
         unsavedText: (file) => vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === file && d.isDirty)?.getText(),
       },
     });
     this.reviews = new ReviewUi(() => this.core);
     this.statusItem.name = 'FriedLiver decisions';
-    this.statusItem.command = 'friedliver.nextDecision';
+    this.statusItem.command = 'friedliver.openInbox';
     this.statusItem.color = new vscode.ThemeColor('friedliver.decision');
     this.workingItem.name = 'FriedLiver agents working';
     this.workingItem.command = 'friedliver.openTasks';
@@ -277,6 +312,7 @@ export class Controller {
 
     context.subscriptions.push(
       this.log,
+      this.systemLog,
       this.statusItem,
       this.workingItem,
       this.autoItem,
@@ -301,7 +337,17 @@ export class Controller {
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
       registerBeforeProvider(() => this.core),
     );
+    this.remote = new RemoteControl(context, {
+      core: this.core,
+      folders: () => this.folders(),
+      agents: () => shownAgents(this.showDemo()),
+      reviews: { accept: (id) => this.reviews.accept(id), reject: (id) => this.reviews.reject(id) },
+      hidden: (chatId) => this.inlineChats.has(chatId),
+      log: (line) => this.log.info(line),
+    });
+    context.subscriptions.push(this.remote);
     const unsubscribe = this.core.onAction((action) => {
+      this.remote?.onAction(action);
       this.batcher.push(action);
       this.stateFile?.schedule();
     });
@@ -311,12 +357,17 @@ export class Controller {
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
     command('friedliver.openBrowser', () => this.browser.show());
+    command('friedliver.links.useBuiltin', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'builtin', vscode.ConfigurationTarget.Global));
+    command('friedliver.links.useExternal', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'external', vscode.ConfigurationTarget.Global));
+    this.browser.registerLinkOpener(linkMode);
+    command('friedliver.system.showLog', () => this.systemLog.show(true));
     command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
     // Integration tests must not write the developer's ~/.claude.json.
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
     command('friedliver.nextDecision', () => this.nextDecision());
+    command('friedliver.openInbox', () => this.openInbox());
     command('friedliver.review.accept', (reviewId?: unknown) => {
       if (!this.reviews.accept(typeof reviewId === 'string' ? reviewId : undefined)) void vscode.window.showInformationMessage('No agent edit is waiting here.');
     });
@@ -354,6 +405,7 @@ export class Controller {
     command('friedliver.fanout', () => this.fanoutCommand());
     command('friedliver.rewind', (chatId?: unknown) => this.rewindCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.pipe', (chatId?: unknown) => this.pipeCommand(typeof chatId === 'string' ? chatId : undefined));
+    command('friedliver.diagnoseClaudeSessions', () => this.diagnoseClaudeSessions());
     this.editor = new EditorAgent(context, {
       core: this.core,
       showChat: (chatId, revealItem) => this.showChat(chatId, revealItem),
@@ -587,6 +639,10 @@ export class Controller {
             defaults: this.core.agentDefaults(),
             roster: this.roster(),
           });
+          if (surface.kind === 'tasks' && this.inboxWanted) {
+            this.inboxWanted = false;
+            post(surface, { type: 'showInbox' });
+          }
           if (surface.kind !== 'chat') {
             if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
             this.refreshClaudeSessions();
@@ -696,6 +752,12 @@ export class Controller {
           // Only a session this window listed, so a webview can't name some other folder's.
           const found = this.claudeSessions.find((s) => s.id === m.sessionId);
           if (!found) return;
+          // A chat already continues it (one that only resumed it shows in its card): that chat, not another.
+          const existing = found.chatId ?? chatOfSession(this.core.exportState(), found.id);
+          if (existing) {
+            await this.showChat(existing);
+            return;
+          }
           const chat = await this.core.createChat('claude', { title: found.title, resume: { sessionId: found.id, cwd: found.cwd } });
           this.refreshClaudeSessions();
           await this.showChat(chat.id);
@@ -718,6 +780,9 @@ export class Controller {
         }
         case 'moveToCenter':
           await this.moveToCenter();
+          return;
+        case 'openInbox':
+          this.openInbox();
           return;
         case 'openTasks':
           this.openTasks();
@@ -766,7 +831,7 @@ export class Controller {
         case 'removeChat': {
           const chat = this.core.chat(m.chatId);
           if (!chat) return;
-          const ok = await vscode.window.showWarningMessage(`Remove ${chat.label}: “${chat.title}”?`, { modal: true, detail: 'Its history goes. A worktree it had stays on disk.' }, 'Remove');
+          const ok = await vscode.window.showWarningMessage(`Remove ${chatRef(chat)} (${agentName(chat.agent)})?`, { modal: true, detail: 'Its history goes. A worktree it had stays on disk.' }, 'Remove');
           if (ok) await this.core.removeChat(m.chatId);
           return;
         }
@@ -784,6 +849,9 @@ export class Controller {
           return;
         case 'permissionDiff':
           if (!this.core.showProposal(m.requestId, m.path)) void vscode.window.showInformationMessage("FriedLiver couldn't build the whole file for this change. The card shows the agent's own diff.");
+          return;
+        case 'stopAuto':
+          this.core.stopAuto(m.id);
           return;
         case 'allowAlways':
           await this.core.allowAlways(m.requestId !== undefined ? { requestId: m.requestId } : { commandId: m.commandId! }, m.grant);
@@ -807,6 +875,15 @@ export class Controller {
         case 'copy':
           await vscode.env.clipboard.writeText(m.text);
           return;
+        case 'openLink':
+          await this.openLink(m.url, m.modifier);
+          return;
+        case 'openText': {
+          // An untitled document in FriedLiver's output language, so it wraps; the user's own files keep their setting.
+          const doc = await vscode.workspace.openTextDocument({ content: m.text, language: 'friedliver-output' });
+          await vscode.window.showTextDocument(doc, { preview: true });
+          return;
+        }
         case 'otherAgents':
           await this.otherAgents();
           return;
@@ -864,7 +941,7 @@ export class Controller {
     }
     const roots = this.core.roots();
     const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
-    const terminal = vscode.window.createTerminal({ name: `${chat.label}: ${clip(chat.title, 40)}`, cwd: folder });
+    const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)}: ${clip(chatName(chat), 40)}`, cwd: folder });
     terminal.show();
     terminal.sendText(command, true);
   }
@@ -961,6 +1038,14 @@ export class Controller {
     await vscode.commands.executeCommand('friedliver.agents.focus');
   }
 
+  /** Open Decision Inbox: the Agent Manager on its Inbox; a Manager still loading turns to it once ready. */
+  openInbox(): void {
+    const live = [...this.surfaces].find((s) => s.kind === 'tasks' && s.ready && s.visible());
+    this.openTasks();
+    if (live) post(live, { type: 'showInbox' });
+    else this.inboxWanted = true;
+  }
+
   openTasks(): void {
     if (this.tasksPanel) {
       this.tasksPanel.reveal();
@@ -992,7 +1077,7 @@ export class Controller {
     if (!agent) return;
     const text = await vscode.window.showInputBox({
       title: `Ask ${AGENT_FACES[agent].name}`,
-      prompt: `The answer comes back into ${source.label}.`,
+      prompt: `The answer comes back into ${chatRef(source)}.`,
       validateInput: (v) => (v.trim() ? undefined : 'Type a question.'),
     });
     if (!text?.trim()) return;
@@ -1039,11 +1124,11 @@ export class Controller {
   async pipeCommand(chatId?: string): Promise<void> {
     const from = await this.pickChat('Pipe which chat’s replies?', chatId);
     if (!from) return;
-    const to = await this.pickChat(`Send each reply from ${from.label} to…`, undefined, from.id);
+    const to = await this.pickChat(`Send each reply from ${chatRef(from)} to…`, undefined, from.id);
     if (!to) return;
     try {
       this.core.pipe(from.id, to.id);
-      void vscode.window.showInformationMessage(`Each reply from ${from.label} now goes to ${to.label}.`);
+      void vscode.window.showInformationMessage(`Each reply from ${chatRef(from)} now goes to ${chatRef(to)}.`);
     } catch (err) {
       this.error(err);
     }
@@ -1078,7 +1163,7 @@ export class Controller {
       return undefined;
     }
     const items = chats
-      .map((c) => ({ label: c.label, description: c.title, chat: c }))
+      .map((c) => ({ ...chatPick(c), chat: c }))
       .sort((a, b) => (b.chat.id === this.lastSelected ? 1 : 0) - (a.chat.id === this.lastSelected ? 1 : 0));
     return (await vscode.window.showQuickPick(items, { title }))?.chat;
   }
@@ -1117,9 +1202,9 @@ export class Controller {
     if (n === 0) {
       this.statusItem.hide();
     } else {
-      this.statusItem.text = `$(bell-dot) ${n} decision${n === 1 ? '' : 's'} waiting`;
+      this.statusItem.text = `$(inbox) Inbox · ${n}`;
       this.statusItem.tooltip = new vscode.MarkdownString(['**Agents are waiting for you**', ...waiting.map((d) => `- ${d.title.replace(/[\\`*_[\]<>]/g, '\\$&')}`)].join('\n'));
-      this.statusItem.accessibilityInformation = { label: `${n} agent decision${n === 1 ? '' : 's'} waiting. Go to the next one.` };
+      this.statusItem.accessibilityInformation = { label: `${n} agent decision${n === 1 ? '' : 's'} waiting. Open the Inbox.` };
       this.statusItem.show();
     }
     // A zero badge hides it; clearing with undefined can leave the old count on the container.
@@ -1134,16 +1219,17 @@ export class Controller {
     const key = `${busy.map((c) => c.id).join()}|${full.map((c) => c.id).join()}`;
     if (key === this.shownStatus) return;
     this.shownStatus = key;
-    if (busy.length) {
-      this.workingItem.text = `$(sync~spin) ${busy.length} working`;
-      this.workingItem.tooltip = `${busy.map((c) => c.label).join(', ')} ${busy.length === 1 ? 'is' : 'are'} working. Open the Agent Manager.`;
+    const shown = statusTexts(busy, full);
+    if (shown.working) {
+      this.workingItem.text = shown.working.text;
+      this.workingItem.tooltip = shown.working.tooltip;
       this.workingItem.show();
     } else {
       this.workingItem.hide();
     }
-    if (full.length) {
-      this.autoItem.text = `$(zap) Auto: ${full.length === 1 ? full[0].label : `${full.length} chats`}`;
-      this.autoItem.tooltip = `${full.map((c) => c.label).join(', ')} edit${full.length === 1 ? 's' : ''} and run${full.length === 1 ? 's' : ''} commands without asking. Click to see.`;
+    if (shown.auto) {
+      this.autoItem.text = shown.auto.text;
+      this.autoItem.tooltip = shown.auto.tooltip;
       this.autoItem.command = { command: 'friedliver.command.show', title: 'Show', arguments: [full[0].id, ''] };
       this.autoItem.show();
     } else {
@@ -1196,8 +1282,9 @@ export class Controller {
   }
 
   /** Commands wait in the chat; a notification offers Run only when it shows the whole command exactly as it will run. */
-  private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string }): void {
-    const shown = commandNotice(ask.commandLine);
+  private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string; careful?: boolean }): void {
+    // A careful command is allowed only by holding on its card: no Run here.
+    const shown = { ...commandNotice(ask.commandLine), ...(ask.careful ? { runnable: false } : {}) };
     if (shown.runnable) this.runnable.add(ask.commandId);
     const buttons = [
       ...(shown.runnable ? [{ title: 'Run', run: () => this.runnable.has(ask.commandId) && this.core.decideCommand(ask.commandId, true) }] : []),
@@ -1205,7 +1292,7 @@ export class Controller {
       ...(ask.chatId ? [{ title: 'Show', run: () => void this.showChat(ask.chatId!, ask.commandId) }] : []),
       this.manageButton,
     ];
-    const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${shown.runnable ? '' : ' (open the chat to see all of it)'}`;
+    const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${ask.careful ? ' (careful: allow it in the chat)' : shown.runnable ? '' : ' (open the chat to see all of it)'}`;
     this.notifyDecision(ask.commandId, ask.chatId, text, buttons);
   }
 
@@ -1231,13 +1318,13 @@ export class Controller {
   /** On every approval toast: the remembered "Always allow" answers, to look over or revoke. */
   private readonly manageButton = { title: 'Manage', run: () => this.managePermissions() };
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void {
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean; once?: boolean }): void {
     if (isExternal(ask.chatId)) {
-      // No chat holds this request, so it always gets its own popup, whatever else is waiting.
+      // No chat holds this request, so it always gets its own popup, whatever else is waiting. Careful: once only.
       const buttons: Record<string, BridgeAnswer | 'manage'> = {
         Allow: 'allow',
-        'Allow for this session': 'allowChat',
-        ...(ask.always ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
+        ...(ask.careful || ask.once ? {} : { 'Allow for this session': 'allowChat' as const }),
+        ...(ask.always && !ask.careful && !ask.once ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
         Deny: 'deny',
         Manage: 'manage',
       };
@@ -1249,11 +1336,17 @@ export class Controller {
       });
       return;
     }
-    const always = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId)?.always;
+    const item = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId);
+    const always = item?.once ? undefined : item?.always;
+    // A careful one (a purchase, a form submit) is allowed only by holding on its card; a once-only one never for the chat or always.
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
-      { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
-      { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
-      ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
+      ...(ask.careful
+        ? []
+        : [
+            { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
+            ...(item?.once ? [] : [{ title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') }]),
+            ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
+          ]),
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
       this.manageButton,
@@ -1274,20 +1367,19 @@ export class Controller {
    * consultation) answer there instead. VS Code has no stable API for an OS
    * notification or taskbar flash, so an unfocused window gets these toasts only.
    */
-  private turnEnded(t: { chatId: string; label: string; title: string; stopReason: string | null; failure?: Item; files: number; byUser: boolean }): void {
+  private turnEnded(t: { chatId: string; agent: AgentKey; title: string; stopReason: string | null; failure?: Item; files: number; byUser: boolean }): void {
     if (!t.byUser || this.onScreen(t.chatId)) return;
     const open = { title: 'Open', run: () => void this.showChat(t.chatId) };
     if (t.failure?.kind === 'notice') {
       const actions = (t.failure.actions ?? []).slice(0, 2).map((a) => ({ title: a.label, run: () => void this.noticeAction(t.chatId, a).catch((err: unknown) => this.error(err)) }));
-      void vscode.window.showErrorMessage(`${plainText(t.label)}: ${plainText(t.failure.text)}`, ...[...actions, open].map((b) => b.title)).then((picked) => {
+      void vscode.window.showErrorMessage(plainText(turnEndedText({ ...t, failure: t.failure.text })), ...[...actions, open].map((b) => b.title)).then((picked) => {
         [...actions, open].find((b) => b.title === picked)?.run();
       });
       return;
     }
     if (t.stopReason === 'cancelled' || !vscode.workspace.getConfiguration('friedliver.notify').get<boolean>('finished', true)) return;
-    const changed = t.files ? ` · ${t.files} file${t.files === 1 ? '' : 's'} changed` : '';
     const buttons = [open, ...(t.files ? [{ title: 'View changes', run: () => void viewChanges(this.core, t.chatId) }] : [])];
-    void vscode.window.showInformationMessage(`${plainText(t.label)} finished: ${plainText(t.title)}${changed}`, ...buttons.map((b) => b.title)).then((picked) => {
+    void vscode.window.showInformationMessage(plainText(turnEndedText({ agent: t.agent, title: t.title, files: t.files })), ...buttons.map((b) => b.title)).then((picked) => {
       buttons.find((b) => b.title === picked)?.run();
     });
   }
@@ -1438,11 +1530,21 @@ export class Controller {
     for (const s of this.surfaces) post(s, message);
   }
 
+  /** A web link the user clicked: FriedLiver's browser or the system's, by friedliver.links.openIn, the other way with Cmd/Ctrl. */
+  private async openLink(url: string, modifier: boolean): Promise<void> {
+    // Checked here too: a webview's word is never enough.
+    const t = linkTarget(url);
+    if (t?.kind !== 'web') return;
+    if (linkDestination(linkMode(), modifier) === 'builtin' && this.browser.supported()) return this.browser.openUserTab(t.url);
+    await openInSystemBrowser(t.url);
+  }
+
   private async offerSignInUrl(agent: AgentKey, url: string): Promise<void> {
     if (this.asked.has(url)) return;
     this.asked.add(url);
     const open = await vscode.window.showInformationMessage(`${AGENT_FACES[agent].name} printed a sign-in link.`, 'Open sign-in page');
-    if (open) await vscode.env.openExternal(vscode.Uri.parse(url, true));
+    // Sign-in pages talk back to the agent on this machine: the system browser, never FriedLiver's.
+    if (open) await openInSystemBrowser(url);
   }
 
   private async pickImages(): Promise<Attachment[]> {
@@ -1553,21 +1655,45 @@ export class Controller {
     }, 500);
   }
 
+  /** Writes what the Manager's Claude Code lane reads, and why each session is shown or hidden, to an output channel. */
+  private async diagnoseClaudeSessions(): Promise<void> {
+    if (!this.claudeReport) {
+      this.claudeReport = vscode.window.createOutputChannel('FriedLiver: Claude Code Sessions');
+      this.context.subscriptions.push(this.claudeReport);
+    }
+    const out = this.claudeReport;
+    const folders = this.folders();
+    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    const shown = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true);
+    const showAll = vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false);
+    const report: string[] = [];
+    const sessions = await listClaudeSessions({ home: os.homedir(), folders, skip: owned, showAll, report });
+    out.clear();
+    out.appendLine(`Claude Code sessions, ${new Date().toISOString()}`);
+    out.appendLine(`folders: ${folders.length ? folders.join(', ') : 'none (every project from the last week)'}`);
+    out.appendLine(`friedliver.showClaudeCodeSessions: ${shown}, friedliver.claudeSessions.showAll: ${showAll}`);
+    out.appendLine(`sessions FriedLiver's chats have: ${owned.size ? [...owned].join(', ') : 'none'}`);
+    out.appendLine(`listed: ${sessions.length}; the Manager last got: ${this.claudeSessions.length}`);
+    for (const line of report) out.appendLine(line);
+    out.show(true);
+  }
+
   private async readClaudeSessions(): Promise<void> {
     const shown = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true);
     const manager = shown && [...this.surfaces].some((s) => s.kind === 'tasks');
     // The Images view and the Manager's Images tab show what those sessions looked at.
     const gallery = shown && [...this.surfaces].some((s) => s.kind !== 'chat');
     this.watchClaudeSessions(gallery);
-    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    const saved = this.core.exportState();
+    const owned = new Set(Object.values(saved.chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
     const home = os.homedir();
     const folders = this.folders();
-    this.claudeSessions = manager ? await listClaudeSessions({
+    this.claudeSessions = manager ? linkResumeChats(await listClaudeSessions({
           home,
           folders,
           skip: owned,
           showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
-        }) : [];
+        }), saved) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
     const images = gallery ? await listClaudeImages({ home, folders, skip: owned }) : [];
     if (JSON.stringify(images) === JSON.stringify(this.claudeImages)) return;

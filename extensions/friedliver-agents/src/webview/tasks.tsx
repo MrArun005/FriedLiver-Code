@@ -1,5 +1,5 @@
 import { Fragment, render } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   AGENT_FACES,
   age,
@@ -8,7 +8,6 @@ import {
   lastReply,
   type AgentKey,
   type AppState,
-  type BridgeItem,
   type ChatView,
   type ChatStatus,
 } from '../shared/model';
@@ -28,9 +27,8 @@ import {
   filterChats,
   filterClaudeSessions,
   keepPlan,
-  matchesQuery,
-  nextDecision,
   openChats,
+  withoutLinkedChats,
   subagents,
   sortChats,
   statusOf,
@@ -44,20 +42,27 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
+import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
-import { AutoBadge, ModeBadge, PermissionOptions, TaskOptions } from './controls';
+import { AutoBadge, ModeBadge, TaskOptions, decisionId } from './controls';
+import { ApprovalCard } from './approval';
+import { approvalOf, type Approvable } from '../shared/approval';
 import { AgentMap } from './map';
 import { Gallery } from './gallery';
+import { Inbox } from './inbox';
+import { inbox } from '../shared/inbox';
 import type { OutsideImages } from '../shared/gallery';
+import { chatName, chatTip } from '../shared/names';
 
-type View = 'board' | 'list' | 'map' | 'images';
-const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' | 'grid' }[] = [
+type View = 'board' | 'list' | 'map' | 'images' | 'inbox';
+const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' | 'grid' | 'inbox' }[] = [
   { id: 'board', title: 'Board', icon: 'tasks' },
   { id: 'list', title: 'List', icon: 'list' },
   { id: 'map', title: 'Map', icon: 'map' },
   { id: 'images', title: 'Images', icon: 'grid' },
+  { id: 'inbox', title: 'Inbox', icon: 'inbox' },
 ];
 
 /** Problem and Idle show only when a chat is in them. */
@@ -91,15 +96,14 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
     <ul class="sub-cards" aria-label={label}>
       {(open ? [...live, ...done] : live).map((s) => (
         <li key={s.id}>
-          {onOpen ? (
-            <button class="sub-card" data-status={SUB_DOT[s.state]} title={s.title} onClick={() => onOpen(s.id)}>
-              <SubCardBody s={s} />
-            </button>
-          ) : (
-            <div class="sub-card static" data-status={SUB_DOT[s.state]} title={[s.title, s.note, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}>
-              <SubCardBody s={s} />
-            </div>
-          )}
+          <UiRow
+            class={onOpen ? 'sub-card' : 'sub-card static'}
+            title={onOpen ? s.title : [s.title, s.note, s.about, s.last && `Last step: ${s.last}`].filter(Boolean).join('\n')}
+            meta={[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}
+            onPress={onOpen && (() => onOpen(s.id))}
+          >
+            <Dot state={SUB_DOT[s.state]} /> {s.title}
+          </UiRow>
         </li>
       ))}
       {done.length > 0 && (
@@ -114,12 +118,9 @@ function SubCards({ label, subs, onOpen }: { label: string; subs: Subagent[]; on
 /** "34 done · show": the folded done subagents of one chat or session. */
 function SubFold({ n, open, onToggle }: { n: number; open: boolean; onToggle(): void }) {
   return (
-    <button type="button" class="sub-card sub-fold" data-status="done" aria-expanded={open} aria-label={`${n} done subagent${n === 1 ? '' : 's'}: ${open ? 'hide' : 'show'}`} onClick={onToggle}>
-      <Dot state="done" still />
-      <span class="sub-title">
-        {n} done · {open ? 'hide' : 'show'}
-      </span>
-    </button>
+    <UiRow class="sub-card sub-fold" expanded={open} label={`${n} done subagent${n === 1 ? '' : 's'}: ${open ? 'hide' : 'show'}`} onPress={onToggle}>
+      {n} done · {open ? 'hide' : 'show'}
+    </UiRow>
   );
 }
 
@@ -156,9 +157,7 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           <td class="c-age num" />
           <td class="c-act">
             {onOpen && (
-              <button class="ghost icon-btn sm" title="Show in chat" aria-label={`Show ${sub.title} in ${parent}`} onClick={() => onOpen(sub.id)}>
-                <Icon name="open" />
-              </button>
+              <IconButton icon="open" label={`Show ${sub.title} in ${parent}`} muted size="sm" title="Show in chat" onClick={() => onOpen(sub.id)} />
             )}
           </td>
         </tr>
@@ -168,9 +167,9 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           <td class="c-status" />
           <td class="c-agent" />
           <td class="c-task">
-            <button type="button" class="link sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
+            <Button variant="link" class="sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
               ↳ {done.length} done · {open ? 'hide' : 'show'}
-            </button>
+            </Button>
           </td>
           <td class="c-activity num" />
           <td class="c-files num" />
@@ -182,15 +181,6 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
   );
 }
 
-function SubCardBody({ s }: { s: Subagent }) {
-  return (
-    <>
-      <Dot state={SUB_DOT[s.state]} />
-      <span class="sub-title">{s.title}</span>
-      <span class="hint">{[SUB_LABEL[s.state], toolCount(s.tools)].filter(Boolean).join(' · ')}</span>
-    </>
-  );
-}
 
 const openClaude = (sessionId: string) => send({ type: 'openClaudeSession', sessionId });
 const OUTSIDE_TIP = 'Started outside FriedLiver (the claude CLI or the Claude Code extension). FriedLiver only reads it until you open it here.';
@@ -203,19 +193,19 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
   const col = claudeColumn(s, now);
   return (
     <>
-      <article class="task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
+      <article class="fl-card task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
         <div class="card-top">
           <Glyph agent="claude" />
-          <span class="tag" title={OUTSIDE_TIP}>
+          <span class="fl-pill" data-tone="muted" title={OUTSIDE_TIP}>
             {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
           <span class="sep">·</span>
           <span title="Last activity">{ago(s.lastActivity, now)}</span>
         </div>
         <h3 class="card-title">
-          <button class="title-btn" title={s.title} onClick={() => openClaude(s.id)}>
+          <Button variant="text" title={s.title} onClick={() => openClaude(s.id)}>
             {s.title}
-          </button>
+          </Button>
         </h3>
         <div class="card-state">
           <Dot state={col} />
@@ -226,9 +216,9 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
         </div>
         <div class="card-actions">
           <span class="spacer" />
-          <button class="sm" title={openTip(col)} onClick={() => openClaude(s.id)}>
-            <Icon name="open" /> Open in FriedLiver
-          </button>
+          <Button size="sm" icon="open" title={s.chatId ? 'Open the FriedLiver chat that continues it' : openTip(col)} onClick={() => openClaude(s.id)}>
+            Open in FriedLiver
+          </Button>
         </div>
       </article>
       <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} />
@@ -248,7 +238,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
           </span>
         </td>
         <td class="c-agent">
-          <span class="tag" title={OUTSIDE_TIP}>
+          <span class="fl-pill" data-tone="muted" title={OUTSIDE_TIP}>
             {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
           </span>
         </td>
@@ -263,26 +253,12 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         <td class="c-files num">{plural(s.messages, 'message')}</td>
         <td class="c-age num" />
         <td class="c-act">
-          <button class="ghost icon-btn sm" title={openTip(col)} aria-label={`Open ${s.title} in FriedLiver`} onClick={() => openClaude(s.id)}>
-            <Icon name="open" />
-          </button>
+          <IconButton icon="open" label={`Open ${s.title} in FriedLiver`} muted size="sm" title={openTip(col)} onClick={() => openClaude(s.id)} />
         </td>
       </tr>
       <SubRows subs={claudeSubagents(s, now)} parent={s.title} />
     </>
   );
-}
-
-/** Focus the card, row or node for a chat, and flash it so the eye finds it. */
-function reveal(chatId: string) {
-  requestAnimationFrame(() => {
-    const el = document.querySelector<HTMLElement>(`[data-nav="${CSS.escape(chatId)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: scrollBehavior() });
-    el.focus({ preventScroll: true });
-    el.setAttribute('data-flash', '');
-    setTimeout(() => el.removeAttribute('data-flash'), 1200);
-  });
 }
 
 /** The Agent Manager: every chat as a task, by where it stands, in a list, or on a map of how they connect. */
@@ -295,6 +271,7 @@ function Manager() {
     if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
     if (m.type === 'defaults') setDefaults(m.defaults);
     if (m.type === 'claudeSessions') setClaude(m.sessions);
+    if (m.type === 'showInbox') setView('inbox');
   });
   const now = useNow(15_000);
   const [view, setView] = usePersisted<View>('view', 'board');
@@ -303,30 +280,26 @@ function Manager() {
   const [focusId, setFocusId] = useState<string>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const search = useRef<HTMLInputElement>(null);
-  const lastJump = useRef<string | undefined>(undefined);
 
-  const shown = useMemo(() => filterChats(openChats(state.chats), query), [state, query]);
+  // A chat that only resumed an outside session shows in that session's card, not as an idle card of its own.
+  const own = useMemo(() => withoutLinkedChats(state.chats, claude), [state, claude]);
+  const shown = useMemo(() => filterChats(openChats(own), query), [own, query]);
   const outside = useMemo(() => filterClaudeSessions(claude.filter((s) => !s.archived), query), [claude, query]);
   const oldOutside = useMemo(() => claude.filter((s) => s.archived), [claude]);
-  const shownState = useMemo<AppState>(() => ({ ...state, chats: state.chats.filter((c) => c.archived || shown.includes(c)) }), [state, shown]);
+  const shownState = useMemo<AppState>(() => ({ ...state, chats: own.filter((c) => c.archived || shown.includes(c)) }), [state, own, shown]);
   const waiting = useMemo(() => decisions({ chats: openChats(state.chats) }), [state]);
-  const tally = { ...counts(state) };
+  const inboxCount = useMemo(() => inbox(state).entries.length, [state]);
+  // Esc leaves the Inbox for the view you came from.
+  const cameFrom = useRef<View>('board');
+  if (view !== 'inbox') cameFrom.current = view;
+  const tally = { ...counts({ ...state, chats: own }) };
   tally.archived += oldOutside.length;
-
-  const jump = () => {
-    const d = nextDecision(waiting, lastJump.current);
-    if (!d) return;
-    lastJump.current = d.id;
-    const chat = state.chats.find((c) => c.id === d.chatId);
-    if (chat && !matchesQuery(chat, query)) setQuery('');
-    setFocusId(d.chatId);
-    reveal(d.chatId);
-  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t?.closest('.popover') || e.metaKey || e.ctrlKey || e.altKey) return;
+      // The Inbox has its own keys (inbox.tsx): its digits pick answers, not views.
+      if (view === 'inbox' || t?.closest('.fl-menu') || e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTyping(t)) {
         if (e.key === 'Escape' && t === search.current) {
           setQuery('');
@@ -396,41 +369,44 @@ function Manager() {
                 <Dot state="done" /> {tally.done} done
               </span>
               {tally.archived > 0 && (
-                <button
-                  class="link count-item"
+                <Button
+                  variant="link"
+                  icon="history"
+                  class="count-item"
                   onClick={() => {
                     setHistoryOpen(true);
                     requestAnimationFrame(() => document.getElementById('history')?.scrollIntoView({ block: 'start', behavior: scrollBehavior() }));
                   }}
                 >
-                  <Icon name="history" /> {tally.archived} archived
-                </button>
+                  {tally.archived} archived
+                </Button>
               )}
             </div>
           </div>
           <span class="spacer" />
-          {waiting.length > 0 ? (
-            <button class="pill loud" onClick={jump} title="Go to the next decision">
-              <Dot state="needs-you" />
+          {view === 'inbox' ? null : waiting.length > 0 ? (
+            <FilterPill size="md" tone="waiting" class="mgr-waiting" onPress={() => setView('inbox')} title="Open the Inbox (5)">
               {waiting.length} decision{waiting.length === 1 ? '' : 's'} waiting
-            </button>
+            </FilterPill>
           ) : (
-            <span class="pill quiet">
-              <Icon name="check" /> Nothing waiting
-            </span>
+            <Pill size="md" tone="muted" icon="check">
+              Nothing waiting
+            </Pill>
           )}
-          <label class="search">
-            <Icon name="search" />
-            <input
-              ref={search}
-              type="search"
-              value={query}
-              placeholder={view === 'images' ? 'Search images, chats, agents' : 'Search tasks, agents, branches'}
-              aria-label={view === 'images' ? 'Search images' : 'Search tasks'}
-              onInput={(e) => setQuery(e.currentTarget.value)}
-            />
-            {!query && <Kbd>/</Kbd>}
-          </label>
+          {view !== 'inbox' && (
+            <label class="search">
+              <Icon name="search" />
+              <input
+                ref={search}
+                type="search"
+                value={query}
+                placeholder={view === 'images' ? 'Search images, chats, agents' : 'Search tasks, agents, branches'}
+                aria-label={view === 'images' ? 'Search images' : 'Search tasks'}
+                onInput={(e) => setQuery(e.currentTarget.value)}
+              />
+              {!query && <Kbd>/</Kbd>}
+            </label>
+          )}
           <div class="seg views" role="tablist" aria-label="View">
             {VIEWS.map((v, i) => (
               <button
@@ -452,17 +428,19 @@ function Manager() {
                 }}
               >
                 <Icon name={v.icon} /> {v.title}
+                {v.id === 'inbox' && inboxCount > 0 && <span class="seg-count"> · {inboxCount}</span>}
               </button>
             ))}
           </div>
         </header>
 
-        {view !== 'images' && <NewTask defaults={defaults} />}
+        {view !== 'images' && view !== 'inbox' && <NewTask defaults={defaults} />}
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
           {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} />}
-          {view !== 'images' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
-          {view !== 'images' && !query && shown.length === 0 && outside.length === 0 && (
+          {view === 'inbox' && <Inbox state={state} now={now} onClose={() => setView(cameFrom.current)} />}
+          {view !== 'images' && view !== 'inbox' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
+          {view !== 'images' && view !== 'inbox' && !query && shown.length === 0 && outside.length === 0 && (
             <div class="empty-view">
               <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
               <p class="hint">Describe a task above, pick one or more agents, press ↩.</p>
@@ -473,7 +451,7 @@ function Manager() {
           {view === 'map' && <AgentMap state={shownState} outside={outside} now={now} {...nav} />}
         </div>
 
-        {view !== 'images' && <History chats={state.chats.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />}
+        {view !== 'images' && view !== 'inbox' && <History chats={own.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />}
       </div>
     </LiveState.Provider>
   );
@@ -556,9 +534,9 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         <label class="check" title="A separate git checkout on its own branch, so agents can't clash">
           <input type="checkbox" checked={own} onChange={(e) => setWorktree(e.currentTarget.checked)} /> Own worktree
         </label>
-        <button class="primary" disabled={!prompt.trim()} onClick={start}>
+        <Button variant="primary" disabled={!prompt.trim()} onClick={start}>
           Start <Kbd>⏎</Kbd>
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -612,81 +590,22 @@ function Board({ state, chats, outside, now, focusId, onFocus }: { state: AppSta
   );
 }
 
-/** Inline answers to whatever the chat waits on, so most decisions take one click from the board. */
+/** Inline answers to whatever the chat waits on: the approval card, compact; a question opens the chat. */
 function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
   const d = line.decision;
+  const state = useContext(LiveState);
   if (!d) return null;
-  if (d.kind === 'review') {
-    return (
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
-          Review edit
-        </button>
-        <button class="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'accept' })}>
-          <Icon name="check" /> Accept
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'reject' })}>
-          Reject
-        </button>
-      </div>
-    );
-  }
-  if (d.kind === 'command') {
-    return (
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
-          <Icon name="play" /> Run
-        </button>
-        <button class="ghost danger sm" onClick={() => send({ type: 'command', commandId: d.id, approve: false })}>
-          Deny
-        </button>
-      </div>
-    );
-  }
   if (d.kind === 'question') {
     return (
       <div class="actions">
-        <button class="decide sm" onClick={() => open(chat.id)}>
+        <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
           Answer
-        </button>
+        </Button>
       </div>
     );
   }
-  if (d.kind === 'bridge') {
-    const bridge = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === d.id);
-    return (
-      <div class="actions">
-        <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
-          Allow
-        </button>
-        <button class="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowChat' })}>
-          Allow for this chat
-        </button>
-        {bridge?.always && (
-          <button class="sm" title={`Don't ask again for ${bridge.always}, in any chat`} onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allowAlways' })}>
-            Always allow
-          </button>
-        )}
-        <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'deny' })}>
-          Deny
-        </button>
-      </div>
-    );
-  }
-  const item = chat.items.find((i) => i.kind === 'permission' && i.requestId === d.id);
-  if (item?.kind !== 'permission') return null;
-  // A diff or a plan needs reading: the chat shows it in full.
-  const read = !!item.detail?.plan || (item.detail?.files?.length ?? 0) > 0;
-  return (
-    <div class="actions">
-      {read && (
-        <button class="sm" onClick={() => open(chat.id)}>
-          {item.detail?.plan ? 'Read the plan' : 'See the diff'}
-        </button>
-      )}
-      <PermissionOptions item={item} compact />
-    </div>
-  );
+  const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
+  return item ? <ApprovalCard item={item} chat={chat} state={state} compact /> : null;
 }
 
 function Steps({ progress }: { progress: Progress }) {
@@ -715,10 +634,9 @@ function BadgeView({ badge }: { badge: Badge }) {
     else if (badge.group) document.getElementById(`group-${badge.group}`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   };
   return (
-    <button class="badge" data-kind={badge.kind} onClick={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
-      <Icon name={BADGE_ICON[badge.kind]} />
-      <span class="badge-text">{badge.text}</span>
-    </button>
+    <FilterPill icon={BADGE_ICON[badge.kind]} class="badge" onPress={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
+      {badge.text}
+    </FilterPill>
   );
 }
 
@@ -739,11 +657,12 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
   const archive = () => send({ type: 'archive', chatId: chat.id, archived: true });
   return (
     <article
-      class="task-card"
+      class="fl-card fl-card--interactive task-card"
       data-status={status}
+      data-tone={status === 'needs-you' ? 'waiting' : status === 'error' ? 'error' : undefined}
       data-nav={chat.id}
       tabIndex={tabbable ? 0 : -1}
-      aria-label={`${chat.label}: ${chat.title}. ${DOT_LABEL[status]}`}
+      aria-label={`${chatTip(chat)}. ${DOT_LABEL[status]}`}
       onFocus={(e) => e.target === e.currentTarget && onFocus(chat.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target === e.currentTarget) open(chat.id);
@@ -751,13 +670,13 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
     >
       <div class="card-top">
         <Glyph agent={chat.agent} size="sm" />
-        <span class="card-who" title={chat.label}>
+        <span class="card-who" title={chatTip(chat)}>
           {agentName(chat.agent)}
         </span>
         <span class="spacer" />
         <AutoBadge chat={chat} short />
         {(reportedMode(chat.session)?.tone === 'full' || reportedMode(chat.session)?.tone === 'auto') && chat.approval !== 'full' && <ModeBadge session={chat.session} agent={chat.agent} />}
-        {chat.merged && <span class="tag">merged</span>}
+        {chat.merged && <span class="fl-pill" data-tone="muted">merged</span>}
         {/* Connections: out of sight until the card is hovered or has focus; ⋯ holds them too. */}
         <span class="card-connect">
           <HandoffMenu chat={chat} compact />
@@ -767,17 +686,15 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <CardMore chat={chat} canMerge={canMerge} changes={files > 0 || !!chat.branch} archive={archive} />
       </div>
       <h3 class="card-title">
-        <button class="title-btn" title={chat.title} onClick={() => open(chat.id)}>
+        <Button variant="text" title={chat.title} onClick={() => open(chat.id)}>
           {chat.title}
-        </button>
+        </Button>
       </h3>
       <div class="card-state" data-decision={line.decision ? '' : undefined}>
         <Dot state={status} />
         <span class="card-state-text">{line.text}</span>
         {line.waiting > 1 && (
-          <span class="tag loud" title={`${line.waiting} decisions waiting`}>
-            +{line.waiting - 1}
-          </span>
+          <Count n={`+${line.waiting - 1}`} loud label={`${line.waiting} decisions waiting`} />
         )}
       </div>
       {line.code &&
@@ -797,18 +714,18 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       {(chat.branch || badges.length > 0 || conflicts.length > 0) && (
         <div class="card-pills">
           {chat.branch && (
-            <span class="chip" title={`${chat.branch}\n${chat.cwd}`}>
+            <span class="fl-pill" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
               <Icon name="branch" />
-              <span class="chip-text">{chat.branch}</span>
+              <span class="fl-pill__text">{chat.branch}</span>
             </span>
           )}
           {conflicts.slice(0, 2).map((c) => (
-            <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${o.label})`).join(', ')}: they clash when merged`}>
+            <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${agentName(o.agent)})`).join(', ')}: they clash when merged`}>
               <Icon name="diff" />
-              <span class="badge-text">{conflictText(c)}</span>
+              <span class="fl-pill__text">{conflictText(c)}</span>
             </span>
           ))}
-          {conflicts.length > 2 && <span class="badge conflict">+{conflicts.length - 2} more shared</span>}
+          {conflicts.length > 2 && <span class="fl-pill" data-tone="warn">+{conflicts.length - 2} more shared</span>}
           {badges.map((b) => (
             <BadgeView key={b.text} badge={b} />
           ))}
@@ -818,13 +735,13 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       {(chat.busy || (canMerge && !line.decision)) && (
         <div class="card-actions">
           {chat.busy ? (
-            <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-              <Icon name="stop" /> Stop
-            </button>
+            <Button variant="quiet-danger" size="sm" icon="stop" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+              Stop
+            </Button>
           ) : (
-            <button class="sm" onClick={() => send({ type: 'merge', chatId: chat.id })}>
-              <Icon name="merge" /> Merge
-            </button>
+            <Button size="sm" icon="merge" onClick={() => send({ type: 'merge', chatId: chat.id })}>
+              Merge
+            </Button>
           )}
         </div>
       )}
@@ -843,46 +760,30 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
   // Hand off only to agents the pickers offer (Demo when shown).
   const agents = useRoster().agents;
   return (
-    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn sm card-more" trigger={<Icon name="more" />}>
+    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
         <>
-          <button role="menuitem" onClick={() => (close(false), open(chat.id))}>
-            <Icon name="open" /> Open chat
-          </button>
-          <button role="menuitem" disabled={!changes} title={changes ? undefined : 'No changes yet'} onClick={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))}>
-            <Icon name="diff" /> View changes
-          </button>
-          <button role="menuitem" onClick={() => (close(false), ask())}>
-            <Icon name="ask" /> Ask another agent…
-          </button>
-          <div class="pop-sep" role="separator" />
-          <div class="pop-title" aria-hidden="true">Hand off to</div>
+          <MenuItem icon="open" label="Open chat" onSelect={() => (close(false), open(chat.id))} />
+          <MenuItem icon="diff" label="View changes" disabled={!changes} title={changes ? undefined : 'No changes yet'} onSelect={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))} />
+          <MenuItem icon="ask" label="Ask another agent…" onSelect={() => (close(false), ask())} />
+          <MenuSep />
+          <MenuTitle>Hand off to</MenuTitle>
           {agents.map((agent) => (
-            <button key={agent} role="menuitem" onClick={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}>
-              <Glyph agent={agent} size="sm" />
-              <span class="grow">{agentName(agent)}</span>
-              {agent === chat.agent && <span class="hint">new chat</span>}
-            </button>
+            <MenuItem
+              key={agent}
+              lead={<Glyph agent={agent} size="sm" />}
+              label={agentName(agent)}
+              end={agent === chat.agent ? 'new chat' : undefined}
+              onSelect={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}
+            />
           ))}
-          <div class="pop-sep" role="separator" />
+          <MenuSep />
           <PipeTargets chat={chat} close={close} />
-          <div class="pop-sep" role="separator" />
-          <button role="menuitem" onClick={() => (close(), send({ type: 'renameChat', chatId: chat.id }))}>
-            <Icon name="rename" /> Rename chat
-          </button>
-          {canMerge && (
-            <button role="menuitem" onClick={() => (close(), send({ type: 'merge', chatId: chat.id }))}>
-              <Icon name="merge" /> Merge into main
-            </button>
-          )}
-          {chat.branch && !chat.busy && (
-            <button role="menuitem" class="danger" onClick={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))}>
-              <Icon name="trash" /> Delete worktree
-            </button>
-          )}
-          <button role="menuitem" onClick={() => (close(false), archive())}>
-            <Icon name="archive" /> Archive
-          </button>
+          <MenuSep />
+          <MenuItem icon="rename" label="Rename chat" onSelect={() => (close(), send({ type: 'renameChat', chatId: chat.id }))} />
+          {canMerge && <MenuItem icon="merge" label="Merge into main" onSelect={() => (close(), send({ type: 'merge', chatId: chat.id }))} />}
+          {chat.branch && !chat.busy && <MenuItem icon="trash" label="Delete worktree" tone="error" onSelect={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))} />}
+          <MenuItem icon="archive" label="Archive" onSelect={() => (close(false), archive())} />
         </>
       )}
     </Popover>
@@ -907,9 +808,9 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
         </span>
         <span class="hint">{group.chats.length} agents, same task</span>
         <span class="spacer" />
-        <button class="ghost sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
+        <Button variant="quiet" size="sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? 'Show' : 'Hide'}
-        </button>
+        </Button>
       </header>
       {!collapsed && (
         <div class="compare-grid" style={{ gridTemplateColumns: `repeat(${group.chats.length}, minmax(0, 1fr))` }}>
@@ -920,12 +821,14 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
               <article key={c.id} class="compare-col" data-status={status}>
                 <div class="compare-top">
                   <Glyph agent={c.agent} size="sm" />
-                  <span class="compare-agent" title={c.label}>
+                  <span class="compare-agent" title={chatTip(c)}>
                     {agentName(c.agent)}
                   </span>
-                  <button class="title-btn compare-topic" title={c.title} onClick={() => open(c.id)}>
-                    {c.title}
-                  </button>
+                  <span class="compare-topic">
+                    <Button variant="text" truncate title={c.title} onClick={() => open(c.id)}>
+                      {c.title}
+                    </Button>
+                  </span>
                   <Dot state={status} />
                   <span class="hint">{DOT_LABEL[status]}</span>
                   <span class="spacer" />
@@ -935,13 +838,13 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                 </div>
                 <p class="compare-reply">{reply || <span class="hint">No reply yet.</span>}</p>
                 <div class="actions">
-                  <button class="ghost sm" onClick={() => send({ type: 'viewChanges', chatId: c.id })}>
-                    <Icon name="diff" /> Changes
-                  </button>
+                  <Button variant="quiet" size="sm" icon="diff" onClick={() => send({ type: 'viewChanges', chatId: c.id })}>
+                    Changes
+                  </Button>
                   <span class="spacer" />
-                  <button class="sm" disabled={c.busy} title={c.busy ? 'Still working' : c.branch ? 'Merge this one, archive the others' : 'Archive the others'} onClick={() => keep(c.id)}>
-                    <Icon name="keep" /> Keep this one
-                  </button>
+                  <Button size="sm" icon="keep" disabled={c.busy} title={c.busy ? 'Still working' : c.branch ? 'Merge this one, archive the others' : 'Archive the others'} onClick={() => keep(c.id)}>
+                    Keep this one
+                  </Button>
                 </div>
               </article>
             );
@@ -1014,7 +917,7 @@ function List({
                 </tr>
               )}
               <Row chat={c} model={cardModel(state, c, now, conflicts)} activity={ago(c.lastActivity, now)} tabbable={c.id === roving} onFocus={onFocus} />
-              <SubRows subs={subagents(c)} parent={c.label} onOpen={(id) => openSub(c.id, id)} />
+              <SubRows subs={subagents(c)} parent={chatName(c)} onOpen={(id) => openSub(c.id, id)} />
             </Fragment>
           ))}
           {outside.map((s) => (
@@ -1041,7 +944,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       data-status={status}
       data-nav={c.id}
       tabIndex={tabbable ? 0 : -1}
-      aria-label={`${c.label}: ${c.title}. ${DOT_LABEL[status]}`}
+      aria-label={`${chatTip(c)}. ${DOT_LABEL[status]}`}
       onFocus={(e) => e.target === e.currentTarget && onFocus(c.id)}
       onClick={(e) => !(e.target as HTMLElement).closest('button') && open(c.id)}
       onKeyDown={(e) => {
@@ -1055,7 +958,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       </td>
       <td class="c-agent">
         <span class="cell-agent">
-          <Glyph agent={c.agent} size="sm" /> <span title={c.label}>{agentName(c.agent)}</span>
+          <Glyph agent={c.agent} size="sm" /> <span title={chatTip(c)}>{agentName(c.agent)}</span>
         </span>
       </td>
       <td class="c-task">
@@ -1064,9 +967,9 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
             {c.title}
           </span>
           {c.branch && (
-            <span class="chip" title={c.branch}>
+            <span class="fl-pill" data-tone="muted" title={c.branch}>
               <Icon name="branch" />
-              <span class="chip-text">{c.branch}</span>
+              <span class="fl-pill__text">{c.branch}</span>
             </span>
           )}
         </div>
@@ -1102,36 +1005,45 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
   const d = line.decision;
   if (!d) {
     return chat.busy ? (
-      <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-        <Icon name="stop" /> Stop
-      </button>
+      <Button variant="quiet-danger" icon="stop" size="sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+        Stop
+      </Button>
     ) : null;
   }
   if (d.kind === 'review') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
+      <Button variant="primary" size="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
         Review
-      </button>
+      </Button>
+    );
+  }
+  // A careful request is allowed by holding on its card, never in one click from a row.
+  const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
+  if (item && approvalOf(item, chat).hold) {
+    return (
+      <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
+        Review
+      </Button>
     );
   }
   if (d.kind === 'command') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
-        <Icon name="play" /> Run
-      </button>
+      <Button variant="primary" icon="play" size="sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
+        Run
+      </Button>
     );
   }
   if (d.kind === 'bridge') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
+      <Button variant="primary" size="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
         Allow
-      </button>
+      </Button>
     );
   }
   return (
-    <button class="decide sm" onClick={() => open(chat.id)}>
+    <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
       Answer
-    </button>
+    </Button>
   );
 }
 
@@ -1153,23 +1065,23 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
           {sorted.map((c) => (
             <li key={c.id} class="history-row">
               <Glyph agent={c.agent} size="sm" />
-              <span class="history-label" title={c.label}>{agentName(c.agent)}</span>
+              <span class="history-label" title={chatTip(c)}>{agentName(c.agent)}</span>
               <button class="title-btn history-title" title={c.title} onClick={() => open(c.id)}>
                 {c.title}
               </button>
               <span class="hint num">{age(c.createdAt, now)}</span>
-              <button class="ghost sm" onClick={() => send({ type: 'archive', chatId: c.id, archived: false })}>
-                <Icon name="unarchive" /> Unarchive
-              </button>
-              <button class="ghost danger sm" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
-                <Icon name="trash" /> Remove
-              </button>
+              <Button variant="quiet" size="sm" icon="unarchive" onClick={() => send({ type: 'archive', chatId: c.id, archived: false })}>
+                Unarchive
+              </Button>
+              <Button variant="quiet-danger" size="sm" icon="trash" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
+                Remove
+              </Button>
             </li>
           ))}
           {outside.map((s) => (
             <li key={s.id} class="history-row">
               <Glyph agent="claude" size="sm" />
-              <span class="tag history-label" title={OUTSIDE_TIP}>
+              <span class="fl-pill history-label" data-tone="muted" title={OUTSIDE_TIP}>
                 Claude Code
               </span>
               <button class="title-btn history-title" title={s.title} onClick={() => openClaude(s.id)}>

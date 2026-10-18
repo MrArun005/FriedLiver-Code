@@ -13,6 +13,7 @@ import type { ToolOut } from '../shared/tools';
 import { Code, CopyButton, Icon, ImageThumb, RunButton, basename, memo, send } from './common';
 import { stepImage } from '../shared/stepImages';
 import { DiffView } from './controls';
+import { Button, FileRef, IconButton } from './ui';
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>;
 
@@ -112,7 +113,7 @@ function Step({ tool: t, approval, state, still, open, onToggle, chatId, cwd }: 
           </span>
         )}
         <span class="step-end">
-          {exit !== undefined && exit !== 0 && <span class="tag bad">exit {exit}</span>}
+          {exit !== undefined && exit !== 0 && <span class="fl-pill" data-tone="failed">exit {exit}</span>}
           {denied && <span class="step-denied">denied</span>}
           {t.ms !== undefined && <span class="step-time">{shortDuration(t.ms)}</span>}
         </span>
@@ -162,7 +163,7 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
         {/* A heredoc write: the file it writes first, then the command around it. */}
         {doc?.file && <HeredocFile doc={doc} cwd={cwd} />}
         {cmd && (
-          <ToolRow label="IN" class="step-command" aria-label="Command" text={cmd.line} lang="sh" pre tools={
+          <ToolRow label="IN" class="step-command" aria-label="Command" text={cmd.line} lang="sh" tools={
             <>
               {meta.length > 0 && <span class={`tool-meta${exit ? ' bad' : ''}`}>{meta.join(' · ')}</span>}
               {runnable && <RunButton chatId={chatId} command={cmd.line} cwd={cmd.cwd} />}
@@ -180,9 +181,7 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
               <span class="tool-label">DIFF</span>
               <div class="tool-cell">
                 <div class="file-line">
-                  <button class="ref" title={o.path} onClick={() => send({ type: 'openFile', path: o.path })}>
-                    {basename(o.path)}
-                  </button>
+                  <FileRef path={o.path} onOpen={() => send({ type: 'openFile', path: o.path })} />
                   <span class="stats">
                     <span class="plus">+{o.added}</span>
                     <span class="minus">−{o.removed}</span>
@@ -202,7 +201,8 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
 const CLAMP_LINES = 3;
 
 /** One IN/OUT row: its label, its text (clipped past three lines), and copy/run on hover. */
-function ToolRow({ label, class: className, text, lang, pre, out, tools, children, ...rest }: { label: string; class: string; text: string; lang: string; pre?: boolean; out?: boolean; tools?: ComponentChildren; children?: ComponentChildren; 'aria-label': string }) {
+/** One IN/OUT/FILE row: its text wraps (QA: long lines don't run off), opens in an editor tab, and has its own tools. */
+function ToolRow({ label, class: className, text, lang, out, tools, children, ...rest }: { label: string; class: string; text: string; lang: string; out?: boolean; tools?: ComponentChildren; children?: ComponentChildren; 'aria-label': string }) {
   const [all, setAll] = useState(false);
   const lines = useMemo(() => text.replace(/\n$/, '').split('\n').length, [text]);
   const long = lines > CLAMP_LINES;
@@ -210,14 +210,17 @@ function ToolRow({ label, class: className, text, lang, pre, out, tools, childre
     <section class={`tool-row ${className}${out ? ' out' : ''}`} aria-label={rest['aria-label']}>
       <span class="tool-label">{label}</span>
       <div class="tool-cell">
-        <Code code={text} lang={lang} class={`${pre ? 'keep ' : ''}${long && !all ? 'capped' : ''}`} />
+        <Code code={text} lang={lang} class={long && !all ? 'capped' : ''} />
         {long && (
-          <button class="link sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
+          <Button variant="link" size="sm" class="sm-link" aria-expanded={all} onClick={() => setAll(!all)}>
             {all ? 'Show less' : `Show all ${lines} lines`}
-          </button>
+          </Button>
         )}
         {children}
-        {tools && <span class="tool-tools">{tools}</span>}
+        <span class="tool-tools">
+          {tools}
+          <IconButton icon="open" label="Open in editor" title="Open in an editor tab (long lines wrap)" size="sm" variant="secondary" muted onClick={() => send({ type: 'openText', text })} />
+        </span>
       </div>
     </section>
   );
@@ -232,9 +235,9 @@ function HeredocFile({ doc, cwd }: { doc: Heredoc; cwd: string }) {
     <ToolRow label="FILE" class="step-file" aria-label={`Written to ${basename(file)}`} text={doc.body} lang={langOf(file)} tools={
       <>
         {inside && (
-          <button type="button" class="ghost sm" title={`Open ${inside}`} onClick={() => send({ type: 'openFile', path: inside })}>
+          <Button variant="secondary" size="sm" title={`Open ${inside}`} onClick={() => send({ type: 'openFile', path: inside })}>
             Open file
-          </button>
+          </Button>
         )}
         <CopyButton text={doc.body} label="Copy file text" />
       </>

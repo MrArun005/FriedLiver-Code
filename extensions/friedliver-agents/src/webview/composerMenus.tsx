@@ -7,6 +7,8 @@ import { AGENT_FACES, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
+import { agentName, chatTip } from '../shared/names';
+import { IconButton, Toggle } from './ui';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
@@ -121,7 +123,7 @@ function ToggleRow({ chat, option, icon }: { chat: ChatView; option: SessionOpti
       <span class="cc-item-name" title={option.description}>
         {option.name}
       </span>
-      <button type="button" role="switch" aria-checked={on} aria-label={option.name} class="cc-switch" onClick={() => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value: !on })} />
+      <Toggle class="cc-toggle" checked={on} label={option.name} onChange={(value) => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value })} />
     </div>
   );
 }
@@ -181,7 +183,7 @@ export function ModelMenu({ chat, close }: MenuProps) {
             {pick.current === c.value && <Icon name="check" size={16} />}
           </button>
         ))}
-        {!pick && <div class="cc-empty">{chat.session?.live ? `${chat.label} offers no model choice` : `${chat.label} is starting…`}</div>}
+        {!pick && <div class="cc-empty">{chat.session?.live ? `${agentName(chat.agent)} offers no model choice` : `${agentName(chat.agent)} is starting…`}</div>}
       </div>
       <Divider />
       <EffortRow chat={chat} />
@@ -418,7 +420,7 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
     ...linked.map((c) => ({
       key: c.id,
       title: c.title,
-      tip: `${c.label}: ${c.title}`,
+      tip: chatTip(c),
       state: c.busy ? 'working' : 'done',
       meta: [shortDuration(Math.max(0, (c.busy ? now : c.lastActivity) - c.createdAt)), c.session?.usage ? `${formatTokens(c.session.usage.used)} tokens` : c.origin?.kind === 'consult' ? 'consultation' : 'hand-off'].join(' · '),
       go: () => {
@@ -433,21 +435,18 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
         <div class="cc-map-head">
           <div class="cc-map-title">Agent map</div>
           <span class="cc-map-actions">
-            <button
-              type="button"
-              class="ghost icon-btn sm cc-map-manager"
-              aria-label="Open Agent Manager"
-              title="Open Agent Manager"
+            <IconButton
+              icon="tasks"
+              label="Open Agent Manager"
+              size="sm"
+              muted
+              class="cc-map-manager"
               onClick={() => {
                 close();
                 send({ type: 'openTasks' });
               }}
-            >
-              <Icon name="tasks" />
-            </button>
-            <button type="button" class="ghost icon-btn sm cc-map-close" aria-label="Close" title="Close (Esc)" onClick={close}>
-              <Icon name="close" />
-            </button>
+            />
+            <IconButton icon="close" label="Close" muted size="sm" class="cc-map-close" title="Close (Esc)" onClick={close} />
           </span>
         </div>
         <div class="cc-map-sub">
@@ -460,7 +459,7 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
                 <Dot state={chat.busy ? 'working' : 'idle'} still={!chat.busy} />
                 {chat.title}
               </span>
-              <span class="cc-map-meta">{[model, usage ? `${formatTokens(usage.used)} tokens in context` : undefined].filter(Boolean).join(' · ') || chat.label}</span>
+              <span class="cc-map-meta">{[model, usage ? `${formatTokens(usage.used)} tokens in context` : undefined].filter(Boolean).join(' · ') || agentName(chat.agent)}</span>
             </div>
             {rows.length > 0 && (
               <div class="cc-map-children">

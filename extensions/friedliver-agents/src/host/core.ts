@@ -36,6 +36,9 @@ import {
 } from '../shared/session';
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
 import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
+import { approvalOf, type Approvable } from '../shared/approval';
+import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
+import { chatRef } from '../shared/names';
 import {
   AGENT_FACES,
   EMPTY_STATE,
@@ -63,7 +66,7 @@ import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
-import { inGitFolder, insideRoots, realPath } from './paths';
+import { inGitFolder, insideRoots, realPath, workspacePath } from './paths';
 import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
@@ -110,19 +113,23 @@ export interface PendingReview {
 export interface CoreUi {
   showReview(review: PendingReview): void;
   closeReview(reviewId: string): void;
-  askCommand?(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string }): void;
+  /** `careful`: allowed only by holding on its card, so a notification offers no Run. */
+  askCommand?(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string; careful?: boolean }): void;
   /** `allow`/`deny`: the agent's own options a notification may offer, by id. */
+  /** No `allow` for a careful request: it is allowed only by holding on its card. */
   askPermission?(ask: { chatId: string; requestId: string; agentLabel: string; title: string; allow?: { optionId: string; name: string }; deny?: { optionId: string; name: string } }): void;
   /** A read-only diff of what a permission request would write. */
   showProposal?(p: { id: string; path: string; before: string | null; after: string; agentLabel: string; chatId: string }): void;
   /** A turn ended: the editor may say so when the chat isn't on screen. */
-  turnEnded?(t: { chatId: string; label: string; title: string; stopReason: acp.StopReason | null; failure?: Item; files: number; byUser: boolean }): void;
+  turnEnded?(t: { chatId: string; agent: AgentKey; title: string; stopReason: acp.StopReason | null; failure?: Item; files: number; byUser: boolean }): void;
   /** Asks once per chat before Full auto. */
   confirmFullAuto?(ask: { label: string; agent: string; mode?: string }): Promise<boolean>;
   /** Asks before adding an "Always allow" command rule. */
   confirmRule?(rule: Extract<Grant, { kind: 'exact' | 'prefix' }>): Promise<boolean>;
+  /** FriedLiver Remote asked for something that keeps allowing (Auto, "Always allow"): the user's OK on the Mac. No hook: refused. */
+  confirmRemote?(ask: { title: string; detail: string; button: string }): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
-  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void;
+  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean; once?: boolean }): void;
   /** An agent asks a question as a small form, answered in the chat. */
   askQuestion?(ask: { chatId: string; requestId: string; agentLabel: string; message: string }): void;
   signInUrl?(agent: AgentKey, url: string): void;
@@ -152,6 +159,8 @@ export interface CoreOptions {
   browserPage?: ToolHost['browserPage'];
   /** Answers the index_* tools (projectIndexHost.ts). */
   index?: ToolHost['index'];
+  /** The system_* tools (system.ts, the user's settings, the audit log). */
+  system?: ToolHost['system'];
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -160,6 +169,8 @@ export interface CoreOptions {
   defaults?: { get(agent: AgentKey): AgentDefaults | undefined; set(agent: AgentKey, value: AgentDefaults): void };
   /** Remembered "Always allow" answers (permissions.ts), from the user's own storage. */
   permissions?: Permissions;
+  /** Seconds before a routine request allows itself once (friedliver.approvals.autoRoutineSeconds); 0 or absent: never. */
+  autoRoutineSeconds?(): number;
   /** Where agents start when no folder is open: an empty folder of FriedLiver's, so they don't scan home (and macOS doesn't ask for Desktop, Documents, Downloads). */
   noFolderCwd?: string;
   /** Starts a new chat's agent and session at once, before its first message. On unless false. */
@@ -173,6 +184,12 @@ export interface CoreOptions {
   /** Where checkpoints are kept across windows (global storage); folders outside git need it. */
   checkpointDir?: string;
 }
+
+/**
+ * Where a request came from: the desktop, or a phone paired with FriedLiver Remote (by its name).
+ * A phone's request that loosens review or keeps allowing waits for the user's OK on the Mac.
+ */
+export type Via = 'desktop' | { device: string; valid?(): boolean };
 
 /** Rewind to a message: its files, the conversation, or both. */
 export type RewindMode = 'both' | 'code' | 'conversation';
@@ -217,7 +234,10 @@ export class AgentCore {
   private readonly listeners = new Set<(action: Action, state: AppState) => void>();
   private readonly hub: AgentHub;
   private readonly turns = new TurnLog();
-  private readonly permissions = new Map<string, Pending<acp.RequestPermissionResponse> & { options: acp.PermissionOption[] }>();
+  /** `careful`: once only, so the agent's own "don't ask again" is refused for it too. */
+  private readonly permissions = new Map<string, Pending<acp.RequestPermissionResponse> & { options: acp.PermissionOption[]; careful?: boolean }>();
+  /** Routine requests counting down to allow themselves, by request or command id. */
+  private readonly autoTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly reviews = new Map<string, PendingReview & Pending<{ accept: boolean; content?: string }>>();
   private readonly commands = new Map<string, Pending<boolean>>();
   private readonly questions = new Map<string, Pending<acp.CreateElicitationResponse> & { fields: QuestionField[] }>();
@@ -330,6 +350,7 @@ export class AgentCore {
       externalAutoApprove: options.externalAutoApprove,
       browserPage: options.browserPage,
       index: options.index,
+      system: options.system,
       get remember() {
         return options.remember;
       },
@@ -394,7 +415,8 @@ export class AgentCore {
     if (!folder) throw new Error('Open a folder first. Agents work inside the folder you open.');
     const shared = options.shareWorktreeOf ? this.chat(options.shareWorktreeOf) : undefined;
     const resumeCwd = options.resume && this.options.folders().includes(options.resume.cwd) ? options.resume.cwd : undefined;
-    let cwd = shared?.cwd ?? resumeCwd ?? folder;
+    const chosenCwd = options.cwd && this.options.folders().includes(options.cwd) ? options.cwd : undefined;
+    let cwd = shared?.cwd ?? resumeCwd ?? chosenCwd ?? folder;
     let wt = shared && this.worktrees.get(shared.id);
     if (options.worktree && !wt) {
       const repo = await git.repoRoot(folder);
@@ -405,12 +427,13 @@ export class AgentCore {
     }
     const chat = this.hub.createChat(agent, cwd, options.resume?.sessionId);
     if (wt) this.worktrees.set(chat.id, wt);
-    const n = (this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1);
+    // Counted still (saved state keeps it), never shown: a chat is named by its topic (names.ts).
+    this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1;
     const name = AGENT_FACES[agent].name;
     const view: ChatView = {
       id: chat.id,
       agent,
-      label: n > 1 ? `${name} ${n}` : name,
+      label: name,
       title: options.title ? titleFrom(options.title) : 'New chat',
       cwd,
       branch: wt?.branch,
@@ -629,8 +652,17 @@ export class AgentCore {
   }
 
   /** FriedLiver's approval level for the chat, and the agent's matching mode. */
-  async setApproval(chatId: string, level: ApprovalLevel): Promise<void> {
+  async setApproval(chatId: string, level: ApprovalLevel, via: Via = 'desktop'): Promise<void> {
     const chat = this.requireChat(chatId);
+    if (via !== 'desktop') {
+      // From a phone: tightening goes ahead; loosening waits for the Mac; nothing becomes a default for new chats.
+      if (level === (chat.approval ?? 'ask')) return;
+      if (level === 'full' && !(await this.confirmFull(chat, via))) return;
+      if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chatRef(chat)} accept edits without asking?`, detail: `${chat.label}'s edits would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
+      this.dispatch({ t: 'approval', chatId, level });
+      await this.applyLevel(chatId, true);
+      return;
+    }
     if (level === 'full' && !(await this.confirmFull(chat))) return;
     this.setLevel(chat, level);
     await this.applyLevel(chatId, true);
@@ -651,11 +683,17 @@ export class AgentCore {
     if (level !== 'full') this.saveDefaults(chat.agent, { approval: level });
   }
 
-  private async confirmFull(chat: ChatView): Promise<boolean> {
+  private async confirmFull(chat: ChatView, via: Via = 'desktop'): Promise<boolean> {
+    if (via !== 'desktop') {
+      // Every time from the phone, whatever the desktop confirmed before.
+      const ok = await this.confirmRemote(via, { title: `Run ${chatRef(chat)} in Auto?`, detail: `${chat.label} would edit and run commands without asking until the chat is switched back.`, button: 'Use Auto' });
+      if (ok) this.confirmedFull.add(chat.id);
+      return ok;
+    }
     if (this.confirmedFull.has(chat.id)) return true;
     const mode = modeFor(chat.agent, modeOption(chat.session), 'full');
     const name = modeOption(chat.session)?.choices.find((c) => c.value === mode)?.name;
-    if (!(await this.options.ui.confirmFullAuto?.({ label: chat.label, agent: this.label(chat.agent), mode: name }))) return false;
+    if (!(await this.options.ui.confirmFullAuto?.({ label: `the chat ${chatRef(chat)}`, agent: this.label(chat.agent), mode: name }))) return false;
     this.confirmedFull.add(chat.id);
     return true;
   }
@@ -984,6 +1022,9 @@ export class AgentCore {
     const pending = this.permissions.get(requestId);
     // Only an option the agent offered; anything else from a view is ignored.
     if (!pending || (optionId !== null && !pending.options.some((o) => o.optionId === optionId))) return;
+    // A careful request is allowed once only: never the agent's "don't ask again" or a mode change.
+    const chosen = pending.options.find((o) => o.optionId === optionId);
+    if (pending.careful && chosen?.kind.startsWith('allow') && (chosen.kind !== 'allow_once' || ESCALATING.test(chosen.name))) return;
     pending.resolve(optionId ? { outcome: { outcome: 'selected', optionId } } : { outcome: { outcome: 'cancelled' } });
   }
 
@@ -1006,6 +1047,49 @@ export class AgentCore {
 
   decideCommand(commandId: string, approve: boolean): void {
     this.commands.get(commandId)?.resolve(approve);
+  }
+
+  /** Stop: a routine request's countdown ends, and it waits for the user like any other. */
+  stopAuto(id: string): void {
+    const timer = this.autoTimers.get(id);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.autoTimers.delete(id);
+    this.dispatch({ t: 'autoOff', id });
+  }
+
+  /** When a routine request allows itself, or undefined: off, or not routine. Starts the timer that does it. */
+  private autoRoutine(id: string, routine: boolean, run: () => void): number | undefined {
+    const seconds = Math.min(60, Math.max(0, Number(this.options.autoRoutineSeconds?.() ?? 0) || 0));
+    if (!routine || !seconds) return undefined;
+    const timer = setTimeout(() => {
+      this.autoTimers.delete(id);
+      run();
+    }, seconds * 1000);
+    timer.unref?.();
+    this.autoTimers.set(id, timer);
+    return Date.now() + seconds * 1000;
+  }
+
+  private endAuto(id: string): boolean {
+    const timer = this.autoTimers.get(id);
+    clearTimeout(timer);
+    return this.autoTimers.delete(id);
+  }
+
+  /**
+   * A force push: the commits it would drop from the remote branch, as of the last fetch. Git runs before
+   * the user says yes, so only in a workspace folder (a trusted one: the extension doesn't run in untrusted
+   * workspaces), and with the repository's program-running config off (git.remoteOnlyCommits).
+   */
+  private async droppedBy(line: string | undefined, cwd: string | undefined): Promise<DroppedCommits | undefined> {
+    const push = line ? forcePush(line) : undefined;
+    const dir = push && cwd ? insideRoots(cwd, this.roots()) : null;
+    const real = dir ? realPath(dir) : null;
+    // The workspace root holding it, by its real path: git is pointed at exactly that root's .git folder.
+    const root = real ? this.roots().map((r) => realPath(r)).find((r): r is string => !!r && (real === r || real.startsWith(r.endsWith(path.sep) ? r : r + path.sep))) : undefined;
+    if (!push || !root) return undefined;
+    return (await git.remoteOnlyCommits(root, push.remote, push.dst, push.src ?? 'HEAD').catch(() => null)) ?? undefined;
   }
 
   /**
@@ -1397,7 +1481,7 @@ export class AgentCore {
     if (notice) this.items(chatId, [notice]);
     const chat = this.chat(chatId);
     if (chat) {
-      this.options.ui.turnEnded?.({ chatId, label: chat.label, title: chat.title, stopReason, failure: notice?.kind === 'notice' && notice.tone === 'error' ? notice : undefined, files: files.length, byUser });
+      this.options.ui.turnEnded?.({ chatId, agent: chat.agent, title: chat.title, stopReason, failure: notice?.kind === 'notice' && notice.tone === 'error' ? notice : undefined, files: files.length, byUser });
     }
     // Read the reply before pipes or held forwards give the chat its next message.
     const result: TurnResult = { stopReason, reply: chat ? lastReply(chat) : '' };
@@ -1539,6 +1623,7 @@ export class AgentCore {
     detail: PermissionDetail,
     options: acp.PermissionOption[],
     files: { paths: string[]; access?: Access; complete: boolean },
+    careful = false,
   ): { option: acp.PermissionOption; reason: string } | undefined {
     if (!chat || kind === 'switch_mode' || detail.plan) return undefined;
     const once = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
@@ -1548,10 +1633,13 @@ export class AgentCore {
     const all = this.turnDecision.get(chat.id);
     if (edit && all === 'reject' && no) return { option: no, reason: 'Reject all' };
     if (!once) return undefined;
-    if (edit && all === 'accept') return { option: once, reason: 'Accept all' };
+    // Accept all never covers a careful edit (secrets, keys, .git): that one is held and allowed on its own.
+    if (edit && all === 'accept' && !careful) return { option: once, reason: 'Accept all' };
     if (edit && level !== 'ask') return { option: once, reason: APPROVAL_NAMES[level] };
     const outside = detail.command?.cwd !== undefined && insideRoots(detail.command.cwd, this.roots()) === null;
     if (level === 'full' && !outside) return { option: once, reason: APPROVAL_NAMES.full };
+    // A careful request asks every time: no remembered rule answers it.
+    if (careful) return undefined;
     if (kind === 'execute' && detail.command && !outside) {
       const rule = matchesRule(detail.command.line, this.options.permissions?.commands() ?? []);
       if (rule) return { option: once, reason: `Always allowed: ${describeRule(rule)}` };
@@ -1696,6 +1784,9 @@ export class AgentCore {
     const kind = tool.kind ?? undefined;
     const detail = this.permissionDetail(tool, proposals, chat);
     const files = this.requestFiles(tool, kind, proposals, chat?.cwd);
+    const dropped = await this.droppedBy(detail.command?.line, detail.command?.cwd ?? chat?.cwd);
+    if (dropped) detail.dropped = dropped;
+    if (signal.aborted) return { outcome: { outcome: 'cancelled' } };
     const always = kind === 'switch_mode' ? [] : this.alwaysFor(files, detail);
     if (always.length) detail.always = always;
     for (const p of proposals) this.noteFile(chatId, p.path, p.before);
@@ -1710,7 +1801,9 @@ export class AgentCore {
       ...(kind ? { toolKind: kind } : {}),
       ...(Object.keys(detail).length ? { detail } : {}),
     };
-    const auto = this.autoAnswer(chat, kind, detail, options, files);
+    const risk = approvalOf(item as Approvable, chat ?? { agent: 'demo', label: '', cwd: '' }).risk;
+    const careful = risk.tone === 'careful';
+    const auto = this.autoAnswer(chat, kind, detail, options, files, careful);
     if (auto) {
       this.items(chatId, [{ ...item, answer: auto.option.name, auto: auto.reason }]);
       if (auto.option.kind.startsWith('allow')) this.approveWrites(chatId, proposals);
@@ -1721,27 +1814,46 @@ export class AgentCore {
       if (this.proposals.size > 50) this.proposals.delete(this.proposals.keys().next().value!);
     }
     return new Promise((resolve) => {
+      let autoFired = false;
       this.permissions.set(requestId, {
         chatId,
         options,
+        careful,
         resolve: (answer) => {
           if (!this.permissions.delete(requestId)) return;
+          this.endAuto(requestId);
           const chosen = answer.outcome.outcome === 'selected' ? options.find((o) => o.optionId === (answer.outcome as { optionId: string }).optionId) : undefined;
           if (chosen?.kind.startsWith('allow')) this.approveWrites(chatId, proposals);
-          this.dispatch({ t: 'permissionAnswered', requestId, answer: chosen?.name ?? 'Cancelled' });
+          this.dispatch({ t: 'permissionAnswered', requestId, answer: chosen?.name ?? 'Cancelled', ...(autoFired ? { auto: 'Routine, allowed after the countdown' } : {}) });
           resolve(answer);
         },
       });
       signal.addEventListener('abort', () => this.answerPermission(requestId, null), { once: true });
-      this.items(chatId, [item]);
       const allow = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
+      // Routine, with a plain one-time yes, not a plan, and wholly inside the workspace (the command's folder,
+      // every file it names, all of them resolvable): it may count down (off unless the user set it).
+      // Relative paths resolve against the chat's folder, links are followed, and anything that doesn't resolve fails closed.
+      const inside = (p: string | undefined) => workspacePath(p, chat?.cwd, this.roots()) !== null;
+      const inWorkspace = detail.command
+        ? inside(detail.command.cwd ?? chat?.cwd)
+        : files.complete && files.paths.length > 0 && [...files.paths, ...(detail.locations ?? [])].every(inside);
+      // Only the exact command list ever counts down; nothing the classifier says does.
+      const routine = inWorkspace && !!detail.command && autoRoutineCommand(detail.command.line);
+      const autoAt =
+        allow && !detail.plan && kind !== 'switch_mode'
+          ? this.autoRoutine(requestId, routine, () => {
+              autoFired = true;
+              this.answerPermission(requestId, allow.optionId);
+            })
+          : undefined;
+      this.items(chatId, [autoAt ? { ...item, autoAt } : item]);
       const deny = options.find((o) => o.kind === 'reject_once');
       this.options.ui.askPermission?.({
         chatId,
         requestId,
         agentLabel: chat?.label ?? 'The agent',
         title,
-        ...(allow ? { allow: { optionId: allow.optionId, name: allow.name } } : {}),
+        ...(allow && !careful ? { allow: { optionId: allow.optionId, name: allow.name } } : {}),
         ...(deny ? { deny: { optionId: deny.optionId, name: deny.name } } : {}),
       });
     });
@@ -1798,7 +1910,7 @@ export class AgentCore {
    * user confirms it), then allows the request that asked. The grant must be one this very request
    * offered: the command on screen, or a folder or website its card listed. Never in a read-only chat.
    */
-  async allowAlways(target: { requestId: string } | { commandId: string }, grant: Grant): Promise<void> {
+  async allowAlways(target: { requestId: string } | { commandId: string }, grant: Grant, via: Via = 'desktop'): Promise<void> {
     let found: { chat: ChatView; line?: string; offered: Grant[] } | undefined;
     for (const chat of this.state.chats) {
       for (const i of chat.items) {
@@ -1808,10 +1920,18 @@ export class AgentCore {
     }
     const remembered = this.options.permissions;
     if (!found || found.chat.readOnly || !remembered) return;
+    // Careful requests are allowed once, never remembered.
+    if (('requestId' in target && this.permissions.get(target.requestId)?.careful) || (found.line !== undefined && commandRisk(found.line).tone === 'careful')) return;
+    const fromPhone = () => {
+      const { what, scope } = describeGrant(grant);
+      const title = grant.kind === 'folder' ? `${grant.access === 'read' ? 'reading' : 'changing'} files in ${scope}` : grant.kind === 'site' ? `${scope} in the browser` : grant.kind === 'tool' ? what.toLowerCase() : scope;
+      return via !== 'desktop' && this.confirmRemote(via, { title: `Always allow ${title}?`, detail: `${what}, in every chat, for every agent, until you revoke it in "FriedLiver: Manage Permissions".`, button: 'Always allow' });
+    };
     if (grant.kind === 'exact' || grant.kind === 'prefix') {
       // The rule must cover the very command on screen.
-      if (!found.line || !matchesRule(found.line, [grant]) || !(await this.options.ui.confirmRule?.(grant))) return;
-    } else if (!found.offered.some((g) => sameGrant(g, grant))) {
+      if (!found.line || !matchesRule(found.line, [grant])) return;
+      if (!(await (via !== 'desktop' ? fromPhone() : this.options.ui.confirmRule?.(grant)))) return;
+    } else if (!found.offered.some((g) => sameGrant(g, grant)) || (via !== 'desktop' && !(await fromPhone()))) {
       return;
     }
     if (!remembered.add(grant, AGENT_FACES[found.chat.agent].name)) return;
@@ -1824,6 +1944,13 @@ export class AgentCore {
     if (once) this.answerPermission(target.requestId, once.optionId);
   }
 
+  /** The user's OK on the Mac for a request from FriedLiver Remote; refused when the editor can't ask. */
+  private async confirmRemote(via: { device: string; valid?(): boolean }, ask: { title: string; detail: string; button: string }): Promise<boolean> {
+    const confirm = this.options.ui.confirmRemote;
+    // A phone revoked while the question was up gets nothing from the answer.
+    return confirm ? (await confirm({ ...ask, title: `Phone “${via.device}” asks: ${ask.title}` })) === true && via.valid?.() !== false : false;
+  }
+
   /** Accept all / Reject all: the edits waiting now (the editor decides its reviews) and the rest of this turn's. */
   decideAll(chatId: string, action: 'accept' | 'reject'): string[] {
     const chat = this.requireChat(chatId);
@@ -1832,6 +1959,7 @@ export class AgentCore {
       if (p.chatId !== chatId) continue;
       const item = chat.items.find((i) => i.kind === 'permission' && i.requestId === id);
       if (item?.kind !== 'permission' || !(item.toolKind === 'edit' || item.detail?.files?.length)) continue;
+      if (action === 'accept' && p.careful) continue;
       const option = p.options.find((o) => (action === 'accept' ? o.kind === 'allow_once' && !ESCALATING.test(o.name) : o.kind === 'reject_once'));
       if (option) this.answerPermission(id, option.optionId);
     }
@@ -1910,7 +2038,7 @@ export class AgentCore {
   private commandHooks(agentId: AgentKey): TerminalListener {
     const known = new Map<string, { commandId: string; startedAt?: number }>();
     return {
-      approve: (info) => {
+      approve: async (info) => {
         const commandId = this.id('cmd');
         const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
         if (this.readOnlyChat(chatId)) return Promise.resolve(false);
@@ -1918,20 +2046,30 @@ export class AgentCore {
         const outside = insideRoots(info.cwd, this.roots()) === null;
         // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.
         const chat = chatId ? this.chat(chatId) : undefined;
-        const rule = outside ? undefined : matchesRule(info.commandLine, this.options.permissions?.commands() ?? []);
+        const risk = commandRisk(info.commandLine);
+        // A careful command asks every time: no remembered rule runs it.
+        const rule = outside || risk.tone === 'careful' ? undefined : matchesRule(info.commandLine, this.options.permissions?.commands() ?? []);
         const auto = outside || !chat ? undefined : chat.approval === 'full' ? APPROVAL_NAMES.full : rule ? `Always allowed: ${describeRule(rule)}` : undefined;
         if (chatId && auto) {
           this.items(chatId, [{ kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'running', output: '', auto }]);
-          return Promise.resolve(true);
+          return true;
         }
-        if (chatId) this.items(chatId, [{ kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'awaiting', output: '' }]);
+        const dropped = await this.droppedBy(info.commandLine, info.cwd);
+        let autoFired = false;
+        const autoAt = outside || !chatId ? undefined : this.autoRoutine(commandId, autoRoutineCommand(info.commandLine), () => ((autoFired = true), this.decideCommand(commandId, true)));
+        if (chatId)
+          this.items(chatId, [
+            { kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'awaiting', output: '', ...(dropped ? { dropped } : {}), ...(autoAt ? { autoAt } : {}) },
+          ]);
         const agentLabel = (chatId && this.chat(chatId)?.label) || this.label(agentId);
-        this.options.ui.askCommand?.({ chatId, commandId, agentLabel, commandLine: info.commandLine });
+        this.options.ui.askCommand?.({ chatId, commandId, agentLabel, commandLine: info.commandLine, ...(risk.tone === 'careful' ? { careful: true } : {}) });
         return new Promise<boolean>((resolve) => {
           this.commands.set(commandId, {
             chatId,
             resolve: (ok) => {
               if (!this.commands.delete(commandId)) return;
+              this.endAuto(commandId);
+              if (autoFired) this.dispatch({ t: 'command', commandId, patch: { auto: 'Routine, run after the countdown' } });
               if (!ok) known.delete(info.terminalId);
               this.dispatch({ t: 'command', commandId, patch: { state: ok ? 'running' : 'denied' } });
               resolve(ok);

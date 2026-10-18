@@ -36,6 +36,30 @@
     "test:integration": "node esbuild.mjs && node dist/test/run.js"
   },
   "contributes": {
+    "languages": [
+      {
+        "id": "friedliver-output",
+        "aliases": [
+          "Agent output"
+        ]
+      }
+    ],
+    "externalUriOpeners": [
+      {
+        "id": "friedliver.browser",
+        "label": "FriedLiver browser",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
+    "configurationDefaults": {
+      "[friedliver-output]": {
+        "editor.wordWrap": "on",
+        "editor.wrappingIndent": "same"
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -79,6 +103,26 @@
     },
     "commands": [
       {
+        "command": "friedliver.links.useBuiltin",
+        "title": "Open Links in FriedLiver Browser",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.links.useExternal",
+        "title": "Open Links in System Browser",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.remote.open",
+        "title": "Remote Control…",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.remote.stop",
+        "title": "Stop Remote Control",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.showVersion",
         "title": "Show Version",
         "category": "FriedLiver"
@@ -116,6 +160,12 @@
         "command": "friedliver.nextDecision",
         "title": "Go to Next Decision",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.openInbox",
+        "title": "Open Decision Inbox",
+        "category": "FriedLiver",
+        "icon": "$(inbox)"
       },
       {
         "command": "friedliver.review.accept",
@@ -284,6 +334,16 @@
         "command": "friedliver.index.rebuild",
         "title": "Rebuild Project Index",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.diagnoseClaudeSessions",
+        "title": "Diagnose Claude Code Sessions",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.system.showLog",
+        "title": "Show System Actions Log",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
@@ -332,6 +392,16 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "friedliver.links.useExternal",
+          "when": "activeEditor == 'workbench.editor.browser' && config.friedliver.links.openIn != 'external'",
+          "group": "friedliver.links"
+        },
+        {
+          "command": "friedliver.links.useBuiltin",
+          "when": "activeEditor == 'workbench.editor.browser' && config.friedliver.links.openIn == 'external'",
+          "group": "friedliver.links"
+        },
         {
           "command": "friedliver.review.accept",
           "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
@@ -473,6 +543,12 @@
         "when": "!terminalFocus"
       },
       {
+        "command": "friedliver.openInbox",
+        "key": "ctrl+alt+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "!terminalFocus"
+      },
+      {
         "command": "friedliver.toggleCodeAndChat",
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
@@ -499,22 +575,22 @@
     "colors": [
       {
         "id": "friedliver.decision",
-        "description": "The one loud color: something waits for your decision (waiting badge, Accept, Run).",
+        "description": "The one loud color: something waits for your decision (waiting badge, needs-you dots). The theme's info blue, never the error red or the brand orange.",
         "defaults": {
-          "dark": "#d97757",
-          "light": "#a6461f",
-          "highContrast": "#ffffff",
-          "highContrastLight": "#a6461f"
+          "dark": "notificationsInfoIcon.foreground",
+          "light": "notificationsInfoIcon.foreground",
+          "highContrast": "notificationsInfoIcon.foreground",
+          "highContrastLight": "notificationsInfoIcon.foreground"
         }
       },
       {
         "id": "friedliver.decisionForeground",
-        "description": "Text on the decision color.",
+        "description": "Text on the decision color: the page color (dark on the dark themes' light blue, white on the light themes' deep blue).",
         "defaults": {
-          "dark": "#1f1209",
-          "light": "#ffffff",
-          "highContrast": "#000000",
-          "highContrastLight": "#ffffff"
+          "dark": "editor.background",
+          "light": "editor.background",
+          "highContrast": "editor.background",
+          "highContrastLight": "editor.background"
         }
       },
       {
@@ -577,6 +653,18 @@
           "type": "string",
           "default": "#D97757",
           "markdownDescription": "The chat's one accent colour, used only as the border of the recommended answer. Leave it empty to use the theme's button colour. Takes effect when a view next opens."
+        },
+        "friedliver.remote.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Lets phones you pair control your agents from the same Wi-Fi (FriedLiver Remote). Off by default; **FriedLiver: Remote Control…** starts it and shows the pairing QR code. Only your own user settings can turn it on, never a workspace's."
+        },
+        "friedliver.remote.tailscale": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Also listen on this Mac's Tailscale address, so paired phones on your tailnet reach FriedLiver Remote from anywhere. Never the public internet, never a relay. See docs/REMOTE.md."
         },
         "friedliver.voice.language": {
           "type": "string",
@@ -646,6 +734,24 @@
           ],
           "description": "Arguments for the Gemini program."
         },
+        "friedliver.links.openIn": {
+          "scope": "application",
+          "type": "string",
+          "enum": [
+            "builtin",
+            "external"
+          ],
+          "enumItemLabels": [
+            "FriedLiver browser",
+            "System browser"
+          ],
+          "enumDescriptions": [
+            "Web links you click open in a tab of FriedLiver's browser, on the right. Hold Cmd/Ctrl in a chat to use the system browser.",
+            "Web links open in your system browser. Hold Cmd/Ctrl in a chat to use FriedLiver's browser."
+          ],
+          "default": "builtin",
+          "markdownDescription": "Where web links you click open: in a chat, the Agent Manager and Images, and (through the editor's link openers) in Markdown previews, hovers, the editor and the terminal. Per-site choices you made in `#workbench.externalUriOpeners#` still win."
+        },
         "friedliver.showDemoAgent": {
           "scope": "machine",
           "type": "boolean",
@@ -710,6 +816,14 @@
           "scope": "machine",
           "description": "The approval level new chats start at. Full auto is chosen per chat, never here. Read from user settings only, so a repository can't make agents run without asking."
         },
+        "friedliver.approvals.autoRoutineSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 60,
+          "scope": "machine",
+          "markdownDescription": "Routine requests (reads, `git status`, the project's tests, lint and build) allow themselves once after this many seconds, with a visible countdown you can stop (Esc). 0 turns it off. Review and careful requests always wait for you. Read from user settings only."
+        },
         "friedliver.notify.decisions": {
           "type": "boolean",
           "default": true,
@@ -770,6 +884,82 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
+        },
+        "friedliver.system.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Let agents ask to act on your Mac or Windows PC through the `system_*` tools: open apps, files and links, bring apps to the front, use the clipboard, show notifications, change the volume, run Shortcuts and screenshot a window. Each action asks you first and is logged in **FriedLiver: System Actions**. Not available on Linux. See docs/SYSTEM-CONTROL.md."
+        },
+        "friedliver.system.fullAutoAllowed": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Let chats on Full auto use the `system_*` tools without asking. Off: they still ask. Reading the clipboard, window screenshots and terminal-like apps ask every time either way. Only your user settings count."
+        },
+        "friedliver.system.tools": {
+          "type": "object",
+          "scope": "machine",
+          "markdownDescription": "Turn single `system_*` tools on or off.",
+          "properties": {
+            "system_open": {
+              "type": "boolean",
+              "default": true,
+              "description": "Open apps, files and links"
+            },
+            "system_apps": {
+              "type": "boolean",
+              "default": true,
+              "description": "List apps and windows"
+            },
+            "system_focus": {
+              "type": "boolean",
+              "default": true,
+              "description": "Bring an app to the front"
+            },
+            "system_shortcut": {
+              "type": "boolean",
+              "default": true,
+              "description": "Run an Apple Shortcut (macOS)"
+            },
+            "system_clipboard_read": {
+              "type": "boolean",
+              "default": true,
+              "description": "Read the clipboard (asked every time)"
+            },
+            "system_clipboard_write": {
+              "type": "boolean",
+              "default": true,
+              "description": "Copy text to the clipboard"
+            },
+            "system_notify": {
+              "type": "boolean",
+              "default": true,
+              "description": "Show a notification"
+            },
+            "system_volume": {
+              "type": "boolean",
+              "default": true,
+              "description": "Read or change the volume"
+            },
+            "system_screenshot_window": {
+              "type": "boolean",
+              "default": true,
+              "description": "Screenshot a window (asked every time)"
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "system_open": true,
+            "system_apps": true,
+            "system_focus": true,
+            "system_shortcut": true,
+            "system_clipboard_read": true,
+            "system_clipboard_write": true,
+            "system_notify": true,
+            "system_volume": true,
+            "system_screenshot_window": true
+          }
         },
         "friedliver.inlineEdit.agent": {
           "type": "string",
@@ -905,6 +1095,7 @@
     "zod": "^4.6.7"
   },
   "enabledApiProposals": [
-    "browser"
+    "browser",
+    "externalUriOpener"
   ]
 }

@@ -4,6 +4,7 @@ import type { AgentRoster } from './accounts';
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import type { DictationUpdate } from './dictation';
 import type { OutsideImages } from './gallery';
+import { linkTarget } from './links';
 import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
 import { typeable } from './steps';
@@ -48,6 +49,10 @@ export type WebviewMessage =
   | { type: 'revealImage'; path: string }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
+  /** A web link you clicked: where it opens is the friedliver.links.openIn setting, the other way with Cmd/Ctrl. */
+  | { type: 'openLink'; url: string; modifier: boolean }
+  /** A step's input or output, or an agent's text, in an editor tab of its own (word-wrapped, see package.json). */
+  | { type: 'openText'; text: string }
   /** `choices` and `approval` (optional): the agent's model, effort and approval level for the task. */
   | { type: 'createTask'; agent: AgentKey; prompt: string; worktree: boolean; choices?: TaskChoices; approval?: ApprovalLevel }
   /** `item` (optional): a transcript item to scroll to, e.g. a subagent's tool call. */
@@ -56,6 +61,8 @@ export type WebviewMessage =
   | { type: 'removeWorktree'; chatId: string }
   | { type: 'moveToCenter' }
   | { type: 'openTasks' }
+  /** The Agent Manager on its Inbox: everything any agent waits on. */
+  | { type: 'openInbox' }
   // Connections between chats and agents.
   /** Continue this chat with another agent, in a new chat that starts from its transcript. */
   | { type: 'handoff'; chatId: string; agent: AgentKey }
@@ -90,6 +97,8 @@ export type WebviewMessage =
   | { type: 'permissionDiff'; requestId: string; path: string }
   /** Always allow a command from now on (after a confirmation), and allow this one. */
   | { type: 'allowAlways'; requestId?: string; commandId?: string; grant: Grant }
+  /** Stop a routine request's auto-allow countdown. */
+  | { type: 'stopAuto'; id: string }
   /** Manage Permissions: open it, revoke one remembered "Always allow", or all of them. */
   | { type: 'managePermissions' }
   | { type: 'revokePermission'; id: string }
@@ -145,7 +154,9 @@ export type HostMessage =
   /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
   | ({ type: 'dictation'; chatId: string } & DictationUpdate)
   /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
-  | { type: 'roster'; roster: AgentRoster };
+  | { type: 'roster'; roster: AgentRoster }
+  /** The Agent Manager turns to its Inbox (FriedLiver: Open Decision Inbox). */
+  | { type: 'showInbox' };
 
 /** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
 export interface ClaudeSession {
@@ -162,6 +173,8 @@ export interface ClaudeSession {
   subagents: ClaudeSubagent[];
   /** Idle for over a week: counted under Archived, not on the board. */
   archived?: boolean;
+  /** The FriedLiver chat that resumed it but never ran a turn: shown in this card only, and Open reuses it. */
+  chatId?: string;
 }
 
 /** What the transcripts say about one subagent; the view turns it into a state with the current time (see claudeSubagents). */
@@ -278,6 +291,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'ready':
     case 'moveToCenter':
     case 'openTasks':
+    case 'openInbox':
     case 'otherAgents':
     case 'dictationSettings':
       return { type: m.type };
@@ -310,11 +324,19 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return { type: m.type };
     case 'revokePermission':
       return str(m.id, 5000) && m.id ? { type: 'revokePermission', id: m.id } : null;
+    case 'stopAuto':
+      return id(m.id) ? { type: 'stopAuto', id: m.id } : null;
     case 'reviewAll':
       return id(m.chatId) && (m.action === 'accept' || m.action === 'reject') ? { type: 'reviewAll', chatId: m.chatId, action: m.action } : null;
     case 'unqueue':
     case 'steer':
       return id(m.chatId) && id(m.id) ? { type: m.type, chatId: m.chatId, id: m.id } : null;
+    case 'openLink': {
+      const t = typeof m.url === 'string' ? linkTarget(m.url) : null;
+      return t?.kind === 'web' ? { type: 'openLink', url: t.url, modifier: m.modifier === true } : null;
+    }
+    case 'openText':
+      return str(m.text, LIMITS.copy) && m.text ? { type: 'openText', text: m.text } : null;
     case 'copy':
     case 'insert':
       return str(m.text, LIMITS.copy) && m.text ? { type: m.type, text: m.text } : null;
