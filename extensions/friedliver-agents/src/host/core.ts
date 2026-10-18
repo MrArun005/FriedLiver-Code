@@ -180,7 +180,7 @@ export interface CoreOptions {
  * Where a request came from: the desktop, or a phone paired with FriedLiver Remote (by its name).
  * A phone's request that loosens review or keeps allowing waits for the user's OK on the Mac.
  */
-export type Via = 'desktop' | { device: string };
+export type Via = 'desktop' | { device: string; valid?(): boolean };
 
 /** Rewind to a message: its files, the conversation, or both. */
 export type RewindMode = 'both' | 'code' | 'conversation';
@@ -644,7 +644,7 @@ export class AgentCore {
       // From a phone: tightening goes ahead; loosening waits for the Mac; nothing becomes a default for new chats.
       if (level === (chat.approval ?? 'ask')) return;
       if (level === 'full' && !(await this.confirmFull(chat, via))) return;
-      if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chat.label} accept edits without asking?`, detail: `Edits in “${chat.title}” would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
+      if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chat.label} accept edits without asking?`, detail: `${chat.label}'s edits would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
       this.dispatch({ t: 'approval', chatId, level });
       await this.applyLevel(chatId, true);
       return;
@@ -1855,9 +1855,10 @@ export class AgentCore {
   }
 
   /** The user's OK on the Mac for a request from FriedLiver Remote; refused when the editor can't ask. */
-  private async confirmRemote(via: { device: string }, ask: { title: string; detail: string; button: string }): Promise<boolean> {
+  private async confirmRemote(via: { device: string; valid?(): boolean }, ask: { title: string; detail: string; button: string }): Promise<boolean> {
     const confirm = this.options.ui.confirmRemote;
-    return confirm ? (await confirm({ ...ask, title: `${ask.title} ${via.device} asks.` })) === true : false;
+    // A phone revoked while the question was up gets nothing from the answer.
+    return confirm ? (await confirm({ ...ask, title: `Phone “${via.device}” asks: ${ask.title}` })) === true && via.valid?.() !== false : false;
   }
 
   /** Accept all / Reject all: the edits waiting now (the editor decides its reviews) and the rest of this turn's. */

@@ -29,10 +29,14 @@ export function checkBindHost(host: string): void {
   if (!isPrivateLan(host) && !isTailscaleIp(host)) throw new Error(`FriedLiver Remote listens only on a private LAN or Tailscale address, not "${host}".`);
 }
 
-/** The private IPv4 addresses of this machine's network interfaces (not loopback, not Tailscale). */
+/** VPN tunnels, VM and container bridges, Apple's peer-to-peer links: not the Wi-Fi or Ethernet the phone is on. */
+const VIRTUAL = /^(utun|ipsec|ppp|tun|tap|bridge|vmnet|vboxnet|docker|br-|veth|awdl|llw|gif|stf|anpi|ap\d|vnic|virbr|zt|wg|tailscale)/i;
+
+/** The private IPv4 addresses of this machine's Wi-Fi and Ethernet interfaces (not loopback, VPNs, VM bridges or Tailscale). */
 export function lanAddresses(ifaces: Ifaces = os.networkInterfaces()): string[] {
   const out: string[] = [];
-  for (const list of Object.values(ifaces)) {
+  for (const [name, list] of Object.entries(ifaces)) {
+    if (VIRTUAL.test(name)) continue;
     for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal && isPrivateLan(i.address) && !out.includes(i.address)) out.push(i.address);
   }
   return out;

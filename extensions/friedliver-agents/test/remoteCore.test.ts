@@ -36,7 +36,7 @@ describe('Auto from the phone', () => {
     const chat = await c.createChat('demo');
     await c.setApproval(chat.id, 'full', PHONE);
     expect(c.chat(chat.id)!.approval).toBeUndefined();
-    expect(asked.remote).toEqual(['Run Demo in Auto? Arun’s iPhone asks.']);
+    expect(asked.remote).toEqual(['Phone “Arun’s iPhone” asks: Run Demo in Auto?']);
     expect(asked.desktopFull).toBe(0);
 
     await c.setApproval(chat.id, 'full');
@@ -78,7 +78,7 @@ describe('looser review from the phone', () => {
     const chat = await c.createChat('demo');
     let set = c.setApproval(chat.id, 'edits', PHONE);
     await waitFor(() => asked.length === 1);
-    expect(asked).toEqual(['Let Demo accept edits without asking? Arun’s iPhone asks.']);
+    expect(asked).toEqual(['Phone “Arun’s iPhone” asks: Let Demo accept edits without asking?']);
     expect(c.chat(chat.id)!.approval).toBeUndefined();
     answer(false);
     await set;
@@ -108,7 +108,7 @@ describe('"Always allow" from the phone', () => {
     await waitFor(() => !!open(c, chat.id));
     const p = open(c, chat.id)!;
     await c.allowAlways({ requestId: p.requestId }, { kind: 'exact', command: 'node --version' }, PHONE);
-    expect(asked.remote).toEqual(['Always allow node --version? Arun’s iPhone asks.']);
+    expect(asked.remote).toEqual(['Phone “Arun’s iPhone” asks: Always allow node --version?']);
     expect(asked.desktopRule).toBe(0);
     expect(permissions.commands()).toEqual([]);
     expect(open(c, chat.id)?.requestId).toBe(p.requestId);
@@ -127,7 +127,7 @@ describe('"Always allow" from the phone', () => {
     await c.allowAlways({ requestId: p.requestId }, { kind: 'folder', folder: elsewhere, access: 'write' }, PHONE);
     expect(asked.remote).toEqual([]);
     await c.allowAlways({ requestId: p.requestId }, { kind: 'folder', folder: dir, access: 'write' }, PHONE);
-    expect(asked.remote).toEqual([`Always allow changing files in ${dir}? Arun’s iPhone asks.`]);
+    expect(asked.remote).toEqual([`Phone “Arun’s iPhone” asks: Always allow changing files in ${dir}?`]);
     await turn;
     expect(permissions.list()).toMatchObject([{ grant: { kind: 'folder', folder: dir } }]);
   });

@@ -18,6 +18,9 @@ import { pairingHtml, type PanelState } from './panel';
 import { RemoteServer, type Endpoint } from './server';
 
 const CONFIRM_MS = 2 * 60_000;
+const PORT_KEY = 'friedliver.remote.port';
+/** How often the addresses are checked: a server on a network the Mac left stops. */
+const NETWORK_CHECK_MS = 15_000;
 
 export interface RemoteDeps {
   core: AgentCore;
@@ -43,11 +46,14 @@ export class RemoteControl implements vscode.Disposable {
   private tailscaleUrl?: string;
   private fp = '';
   private trustedTailscale = false;
-  private known = new Set<string>();
   private changedChats = new Set<string>();
   private changeTimer?: ReturnType<typeof setTimeout>;
   private expiryTimer?: ReturnType<typeof setTimeout>;
   private readonly subs: vscode.Disposable[] = [];
+  /** Desktop questions from phones still up; a revoke or a stop answers them no. */
+  private readonly pending = new Set<(ok: boolean) => void>();
+  private boundLan: string[] = [];
+  private networkTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -61,6 +67,7 @@ export class RemoteControl implements vscode.Disposable {
       agents: deps.agents,
       reviews: deps.reviews,
       confirm: (ask) => this.confirm(ask),
+      paired: (id) => this.devices.has(id),
       hidden: deps.hidden,
       error: (err) => deps.log(`Remote: ${err instanceof Error ? err.message : String(err)}`),
     });
@@ -100,13 +107,22 @@ export class RemoteControl implements vscode.Disposable {
 
   /** The user's OK on the Mac for a phone's request that keeps allowing: a notification, two minutes at most. */
   confirm(ask: { title: string; detail: string; button: string }): Promise<boolean> {
+    if (!this.server) return Promise.resolve(false);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(false), CONFIRM_MS);
-      void vscode.window.showWarningMessage(`${plainText(ask.title)} ${plainText(ask.detail)}`, ask.button, 'Deny').then((picked) => {
+      const done = (ok: boolean) => {
+        if (!this.pending.delete(done)) return;
         clearTimeout(timer);
-        resolve(picked === ask.button);
-      });
+        resolve(ok);
+      };
+      this.pending.add(done);
+      const timer = setTimeout(() => done(false), CONFIRM_MS);
+      void vscode.window.showWarningMessage(`${plainText(ask.title)} ${plainText(ask.detail)}`, ask.button, 'Deny').then((picked) => done(picked === ask.button));
     });
+  }
+
+  /** Every phone question still up on the Mac is answered no. */
+  private refusePending(): void {
+    for (const done of [...this.pending]) done(false);
   }
 
   // ---- Starting and stopping ----
@@ -171,7 +187,7 @@ export class RemoteControl implements vscode.Disposable {
             return r && { before: r.before, proposed: r.proposed };
           });
         },
-        act: (action, device) => this.actions.run(action, device.name),
+        act: (action, device) => this.actions.run(action, device),
       },
       assets: {
         js: readFileSync(path.join(dir, 'media', 'dist', 'remote.js'), 'utf8'),
@@ -188,6 +204,18 @@ export class RemoteControl implements vscode.Disposable {
           icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
         }),
       },
+      port: this.context.globalState.get<number>(PORT_KEY),
+      approvePairing: async (name, ip) =>
+        (await vscode.window.showWarningMessage(
+          `Pair “${plainText(name)}” with FriedLiver Remote?`,
+          { modal: true, detail: `A phone at ${ip} scanned the QR code. Allow it only if it is yours: it will be able to read your chats, send messages and answer approvals.` },
+          'Pair',
+        )) === 'Pair',
+      onSeen: (device) => {
+        void vscode.window.showInformationMessage(`${plainText(device.name)} is using FriedLiver Remote.`, 'Revoke').then((picked) => {
+          if (picked === 'Revoke') this.revoke(device.id);
+        });
+      },
       onPaired: (device) => {
         this.panelState = { ...this.panelState, code: undefined, expires: undefined, paired: device.name };
         this.refreshPanel();
@@ -197,12 +225,27 @@ export class RemoteControl implements vscode.Disposable {
     });
     this.server = server;
     const urls = server.urls();
+    void this.context.globalState.update(PORT_KEY, Number(new URL(urls[0]).port));
+    this.boundLan = lan;
+    clearInterval(this.networkTimer);
+    this.networkTimer = setInterval(() => this.checkNetwork(), NETWORK_CHECK_MS);
     this.lanUrl = lan.length ? urls[0] : undefined;
     this.tailscaleUrl = this.tailscale ? urls.at(-1) : undefined;
     this.panelState.via = this.lanUrl ? 'lan' : 'tailscale';
     this.deps.log(`Remote: listening on ${urls.join(', ')}`);
     this.connections([]);
     return server;
+  }
+
+  /** The Mac changed networks: the server stops rather than listen on an address that now means something else. */
+  private checkNetwork(): void {
+    const now = lanAddresses();
+    if (this.boundLan.every((a) => now.includes(a)) && now.every((a) => this.boundLan.includes(a))) return;
+    void this.stop().then(() =>
+      vscode.window.showInformationMessage('FriedLiver Remote stopped: this Mac’s network changed.', 'Start again').then((picked) => {
+        if (picked) void this.open();
+      }),
+    );
   }
 
   private async restart(): Promise<void> {
@@ -213,23 +256,17 @@ export class RemoteControl implements vscode.Disposable {
 
   private async stop(): Promise<void> {
     this.pairing.cancel();
+    this.refusePending();
+    clearInterval(this.networkTimer);
     clearTimeout(this.changeTimer);
     this.changeTimer = undefined;
     await this.server?.dispose();
     this.server = undefined;
-    this.known.clear();
     this.status.hide();
     this.panel?.dispose();
   }
 
   private connections(devices: Device[]): void {
-    for (const d of devices) {
-      if (this.known.has(d.id)) continue;
-      void vscode.window.showInformationMessage(`${plainText(d.name)} connected to FriedLiver Remote.`, 'Revoke').then((picked) => {
-        if (picked === 'Revoke') this.revoke(d.id);
-      });
-    }
-    this.known = new Set(devices.map((d) => d.id));
     const n = devices.length;
     this.status.text = `$(broadcast) Remote · ${n} device${n === 1 ? '' : 's'}`;
     this.status.tooltip = `FriedLiver Remote is on: ${[this.lanUrl, this.tailscaleUrl].filter(Boolean).join(', ')}. Click to pair a phone or revoke one.`;
@@ -238,6 +275,7 @@ export class RemoteControl implements vscode.Disposable {
   }
 
   private revoke(id: string): void {
+    this.refusePending();
     if (this.server) this.server.revoke(id);
     else this.devices.revoke(id);
     this.refreshPanel();
@@ -284,6 +322,7 @@ export class RemoteControl implements vscode.Disposable {
       case 'revokeAll':
         void vscode.window.showWarningMessage('Revoke every paired phone?', { modal: true }, 'Revoke all').then((picked) => {
           if (picked !== 'Revoke all') return;
+          this.refusePending();
           if (this.server) this.server.revokeAll();
           else this.devices.revokeAll();
           this.refreshPanel();

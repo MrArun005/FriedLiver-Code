@@ -721,6 +721,10 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.hint--warn {
+  color: var(--error);
+}
+
 .options {
   display: flex;
   flex-direction: column;
