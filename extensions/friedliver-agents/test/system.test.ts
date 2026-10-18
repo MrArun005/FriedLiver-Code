@@ -204,8 +204,8 @@ describe('platform routing', () => {
 
 describe('no injection: agent text never becomes code or an option', () => {
   it('macOS apps open by their bundle path from the installed list, as one argument', async () => {
-    // A file name can't hold '/', so those can't be installed apps.
-    const names = NASTY.filter((n) => !n.includes('/'));
+    // A file name can't hold '/' (nor, on Windows, <>:"|?*\\), so those can't be installed apps.
+    const names = NASTY.filter((n) => !(process.platform === 'win32' ? /[<>:"|?*\\/]/ : /\//).test(n));
     const dir = await appsDir('mac', ['Spotify', ...names]);
     const { sys, runs } = control('darwin', { appDirs: [dir] });
     for (const name of ['spotify', ...names]) {
@@ -293,45 +293,50 @@ describe('no injection: agent text never becomes code or an option', () => {
   });
 });
 
-describe('opening files and folders', () => {
+describe('opening files and folders (on this machine\'s own disk and platform)', () => {
+  const WIN = process.platform === 'win32';
+  const host: NodeJS.Platform = WIN ? 'win32' : 'darwin';
+
   async function home() {
     const h = await mkdtemp(path.join(os.tmpdir(), 'fl-home-'));
     await mkdir(path.join(h, '.ssh'));
     await writeFile(path.join(h, '.ssh', 'id_rsa.txt'), 'key');
     await mkdir(path.join(h, 'Docs'));
     await writeFile(path.join(h, 'Docs', 'report.pdf'), '%PDF');
-    for (const f of ['run.sh', 'x.command', 'noext', 'page.html', 'evil.webloc', 'script.js', 'macro.docm', 'a.terminal']) await writeFile(path.join(h, 'Docs', f), '');
+    for (const f of SCRIPTS) await writeFile(path.join(h, 'Docs', f), '');
     await mkdir(path.join(h, 'Docs', 'Fake.app', 'Contents'), { recursive: true });
     await mkdir(path.join(h, 'Docs', 'Sneaky', 'Contents'), { recursive: true });
     await writeFile(path.join(h, 'Docs', 'Sneaky', 'Contents', 'Info.plist'), '');
-    await symlink(path.join(h, '.ssh'), path.join(h, 'Docs', 'keys'));
+    await mkdir(path.join(h, 'Docs', 'Bin.{645FF040-5081-101B-9F08-00AA002F954E}'));
+    await symlink(path.join(h, '.ssh'), path.join(h, 'Docs', 'keys'), 'junction');
     return h;
   }
+  const SCRIPTS = ['run.sh', 'x.command', 'noext', 'page.html', 'evil.webloc', 'script.js', 'macro.docm', 'a.terminal', 'setup.exe', 'run.bat', 'go.ps1', 'link.lnk', 'site.url', 'a.vbs', 'b.hta', 'c.msi'];
 
   it('opens documents and folders by their real path', async () => {
     const h = await home();
-    const { sys, runs } = control('darwin', { home: h });
+    const { sys, runs } = control(host, { home: h });
     const p = await sys.prepare({ tool: 'system_open', path: path.join(h, 'Docs', 'report.pdf') });
     await p.run(signal);
     const real = await import('node:fs/promises').then((fs) => fs.realpath(path.join(h, 'Docs', 'report.pdf')));
     expect(p.target).toBe(`file:${real}`);
-    expect(runs.at(-1)).toEqual({ file: '/usr/bin/open', args: [real] });
+    if (WIN) expect(decodePs(runs.at(-1)!)).toEqual({ script: expect.stringContaining(PS.openPath), data: { path: real } });
+    else expect(runs.at(-1)).toEqual({ file: '/usr/bin/open', args: [real] });
     await (await sys.prepare({ tool: 'system_open', path: path.join(h, 'Docs') })).run(signal);
   });
 
-  it('refuses programs, scripts, app bundles, private folders (also through symlinks), relative and missing paths', async () => {
+  it('refuses programs, scripts, app bundles, private folders (also through links), relative and missing paths', async () => {
     const h = await home();
-    const { sys, runs } = control('darwin', { home: h });
+    const { sys, runs } = control(host, { home: h });
     const refused: [string, RegExp][] = [
-      ...['run.sh', 'x.command', 'noext', 'page.html', 'evil.webloc', 'script.js', 'macro.docm', 'a.terminal'].map((f): [string, RegExp] => [path.join(h, 'Docs', f), /documents, images, media and folders only/]),
+      ...SCRIPTS.map((f): [string, RegExp] => [path.join(h, 'Docs', f), /documents, images, media and folders only/]),
       [path.join(h, 'Docs', 'Fake.app'), /app or package/],
-      [path.join(h, 'Docs', 'Sneaky'), /app or package/],
+      [path.join(h, 'Docs', 'Bin.{645FF040-5081-101B-9F08-00AA002F954E}'), /app or package/],
       [path.join(h, '.ssh', 'id_rsa.txt'), /private or system place/],
       [path.join(h, 'Docs', 'keys', 'id_rsa.txt'), /private or system place/],
-      ['/etc/hosts', /private or system place/],
-      ['Docs/report.pdf', /absolute path/],
+      [WIN ? 'Docs\\report.pdf' : 'Docs/report.pdf', /absolute path/],
       [path.join(h, 'nope.pdf'), /no file or folder/],
-      ['//server/share/a.pdf', /Network paths/],
+      ...(WIN ? [] : ([[path.join(h, 'Docs', 'Sneaky'), /app or package/], ['/etc/hosts', /private or system place/], ['//server/share/a.pdf', /Network paths/]] as [string, RegExp][])),
     ];
     for (const [p, why] of refused) await expect(sys.prepare({ tool: 'system_open', path: p }), p).rejects.toThrow(why);
     expect(runs).toEqual([]);
@@ -469,5 +474,32 @@ describe('settings (friedliver.system.*)', () => {
     expect(fromWorkspace.fullAutoAllowed).toBe(false);
     const user = systemSettings((k) => ({ globalValue: k === 'enabled' ? false : k === 'fullAutoAllowed' ? true : { system_clipboard_read: false, system_open: 'yes' } }));
     expect(user).toMatchObject({ enabled: false, fullAutoAllowed: true, tools: { system_clipboard_read: false, system_open: true } });
+  });
+});
+
+/** CI's Windows runner (ci.yml sets FRIEDLIVER_SYSTEM_SMOKE): the real PowerShell, with harmless inputs. */
+describe.runIf(process.platform === 'win32' && !!process.env.FRIEDLIVER_SYSTEM_SMOKE)('the real PowerShell templates (Windows CI smoke)', () => {
+  const real = () => new SystemControl({ home: os.homedir(), shotsBase: os.tmpdir() });
+
+  it('every template parses', async () => {
+    const parse = String.raw`$errs = @()
+foreach ($s in $d.scripts) { $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([string]$s, [ref]$null, [ref]$e); $errs += @($e | ForEach-Object { $_.Message }) }
+ConvertTo-Json -Compress -InputObject @($errs)`;
+    const { spawnRunner } = await import('../src/host/system');
+    const r = await spawnRunner('win')(powershell(parse, { scripts: Object.values(PS) }), signal);
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual([]);
+  });
+
+  it('lists the processes that have windows', async () => {
+    const r = await real().running(signal);
+    expect(Array.isArray(r.apps) && Array.isArray(r.windows)).toBe(true);
+  });
+
+  it('round-trips text through the clipboard, quotes and all', async () => {
+    const sys = real();
+    const text = `FriedLiver smoke ${Date.now()} “quotes” 'single' $(x) \`tick\` ; 名前 🎵`;
+    await (await sys.prepare({ tool: 'system_clipboard_write', text })).run(signal);
+    expect(await (await sys.prepare({ tool: 'system_clipboard_read' })).run(signal)).toBe(text);
   });
 });
