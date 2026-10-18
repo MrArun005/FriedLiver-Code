@@ -48,6 +48,7 @@ import {
 } from '../shared/view';
 import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../shared/session';
 import { questionGroups } from '../shared/questions';
+import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
 import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
 import { Viewer } from './viewer';
@@ -330,6 +331,7 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
   const flat = groups.flatMap((g) => g.chats);
   const current = flat[Math.min(at, flat.length - 1)];
   const archived = state.chats.filter((c) => c.archived).length;
+  const waiting = useMemo(() => inbox(state).entries.length, [state]);
   useEffect(() => {
     if (current) document.getElementById(`${listId}-${current.id}`)?.scrollIntoView({ block: 'nearest' });
   }, [current?.id]);
@@ -434,6 +436,9 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
         {!flat.length && <div class="pop-empty">{query ? 'No chat matches.' : 'No open chats.'}</div>}
       </div>
       <div class="pop-foot">
+        <button class="ghost sm inbox-entry" data-waiting={waiting ? '' : undefined} title={`Everything any agent waits on (${IS_MAC ? '⇧⌘I' : 'Ctrl+Alt+Shift+I'})`} onClick={() => send({ type: 'openInbox' })}>
+          <Icon name="inbox" /> Inbox{waiting ? ` · ${waiting}` : ''}
+        </button>
         <button class="ghost sm" onClick={() => send({ type: 'openTasks' })}>
           <Icon name="tasks" /> Agent Manager
         </button>
