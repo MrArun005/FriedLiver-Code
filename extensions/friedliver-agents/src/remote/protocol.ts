@@ -63,10 +63,12 @@ export type PhoneItem =
       plan?: string;
       text?: string;
       url?: string;
+      /** The command can't be shown whole and plainly: allow it on the Mac. */
+      onMac?: boolean;
       /** "Always allow" choices: what the card offers, each confirmed on the Mac. */
       always: { grant: Grant; label: string }[];
     }
-  | { k: 'command'; id: string; line: string; cwd: string; state: string; outside: boolean; output: string; exitCode?: number | null; auto?: string }
+  | { k: 'command'; id: string; line: string; cwd: string; state: string; outside: boolean; output: string; exitCode?: number | null; auto?: string; onMac?: boolean }
   | { k: 'question'; id: string; message: string; fields: QuestionField[]; state: string; summary?: string }
   | { k: 'review'; id: string; file: PhoneFile; state: string; auto?: string }
   | { k: 'bridge'; id: string; title: string; text: string; state: string; always?: string }

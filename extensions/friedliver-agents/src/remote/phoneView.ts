@@ -7,6 +7,7 @@ import { AGENT_FACES, bridgeTitle, decisions, waitingItems, type AgentKey, type 
 import { describeGrant, type Grant } from '../shared/permissions';
 import { ESCALATING } from '../shared/tools';
 import { openChats, statusGroups, statusOf, subagents } from '../shared/view';
+import { DISGUISE, plainCommand } from './actions';
 import type { PhoneChat, PhoneItem, PhoneList, PhoneSummary } from './protocol';
 
 const MAX_ITEMS = 120;
@@ -20,6 +21,9 @@ function alwaysLabel(grant: Grant, rel: (p: string) => string): string {
   if (grant.kind === 'site') return `Always allow ${grant.origin}`;
   return `Always allow: ${describeGrant(grant).what}`;
 }
+
+/** Control, bidi and zero-width characters spelled out, so a command reads as it runs. */
+const visible = (s: string) => s.replace(new RegExp(DISGUISE.source, 'gu'), (c) => `⟨U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}⟩`);
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 const tail = (s: string, max: number) => (s.length > max ? `…${s.slice(-(max - 1))}` : s);
@@ -102,7 +106,7 @@ function phoneItem(
     case 'permission': {
       const d = i.detail;
       const always = [
-        ...(d?.command && !i.answer ? [{ grant: { kind: 'exact' as const, command: d.command.line }, label: `Always allow ${clip(d.command.line, 60)}` }] : []),
+        ...(d?.command && !i.answer && plainCommand(d.command.line) ? [{ grant: { kind: 'exact' as const, command: d.command.line }, label: `Always allow ${clip(d.command.line, 60)}` }] : []),
         ...(!i.answer ? (d?.always ?? []).map((grant) => ({ grant, label: alwaysLabel(grant, rel) })) : []),
       ];
       return {
@@ -112,7 +116,7 @@ function phoneItem(
         options: i.options.map((o) => ({ id: o.optionId, name: o.name, kind: o.kind, escalates: o.kind === 'allow_always' || ESCALATING.test(o.name) })),
         ...(i.answer ? { answer: i.answer } : {}),
         ...(i.auto ? { auto: i.auto } : {}),
-        ...(d?.command ? { command: { line: clip(d.command.line, 4000), ...(d.command.cwd ? { cwd: rel(d.command.cwd) } : {}) } } : {}),
+        ...(d?.command ? { command: { line: clip(visible(d.command.line), 4000), ...(d.command.cwd ? { cwd: rel(d.command.cwd) } : {}) }, ...(plainCommand(d.command.line) ? {} : { onMac: true }) } : {}),
         ...(d?.files?.length
           ? { files: d.files.map((f) => ({ path: rel(f.path), added: f.added, removed: f.removed, isNew: f.isNew, lines: f.lines.slice(0, MAX_LINES), more: f.more + Math.max(0, f.lines.length - MAX_LINES) })) }
           : {}),
@@ -126,7 +130,8 @@ function phoneItem(
       return {
         k: 'command',
         id: i.commandId,
-        line: clip(i.commandLine, 4000),
+        line: clip(visible(i.commandLine), 4000),
+        ...(plainCommand(i.commandLine) ? {} : { onMac: true }),
         cwd: rel(i.cwd),
         state: i.state,
         outside: i.outside,

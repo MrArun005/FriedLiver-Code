@@ -381,8 +381,9 @@ function ItemView({ item, act }: { item: PhoneItem; act: Act }) {
             </div>
           ) : null}
           {item.text && !item.plan ? <p class="card__text">{item.text}</p> : null}
+          {item.onMac ? <p class="hint hint--warn">This command is too long or has hidden characters. Allow it on your Mac; you can still say no here.</p> : null}
           <div class="options">
-            {item.options.map((o, i) => (
+            {item.options.filter((o) => !item.onMac || !o.kind.startsWith('allow')).map((o, i) => (
               <button
                 key={o.id}
                 class={`option${o === primary ? ' option--primary' : ''}${o.escalates ? ' option--escalates' : ''}`}
@@ -414,15 +415,18 @@ function ItemView({ item, act }: { item: PhoneItem; act: Act }) {
         <Card title={item.outside ? 'Run a command outside the workspace' : 'Run a command'}>
           <pre class="code">{item.line}</pre>
           <p class="hint">in {item.cwd}</p>
+          {item.onMac ? <p class="hint hint--warn">This command is too long or has hidden characters. Run it from your Mac; you can still deny it here.</p> : null}
           <Buttons>
-            <button class="btn btn--primary" onClick={() => void act({ type: 'command', commandId: item.id, approve: true })}>
-              Run
-            </button>
+            {item.onMac ? null : (
+              <button class="btn btn--primary" onClick={() => void act({ type: 'command', commandId: item.id, approve: true })}>
+                Run
+              </button>
+            )}
             <button class="btn" onClick={() => void act({ type: 'command', commandId: item.id, approve: false })}>
               Deny
             </button>
           </Buttons>
-          {item.outside ? null : <Always choices={[{ grant: { kind: 'exact', command: item.line }, label: 'Always allow this exact command' }]} act={act} target={{ commandId: item.id }} />}
+          {item.outside || item.onMac ? null : <Always choices={[{ grant: { kind: 'exact', command: item.line }, label: 'Always allow this exact command' }]} act={act} target={{ commandId: item.id }} />}
         </Card>
       );
     }

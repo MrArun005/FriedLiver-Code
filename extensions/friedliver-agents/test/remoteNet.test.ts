@@ -18,6 +18,21 @@ describe('addresses FriedLiver Remote binds to', () => {
     expect(lanAddresses(ifaces)).toEqual(['192.168.1.23', '10.0.4.7']);
   });
 
+  it('leave out VPNs, VM and container bridges, and other virtual interfaces', () => {
+    const ifaces = {
+      en0: [v4('192.168.1.23')],
+      utun3: [v4('10.8.0.2')],
+      bridge100: [v4('192.168.64.1')],
+      vmnet8: [v4('172.16.10.1')],
+      vboxnet0: [v4('192.168.56.1')],
+      docker0: [v4('172.17.0.1')],
+      'br-1a2b': [v4('172.18.0.1')],
+      ppp0: [v4('10.1.1.1')],
+      ipsec0: [v4('10.2.2.2')],
+    };
+    expect(lanAddresses(ifaces)).toEqual(['192.168.1.23']);
+  });
+
   it('never include the wildcard, loopback or public addresses', () => {
     for (const bad of ['0.0.0.0', '::', '', '127.0.0.1', '8.8.8.8', '::1', '192.168.1.1 ', 'localhost', '100.64.0.1x', '0', '172.32.0.1']) {
       expect(() => checkBindHost(bad), bad).toThrow();

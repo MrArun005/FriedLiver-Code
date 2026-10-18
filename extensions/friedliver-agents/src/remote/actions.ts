@@ -4,7 +4,7 @@
 // waits for the user's OK on the Mac first.
 import type { AgentCore } from '../host/core';
 import { waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
-import { ESCALATING } from '../shared/tools';
+import { primaryOption } from '../shared/tools';
 import { phoneChats } from './phoneView';
 import type { RemoteAction } from './protocol';
 
@@ -16,6 +16,8 @@ export interface RemoteActionsDeps {
   reviews: { accept(reviewId: string): boolean; reject(reviewId: string): boolean };
   /** The user's OK on the Mac, for anything that keeps allowing. */
   confirm(ask: { title: string; detail: string; button: string }): Promise<boolean>;
+  /** Whether the device is still paired: an OK on the Mac that arrives after a revoke does nothing. */
+  paired?(deviceId: string): boolean;
   /** Chats the phone must not see (an inline edit's). */
   hidden?(chatId: string): boolean;
   error?(err: unknown): void;
@@ -24,6 +26,14 @@ export interface RemoteActionsDeps {
 export type ActionResult = { ok: true; chatId?: string } | { ok: false; error: string };
 
 const idOf = (i: Item) => (i.kind === 'permission' || i.kind === 'question' || i.kind === 'bridge' ? i.requestId : i.kind === 'command' ? i.commandId : i.kind === 'review' ? i.reviewId : undefined);
+/** Longest command the phone shows whole; anything longer is approved on the Mac. */
+export const MAX_PHONE_COMMAND = 4000;
+/** Characters that could make a command read differently from what runs: controls (but tab and newline), bidi and zero-width. */
+export const DISGUISE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/** The phone shows this command whole and as it runs, so approving it there is informed. */
+export const plainCommand = (line: string) => line.length <= MAX_PHONE_COMMAND && !DISGUISE.test(line);
+const ON_MAC = 'Approve this one on your Mac: the phone can’t show the whole command plainly.';
+
 const refused = (error: string): ActionResult => ({ ok: false, error });
 
 export class RemoteActions {
@@ -46,11 +56,13 @@ export class RemoteActions {
     return undefined;
   }
 
-  /** `device`: the paired phone's name, shown on the Mac when it asks for an OK. */
-  async run(a: RemoteAction, device: string): Promise<ActionResult> {
+  /** `device`: the paired phone, named on the Mac when it asks for an OK. */
+  async run(a: RemoteAction, device: { id: string; name: string }): Promise<ActionResult> {
     const { core } = this.deps;
-    const via = { device };
-    const confirm = (ask: { title: string; detail: string; button: string }) => this.deps.confirm({ ...ask, title: `${ask.title} ${device} asks.` });
+    const stillPaired = () => this.deps.paired?.(device.id) ?? true;
+    const via = { device: device.name, valid: stillPaired };
+    const confirm = async (ask: { title: string; detail: string; button: string }) =>
+      (await this.deps.confirm({ ...ask, title: `Phone “${device.name}” asks: ${ask.title}` })) && stillPaired();
     switch (a.type) {
       case 'send': {
         if (!this.chat(a.chatId)) return refused('No such chat.');
@@ -66,7 +78,11 @@ export class RemoteActions {
         if (!found) return refused('That request is no longer waiting.');
         const option = a.optionId === null ? undefined : found.item.options.find((o) => o.optionId === a.optionId);
         if (a.optionId !== null && !option) return refused('The agent did not offer that answer.');
-        if (option && option.kind.startsWith('allow') && (option.kind === 'allow_always' || ESCALATING.test(option.name))) {
+        const allows = option?.kind.startsWith('allow');
+        const line = found.item.detail?.command?.line;
+        if (allows && line !== undefined && !plainCommand(line)) return refused(ON_MAC);
+        // Only the plain one-time yes goes ahead: every other allow keeps allowing or changes how the agent asks.
+        if (option && allows && option !== primaryOption(found.item.options)) {
           const ok = await confirm({
             title: `Answer “${option.name}” for ${found.chat.label}?`,
             detail: `${found.item.title}. This answer keeps allowing, or changes how ${found.chat.label} asks from now on.`,
@@ -77,10 +93,13 @@ export class RemoteActions {
         core.answerPermission(a.requestId, a.optionId);
         return { ok: true };
       }
-      case 'command':
-        if (!this.waiting('command', a.commandId)) return refused('That command is no longer waiting.');
+      case 'command': {
+        const found = this.waiting('command', a.commandId);
+        if (!found) return refused('That command is no longer waiting.');
+        if (a.approve && !plainCommand(found.item.commandLine)) return refused(ON_MAC);
         core.decideCommand(a.commandId, a.approve);
         return { ok: true };
+      }
       case 'answerQuestion':
         if (!this.waiting('question', a.requestId)) return refused('That question is no longer waiting.');
         core.answerQuestion(a.requestId, a.action, a.values);
@@ -93,9 +112,13 @@ export class RemoteActions {
       case 'bridge': {
         const found = this.waiting('bridge', a.requestId);
         if (!found) return refused('That request is no longer waiting.');
-        if (a.answer === 'allowAlways') {
-          if (!found.item.always) return refused('Always allow is not offered here.');
-          const ok = await confirm({ title: `Always allow ${found.item.always}?`, detail: `${found.chat.label}'s request, and the same again later, without asking.`, button: 'Always allow' });
+        if (a.answer === 'allowAlways' && !found.item.always) return refused('Always allow is not offered here.');
+        if (a.answer === 'allowAlways' || a.answer === 'allowChat') {
+          const ok = await confirm(
+            a.answer === 'allowAlways'
+              ? { title: `Always allow ${found.item.always}?`, detail: `${found.chat.label}'s request, and the same again later, without asking.`, button: 'Always allow' }
+              : { title: `Allow ${found.chat.label} this for the rest of the chat?`, detail: 'Requests like this one in that chat would go ahead without asking.', button: 'Allow for this chat' },
+          );
           if (!ok) return refused('Not confirmed on the Mac.');
         }
         core.answerBridge(a.requestId, a.answer);
@@ -103,7 +126,10 @@ export class RemoteActions {
       }
       case 'allowAlways': {
         const id = a.requestId ?? a.commandId!;
-        if (!(a.requestId ? this.waiting('permission', id) : this.waiting('command', id))) return refused('That request is no longer waiting.');
+        const found = a.requestId ? this.waiting('permission', id) : this.waiting('command', id);
+        if (!found) return refused('That request is no longer waiting.');
+        const line = found.item.kind === 'command' ? found.item.commandLine : found.item.kind === 'permission' ? found.item.detail?.command?.line : undefined;
+        if (line !== undefined && !plainCommand(line)) return refused(ON_MAC);
         await core.allowAlways(a.requestId ? { requestId: a.requestId } : { commandId: a.commandId! }, a.grant, via);
         return { ok: true };
       }
