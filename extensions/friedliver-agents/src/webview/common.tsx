@@ -7,6 +7,7 @@ import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
+import { discussLayouts, type DiscussLayout } from '../shared/discussView';
 import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
 import { TAB_MIN, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
@@ -57,6 +58,13 @@ export function useRoster(): AgentRoster {
     return () => void rosterWatchers.delete(wake);
   }, []);
   return roster;
+}
+
+/** friedliver.discuss.layout, drawing the card again when it changes. */
+export function useDiscussLayout(): DiscussLayout {
+  const [, setN] = useState(0);
+  useEffect(() => discussLayouts.watch(() => setN((n) => n + 1)), []);
+  return discussLayouts.get();
 }
 
 /** A small mark for an agent's last known sign-in; nothing while it was never checked. */
@@ -166,6 +174,9 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
         setState(keyItems(undefined, m.state));
         setSelected(m.selected);
         if (m.roster) setRoster(m.roster);
+        if (m.discussLayout) discussLayouts.set(m.discussLayout);
+      } else if (m.type === 'discussLayout') {
+        discussLayouts.set(m.layout);
       } else if (m.type === 'roster') {
         setRoster(m.roster);
       } else if (m.type === 'action') {

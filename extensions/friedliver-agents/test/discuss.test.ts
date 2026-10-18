@@ -214,7 +214,7 @@ describe('/discuss: the orchestrator', () => {
     ]);
   });
 
-  it('a message during the discussion is heard from the next turn on, and shows in the transcript', async () => {
+  it('a point added while it runs waits for the round to end, then everyone hears it from the next round', async () => {
     let release!: () => void;
     const h = fakeHost(
       { claude: [async () => (await new Promise<void>((r) => (release = r)), `P${stance('Postgres', ['x'])}`), `P2${stance('Postgres', ['x'])}`, CONCLUSION], gemini: [`M${stance('MySQL', ['y'])}`] },
@@ -223,12 +223,37 @@ describe('/discuss: the orchestrator', () => {
     const done = h.discussions.start('chat-1', ['gemini'], 'q');
     await waitFor(() => !!release);
     expect(h.discussions.runningIn('chat-1')).toBeDefined();
-    h.discussions.interject('chat-1', 'We already run MySQL in prod.');
+    h.discussions.addPoint(h.d().id, 'We already run MySQL in prod.');
+    expect(h.d().points).toEqual(['We already run MySQL in prod.']);
     release();
     await done;
-    expect(h.d().turns[0]).toMatchObject({ by: 'you', text: 'We already run MySQL in prod.' });
-    expect(h.asked[1].prompt).toContain('The user (between turns):\nWe already run MySQL in prod.');
+    // Gemini, still in round 1, didn't hear it; Claude, opening round 2, did.
+    expect(h.asked[1].prompt).not.toContain('We already run MySQL in prod.');
+    expect(h.asked[2].prompt).toContain('The user (between turns):\nWe already run MySQL in prod.');
+    expect(h.d().turns.map((t) => [t.by, t.round])).toEqual([['claude', 1], ['gemini', 1], ['you', 2], ['claude', 2], ['gemini', 2]]);
+    expect(h.d().points).toBeUndefined();
     expect(h.discussions.runningIn('chat-1')).toBeUndefined();
+  });
+
+  it('a point added in the last round goes to the summing up', async () => {
+    let release!: () => void;
+    const h = fakeHost({ claude: [async () => (await new Promise<void>((r) => (release = r)), `P${stance('Postgres', ['x'])}`), CONCLUSION], gemini: [`M${stance('MySQL', ['y'])}`] }, { maxRounds: 1 });
+    const done = h.discussions.start('chat-1', ['gemini'], 'q');
+    await waitFor(() => !!release);
+    h.discussions.interject('chat-1', 'Budget matters.');
+    release();
+    await done;
+    expect(h.asked.at(-1)!.prompt).toContain('Budget matters.');
+    expect(h.d().turns.at(-1)).toMatchObject({ by: 'you', round: 2, text: 'Budget matters.' });
+  });
+
+  it('asks for the side, whose point it answers, and later names the sides so far; the summary asks for round trends', async () => {
+    const h = fakeHost({ claude: [`P${stance('Postgres', ['x'])}`.replace('"position"', '"side":"Postgres","position"'), `P2${stance('Postgres', ['x'])}`, CONCLUSION], gemini: [`M${stance('MySQL', ['y'])}`] }, { maxRounds: 2 });
+    await h.discussions.start('chat-1', ['gemini'], 'Postgres or MySQL?');
+    expect(h.asked[0].prompt).toMatch(/"side": .*"replyTo": .*"quote"/);
+    expect(h.asked[1].prompt).toContain('Positions named so far: "Postgres"');
+    expect(h.asked.at(-1)!.prompt).toContain('"rounds": [{"round": 1, "trend": "converging|diverging|stuck"');
+    expect(h.d().turns[0].stance?.side).toBe('Postgres');
   });
 
   it("each prompt carries only what the agent hasn't heard, and asks for a stance block", async () => {
