@@ -459,6 +459,9 @@ async function spacing(page, width, P, box, css) {
   row(name, 'transcript bottom', 40, px(await css('.transcript', 'padding-bottom')));
   row(name, 'title lines up with the transcript', 0, (await box('.chat-head-title')).left + 6 - (tr.left + gutter));
   row(name, 'user message padding', '4px 6px', await css('.user-msg .bubble', 'padding'));
+  // Owner, 2026-10-17: the box spans the transcript like Claude Code's prompt box, however short the message.
+  row(name, 'user message box = transcript content width', tr.width - 2 * gutter, (await box('.user-msg .bubble')).width);
+  row(name, 'user message box starts at the gutter', 0, (await box('.user-msg .bubble')).left - (tr.left + gutter));
   row(name, 'user message margin (4px 0; the first one 0 on top)', 4, px(await css('.user-msg', 'padding-bottom')));
   const rows = await page.evaluate(() => [...document.querySelectorAll('.transcript > .tl')].slice(0, 2).map((e) => e.getBoundingClientRect().top));
   row(name, 'timeline pitch (6.png: 36)', 36, rows[1] - rows[0]);

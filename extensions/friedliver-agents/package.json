@@ -36,6 +36,30 @@
     "test:integration": "node esbuild.mjs && node dist/test/run.js"
   },
   "contributes": {
+    "languages": [
+      {
+        "id": "friedliver-output",
+        "aliases": [
+          "Agent output"
+        ]
+      }
+    ],
+    "externalUriOpeners": [
+      {
+        "id": "friedliver.browser",
+        "label": "FriedLiver browser",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
+    "configurationDefaults": {
+      "[friedliver-output]": {
+        "editor.wordWrap": "on",
+        "editor.wrappingIndent": "same"
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -78,6 +102,16 @@
       ]
     },
     "commands": [
+      {
+        "command": "friedliver.links.useBuiltin",
+        "title": "Open Links in FriedLiver Browser",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.links.useExternal",
+        "title": "Open Links in System Browser",
+        "category": "FriedLiver"
+      },
       {
         "command": "friedliver.showVersion",
         "title": "Show Version",
@@ -332,6 +366,16 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "friedliver.links.useExternal",
+          "when": "activeEditor == 'workbench.editor.browser' && config.friedliver.links.openIn != 'external'",
+          "group": "friedliver.links"
+        },
+        {
+          "command": "friedliver.links.useBuiltin",
+          "when": "activeEditor == 'workbench.editor.browser' && config.friedliver.links.openIn == 'external'",
+          "group": "friedliver.links"
+        },
         {
           "command": "friedliver.review.accept",
           "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
@@ -646,6 +690,24 @@
           ],
           "description": "Arguments for the Gemini program."
         },
+        "friedliver.links.openIn": {
+          "scope": "application",
+          "type": "string",
+          "enum": [
+            "builtin",
+            "external"
+          ],
+          "enumItemLabels": [
+            "FriedLiver browser",
+            "System browser"
+          ],
+          "enumDescriptions": [
+            "Web links you click open in a tab of FriedLiver's browser, on the right. Hold Cmd/Ctrl in a chat to use the system browser.",
+            "Web links open in your system browser. Hold Cmd/Ctrl in a chat to use FriedLiver's browser."
+          ],
+          "default": "builtin",
+          "markdownDescription": "Where web links you click open: in a chat, the Agent Manager and Images, and (through the editor's link openers) in Markdown previews, hovers, the editor and the terminal. Per-site choices you made in `#workbench.externalUriOpeners#` still win."
+        },
         "friedliver.showDemoAgent": {
           "scope": "machine",
           "type": "boolean",
@@ -905,6 +967,7 @@
     "zod": "^4.6.7"
   },
   "enabledApiProposals": [
-    "browser"
+    "browser",
+    "externalUriOpener"
   ]
 }

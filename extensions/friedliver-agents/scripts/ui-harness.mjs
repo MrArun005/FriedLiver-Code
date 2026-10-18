@@ -349,7 +349,7 @@ async function shoot() {
     const p = await open('surface=accounts&focus=gemini', 900, 700);
     await p.waitForTimeout(50);
     check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
-    check((await p.locator('.acct-card').count()) === 4, 'a card per agent, Demo included when shown');
+    check((await p.locator('.acct-card:not(.acct-links)').count()) === 4, 'a card per agent, Demo included when shown');
     const codex = p.locator('#card-codex');
     check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
     await codex.locator('button:has-text("ChatGPT")').click();
@@ -676,7 +676,8 @@ async function shoot() {
     const box = await p.locator('.step-image img').first().boundingBox();
     check(!!box && box.width <= 240 && box.height <= 160, 'thumbnails fit 240×160');
     await p.locator('.step-image .image-thumb').nth(1).click();
-    check((await posted(p)).some((m) => m.type === 'openImage' && m.path.endsWith('docs/login-page_mockup.png')), 'a thumbnail opens the image preview');
+    check((await p.locator('.viewer .preview-title').innerText()) === 'Login page mockup', 'a thumbnail opens the image viewer on it');
+    await p.keyboard.press('Escape');
     check((await p.locator('.images-pill').innerText()).includes('Images · 2'), 'the header counts the chat’s images');
     await p.screenshot({ path: path.join(opts.out, 'chat-images.png'), animations: 'disabled', caret: 'hide' });
     await p.click('.images-pill');
@@ -1221,7 +1222,8 @@ async function shoot() {
     await row('cat << EOF | python3 minidb.py').locator('.step-main').click();
     const opened = p.locator('.tl-step[data-open]:has(.step-text:text("cat << EOF | python3 minidb.py"))');
     check((await opened.locator('.step-command pre.code').innerText()) === COMMANDS.users, 'the command shows in full with every line');
-    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre', 'the command never wraps');
+    // Owner, 2026-10-17: long lines wrap in IN/OUT (its own lines stay lines); the whole command opens wrapped in an editor tab.
+    check((await opened.locator('.step-command pre.code').evaluate((el) => window.getComputedStyle(el).whiteSpace)) === 'pre-wrap', 'a long command line wraps, keeping its own lines');
     check(await opened.locator('.step-output pre.code.capped').count() === 1, 'long output starts capped');
     await opened.locator('.step-output button:has-text("Show all")').click();
     check(await opened.locator('.step-output pre.code.capped').count() === 0, 'Show all opens the whole output');
@@ -1386,7 +1388,7 @@ async function imagesChecks({ open, check, posted }) {
     await p.waitForSelector('.gallery-preview .preview-img');
     await p.waitForFunction(() => document.querySelector('.preview-img')?.complete);
     const title = await p.locator('.preview-title').innerText();
-    check(title === mine[1].title && (await p.locator('.preview-meta').innerText()).includes(`2 of ${mine.length}`), `${width}: a card opens the large preview (${title})`);
+    check(title === mine[1].title && (await p.locator('.viewer-count').innerText()).replace(/\s+/g, ' ') === `2 / ${mine.length}`, `${width}: a card opens the large preview (${title})`);
     const fit = await p.evaluate(() => {
       const img = document.querySelector('.preview-img').getBoundingClientRect();
       const stage = document.querySelector('.preview-stage').getBoundingClientRect();

@@ -2,7 +2,7 @@
 // connection between chats (hand-offs, consultations, pipes, fan-outs, files
 // two chats both changed) as an edge, so you can see how the agents are joined.
 import type { ComponentChildren } from 'preact';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
 import type { ClaudeSession } from '../shared/messages';
 import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
@@ -20,6 +20,17 @@ export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state
   const [tip, setTip] = useState<string | null>(null);
   // A subagent you clicked: highlighted with its chat, its details beside the map. Never a jump to some chat.
   const [sel, setSel] = useState<string | null>(null);
+  // The node that opened the detail panel, for focus to go back to when it closes.
+  const opener = useRef<Element | null>(null);
+  const pickSub = useCallback((id: string | null, from?: Element) => {
+    if (id && from) opener.current = from;
+    setSel(id);
+  }, []);
+  const closeSub = useCallback(() => {
+    setSel(null);
+    const back = opener.current;
+    requestAnimationFrame(() => (back as HTMLElement | SVGElement | null)?.isConnected && (back as HTMLElement).focus({ preventScroll: true }));
+  }, []);
   const waiting = decisions({ chats: state.chats.filter((c) => !c.archived) }).length;
   if (!map.nodes.length && !map.outside.length) return null;
   const selSub = map.subs.find((n) => n.id === sel);
@@ -34,11 +45,11 @@ export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state
       <div class="map-body">
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
-          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={setSel} onFocus={onFocus} toggleDone={toggleDone} />
+          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={pickSub} onFocus={onFocus} toggleDone={toggleDone} />
           {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} />}
         </div>
       </div>
-      {selSub && <SubDetail sub={selSub} state={state} outside={outside} now={now} onClose={() => setSel(null)} />}
+      {selSub && <SubDetail sub={selSub} state={state} outside={outside} now={now} onClose={closeSub} />}
       </div>
     </div>
   );
@@ -54,7 +65,8 @@ interface CanvasProps {
   /** The subagent selected for the detail panel. */
   sel: string | null;
   setTip(id: string | null): void;
-  setSel(id: string | null): void;
+  /** `from`: the node clicked, for focus to go back to. */
+  setSel(id: string | null, from?: Element): void;
   onFocus(id: string): void;
   /** Shows or folds a chat's done subagents. */
   toggleDone(parent: string): void;
@@ -172,7 +184,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                     class={`map-node map-sub map-fold ${lit && !lit.has(n.id) ? 'dim' : ''}`}
                     data-status="done"
                     transform={`translate(${n.x} ${n.y})`}
-                    tabIndex={0}
+                    tabindex={0}
                     role="button"
                     aria-expanded={n.title.endsWith('hide')}
                     aria-label={`${n.count} done subagents: ${n.title.endsWith('hide') ? 'hide' : 'show'}`}
@@ -192,7 +204,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                   </g>
                 );
               }
-              const pick = () => setSel(sel === n.id ? null : n.id);
+              const pick = (e: Event) => setSel(sel === n.id ? null : n.id, e.currentTarget as Element);
               return (
                 <g
                   key={n.id}
@@ -201,7 +213,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                   data-agent={n.agent}
                   data-selected={sel === n.id ? '' : undefined}
                   transform={`translate(${n.x} ${n.y})`}
-                  tabIndex={0}
+                  tabindex={0}
                   role="button"
                   aria-pressed={sel === n.id}
                   aria-label={`Subagent: ${n.title}`}
@@ -209,7 +221,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      pick();
+                      pick(e);
                     }
                   }}
                 >
@@ -232,7 +244,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 key={f.file}
                 class="map-file"
                 transform={`translate(${f.x} ${f.y})`}
-                tabIndex={-1}
+                tabindex={-1}
                 aria-label={`${f.file}, changed in ${f.chats.map((id) => chats.find((c) => c.id === id)?.label).join(' and ')}`}
               >
                 <title>{f.file}</title>
@@ -319,7 +331,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       data-agent={chat.agent}
       data-nav={chat.id}
       transform={`translate(${node.x} ${node.y})`}
-      tabIndex={tabbable ? 0 : -1}
+      tabindex={tabbable ? 0 : -1}
       role="button"
       aria-label={`${chat.label}: ${chat.title}. ${DOT_LABEL[status] ?? status}`}
       onClick={open}
@@ -423,8 +435,45 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
   const answer = call && subagentAnswer(call);
   const state_ = info?.state ?? sub.state;
   const ms = info?.ms ?? (info?.startedAt !== undefined ? Math.max(0, now - info.startedAt) : undefined);
+  const box = useRef<HTMLDivElement>(null);
+  // Opened: focus moves in without scrolling the page; Esc closes.
+  useEffect(() => {
+    box.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+  // Narrow, it is a bottom sheet: dragging its handle down closes it.
+  const [drag, setDrag] = useState(0);
+  const from = useRef<number | null>(null);
   return (
-    <aside class="map-detail" aria-label={`Subagent: ${info?.title ?? sub.title}`}>
+    <div
+      class="map-detail"
+      ref={box}
+      tabIndex={-1}
+      role="dialog"
+      aria-label={`Subagent: ${info?.title ?? sub.title}`}
+      style={drag > 0 ? { transform: `translateY(${drag}px)` } : undefined}
+    >
+      <div
+        class="sheet-handle"
+        aria-hidden="true"
+        onPointerDown={(e) => {
+          from.current = e.clientY;
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => from.current !== null && setDrag(Math.max(0, e.clientY - from.current))}
+        onPointerUp={() => {
+          from.current = null;
+          if (drag > SHEET_CLOSE_PX) onClose();
+          else setDrag(0);
+        }}
+      />
       <div class="tip-head">
         <Dot state={state_ === 'failed' ? 'error' : state_ === 'quiet' ? 'idle' : state_} />
         <b>Subagent</b>
@@ -454,9 +503,12 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
           Show in its chat
         </button>
       )}
-    </aside>
+    </div>
   );
 }
+
+/** How far the bottom sheet is dragged down before it closes. */
+const SHEET_CLOSE_PX = 80;
 
 /** `still`: nothing on the map is live, so the "Live" sample doesn't move either; a moving dash repaints every frame. Its Working dot pulses while a chat works. */
 function Legend({ still, working }: { still: boolean; working: boolean }) {

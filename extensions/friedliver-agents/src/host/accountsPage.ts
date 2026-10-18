@@ -44,7 +44,10 @@ export class AccountsPage implements vscode.Disposable {
     private readonly showDemo: () => boolean,
     private readonly log: (line: string) => void,
   ) {
-    this.disposables.push(accounts.onDidUpdate(() => this.refresh()));
+    this.disposables.push(
+      accounts.onDidUpdate(() => this.refresh()),
+      vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('friedliver.links.openIn') && this.refresh()),
+    );
   }
 
   /** Opens the page, or brings it forward, on the agent's card when given. */
@@ -107,7 +110,8 @@ export class AccountsPage implements vscode.Disposable {
       const active = activeMethod(card);
       return active ? { ...card, active } : card;
     });
-    return { cards, showDemo, ...(this.focus ? { focus: this.focus } : {}) };
+    const links = vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin';
+    return { cards, showDemo, links, ...(this.focus ? { focus: this.focus } : {}) };
   }
 
   private keyViews(agent: Exclude<AgentKey, 'demo'>): KeyView[] {
@@ -135,6 +139,9 @@ export class AccountsPage implements vscode.Disposable {
       case 'ready':
         this.ready = true;
         this.refresh();
+        return;
+      case 'setLinks':
+        await vscode.workspace.getConfiguration('friedliver.links').update('openIn', m.mode, vscode.ConfigurationTarget.Global);
         return;
       case 'openSettings':
         await vscode.commands.executeCommand('workbench.action.openSettings', 'friedliver.showDemoAgent');

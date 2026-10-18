@@ -241,6 +241,10 @@ describe('messages from the Agents & Accounts page', () => {
     ok({ type: 'setDefault', agent: 'claude', key: 'thought_level', value: 'high' });
     // Extra fields are dropped, never passed on.
     ok({ type: 'check', agent: 'codex', command: 'rm -rf /' }, { type: 'check', agent: 'codex' });
+    // Where links open: one of the two values only.
+    ok({ type: 'setLinks', mode: 'external' });
+    ok({ type: 'setLinks', mode: 'builtin' });
+    ok({ type: 'setLinks', mode: 'firefox' }, null);
   });
 
   it('refuses agents outside the fixed list, and Demo while hidden', () => {
