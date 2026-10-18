@@ -537,18 +537,21 @@ export const openTab = (tabs: readonly string[], id: string): string[] => (tabs.
 /** Closing a tab takes it out; nothing takes its place. */
 export const closeTab = (tabs: readonly string[], id: string): string[] => tabs.filter((t) => t !== id);
 
-/** A tab's least width with its title (`full`), squeezed (`compact`); the gap between tabs. Mirrors --tab-min* in tokens.css. */
-export const TAB_MIN = { full: 112, compact: 88, gap: 4 } as const;
+/** A tab's least width with its title (`full`), squeezed (`compact`), the open tab's (`open`); the gap between tabs. Mirrors --tab-*min in tokens.css. */
+export const TAB_MIN = { full: 112, compact: 88, open: 184, gap: 4 } as const;
 export type TabFit = 'full' | 'compact' | 'icon';
 /**
  * How tabs fit a strip `width` wide: titles while each keeps its minimum, then squeezed, then marks only.
- * The open tab always keeps its title (at least the full minimum), so it is counted at that.
+ * The open tab always keeps its title (TAB_MIN.open: at least 110 of it), so it is counted at that.
  */
 export function tabFit(width: number, count: number): TabFit {
   if (width <= 0 || count === 0) return 'full';
-  const need = (min: number) => (count - 1) * (min + TAB_MIN.gap) + TAB_MIN.full;
+  const need = (min: number) => (count - 1) * (min + TAB_MIN.gap) + TAB_MIN.open;
   return need(TAB_MIN.full) <= width ? 'full' : need(TAB_MIN.compact) <= width ? 'compact' : 'icon';
 }
+
+/** A mark-only tab's tooltip: the title, the agent, the status, and Auto when on. */
+export const tabTip = (chat: ChatView): string => `${chatTip(chat)} · ${STATUS_TITLES[statusOf(chat)]}${chat.approval === 'full' ? ' · Auto' : ''}`;
 
 /** The tab a key goes to: Ctrl+Tab / Ctrl+Shift+Tab cycle (as browsers do, on every platform); Cmd+1..8 (Ctrl elsewhere) pick that tab, 9 the last. */
 export function tabForKey(

@@ -27,6 +27,7 @@ import {
   commandLabel,
   tabAfterClose,
   tabForKey,
+  tabTip,
   openTab,
   closeTab,
   applyMention,
@@ -258,6 +259,8 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
             tabIndex={c.id === focusable ? 0 : -1}
             aria-keyshortcuts="Delete"
             title={chatTip(c)}
+            aria-label={tabTip(c)}
+            tip={fit === 'icon' && c.id !== active ? tabTip(c) : undefined}
             onSelect={() => onSelect(c.id)}
             onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
             onClose={() => onClose(c.id)}
@@ -324,7 +327,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
           </>
         )}
       </Popover>
-      <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" onClick={() => send({ type: 'openTasks' })} />
+      <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" class="manager-btn" onClick={() => send({ type: 'openTasks' })} />
     </div>
   );
 }
