@@ -2003,16 +2003,27 @@ async function agentErrorsChecks({ open, check }) {
       const text = await codex.locator('#root').innerText();
       check(!/Internal error/i.test(text), `${width} ${tone}: no bare "Internal error"`);
       check(text.includes("Codex can't use the model old-mini") && text.includes('not supported when using Codex with a ChatGPT account'), `${width} ${tone}: the model notice names the model and gives the agent's words`);
+      // §2.26 Narrow: under 560 px of banner the actions sit below the text, never squeezing it.
+      const box = (sel) => codex.locator(`.notice ${sel}`).first().boundingBox();
+      const [textBox, actionsBox] = [await box('.fl-banner__text'), await box('.fl-banner__actions')];
+      const below = actionsBox.y >= textBox.y + textBox.height - 1;
+      check(width === 480 ? below : !below, `${width} ${tone}: the notice's actions are ${width === 480 ? 'below' : 'beside'} its text`);
+      // Prose in the body font; only code (a command, a `code` span) in the editor's font.
+      const font = (sel) => codex.locator(sel).first().evaluate((e) => e.ownerDocument.defaultView.getComputedStyle(e).fontFamily);
+      check((await font('.notice .notice-detail')) === (await font('.notice .fl-banner__text')), `${width} ${tone}: the agent's words are prose, in the body font`);
       await shot(codex, `agent-errors-model-${width}-${tone}`);
       await codex.getByRole('button', { name: 'Use 6 Luna' }).click();
       check((await posted(codex)).some((m) => m.type === 'notice' && m.action?.do === 'setOption' && m.action.value === 'luna'), `${width} ${tone}: "Use 6 Luna" switches the model`);
       await codex.close();
       const gemini = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-gemini`, width, 700, 2);
       check((await gemini.locator('#root').innerText()).includes('Cannot enable privileged approval modes in an untrusted folder'), `${width} ${tone}: the mode notice gives Gemini's reason`);
+      check((await gemini.locator('.notice .notice-detail code').allInnerTexts()).join() === 'gemini', `${width} ${tone}: a command inside the prose is a code span`);
       await shot(gemini, `agent-errors-mode-${width}-${tone}`);
       await gemini.close();
       if (width !== 900) continue;
       const main = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-main`, width, 700, 2);
+      const install = main.locator('.notice code.notice-detail');
+      check((await install.innerText()) === 'npm install -g @google/gemini-cli' && /mono|courier|menlo/i.test(await install.evaluate((e) => e.ownerDocument.defaultView.getComputedStyle(e).fontFamily)), `${tone}: an install command stays code, in the editor's font`);
       await main.getByRole('button', { name: 'More' }).first().click();
       await main.waitForSelector('[role="menuitem"]');
       check((await main.locator('#root').innerText()).includes('In a new chat'), `${tone}: the hand-off menu offers a new chat besides the linked one`);

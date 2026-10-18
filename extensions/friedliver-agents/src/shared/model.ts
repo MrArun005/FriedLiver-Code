@@ -207,7 +207,7 @@ export type Item =
     }
   | ReviewItem
   | CommandItem
-  | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; actions?: NoticeAction[] }
+  | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; /** `code`: the detail is a command to copy (mono); otherwise prose, `backticks` as code spans. */ detailKind?: 'code'; actions?: NoticeAction[] }
   | { kind: 'changes'; turnId: string; files: string[]; undone?: boolean }
   | LinkItem
   | BridgeItem

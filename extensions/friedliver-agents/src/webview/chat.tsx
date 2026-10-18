@@ -1020,7 +1020,13 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
             ))}
           >
             <div>{item.text}</div>
-            {item.detail && <code class="notice-detail">{item.detail}</code>}
+            {item.detail &&
+              (item.detailKind === 'code' ? (
+                <code class="notice-detail">{item.detail}</code>
+              ) : (
+                // Prose (an agent's words, a hint) in the body font; `backticks` are its code spans.
+                <p class="notice-detail">{item.detail.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</p>
+              ))}
           </Banner>
         </div>
       );
