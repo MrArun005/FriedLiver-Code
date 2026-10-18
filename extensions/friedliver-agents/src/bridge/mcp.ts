@@ -149,6 +149,18 @@ function indexTools() {
       inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
       ...ro,
     },
+    {
+      name: 'index_changes',
+      title: 'Changed files',
+      description:
+        "The project's current hash (the root of a Merkle tree over the indexed files) and the files added, modified or deleted since an earlier hash: by default since the project was last opened.",
+      inputSchema: {
+        $schema: DRAFT_07,
+        type: 'object',
+        properties: { since: { type: 'string', pattern: '^[0-9a-fA-F]{8,64}$', description: 'An earlier project hash, or its first 8+ characters, from an earlier answer.' } },
+      },
+      ...ro,
+    },
   ];
 }
 

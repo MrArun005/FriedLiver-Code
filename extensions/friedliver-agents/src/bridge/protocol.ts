@@ -118,6 +118,9 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
     case 'index_outline':
     case 'index_related':
       return relPath(a.path) ? { tool, path: a.path } : null;
+    case 'index_changes':
+      if (a.since === undefined) return { tool };
+      return typeof a.since === 'string' && /^[0-9a-fA-F]{8,64}$/.test(a.since) ? { tool, since: a.since } : null;
     default:
       return null;
   }
