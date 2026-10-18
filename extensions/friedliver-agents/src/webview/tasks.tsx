@@ -53,7 +53,7 @@ import { AgentMap } from './map';
 import { Gallery } from './gallery';
 import { Inbox } from './inbox';
 import { inbox } from '../shared/inbox';
-import type { OutsideImages } from '../shared/gallery';
+import type { ImageStoreInfo, OutsideImages } from '../shared/gallery';
 import { chatName, chatTip } from '../shared/names';
 
 type View = 'board' | 'list' | 'map' | 'images' | 'inbox';
@@ -266,8 +266,10 @@ function Manager() {
   const [defaults, setDefaults] = useState<Partial<Record<AgentKey, AgentDefaults>>>({});
   const [claude, setClaude] = useState<ClaudeSession[]>([]);
   const [outsideImages, setOutsideImages] = useState<OutsideImages[]>([]);
+  const [imageStore, setImageStore] = useState<ImageStoreInfo>();
   const { state } = useHost((m) => {
     if (m.type === 'claudeImages') setOutsideImages(m.sessions);
+    if (m.type === 'imageStore') setImageStore(m.store);
     if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
     if (m.type === 'defaults') setDefaults(m.defaults);
     if (m.type === 'claudeSessions') setClaude(m.sessions);
@@ -437,7 +439,7 @@ function Manager() {
         {view !== 'images' && view !== 'inbox' && <NewTask defaults={defaults} />}
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
-          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} />}
+          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} store={imageStore} />}
           {view === 'inbox' && <Inbox state={state} now={now} onClose={() => setView(cameFrom.current)} />}
           {view !== 'images' && view !== 'inbox' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
           {view !== 'images' && view !== 'inbox' && !query && shown.length === 0 && outside.length === 0 && (

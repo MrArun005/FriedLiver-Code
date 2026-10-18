@@ -1,5 +1,5 @@
 import { mkdirSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -21,6 +21,7 @@ import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } 
 import { EditorAgent } from './host/editor';
 import { InlineEditor } from './host/inlineEditor';
 import { imagePreview, imageThumb, workerScaler } from './host/imageAccess';
+import { ImageStore, sweepOld, type Copy, type GalleryRef, type Limits } from './host/imageStore';
 import { commandNotice, plainText } from './host/notify';
 import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
@@ -49,7 +50,7 @@ import { linkDestination, linkTarget } from './shared/links';
 const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
 /** The system browser, skipping FriedLiver's own link opener. */
 const openInSystemBrowser = (url: string) => vscode.env.openExternal(vscode.Uri.parse(url, true), { allowContributedOpeners: false });
-import type { OutsideImages } from './shared/gallery';
+import { collectGallery, doneScope, type GalleryImage, type ImageStoreInfo, type OutsideImages } from './shared/gallery';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** How long a message for a chat view (a composer's code reference, an item to reveal) waits for one to load. */
@@ -134,6 +135,11 @@ export class Controller {
   /** Thumbnails are made one at a time, the scaling in a worker thread. */
   private thumbQueue: Promise<unknown> = Promise.resolve();
   private readonly scaler: ReturnType<typeof workerScaler>;
+  /** FriedLiver's copies of the images agents read, take and make (host/imageStore.ts). */
+  private readonly imageStore: ImageStore;
+  /** Paths already copied this session, so the live copy looks at each once. */
+  private readonly copied = new Set<string>();
+  private imageTimers: { sync?: ReturnType<typeof setTimeout>; post?: ReturnType<typeof setTimeout>; commit?: ReturnType<typeof setTimeout> } = {};
   private claudeTimer?: ReturnType<typeof setTimeout>;
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
@@ -181,6 +187,15 @@ export class Controller {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.scaler = workerScaler(path.join(context.extensionUri.fsPath, 'dist', 'thumbWorker.js'));
+    this.imageStore = new ImageStore(path.join(context.globalStorageUri.fsPath, 'images'), {
+      tempRoots: () => this.tempRoots(),
+      scale: this.scaler,
+      onChange: () => this.postImageStore(),
+    });
+    void this.imageStore
+      .load()
+      .then(() => this.tidyImages())
+      .catch((err: unknown) => this.log.warn(`Image copies: ${messageOf(err)}`));
     this.browser = new BrowserPanel(context, (line) => this.log.info(line));
     context.subscriptions.push(
       this.browser,
@@ -466,6 +481,10 @@ export class Controller {
     this.batcher.dispose();
     clearTimeout(this.claudeTimer);
     this.watchClaudeSessions(false);
+    // Closing the window ends Done looking's undo time.
+    for (const t of Object.values(this.imageTimers)) clearTimeout(t);
+    await this.imageStore.commit(this.galleryImages()).catch(() => {});
+    await this.imageStore.flush().catch(() => {});
     // The entry stays (it holds no secret or port); without the token file it answers "FriedLiver isn't running".
     await removeTokenFile(this.context.globalStorageUri.fsPath).catch(() => {});
     await this.core.dispose();
@@ -505,6 +524,86 @@ export class Controller {
     this.updateDecisions();
     this.closeAnswered();
     this.retitle();
+    this.scheduleImageCopies();
+  }
+
+  // ---- Image copies (host/imageStore.ts) ----
+
+  private imageLimits(): Limits {
+    const c = vscode.workspace.getConfiguration('friedliver.images');
+    return { capBytes: Math.max(50, c.get<number>('storageLimitMB', 1024)) * 1024 * 1024, maxAgeMs: Math.max(1, c.get<number>('keepDays', 7)) * 86_400_000 };
+  }
+
+  /** Every image in the Images view (FriedLiver's chats and the outside sessions it has listed). */
+  private galleryImages(): GalleryImage[] {
+    return collectGallery(this.core.snapshot, this.claudeImages).images;
+  }
+
+  /**
+   * Folders whose images Done looking may delete: FriedLiver's screenshot folders, and Claude Code's and
+   * Gemini CLI's temp folders. Never the workspace. Candidates only: removeTemp drops any that fails
+   * trustedRoot on every deletion (a symlink, someone else's, writable by others), so a /tmp/claude-<uid>
+   * another user made first is never used. The per-user temp folder comes first.
+   */
+  private async tempRoots(): Promise<string[]> {
+    const base = this.context.globalStorageUri.fsPath;
+    const shots = (await readdir(base).catch(() => [] as string[])).filter((n) => /^shots-[A-Za-z0-9]{6}$/.test(n)).map((n) => path.join(base, n));
+    const uid = process.getuid?.();
+    const claude = uid === undefined ? [] : [...new Set([os.tmpdir(), '/tmp'])].map((d) => path.join(d, `claude-${uid}`));
+    return [...shots, ...claude, path.join(os.homedir(), '.gemini', 'tmp')];
+  }
+
+  /** The safety net: copies past the age or over the cap go, and FriedLiver's own old screenshots. */
+  private async tidyImages(): Promise<void> {
+    const limits = this.imageLimits();
+    await this.imageStore.enforce(limits);
+    await sweepOld(this.context.globalStorageUri.fsPath, limits.maxAgeMs, this.imageStore.pinnedFiles());
+  }
+
+  /** Copies the images FriedLiver's chats read or made, soon after they appear, while their temp files still exist. */
+  private scheduleImageCopies(): void {
+    if (this.imageTimers.sync) return;
+    this.imageTimers.sync = setTimeout(() => {
+      this.imageTimers.sync = undefined;
+      const hidden = new Set(this.imageStore.hidden());
+      const fresh = collectGallery(this.core.snapshot).images.filter((i) => i.path && !hidden.has(i.key) && !this.copied.has(i.path));
+      if (!fresh.length) return;
+      void (async () => {
+        for (const i of fresh) {
+          this.copied.add(i.path!);
+          await this.imageStore.ingest(i.path!, this.imageRoots()).catch(() => null);
+        }
+        await this.tidyImages();
+      })().catch((err: unknown) => this.log.warn(`Image copies: ${messageOf(err)}`));
+    }, 400);
+  }
+
+  private imageInfo(): ImageStoreInfo {
+    return { used: this.imageStore.used(), cap: this.imageLimits().capBytes, pinned: this.imageStore.pinned(), hidden: this.imageStore.hidden() };
+  }
+
+  private postImageStore(): void {
+    if (this.imageTimers.post) return;
+    this.imageTimers.post = setTimeout(() => {
+      this.imageTimers.post = undefined;
+      const store = this.imageInfo();
+      for (const s of this.surfaces) if (s.kind !== 'chat' && s.ready) post(s, { type: 'imageStore', store });
+    }, 100);
+  }
+
+  /** The thumbnail or full image (`full`) from FriedLiver's copy, else from the file itself. */
+  private async imageFor(file: string, full: boolean): Promise<string | null> {
+    const copy: Copy | null = await this.imageStore.ingest(file, this.imageRoots()).catch(() => null);
+    const thumb = (f: string, roots: string[]) => {
+      const job = this.thumbQueue.then(() => imageThumb(f, roots, path.join(this.context.globalStorageUri.fsPath, 'thumbs'), this.scaler));
+      this.thumbQueue = job.catch(() => {});
+      return job.catch(() => null);
+    };
+    if (copy) {
+      const src = full ? await imagePreview(copy.file, [this.imageStore.dir]) : await thumb(copy.preview ?? copy.file, [this.imageStore.dir]);
+      if (src) return src;
+    }
+    return full ? imagePreview(file, this.imageRoots()) : thumb(file, this.imageRoots());
   }
 
   /** Each chat panel's and the Agents view's title follows the chat it has open: switched, renamed or titled by the agent. */
@@ -645,6 +744,7 @@ export class Controller {
           }
           if (surface.kind !== 'chat') {
             if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
+            post(surface, { type: 'imageStore', store: this.imageInfo() });
             this.refreshClaudeSessions();
           }
           if (surface.kind === 'chat') {
@@ -690,16 +790,40 @@ export class Controller {
         case 'notice':
           await this.noticeAction(m.chatId, m.action);
           return;
-        case 'imageSrc': {
-          const src = await imagePreview(m.path, this.imageRoots());
-          post(surface, { type: 'imageSrc', path: m.path, ...(src ? { src } : {}) });
+        case 'imageSrc':
+        case 'imageThumb': {
+          const src = await this.imageFor(m.path, m.type === 'imageSrc');
+          post(surface, { type: m.type, path: m.path, ...(src ? { src } : {}) });
           return;
         }
-        case 'imageThumb': {
-          const job = this.thumbQueue.then(() => imageThumb(m.path, this.imageRoots(), path.join(this.context.globalStorageUri.fsPath, 'thumbs'), this.scaler));
-          this.thumbQueue = job.catch(() => {});
-          const src = await job.catch(() => null);
-          post(surface, { type: 'imageThumb', path: m.path, ...(src ? { src } : {}) });
+        case 'imagesDone': {
+          // The view names a scope only: which images and files that is, the host decides from its own state.
+          const all = this.galleryImages();
+          const hidden = new Set(this.imageStore.hidden());
+          const scope = doneScope(all.filter((i) => !hidden.has(i.key)), new Set(this.imageStore.pinned()), m.chatId);
+          const ref = (i: GalleryImage): GalleryRef => ({ key: i.key, ...(i.path ? { path: i.path } : {}) });
+          await this.imageStore.done(scope.map(ref), all.map(ref));
+          // If the view goes away before its undo time ends, this commits instead.
+          clearTimeout(this.imageTimers.commit);
+          this.imageTimers.commit = setTimeout(() => void this.imageStore.commit(this.galleryImages()).catch(() => {}), 60_000);
+          return;
+        }
+        case 'imagesUndo':
+          clearTimeout(this.imageTimers.commit);
+          this.imageStore.undo();
+          return;
+        case 'imagesCommit': {
+          clearTimeout(this.imageTimers.commit);
+          const r = await this.imageStore.commit(this.galleryImages());
+          if (r.copies || r.originals) this.log.info(`Done looking: removed ${r.copies} image copies and ${r.originals} temp files.`);
+          return;
+        }
+        case 'imagePin': {
+          const img = this.galleryImages().find((i) => i.key === m.key);
+          if (m.pinned && !img) return;
+          await this.imageStore.pin({ key: m.key, ...(img?.path ? { path: img.path } : {}) }, m.pinned);
+          // A pinned image keeps a copy, also after its temp file is gone.
+          if (m.pinned && img?.path) await this.imageStore.ingest(img.path, this.imageRoots()).catch(() => null);
           return;
         }
         case 'openImage':
@@ -1735,6 +1859,7 @@ export class Controller {
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
     if (e.affectsConfiguration('friedliver.browser.externalClients')) void this.connectClaude(false);
+    if (e.affectsConfiguration('friedliver.images')) void this.tidyImages().finally(() => this.postImageStore());
     if (e.affectsConfiguration('friedliver.showDemoAgent')) {
       this.accounts.refresh();
       this.postRoster();
