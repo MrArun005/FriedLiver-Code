@@ -259,8 +259,25 @@ for (const scheme of ['dark', 'light']) {
   await phone(scheme, 'chat-careful', (p) => p.evaluate(() => document.querySelector('.ask--careful')?.scrollIntoView({ block: 'center' })), { open: 'chat-8' });
 }
 await phone('dark', 'new-chat', (p) => p.click('[aria-label="New chat"]'));
-await phone('dark', 'scope-menu', (p) => p.click('.split__more'), { open: 'chat-3' });
-await phone('light', 'scope-menu', (p) => p.click('.split__more'), { open: 'chat-3' });
+for (const scheme of ['dark', 'light']) {
+  await phone(scheme, 'sheet', (p) => p.click('.req__row'), { open: 'chat-3' });
+  await phone(scheme, 'sheet-careful', (p) => p.click('.req--careful .req__row'), { open: 'chat-8' });
+  await phone(scheme, 'queue', (p) => p.click('.waiting'), { open: 'chat-8' });
+}
+await phone('dark', 'swipe', async (p) => {
+  const row = await p.locator('.req--routine .req__row').boundingBox();
+  await p.mouse.move(row.x + 60, row.y + row.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(row.x + 120, row.y + row.height / 2, { steps: 4 });
+  await p.mouse.move(row.x + 180, row.y + row.height / 2, { steps: 4 });
+}, { open: 'chat-8' });
+await phone('dark', 'undo', async (p) => {
+  const row = await p.locator('.req--routine .req__row').boundingBox();
+  await p.mouse.move(row.x + 60, row.y + row.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(row.x + 200, row.y + row.height / 2, { steps: 8 });
+  await p.mouse.up();
+}, { open: 'chat-8' });
 const code = pairing.start().code;
 const fpB64 = Buffer.from(fp.replace(/:/g, ''), 'hex').toString('base64url');
 await phone('dark', 'pairing', undefined, { paired: false, hash: `#c=${code}&f=${fpB64}` });
