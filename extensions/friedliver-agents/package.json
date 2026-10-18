@@ -850,6 +850,18 @@
           "default": true,
           "description": "Show this folder's Claude Code sessions started outside FriedLiver (the claude CLI, the Claude Code extension) in the Agent Manager, read from ~/.claude/projects. FriedLiver only reads them."
         },
+        "friedliver.images.storageLimitMB": {
+          "type": "integer",
+          "default": 1024,
+          "minimum": 50,
+          "markdownDescription": "How much space FriedLiver's copies of the images agents read, take and make may use, in MB. Past it, the oldest unpinned copies are removed. Pinned images are always kept."
+        },
+        "friedliver.images.keepDays": {
+          "type": "integer",
+          "default": 7,
+          "minimum": 1,
+          "markdownDescription": "Unpinned image copies, and FriedLiver's own screenshots, older than this many days are removed. **Done looking** in the Images view removes them sooner."
+        },
         "friedliver.restoreChats": {
           "type": "boolean",
           "default": true,
@@ -890,6 +902,13 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
+        },
+        "friedliver.usage.dailyTokenWarning": {
+          "scope": "machine",
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Warns once a day when the tokens the agents report for today, across the chats in a window, pass this many. Counted on this computer only; nothing is sent anywhere. `0` (the default) turns it off."
         },
         "friedliver.system.enabled": {
           "type": "boolean",
