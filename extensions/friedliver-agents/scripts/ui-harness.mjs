@@ -67,6 +67,9 @@ if (!opts['no-build']) {
 // ---- Images: the host's own thumbnail and preview code, on the fixture's real files ----
 
 const hostCode = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-harness-')), 'imageAccess.cjs');
+// Leave no temp folder behind, also when --serve is stopped with Ctrl-C or kill.
+process.on('exit', () => fs.rmSync(path.dirname(hostCode), { recursive: true, force: true }));
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(130));
 {
   const { build } = await import('esbuild');
   await build({ entryPoints: [path.join(ext, 'src/host/imageAccess.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: hostCode, logLevel: 'error' });
