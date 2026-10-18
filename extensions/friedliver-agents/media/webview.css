@@ -51,9 +51,10 @@
   --warn: var(--vscode-editorWarning-foreground, #e1c08d);
   --toggle-on: var(--button-bg);
   --effort-fill: var(--vscode-inputOption-activeBorder, #2a2b2c);
-  /* The composer's mic: one brand blue in every theme, a white glyph (4.53:1, hover 5.2:1). */
+  /* The composer's mic: a bare white glyph at rest (the text colour in light themes); while it
+     listens, a brand-blue pill (#0078d4, white 4.53:1) with white level bars. */
+  --mic-idle: #fff;
   --mic-bg: #0078d4;
-  --mic-hover: #026ec1;
   --mic-fg: #fff;
   /* The one loud colour of the Agent Manager: "you must decide". */
   --decision: var(--vscode-friedliver-decision, var(--focus-border));
@@ -154,6 +155,7 @@ body.vscode-high-contrast-light {
   /* A dark knob on a light track reads as on: knobs are white, with a ring. */
   --thumb: #ffffff;
   --shadow-thumb: 0 0 0 1px #00000033, 0 1px 2px #00000029;
+  --mic-idle: var(--fg);
 }
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
@@ -2881,12 +2883,12 @@ button.cc-mic {
   height: 26px;
   margin-right: 5px;
   border-radius: var(--r-5);
-  color: var(--mic-fg);
-  background: var(--mic-bg);
+  color: var(--mic-idle);
+  background: none;
 }
 button.cc-mic:hover {
-  color: var(--mic-fg);
-  background: var(--mic-hover);
+  color: var(--mic-idle);
+  background: var(--ghost-hover);
 }
 button.cc-mic .icon {
   width: 16px;
@@ -5354,30 +5356,41 @@ button.new-chat kbd {
     scroll-behavior: auto !important;
   }
 }
-/* The mic while it listens: a pulsing white ring inside the blue; 60% while it finishes. */
-button.cc-mic[data-state]::after {
-  content: '';
-  position: absolute;
-  inset: 2px;
-  border: 2px solid var(--mic-fg);
-  border-radius: inherit;
-  pointer-events: none;
+/* Listening: the mic grows into a blue pill, [mic | level bars], white on blue. */
+button.cc-mic[data-state='listening'] {
+  width: auto;
+  gap: 5px;
+  padding: 0 8px 0 5px;
+  color: var(--mic-fg);
+  background: var(--mic-bg);
+}
+.cc-input:has(button.cc-mic[data-state='listening']) textarea {
+  padding-right: 76px;
+}
+.mic-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+.mic-bars i {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--mic-fg);
+  transform: scaleY(0.15);
+}
+/* Reduced motion: one pulsing dot instead of the bars. */
+.mic-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mic-fg);
   animation: mic-pulse 1.2s ease infinite;
-}
-button.cc-mic[data-state='stopping'] {
-  opacity: 0.6;
-}
-button.cc-mic[data-state='stopping']::after {
-  animation: none;
 }
 @keyframes mic-pulse {
   50% {
-    opacity: 0.3;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  button.cc-mic[data-state]::after {
-    animation: none;
+    opacity: 0.35;
   }
 }
 
