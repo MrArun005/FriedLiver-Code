@@ -7,6 +7,7 @@
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
 import { READ_LIMITS } from '../host/indexReads';
+import { SNAPSHOT_LIMITS } from '../host/pageText';
 import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
 
 /** Newest first; a client asking for another version gets the newest. */
@@ -211,13 +212,25 @@ function browserTools() {
     inputSchema: Object.keys(properties).length ? { $schema: DRAFT_07, type: 'object', properties, ...(required.length ? { required } : {}) } : NO_INPUT,
     ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
   });
-  const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'A CSS selector, like "#submit" or a [data-fl="12"] one from browser_snapshot.' };
+  const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'An element id from browser_snapshot with elements: true, like "e12", or a CSS selector like "#submit".' };
   const ASKS = ' The user is asked to allow it first unless the chat is in Auto mode.';
   return [
     tool('browser_open', 'Open a page', 'Opens an http or https URL in FriedLiver\'s browser (opening the browser if needed) and waits for it to load. localhost:3000 works too.' + ASKS, {
       url: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'http://, https://, or a bare localhost:<port> address.' },
     }, ['url']),
-    tool('browser_snapshot', 'Read the page', 'The open page as text: its title, URL, visible text, and the links, buttons and fields with a selector for each, to use with browser_click and browser_type.', {}, [], true),
+    tool(
+      'browser_snapshot',
+      'Read the page',
+      "The open page's main content as compact markdown (headings, lists, links, code, tables; no menus, footers or banners), within a token budget. " +
+        'Again on the same page, only what changed since your last snapshot. With elements: true, the links, buttons and fields instead, each with an id like e12 to pass as selector to browser_click and browser_type. Use it rather than a screenshot whenever text answers the question.',
+      {
+        elements: { type: 'boolean', description: 'List the interactive elements (ids for browser_click / browser_type) instead of the content.' },
+        budget: { type: 'integer', minimum: SNAPSHOT_LIMITS.minBudget, maximum: SNAPSHOT_LIMITS.maxBudget, description: `Most tokens the answer may take. Default ${SNAPSHOT_LIMITS.budget}.` },
+        full: { type: 'boolean', description: 'The whole page even if you saw it before, not just the change.' },
+      },
+      [],
+      true,
+    ),
     tool('browser_click', 'Click', 'Clicks an element on the open page, found by CSS selector or by its visible text (give one of the two).' + ASKS, {
       selector: SELECTOR,
       text: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'Visible text of a link, button or label.' },

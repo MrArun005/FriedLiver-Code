@@ -2,6 +2,7 @@
 // and the extension host, over a local socket: one JSON object per line.
 // The host treats every line as untrusted and checks it here first.
 import { READ_LIMITS } from '../host/indexReads';
+import { SNAPSHOT_LIMITS } from '../host/pageText';
 import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
 
@@ -36,7 +37,8 @@ export type BridgeCall =
   | { tool: 'browser_open'; url: string }
   | { tool: 'browser_click'; selector?: string; text?: string }
   | { tool: 'browser_type'; selector: string; text: string }
-  | { tool: 'browser_snapshot' | 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' }
+  | { tool: 'browser_snapshot'; elements?: boolean; budget?: number; full?: boolean }
+  | { tool: 'browser_screenshot' | 'browser_console' | 'browser_back' | 'browser_reload' }
   | IndexCall;
 
 export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
@@ -105,7 +107,11 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       return short(a.selector) ? { tool, selector: a.selector } : { tool, text: a.text as string };
     case 'browser_type':
       return short(a.selector) && typeof a.text === 'string' && a.text.length <= BRIDGE_LIMITS.text ? { tool, selector: a.selector, text: a.text } : null;
-    case 'browser_snapshot':
+    case 'browser_snapshot': {
+      const { elements, budget, full } = a;
+      if ((elements !== undefined && typeof elements !== 'boolean') || (full !== undefined && typeof full !== 'boolean') || !int(budget, SNAPSHOT_LIMITS.minBudget, SNAPSHOT_LIMITS.maxBudget)) return null;
+      return { tool, ...(elements !== undefined ? { elements } : {}), ...(budget !== undefined ? { budget: budget as number } : {}), ...(full !== undefined ? { full } : {}) };
+    }
     case 'browser_screenshot':
     case 'browser_console':
     case 'browser_back':

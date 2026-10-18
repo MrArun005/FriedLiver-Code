@@ -10,6 +10,7 @@ import { mkdir } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
+import { extractPage, PageMemory, toSelector, type PageData } from './pageText';
 import { clampBrowserWidth, ownTab, saveScreenshot, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
@@ -150,22 +151,18 @@ class Cdp {
   }
 }
 
-/** The page as text: title, URL, the elements an agent can act on (each with a selector), then the visible text. */
+/** The page as data for pageText.ts: its main content as markdown lines and its interactive elements (each given a data-fl id). */
 const SNAPSHOT = `(() => {
-  const vis = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
-  const name = (el) => (el.getAttribute('aria-label') || (el.type === 'password' ? '' : el.value) || el.innerText || el.placeholder || el.title || el.alt || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
-  window.__flN = window.__flN || 0;
-  const lines = [];
-  for (const el of document.querySelectorAll('a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=checkbox],[role=tab],[role=menuitem],[contenteditable=true]')) {
-    if (el.type === 'hidden' || !vis(el)) continue;
-    if (!el.dataset.fl) el.dataset.fl = String(++window.__flN);
-    const sel = el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1 ? '#' + CSS.escape(el.id) : '[data-fl="' + el.dataset.fl + '"]';
-    const kind = el.getAttribute('role') || (el.tagName.toLowerCase() + (el.type && el.tagName !== 'BUTTON' ? '[' + el.type + ']' : ''));
-    lines.push(sel + '  ' + kind + ' "' + name(el) + '"' + (el.href ? ' -> ' + el.href : ''));
-    if (lines.length >= 300) { lines.push('…more elements not listed'); break; }
-  }
-  const text = document.body ? document.body.innerText.replace(/\\n{3,}/g, '\\n\\n').slice(0, 20000) : '';
-  return 'Title: ' + document.title + '\\nURL: ' + location.href + '\\n\\nElements:\\n' + lines.join('\\n') + '\\n\\nText:\\n' + text;
+  const vis = (el) => {
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    if (s.display === 'contents') return true;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 || r.height > 0;
+  };
+  const page = (${extractPage.toString()})(document, vis, { title: document.title, url: location.href, start: window.__flN || 0 });
+  window.__flN = page.next;
+  return page;
 })()`;
 
 /** Finds the element to act on, scrolls it into view, and returns its center and a description. */
@@ -196,6 +193,8 @@ export class BrowserPanel implements vscode.Disposable {
   private tab?: vscode.BrowserTab;
   private cdp?: Promise<Cdp>;
   private readonly subscriptions: vscode.Disposable[] = [];
+  /** Each chat's last snapshot, for re-snapshots that send only the change. */
+  private readonly pages = new PageMemory();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -242,7 +241,7 @@ export class BrowserPanel implements vscode.Disposable {
   }
 
   /** One agent tool call (bridgeRequests.ts already checked the URL and got the user's OK). */
-  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string> {
+  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string, chatId = ''): Promise<string> {
     // An OK given for one origin never acts on another: checked right before acting, after the target is found again.
     const sameOrigin = async (cdp: Cdp) => {
       if (expectOrigin === undefined) return;
@@ -261,8 +260,10 @@ export class BrowserPanel implements vscode.Disposable {
         await loaded;
         return this.where(cdp, 'Opened');
       }
-      case 'browser_snapshot':
-        return (await this.page()).evaluate<string>(SNAPSHOT);
+      case 'browser_snapshot': {
+        const page = await (await this.page()).evaluate<PageData>(SNAPSHOT);
+        return this.pages.answer(chatId, page, call);
+      }
       case 'browser_click': {
         const cdp = await this.page();
         const at = await this.find(cdp, call.selector, call.text, false);
@@ -358,7 +359,7 @@ export class BrowserPanel implements vscode.Disposable {
   private async find(cdp: Cdp, selector: string | undefined, text: string | undefined, focus: boolean): Promise<{ x: number; y: number; what: string }> {
     let at: { x: number; y: number; what: string } | null;
     try {
-      at = await cdp.evaluate(locate(selector, text, focus));
+      at = await cdp.evaluate(locate(selector && toSelector(selector), text, focus));
     } catch (err) {
       throw new Error(`Could not use the selector ${selector}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
