@@ -233,11 +233,11 @@ describe('agent terminals', () => {
     const { m } = manager(os.tmpdir(), () => true);
     const { terminalId } = await m.create({ sessionId: 's', command: process.execPath, args: ['-e', "process.stdout.write('x'.repeat(5000))"], outputByteLimit: 1e15 });
     await m.waitForExit({ sessionId: 's', terminalId });
-    expect(m.output({ sessionId: 's', terminalId }).output.length).toBe(5000);
+    expect((await m.output({ sessionId: 's', terminalId })).output.length).toBe(5000);
     expect(MAX_OUTPUT_LIMIT).toBeLessThanOrEqual(16_000_000);
     const small = await m.create({ sessionId: 's', command: process.execPath, args: ['-e', "process.stdout.write('y'.repeat(5000))"], outputByteLimit: 100 });
     await m.waitForExit({ sessionId: 's', terminalId: small.terminalId });
-    expect(m.output({ sessionId: 's', terminalId: small.terminalId })).toMatchObject({ truncated: true, output: 'y'.repeat(100) });
+    expect(await m.output({ sessionId: 's', terminalId: small.terminalId })).toMatchObject({ truncated: true, output: 'y'.repeat(100) });
     m.killAll();
   });
 });

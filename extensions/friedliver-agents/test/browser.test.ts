@@ -164,3 +164,27 @@ describe('security: only FriedLiver-opened tabs, local-only CORS, private screen
     await fs.rm(base, { recursive: true });
   });
 });
+
+describe('screenshots sized for tokens', () => {
+  it('prices an image as Claude does: w×h/750 after its own downscale', async () => {
+    const { imageTokens } = await import('../src/host/browserRules');
+    expect(imageTokens(1024, 640)).toBe(874);
+    // 2560×1600 (a retina viewport) is scaled to fit 1568 px and 1.15 MP first.
+    expect(imageTokens(2560, 1600)).toBeGreaterThan(1500);
+    expect(imageTokens(2560, 1600)).toBeLessThanOrEqual(1600);
+  });
+
+  it('captures the viewport at most max_width CSS px wide at 1x, or one element with a margin, as JPEG', async () => {
+    const { shotParams } = await import('../src/host/browserRules');
+    const view = shotParams({ width: 1280, height: 800, dpr: 2 }, {});
+    expect(view).toMatchObject({ format: 'jpeg', clip: { x: 0, y: 0, width: 1280, height: 800 } });
+    expect(view.clip.scale * 2 * 1280).toBeCloseTo(1024);
+    expect(view.size).toEqual({ width: 1024, height: 640 });
+    const el = shotParams({ width: 1280, height: 800, dpr: 2, scrollX: 0, scrollY: 300 }, { rect: { x: 100, y: 50, width: 300, height: 40 } });
+    expect(el.clip).toMatchObject({ x: 92, y: 342, width: 316, height: 56 });
+    expect(el.size).toEqual({ width: 316, height: 56 });
+    expect(shotParams({ width: 1280, height: 800, dpr: 1 }, { maxWidth: 400 }).size).toEqual({ width: 400, height: 250 });
+    expect(parseCall('browser_screenshot', { selector: 'e3', max_width: 600 })).toEqual({ tool: 'browser_screenshot', selector: 'e3', maxWidth: 600 });
+    expect(parseCall('browser_screenshot', { max_width: 50 })).toBeNull();
+  });
+});

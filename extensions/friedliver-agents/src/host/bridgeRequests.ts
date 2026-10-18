@@ -49,7 +49,7 @@ export interface ToolHost {
   /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
   browserPage?(selector?: string): Promise<{ origin?: string; password: boolean }>;
   /** Answers the read-only index_* tools (projectIndexHost.ts); absent when there is no project index. */
-  index?(call: IndexCall): Promise<string>;
+  index?(call: IndexCall, chatId: string): Promise<string>;
   /** Remembered "Always allow" answers (permissions.ts); without them nothing is offered or remembered. */
   permissions?: Pick<Permissions, 'site' | 'tool' | 'add'> & Partial<Pick<Permissions, 'system'>>;
   /** The system_* tools (system.ts, with the user's settings); absent when this editor has none. */
@@ -108,7 +108,7 @@ export class BridgeRequests {
     if (call.tool === 'list_agents') return agentList();
     if (call.tool === 'list_chats') return chatList(this.host.state, chatId);
     // Read-only and local to the project, like reading a file: no approval.
-    if (isIndexCall(call)) return this.host.index ? this.host.index(call) : 'No project index in this editor. Search the files another way.';
+    if (isIndexCall(call)) return this.host.index ? this.host.index(call, chatId) : 'No project index in this editor. Search the files another way.';
     if (isBrowserCall(call)) return this.browser(caller, call, signal);
     if (call.tool === 'remember') return this.memory(caller, call.fact, signal);
 
@@ -122,7 +122,9 @@ export class BridgeRequests {
       text: call.tool === 'ask_agent' ? call.prompt : call.tool === 'send_to_chat' ? call.message : '',
       state: 'awaiting',
     };
-    settled(await this.approve(caller, item, this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal, this.toolGrant(call.tool)));
+    // Reading the chat that handed this one its task, or that consulted it: the user (or their OK) already linked the two for that.
+    const linked = call.tool === 'read_chat' && this.host.state.links.some((l) => (l.kind === 'handoff' || l.kind === 'consult') && l.from === call.chatId && l.to === caller.id);
+    settled(await this.approve(caller, item, linked || this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal, this.toolGrant(call.tool)));
     // The state may have changed while the user decided.
     this.check(caller, call);
 

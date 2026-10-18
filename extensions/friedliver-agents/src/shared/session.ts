@@ -2,7 +2,7 @@
 // models, slash commands, usage), and how FriedLiver's approval levels map onto
 // each agent's own modes. Pure, so the host and the webviews agree.
 import type * as acp from '@agentclientprotocol/sdk';
-import type { AgentKey } from './model';
+import type { AgentKey, ChatView, TokenTally } from './model';
 
 /** FriedLiver's own say over what an agent may do without asking, per chat. */
 export type ApprovalLevel = 'ask' | 'edits' | 'full';
@@ -441,3 +441,15 @@ export function readOnlyChoice(options: SessionOption[]): { option: SessionOptio
 export const CLAUDE_READ_ONLY_META = {
   claudeCode: { options: { tools: [], disallowedTools: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] } },
 };
+
+/** The usage tooltip's lines about tokens: what FriedLiver saved here (an estimate against the naive way) and the prompt cache's share. */
+export function savedLines(t: TokenTally | undefined): string[] {
+  if (!t) return [];
+  const out: string[] = [];
+  if (t.naive > t.sent) out.push(`FriedLiver saved ~${formatTokens(t.naive - t.sent)} tokens in this chat (${formatTokens(t.sent)} sent where the naive way takes ~${formatTokens(t.naive)})`);
+  if (t.input + t.cacheRead > 0) out.push(`Prompt cache: ${Math.round((100 * t.cacheRead) / (t.input + t.cacheRead))}% of input tokens read from cache`);
+  return out;
+}
+
+/** Tokens FriedLiver saved across these chats (estimate). */
+export const totalSaved = (chats: Pick<ChatView, 'tokens'>[]): number => chats.reduce((n, c) => n + Math.max(0, (c.tokens?.naive ?? 0) - (c.tokens?.sent ?? 0)), 0);

@@ -11,7 +11,9 @@ import { mkdir } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
-import { clampBrowserWidth, ownTab, saveScreenshot, relaxLocalhostCors, type PausedResponse } from './browserRules';
+import { estimateTokens } from '../shared/tokens';
+import { extractPage, PageMemory, toSelector, type PageData } from './pageText';
+import { clampBrowserWidth, imageTokens, ownTab, saveScreenshot, shotParams, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
 const URL_KEY = 'friedliver.browser.lastUrl';
@@ -151,22 +153,18 @@ class Cdp {
   }
 }
 
-/** The page as text: title, URL, the elements an agent can act on (each with a selector), then the visible text. */
+/** The page as data for pageText.ts: its main content as markdown lines and its interactive elements (each given a data-fl id). */
 const SNAPSHOT = `(() => {
-  const vis = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
-  const name = (el) => (el.getAttribute('aria-label') || (el.type === 'password' ? '' : el.value) || el.innerText || el.placeholder || el.title || el.alt || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
-  window.__flN = window.__flN || 0;
-  const lines = [];
-  for (const el of document.querySelectorAll('a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=checkbox],[role=tab],[role=menuitem],[contenteditable=true]')) {
-    if (el.type === 'hidden' || !vis(el)) continue;
-    if (!el.dataset.fl) el.dataset.fl = String(++window.__flN);
-    const sel = el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1 ? '#' + CSS.escape(el.id) : '[data-fl="' + el.dataset.fl + '"]';
-    const kind = el.getAttribute('role') || (el.tagName.toLowerCase() + (el.type && el.tagName !== 'BUTTON' ? '[' + el.type + ']' : ''));
-    lines.push(sel + '  ' + kind + ' "' + name(el) + '"' + (el.href ? ' -> ' + el.href : ''));
-    if (lines.length >= 300) { lines.push('…more elements not listed'); break; }
-  }
-  const text = document.body ? document.body.innerText.replace(/\\n{3,}/g, '\\n\\n').slice(0, 20000) : '';
-  return 'Title: ' + document.title + '\\nURL: ' + location.href + '\\n\\nElements:\\n' + lines.join('\\n') + '\\n\\nText:\\n' + text;
+  const vis = (el) => {
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    if (s.display === 'contents') return true;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 || r.height > 0;
+  };
+  const page = (${extractPage.toString()})(document, vis, { title: document.title, url: location.href, start: window.__flN || 0 });
+  window.__flN = page.next;
+  return page;
 })()`;
 
 /** Finds the element to act on, scrolls it into view, and returns its center and a description. */
@@ -197,6 +195,10 @@ export class BrowserPanel implements vscode.Disposable {
   private tab?: vscode.BrowserTab;
   private cdp?: Promise<Cdp>;
   private readonly subscriptions: vscode.Disposable[] = [];
+  /** Told, per chat, what a snapshot or screenshot would have cost the naive way and what it cost. */
+  onSaved?: (chatId: string, naive: number, sent: number) => void;
+  /** Each chat's last snapshot, for re-snapshots that send only the change. */
+  private readonly pages = new PageMemory();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -278,7 +280,7 @@ export class BrowserPanel implements vscode.Disposable {
   }
 
   /** One agent tool call (bridgeRequests.ts already checked the URL and got the user's OK). */
-  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string> {
+  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string, chatId = ''): Promise<string> {
     // An OK given for one origin never acts on another: checked right before acting, after the target is found again.
     const sameOrigin = async (cdp: Cdp) => {
       if (expectOrigin === undefined) return;
@@ -297,8 +299,13 @@ export class BrowserPanel implements vscode.Disposable {
         await loaded;
         return this.where(cdp, 'Opened');
       }
-      case 'browser_snapshot':
-        return (await this.page()).evaluate<string>(SNAPSHOT);
+      case 'browser_snapshot': {
+        const page = await (await this.page()).evaluate<PageData>(SNAPSHOT);
+        const text = this.pages.answer(chatId, page, call);
+        // The naive way: every line of the page and every element, as the old snapshot sent.
+        this.onSaved?.(chatId, estimateTokens([...page.lines, ...page.elements].join('\n')), estimateTokens(text));
+        return text;
+      }
       case 'browser_click': {
         const cdp = await this.page();
         const at = await this.find(cdp, call.selector, call.text, false);
@@ -319,11 +326,27 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'browser_screenshot': {
         const cdp = await this.page();
-        const { data } = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
+        // One element: scrolled into view, then its box (viewport coordinates); the capture is cropped to it.
+        const rect = call.selector
+          ? await cdp.evaluate<{ x: number; y: number; width: number; height: number } | null>(
+              `((s) => { const el = document.querySelector(s); if (!el) return null; el.scrollIntoView({ block: 'center', inline: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })(${JSON.stringify(toSelector(call.selector))})`,
+            )
+          : undefined;
+        if (rect === null) throw new Error(`Nothing on the page matches ${call.selector}. Use browser_snapshot with elements: true to see what is there.`);
+        const view = await cdp.evaluate<{ width: number; height: number; dpr: number; scrollX: number; scrollY: number }>(
+          '({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio || 1, scrollX, scrollY })',
+        );
+        const shot = shotParams(view, { rect, maxWidth: call.maxWidth });
+        const { data } = (await cdp.send('Page.captureScreenshot', { format: shot.format, quality: shot.quality, clip: shot.clip })) as { data: string };
         const base = this.context.globalStorageUri.fsPath;
         await mkdir(base, { recursive: true, mode: 0o700 });
-        const file = await saveScreenshot(base, Buffer.from(data, 'base64'));
-        return `${await this.where(cdp, 'Screenshot of')}\nSaved to ${file}. Read that file to see it.`;
+        const file = await saveScreenshot(base, Buffer.from(data, 'base64'), 'jpg');
+        const { width, height } = shot.size;
+        this.onSaved?.(chatId, imageTokens(view.width * view.dpr, view.height * view.dpr), imageTokens(width, height));
+        return (
+          `${await this.where(cdp, call.selector ? `Screenshot of ${call.selector} on` : 'Screenshot of')}\n` +
+          `${width}×${height} JPEG, about ${imageTokens(width, height)} image tokens. Saved to ${file}. Read that file to see it; browser_snapshot costs far fewer tokens when text answers the question.`
+        );
       }
       case 'browser_console': {
         const lines = (await this.page()).console;
@@ -394,7 +417,7 @@ export class BrowserPanel implements vscode.Disposable {
   private async find(cdp: Cdp, selector: string | undefined, text: string | undefined, focus: boolean): Promise<{ x: number; y: number; what: string }> {
     let at: { x: number; y: number; what: string } | null;
     try {
-      at = await cdp.evaluate(locate(selector, text, focus));
+      at = await cdp.evaluate(locate(selector && toSelector(selector), text, focus));
     } catch (err) {
       throw new Error(`Could not use the selector ${selector}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }

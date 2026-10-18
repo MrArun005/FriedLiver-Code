@@ -3,8 +3,10 @@ name: Index bench
 # Re-open of the agents extension's project index on microsoft/TypeScript after
 # touching 10 files: time until it answers and until it is verified, against a
 # full build (test/indexBench.test.ts). macOS uses the FSEvents change journal
-# (the helper built here); Linux has no journal and checks every file. Numbers
-# go to the run's summary. Runs on demand and when the index code changes.
+# (the helper built here); Linux has no journal and checks every file. Also the
+# token bench (test/tokenBench.test.ts): scripted agent tasks with and without the
+# index_* tools, tokens counted with js-tiktoken's cl100k_base. Numbers go to the
+# run's summary. Runs on demand and when the index code changes.
 on:
   workflow_dispatch:
   push:
@@ -13,7 +15,11 @@ on:
       - extensions/friedliver-agents/src/host/merkle.ts
       - extensions/friedliver-agents/src/host/changeJournal.ts
       - extensions/friedliver-agents/native/friedliver-fsevents.swift
+      - extensions/friedliver-agents/src/host/indexReads.ts
+      - extensions/friedliver-agents/src/shared/tokens.ts
+      - extensions/friedliver-agents/src/host/pageText.ts
       - extensions/friedliver-agents/test/indexBench.test.ts
+      - extensions/friedliver-agents/test/tokenBench.test.ts
       - .github/workflows/index-bench.yml
 
 permissions:
@@ -52,3 +58,14 @@ jobs:
             FL_FSEVENTS_HELPER="$FL_INDEX_BENCH_JOURNAL" npx vitest run test/changeJournal.test.ts
           fi
           FL_INDEX_BENCH_REPO="$RUNNER_TEMP/TypeScript" npx vitest run test/indexBench.test.ts
+      # The re-open bench appended a comment to 10 files; the token bench restores what it edits itself.
+      - name: Token bench
+        working-directory: extensions/friedliver-agents
+        run: |
+          npm install --no-save js-tiktoken@1.0.21
+          # Pinned web.archive.org captures (id_: the page as served), for the browser rows.
+          mkdir -p "$RUNNER_TEMP/pages"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/mdn-429.html" "https://web.archive.org/web/20250530112150id_/https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/wikipedia-merkle-tree.html" "https://web.archive.org/web/20250602014058id_/https://en.wikipedia.org/wiki/Merkle_tree"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/github-typescript.html" "https://web.archive.org/web/20250601105140id_/https://github.com/microsoft/TypeScript"
+          FL_TOKEN_BENCH_PAGES="$RUNNER_TEMP/pages" FL_TOKEN_BENCH_REPO="$RUNNER_TEMP/TypeScript" FL_TOKEN_BENCH_OUT="$RUNNER_TEMP/token-bench.md" npx vitest run test/tokenBench.test.ts
