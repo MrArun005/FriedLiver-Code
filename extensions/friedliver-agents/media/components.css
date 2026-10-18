@@ -2023,6 +2023,7 @@ button.fl-row,
   border-radius: var(--r-box);
   background: var(--menu-bg);
   color: var(--fg);
+  container: fl-banner / inline-size;
 }
 .fl-banner[data-tone] {
   border-color: color-mix(in srgb, var(--tone) 35%, transparent);
@@ -2040,6 +2041,17 @@ button.fl-row,
 .fl-banner__actions {
   display: flex;
   gap: var(--sp-1);
+}
+/* Narrow (§2.26): under 560 of banner the actions take their own row, under the text, so they never squeeze it. */
+@container fl-banner (max-width: 560px) {
+  .fl-banner__actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+  /* In line with the text, past the icon. */
+  .fl-banner > .icon ~ .fl-banner__actions {
+    padding-left: calc(var(--i-md) + var(--sp-3));
+  }
 }
 
 /* ==== Composer (§2.27): the owner-approved reference, frozen. ====

@@ -3,11 +3,12 @@
 import type { AgentRoster } from './accounts';
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import type { DictationUpdate } from './dictation';
-import type { OutsideImages } from './gallery';
+import type { ImageStoreInfo, OutsideImages } from './gallery';
 import { linkTarget } from './links';
 import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
 import { typeable } from './steps';
+import type { SubagentDetail } from './subagentDetail';
 
 /** Choices for a new task's agents, per agent: optionKey → value (see session.ts). */
 export type TaskChoices = Partial<Record<AgentKey, Record<string, string | boolean>>>;
@@ -47,6 +48,14 @@ export type WebviewMessage =
   | { type: 'imageThumb'; path: string }
   /** Shows an image file in Finder (the system's file manager). */
   | { type: 'revealImage'; path: string }
+  /** Done looking at one chat's images (`chatId`) or every image: they hide now, their copies and temp originals go on imagesCommit. */
+  | { type: 'imagesDone'; chatId?: string }
+  /** Brings back what the last imagesDone hid, before it is committed. */
+  | { type: 'imagesUndo' }
+  /** The undo time is over: delete what the last imagesDone hid. */
+  | { type: 'imagesCommit' }
+  /** Pin a gallery image (by its key) so Done looking and the storage limits keep it. */
+  | { type: 'imagePin'; key: string; pinned: boolean }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
   /** A web link you clicked: where it opens is the friedliver.links.openIn setting, the other way with Cmd/Ctrl. */
@@ -64,10 +73,10 @@ export type WebviewMessage =
   /** The Agent Manager on its Inbox: everything any agent waits on. */
   | { type: 'openInbox' }
   // Connections between chats and agents.
-  /** Continue this chat with another agent, in a new chat that starts from its transcript. */
-  | { type: 'handoff'; chatId: string; agent: AgentKey }
-  /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. */
-  | { type: 'consult'; chatId: string; agent: AgentKey; text: string }
+  /** Continue this chat with another agent: in the chat it handed off to before, or with `fresh` a new one. */
+  | { type: 'handoff'; chatId: string; agent: AgentKey; fresh?: boolean }
+  /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. `fresh` asks in a new chat. */
+  | { type: 'consult'; chatId: string; agent: AgentKey; text: string; fresh?: boolean }
   /** Forward each finished turn of `from` to the chat `to`. */
   | { type: 'pipe'; from: string; to: string }
   | { type: 'unlink'; linkId: string }
@@ -125,7 +134,9 @@ export type WebviewMessage =
   /** Agents & Accounts, on the agent's card when given. */
   | { type: 'openAccounts'; agent?: AgentKey }
   /** Continue a Claude Code session started outside FriedLiver in a new chat. */
-  | { type: 'openClaudeSession'; sessionId: string };
+  | { type: 'openClaudeSession'; sessionId: string }
+  /** Follow that session's subagent for the Manager's detail sheet (subagentDetail updates); without ids, stop. */
+  | { type: 'watchSubagent'; sessionId?: string; id?: string };
 
 export type HostMessage =
   /** `defaults` (optional): each agent's last known options and the user's last choices. */
@@ -151,6 +162,10 @@ export type HostMessage =
   | { type: 'claudeSessions'; sessions: ClaudeSession[] }
   /** The images those sessions read or took, for the Images view. */
   | { type: 'claudeImages'; sessions: OutsideImages[] }
+  /** The followed subagent's brief, steps, token use and report: what changed since the last one. */
+  | { type: 'subagentDetail'; detail: SubagentDetail }
+  /** FriedLiver's image copies: the space they use, and which gallery images are pinned or hidden. */
+  | { type: 'imageStore'; store: ImageStoreInfo }
   /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
   | ({ type: 'dictation'; chatId: string } & DictationUpdate)
   /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
@@ -258,6 +273,9 @@ function noticeAction(v: unknown): NoticeAction | null {
     case 'install':
       // Only which agent to install; the host chooses the command itself.
       return isAgentKey(v.agent) && v.agent !== 'demo' ? { label, do: 'install', agent: v.agent } : null;
+    case 'setOption':
+      // The host sets it only to a value the chat's agent offers.
+      return id(v.optionId) && typeof v.value === 'string' && optionValue(v.value) ? { label, do: 'setOption', optionId: v.optionId, value: v.value } : null;
     default:
       return null;
   }
@@ -302,6 +320,14 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'attach':
       if (m.chatId === undefined) return { type: 'attach' };
       return id(m.chatId) ? { type: 'attach', chatId: m.chatId } : null;
+    case 'imagesDone':
+      if (m.chatId === undefined) return { type: 'imagesDone' };
+      return id(m.chatId) ? { type: 'imagesDone', chatId: m.chatId } : null;
+    case 'imagesUndo':
+    case 'imagesCommit':
+      return { type: m.type };
+    case 'imagePin':
+      return str(m.key, LIMITS.path + 256) && m.key && typeof m.pinned === 'boolean' ? { type: 'imagePin', key: m.key, pinned: m.pinned } : null;
     case 'imageSrc':
     case 'openImage':
     case 'imageThumb':
@@ -363,6 +389,9 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return isAgentKey(m.agent) ? { type: 'newChat', agent: m.agent } : null;
     case 'openClaudeSession':
       return id(m.sessionId) ? { type: 'openClaudeSession', sessionId: m.sessionId } : null;
+    case 'watchSubagent':
+      if (m.sessionId === undefined && m.id === undefined) return { type: 'watchSubagent' };
+      return id(m.sessionId) && id(m.id) ? { type: 'watchSubagent', sessionId: m.sessionId, id: m.id } : null;
     case 'openChat':
       return id(m.chatId) ? { type: 'openChat', chatId: m.chatId, ...(id(m.item) ? { item: m.item } : {}) } : null;
     case 'select':
@@ -373,10 +402,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'viewChanges':
       return id(m.chatId) ? { type: m.type, chatId: m.chatId } : null;
     case 'handoff':
-      return id(m.chatId) && isAgentKey(m.agent) ? { type: 'handoff', chatId: m.chatId, agent: m.agent } : null;
+      return id(m.chatId) && isAgentKey(m.agent) ? { type: 'handoff', chatId: m.chatId, agent: m.agent, ...(m.fresh === true ? { fresh: true } : {}) } : null;
     case 'consult':
       return id(m.chatId) && isAgentKey(m.agent) && str(m.text, LIMITS.text) && m.text.trim()
-        ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text }
+        ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text, ...(m.fresh === true ? { fresh: true } : {}) }
         : null;
     case 'pipe':
       return id(m.from) && id(m.to) && m.from !== m.to ? { type: 'pipe', from: m.from, to: m.to } : null;
