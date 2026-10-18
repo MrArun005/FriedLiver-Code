@@ -14,10 +14,12 @@ import {
   type KeyView,
 } from '../shared/accounts';
 import { AGENT_FACES, type AgentKey } from '../shared/model';
+import { SYSTEM_WORDS, unsupportedOn, type SystemSettingsView, type SystemTool } from '../shared/system';
 import type { Accounts } from './accounts';
 import { messageOf, type AgentCore } from './core';
 import { plainText } from './notify';
 import { installCommandFor } from './signin';
+import { systemPlatform, systemSettings } from './system';
 import { webviewHtml, webviewOptions } from './webviews';
 
 export const ACCOUNTS_PANEL = 'friedliver.accountsPanel';
@@ -47,6 +49,7 @@ export class AccountsPage implements vscode.Disposable {
     this.disposables.push(
       accounts.onDidUpdate(() => this.refresh()),
       vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('friedliver.links.openIn') && this.refresh()),
+      vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('friedliver.system') && this.refresh()),
     );
   }
 
@@ -111,7 +114,39 @@ export class AccountsPage implements vscode.Disposable {
       return active ? { ...card, active } : card;
     });
     const links = vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin';
-    return { cards, showDemo, links, ...(this.focus ? { focus: this.focus } : {}) };
+    return { cards, showDemo, links, system: this.systemView(), ...(this.focus ? { focus: this.focus } : {}) };
+  }
+
+  private systemView(): SystemSettingsView {
+    const platform = systemPlatform() ?? 'other';
+    const settings = systemSettings((key) => vscode.workspace.getConfiguration('friedliver.system').inspect<unknown>(key));
+    const off = new Set(unsupportedOn(platform));
+    const tools = Object.fromEntries(Object.entries(settings.tools).map(([t, on]) => [t, on && !off.has(t as SystemTool)])) as Record<SystemTool, boolean>;
+    return { supported: platform !== 'other', platform, enabled: settings.enabled, fullAutoAllowed: settings.fullAutoAllowed, tools };
+  }
+
+  /** Writes the user's own settings (never the workspace's); letting Full auto cover these asks first. */
+  private async setSystem(key: 'enabled' | 'fullAutoAllowed' | SystemTool, value: boolean): Promise<void> {
+    const config = vscode.workspace.getConfiguration('friedliver.system');
+    if (key === 'fullAutoAllowed' && value) {
+      const ok = await vscode.window.showWarningMessage(
+        'Let Full auto chats act on your computer without asking?',
+        {
+          modal: true,
+          detail:
+            'Agents in chats on Full auto will open apps, files and links, bring apps to the front, copy to the clipboard, show notifications, change the volume and run Shortcuts without asking. Reading the clipboard, window screenshots and terminal-like apps still ask every time. Every action is logged in "FriedLiver: System Actions".',
+        },
+        'Allow on Full auto',
+      );
+      if (ok !== 'Allow on Full auto') return this.refresh();
+    }
+    if (key === 'enabled' || key === 'fullAutoAllowed') {
+      await config.update(key, value, vscode.ConfigurationTarget.Global);
+      return;
+    }
+    const tools = { ...(userSettingObject(config.inspect<unknown>('tools')?.globalValue)), [key]: value };
+    await config.update('tools', tools, vscode.ConfigurationTarget.Global);
+    this.log(`Mac & Windows control: ${SYSTEM_WORDS[key]} turned ${value ? 'on' : 'off'}.`);
   }
 
   private keyViews(agent: Exclude<AgentKey, 'demo'>): KeyView[] {
@@ -145,6 +180,12 @@ export class AccountsPage implements vscode.Disposable {
         return;
       case 'openSettings':
         await vscode.commands.executeCommand('workbench.action.openSettings', 'friedliver.showDemoAgent');
+        return;
+      case 'setSystem':
+        await this.setSystem(m.key, m.value);
+        return;
+      case 'systemLog':
+        await vscode.commands.executeCommand('friedliver.system.showLog');
         return;
       case 'check':
         await this.accounts.check(m.agent);
@@ -192,4 +233,9 @@ export class AccountsPage implements vscode.Disposable {
     this.panel?.dispose();
     for (const d of this.disposables) d.dispose();
   }
+}
+
+/** A stored object setting, or {} for anything else. */
+function userSettingObject(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }

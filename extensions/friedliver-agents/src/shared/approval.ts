@@ -9,6 +9,7 @@ import { AGENT_FACES, type AppState, type ChatView, type Item } from './model';
 import { describeGrant, siteOrigin, type Grant } from './permissions';
 import { agentToolRisk, browserRisk, commandRisk, filesRisk, type DroppedCommits, type Risk } from './risk';
 import { ruleCandidates, ruleSafe } from './rules';
+import { isSystemTool, SYSTEM_VERBS } from './system';
 import { denyOption, primaryOption } from './tools';
 import { clip, relativePath } from './view';
 
@@ -194,11 +195,19 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
   const answer = (a: 'allow' | 'allowChat' | 'allowAlways' | 'deny'): WebviewMessage => ({ type: 'bridge', requestId: item.requestId, answer: a });
   const origin = bridgeOrigin(item);
   const browser = 'browser' in item.target;
-  const risk = browser ? browserRisk(item.tool, item.text, origin) : agentToolRisk(item.tool);
+  // Mac & Windows control (system_*): the app, link, file or Shortcut it acts on.
+  const system = 'system' in item.target ? item.target.system : undefined;
+  const risk: Risk = browser
+    ? browserRisk(item.tool, item.text, origin)
+    : system !== undefined
+      ? { tone: 'review', label: item.once ? 'Asked every time' : 'Acts on your computer', consequences: [] }
+      : agentToolRisk(item.tool);
   const careful = risk.tone === 'careful';
   const other = 'chatId' in item.target ? state?.chats.find((c) => c.id === (item.target as { chatId: string }).chatId) : undefined;
-  const words = BRIDGE_WORDS[item.tool];
-  const target = browser
+  const words = isSystemTool(item.tool) ? SYSTEM_VERBS[item.tool].replace(/^./, (c) => c.toUpperCase()) : BRIDGE_WORDS[item.tool];
+  const target = system !== undefined
+    ? system || clip(item.text, 120)
+    : browser
     ? item.tool === 'browser_open'
       ? item.text.replace(/^https?:\/\//, '')
       : item.text || host(origin) || 'the open page'
@@ -223,6 +232,7 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
             : undefined;
   const locked: Approval['locked'] = {};
   if (careful) locked.chat = locked.always = risk.lock;
+  else if (item.once) locked.chat = locked.always = 'The clipboard, screenshots and terminal-like apps ask every time.';
   else if (!item.always) locked.always = browser ? 'The page’s site is unknown, so it can’t be remembered.' : 'Nothing here can be remembered safely.';
   return {
     id: item.requestId,
@@ -307,6 +317,7 @@ export function scopeRule(a: Approval, item: Approvable, chat: Pick<ChatView, 'c
     if (item.kind === 'bridge') {
       if ('browser' in item.target) return 'Any site in the browser, until this chat ends';
       if ('memory' in item.target) return 'Project memory, until this chat ends';
+      if ('system' in item.target) return `${a.verb}${a.target ? ` \`${a.target}\`` : ''}, until this chat ends`;
       return 'Other agents and chats, until this chat ends';
     }
     return undefined;
@@ -314,6 +325,7 @@ export function scopeRule(a: Approval, item: Approvable, chat: Pick<ChatView, 'c
   if (item.kind === 'bridge') {
     const origin = bridgeOrigin(item);
     if (origin) return `\`${origin}\` in the browser, every agent, every chat`;
+    if ('system' in item.target) return `${a.verb}${a.target ? ` \`${a.target}\`` : ''}, every agent, every chat`;
     return `${(TOOL_NOTE[item.tool] ?? 'This tool').replace(/^./, (c) => c.toUpperCase())}, every agent, every chat`;
   }
   const g = a.grants[grant] ?? a.grants[0];

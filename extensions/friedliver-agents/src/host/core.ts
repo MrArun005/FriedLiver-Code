@@ -128,7 +128,7 @@ export interface CoreUi {
   /** FriedLiver Remote asked for something that keeps allowing (Auto, "Always allow"): the user's OK on the Mac. No hook: refused. */
   confirmRemote?(ask: { title: string; detail: string; button: string }): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
-  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean }): void;
+  askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean; once?: boolean }): void;
   /** An agent asks a question as a small form, answered in the chat. */
   askQuestion?(ask: { chatId: string; requestId: string; agentLabel: string; message: string }): void;
   signInUrl?(agent: AgentKey, url: string): void;
@@ -158,6 +158,8 @@ export interface CoreOptions {
   browserPage?: ToolHost['browserPage'];
   /** Answers the index_* tools (projectIndexHost.ts). */
   index?: ToolHost['index'];
+  /** The system_* tools (system.ts, the user's settings, the audit log). */
+  system?: ToolHost['system'];
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -347,6 +349,7 @@ export class AgentCore {
       externalAutoApprove: options.externalAutoApprove,
       browserPage: options.browserPage,
       index: options.index,
+      system: options.system,
       get remember() {
         return options.remember;
       },

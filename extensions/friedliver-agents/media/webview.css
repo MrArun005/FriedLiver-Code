@@ -6599,3 +6599,9 @@ button.inbox-entry[data-waiting] {
     display: none;
   }
 }
+
+/* A setting that can't change now (Mac & Windows control while it is off). */
+button.cc-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

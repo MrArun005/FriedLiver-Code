@@ -4,6 +4,7 @@
 import path from 'node:path';
 import { diffPreview } from '../shared/diff';
 import { AGENT_FACES, bridgeTitle, decisions, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
+import { approvalOf } from '../shared/approval';
 import { describeGrant, type Grant } from '../shared/permissions';
 import { ESCALATING, denyOption, primaryOption } from '../shared/tools';
 import { commandRisk, requestRisk } from './risk';
@@ -172,7 +173,9 @@ function phoneItem(
         ...(i.auto ? { auto: i.auto } : {}),
       };
     }
-    case 'bridge':
+    case 'bridge': {
+      // The desktop card's own rules: what it locks, the phone doesn't offer.
+      const a = approvalOf(i, chat, state);
       return {
         k: 'bridge',
         id: i.requestId,
@@ -180,8 +183,11 @@ function phoneItem(
         agent: chat.agent,
         text: clip(i.text, 2000),
         state: i.state,
-        ...(i.always && i.state === 'awaiting' ? { always: i.always } : {}),
+        ...(i.always && i.state === 'awaiting' && !a.locked.always ? { always: i.always } : {}),
+        ...(a.locked.chat ? { once: true as const } : {}),
+        ...(a.risk.tone === 'careful' ? { careful: true as const } : {}),
       };
+    }
     case 'notice':
       return { k: 'notice', text: clip(i.text, 2000), tone: i.tone };
     case 'changes':

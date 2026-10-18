@@ -4,6 +4,7 @@
 // waits for the user's OK on the Mac first.
 import type { AgentCore } from '../host/core';
 import { parseMention, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
+import { approvalOf } from '../shared/approval';
 import { primaryOption } from '../shared/tools';
 import { commandRisk, requestRisk } from './risk';
 import { phoneChats } from './phoneView';
@@ -152,6 +153,9 @@ export class RemoteActions {
         const found = this.waiting('bridge', a.requestId);
         if (!found) return refused('That request is no longer waiting.');
         if (a.answer === 'allowAlways' && !found.item.always) return refused('Always allow is not offered here.');
+        // What the desktop card locks (careful, or asked every time) is allowed once from the phone too.
+        const locked = approvalOf(found.item, found.chat).locked;
+        if ((a.answer === 'allowChat' && locked.chat) || (a.answer === 'allowAlways' && locked.always)) return refused('This one can only be allowed once.');
         if (a.answer === 'allowAlways' || a.answer === 'allowChat') {
           const ok = await confirm(
             a.answer === 'allowAlways'

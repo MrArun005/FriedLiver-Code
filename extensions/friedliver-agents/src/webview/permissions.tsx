@@ -8,6 +8,7 @@ const GROUPS: { title: string; hint: string; kinds: Remembered['grant']['kind'][
   { title: 'Folders', hint: 'Agents read or change files here and below without asking, in this workspace.', kinds: ['folder'] },
   { title: 'Commands', hint: 'Agents run these without asking, in this workspace. Chained or redirected lines still ask.', kinds: ['exact', 'prefix'] },
   { title: 'Agent tools', hint: 'Agents reach other agents and chats, or add to project memory, without asking.', kinds: ['tool'] },
+  { title: 'Mac & Windows control', hint: 'Agents do these on your computer without asking, for exactly this app, site, file or Shortcut. The clipboard, screenshots and terminals always ask.', kinds: ['system'] },
 ];
 
 function when(at?: number): string {
