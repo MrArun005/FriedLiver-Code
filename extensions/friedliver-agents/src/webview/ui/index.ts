@@ -3,3 +3,4 @@ export * from './controls';
 export * from './display';
 export * from './menu';
 export * from './overlays';
+export * from './icon';

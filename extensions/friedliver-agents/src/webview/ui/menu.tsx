@@ -2,7 +2,7 @@
 // click outside closes it; Escape returns focus to the trigger; menus move with the arrow keys.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { Icon, type IconName } from '../common';
+import { Icon, type IconName } from './icon';
 import { cx } from './controls';
 
 const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';

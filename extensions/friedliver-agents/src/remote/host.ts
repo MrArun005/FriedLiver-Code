@@ -191,7 +191,8 @@ export class RemoteControl implements vscode.Disposable {
       },
       assets: {
         js: readFileSync(path.join(dir, 'media', 'dist', 'remote.js'), 'utf8'),
-        css: readFileSync(path.join(dir, 'media', 'remote.css'), 'utf8'),
+        // The design system's tokens and components first, then the phone's own layout (COMPONENTS.md).
+        css: ['tokens.css', 'components.css', 'remote.css'].map((f) => readFileSync(path.join(dir, 'media', f), 'utf8')).join('\n'),
         icon: readFileSync(path.join(dir, 'media', 'remote-icon.svg'), 'utf8'),
         manifest: JSON.stringify({
           name: 'FriedLiver Remote',

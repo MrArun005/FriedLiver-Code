@@ -1,6 +1,6 @@
 // The design system's display components (COMPONENTS.md §2.3–2.4, §2.14, §2.16–2.26).
 import type { ComponentChildren } from 'preact';
-import { Icon, type IconName } from '../common';
+import { Icon, type IconName } from './icon';
 import { AGENT_FACES, type AgentKey } from '../../shared/model';
 import { IconButton, cx } from './controls';
 
