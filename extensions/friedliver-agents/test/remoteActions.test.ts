@@ -234,6 +234,60 @@ describe('what the phone sees', () => {
   });
 });
 
+describe('slash commands from the phone', () => {
+  /** A chat of this agent that advertises these commands, and a phone whose Mac answers `ok`. */
+  function slashSetup(agent: 'claude' | 'codex' | 'gemini', commands: string[], ok: boolean) {
+    const sent: string[] = [];
+    const confirms: string[] = [];
+    const chat = { id: 'chat-1', agent, label: agent, title: 't', cwd: '/w', createdAt: 0, busy: false, changedFiles: 0, items: [], depth: 0, files: [], lastActivity: 0, turns: 0, session: { options: [], commands: commands.map((name) => ({ name, description: '' })), live: true } };
+    const core = { snapshot: { chats: [chat], images: [], links: [] }, send: async (_id: string, text: string) => void sent.push(text) } as unknown as AgentCore;
+    const actions = new RemoteActions({ core, folders: () => [], agents: () => [], reviews: { accept: () => true, reject: () => true }, confirm: async (a) => (confirms.push(a.title), ok) });
+    const send = (text: string) => actions.run({ type: 'send', chatId: 'chat-1', text }, PHONE);
+    return { send, sent, confirms };
+  }
+
+  it('Claude: harmless ones go, permission and settings ones are refused, others wait for the Mac', async () => {
+    const { send, sent, confirms } = slashSetup('claude', ['help', 'cost', 'status', 'clear', 'compact', 'permissions', 'config', 'model', 'review'], false);
+    expect(await send('/help')).toEqual({ ok: true });
+    expect(await send('  /cost')).toEqual({ ok: true });
+    for (const c of ['/permissions', '/config', '/allowed-tools Bash', '/dangerously-skip-permissions', '/bypass']) {
+      expect(await send(c), c).toMatchObject({ ok: false, error: expect.stringContaining('on your Mac') });
+    }
+    expect(await send('/clear')).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
+    expect(await send('/model opus')).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
+    expect(confirms).toEqual(['Phone “Arun’s iPhone” asks: Send /clear to claude?', 'Phone “Arun’s iPhone” asks: Send /model to claude?']);
+    expect(sent).toEqual(['/help', '  /cost']);
+  });
+
+  it('Codex: /approvals and /mode are refused; an OK on the Mac sends the rest', async () => {
+    const { send, sent, confirms } = slashSetup('codex', ['approvals', 'mode', 'init', 'diff'], true);
+    expect(await send('/approvals full-access')).toMatchObject({ ok: false });
+    expect(await send('/mode')).toMatchObject({ ok: false });
+    expect(await send('/init')).toEqual({ ok: true });
+    expect(confirms).toEqual(['Phone “Arun’s iPhone” asks: Send /init to codex?']);
+    expect(sent).toEqual(['/init']);
+  });
+
+  it('Gemini: /yolo and /settings are refused, unknown commands wait for the Mac, and an @mention doesn’t hide one', async () => {
+    const { send, sent, confirms } = slashSetup('gemini', ['about', 'memory'], false);
+    expect(await send('/yolo')).toMatchObject({ ok: false, error: expect.stringContaining('on your Mac') });
+    expect(await send('/settings')).toMatchObject({ ok: false });
+    expect(await send('@claude /permissions')).toMatchObject({ ok: false, error: expect.stringContaining('on your Mac') });
+    expect(await send('/made-up thing')).toEqual({ ok: false, error: 'Not confirmed on the Mac.' });
+    expect(confirms[0]).toContain('/made-up');
+    expect(await send('use a/b paths, not /tmp')).toEqual({ ok: true });
+    expect(sent).toEqual(['use a/b paths, not /tmp']);
+  });
+
+  it('applies to a new chat’s first message too', async () => {
+    const created: string[] = [];
+    const core = { snapshot: { chats: [], images: [], links: [] }, createChat: async () => (created.push('chat'), { id: 'chat-9' }), send: async () => {} } as unknown as AgentCore;
+    const actions = new RemoteActions({ core, folders: () => ['/w'], agents: () => ['claude'], reviews: { accept: () => true, reject: () => true }, confirm: async () => false });
+    expect(await actions.run({ type: 'newChat', agent: 'claude', folder: '/w', text: '/permissions' }, PHONE)).toMatchObject({ ok: false });
+    expect(created).toEqual([]);
+  });
+});
+
 describe('a disguised command on the phone', () => {
   it('is spelled out, and offers no Run or Always allow there', () => {
     const { core } = fakeCore([{ kind: 'command', commandId: 'c1', commandLine: 'ls \u202eexe.sh', cwd: '/w', outside: false, state: 'awaiting', output: '' }]);

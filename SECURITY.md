@@ -397,6 +397,12 @@ through the same core call the desktop makes, with these extra rules:
   revoked does nothing, and a revoke answers every pending question no.
 - **No defaults.** Levels set from a phone never become defaults for new
   chats, and a new chat from the phone can't start in Auto.
+- **Slash commands.** A message starting with `/` (after any `@mention`)
+  runs the agent's own command. Information-only ones go through. Ones that
+  change permissions, approvals, modes or settings (`/permissions`,
+  `/allowed-tools`, `/config`, `/approvals`, `/mode`, `/yolo`, `/settings`,
+  `/plan`, `dangerously…`, `bypass…`) are refused. Every other command, listed
+  or not, needs the Mac's OK naming the command.
 - **Commands the phone can't show whole and plainly** (over 4,000 characters,
   or with control, bidi or zero-width characters) can only be denied there.
   The phone spells those characters out.
