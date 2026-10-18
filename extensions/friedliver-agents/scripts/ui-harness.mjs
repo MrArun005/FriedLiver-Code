@@ -17,10 +17,12 @@
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 //        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
 //        &fixture=approvals[&countdown=1] (approvals at every weight: routine, review, careful; ui-fixture-approvals.mjs)
+//        &fixture=agent-errors (agent errors in plain words, and chats agent-to-agent goes back to, ui-fixture-agent-errors.mjs)
 //        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
+//   --only agent-errors the agent-error notices and the hand-off/ask menus that reuse a chat (agent-errors-*.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
 
@@ -41,6 +43,7 @@ import { createRequire } from 'node:module';
 import { accountsFixture } from './ui-fixture-accounts.mjs';
 import { inboxFixture } from './ui-fixture-inbox.mjs';
 import { approvalsFixture } from './ui-fixture-approvals.mjs';
+import { agentErrorsFixture } from './ui-fixture-agent-errors.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -173,6 +176,8 @@ function page(params) {
             ? referenceFixture(Date.now())
             : params.get('fixture') === 'approvals'
               ? approvalsFixture(Date.now(), { countdown: params.get('countdown') === '1' })
+            : params.get('fixture') === 'agent-errors'
+              ? agentErrorsFixture(Date.now())
             : params.get('fixture') === 'inbox' || params.get('fixture') === 'inbox-empty'
               ? inboxFixture(Date.now(), { answered: params.get('fixture') === 'inbox-empty' })
             : params.get('fixture') === 'permissions' || surface === 'permissions'
@@ -325,7 +330,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks }[opts.only ?? ''];
+  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -1982,6 +1987,46 @@ function sharedGallery() {
 }
 
 // ---- Approvals: routine rows, review and careful cards, the Allow menu, hold to allow, the Inbox lanes ----
+
+async function agentErrorsChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const shot = async (p, name, element) => {
+    const file = path.join(out, `${name}.png`);
+    await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    console.log(`  ${file}`);
+  };
+  const posted = (p) => p.evaluate(() => window.__posted.filter((m) => !['ready', 'imageThumb', 'imageSrc', 'select', 'seen', 'draft'].includes(m.type)));
+  for (const [theme, tone] of [['dark-2026', 'dark'], ['light-2026', 'light']]) {
+    for (const width of [900, 480]) {
+      const codex = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-codex`, width, 700, 2);
+      const text = await codex.locator('#root').innerText();
+      check(!/Internal error/i.test(text), `${width} ${tone}: no bare "Internal error"`);
+      check(text.includes("Codex can't use the model old-mini") && text.includes('not supported when using Codex with a ChatGPT account'), `${width} ${tone}: the model notice names the model and gives the agent's words`);
+      await shot(codex, `agent-errors-model-${width}-${tone}`);
+      await codex.getByRole('button', { name: 'Use 6 Luna' }).click();
+      check((await posted(codex)).some((m) => m.type === 'notice' && m.action?.do === 'setOption' && m.action.value === 'luna'), `${width} ${tone}: "Use 6 Luna" switches the model`);
+      await codex.close();
+      const gemini = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-gemini`, width, 700, 2);
+      check((await gemini.locator('#root').innerText()).includes('Cannot enable privileged approval modes in an untrusted folder'), `${width} ${tone}: the mode notice gives Gemini's reason`);
+      await shot(gemini, `agent-errors-mode-${width}-${tone}`);
+      await gemini.close();
+      if (width !== 900) continue;
+      const main = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-main`, width, 700, 2);
+      await main.getByRole('button', { name: 'More' }).first().click();
+      await main.waitForSelector('[role="menuitem"]');
+      check((await main.locator('#root').innerText()).includes('In a new chat'), `${tone}: the hand-off menu offers a new chat besides the linked one`);
+      await shot(main, `agent-errors-handoff-${tone}`);
+      await main.keyboard.press('Escape');
+      await main.getByRole('button', { name: 'Ask another agent' }).first().click();
+      await main.locator('.seg-item', { hasText: 'Codex' }).click();
+      await main.locator('textarea[aria-label^="Question for"]').fill('And for refunds?');
+      check((await main.locator('.ask-form').getByRole('button', { name: 'New chat', exact: true }).count()) === 1, `${tone}: Ask offers "New chat" when Codex already has a chat here`);
+      await shot(main, `agent-errors-ask-${tone}`);
+      await main.close();
+    }
+  }
+}
 
 async function approvalsChecks({ open, check }) {
   const out = opts.out;

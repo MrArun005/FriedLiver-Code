@@ -52,6 +52,8 @@
 // ("thought_level") and a Fast toggle ("model_config"; boolean only for clients that say they
 // take boolean options). session/set_mode, session/set_config_option and session/set_model work.
 // Every turn ends with a usage_update. Steering (_session/steering) works while "wait" runs.
+// FAKE_AGENT_REFUSE_MODES=acceptEdits,bypassPermissions refuses those modes as Gemini does in an untrusted folder;
+// the prompts `refuse-model` and `say-refuse-model` answer as Codex does for a model the account can't use.
 // FAKE_AGENT_LEGACY=1 sends only the older `modes` and Gemini's unstable `models`, and takes the
 // model through session/set_model, as Gemini does.
 // FAKE_AGENT_LOAD_SESSION=1 makes it offer session/load (it remembers nothing, so
@@ -200,8 +202,12 @@ function setModel(state, id) {
   if (!model.efforts.includes(state.effort)) state.effort = model.efforts.includes('medium') ? 'medium' : model.efforts[0];
 }
 
+/** Modes it refuses the way Gemini refuses Auto Edit and YOLO in a folder it doesn't trust (FAKE_AGENT_REFUSE_MODES=a,b). */
+const refusedModes = (process.env.FAKE_AGENT_REFUSE_MODES ?? '').split(',').filter(Boolean);
+
 function setMode(state, id) {
   if (!MODES.some((m) => m.id === id)) throw acp.RequestError.invalidParams(undefined, `Unknown mode ${id}`);
+  if (refusedModes.includes(id)) throw new acp.RequestError(-32603, 'Internal error', { details: 'Cannot enable privileged approval modes in an untrusted folder.' });
   state.mode = id;
 }
 
@@ -1210,6 +1216,13 @@ acp
     }
     const busyFor = command.match(/^busy\s+(\d+(?:\.\d+)?)(\s+stamp)?\s*$/);
     if (busyFor) return { stopReason: await busy(client, sessionId, Math.min(Number(busyFor[1]), 3600), !!busyFor[2]) };
+    // An account that can't use the model: as codex-acp 0.16 fails the turn, and as codex-acp 2 says it in its reply.
+    const refusal = `The '${stateOf(sessionId).model}' model is not supported when using Codex with a ChatGPT account.`;
+    if (command === 'refuse-model') throw new acp.RequestError(-32603, 'Internal error', { message: JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: refusal } }), codex_error_info: 'other' });
+    if (command === 'say-refuse-model') {
+      await say(client, sessionId, refusal);
+      return { stopReason: 'end_turn' };
+    }
     if (command === 'chats') {
       try {
         await say(client, sessionId, await useTool(sessionId, 'list_chats', {}));
