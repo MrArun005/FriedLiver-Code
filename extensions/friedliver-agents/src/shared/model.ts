@@ -45,7 +45,9 @@ export type NoticeAction =
   /** Opens Agents & Accounts on the agent's card. */
   | { label: string; do: 'accounts'; agent: AgentKey }
   /** Sends the agent's own /compact. */
-  | { label: string; do: 'compact' };
+  | { label: string; do: 'compact' }
+  /** Sets one of the chat's session options to a value its agent offers (e.g. a model it can use), then sends the last message again. */
+  | { label: string; do: 'setOption'; optionId: string; value: string };
 
 export interface PermissionOption {
   optionId: string;
@@ -813,6 +815,20 @@ export function parseMention(text: string): { agent: AgentKey; text: string } | 
 /** A message the chat's agent was given: one the user typed, or one that came over a link. */
 function givenToAgent(i: Item): boolean {
   return i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from'));
+}
+
+/**
+ * The newest open chat for `agent` that `chatId` consulted or handed off to:
+ * where the next question or hand-off to that agent goes, so it keeps its context.
+ */
+export function linkedChat(state: Pick<AppState, 'chats' | 'links'>, chatId: string, agent: AgentKey, kind: 'consult' | 'handoff'): ChatView | undefined {
+  let best: { chat: ChatView; at: number } | undefined;
+  for (const l of state.links) {
+    if (l.kind !== kind || l.from !== chatId) continue;
+    const c = state.chats.find((x) => x.id === l.to);
+    if (c && c.agent === agent && !c.archived && (!best || l.createdAt >= best.at)) best = { chat: c, at: l.createdAt };
+  }
+  return best?.chat;
 }
 
 export function lastReply(chat: ChatView): string {
