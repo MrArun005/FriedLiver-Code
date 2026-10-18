@@ -60,6 +60,19 @@ const lum = ([r, g, b]: RGBA) => {
   const f = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
 };
+/** Hue in degrees (0–360) and the shortest distance between two hues. */
+function hue([r, g, b]: RGBA): number {
+  const [x, y, z] = [r / 255, g / 255, b / 255];
+  const max = Math.max(x, y, z);
+  const d = max - Math.min(x, y, z);
+  if (!d) return 0;
+  const h = max === x ? ((y - z) / d) % 6 : max === y ? (z - x) / d + 2 : (x - y) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+const hueGap = (a: RGBA, b: RGBA) => {
+  const d = Math.abs(hue(a) - hue(b));
+  return Math.min(d, 360 - d);
+};
 const contrast = (a: RGBA, b: RGBA) => {
   const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m);
   return (x + 0.05) / (y + 0.05);
@@ -86,6 +99,28 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
       expect(contrast(resolve('var(--sel-fg)', vars), sel), 'selected text').toBeGreaterThanOrEqual(7);
       expect(contrast(sel, menu), 'the selected row stands off the menu').toBeGreaterThan(1.15);
       expect(sel.slice(0, 3), 'hover differs from selected').not.toEqual(hover.slice(0, 3));
+      // Status (QA F06, 2026-10-18): four distinct colours; needs-you is a blue, far from error red and the brand orange.
+      const st = (t: string) => resolve(`var(${t})`, vars);
+      const [working, done, waiting, failed] = ['--status-working', '--status-done', '--status-waiting', '--status-failed'].map(st);
+      expect(new Set([working, done, waiting, failed].map((c) => c.slice(0, 3).join())).size, 'four distinct status colours').toBe(4);
+      expect(hueGap(waiting, failed), 'needs-you is not error red').toBeGreaterThanOrEqual(60);
+      expect(hueGap(waiting, hex('#d97757')), 'needs-you is not the brand orange').toBeGreaterThanOrEqual(60);
+      expect(hue(waiting), 'needs-you is a blue').toBeGreaterThanOrEqual(190);
+      expect(hue(waiting)).toBeLessThanOrEqual(230);
+      // A dot is a graphic: 3:1 on the page (WCAG 1.4.11).
+      for (const [n, c] of Object.entries({ working, done, waiting, failed })) expect(contrast(over(c, bg), bg), `${n} dot on the page`).toBeGreaterThanOrEqual(3);
+      // Text on the loud decision fill (counts, the waiting badge).
+      expect(contrast(st('--decision-fg'), over(waiting, bg)), 'text on the decision colour').toBeGreaterThanOrEqual(4.5);
+      // A toned pill's text on its 14% tint over a card: 4.5:1. The tone mixes toward --fg by --tone-ink (75% dark, 40% light).
+      const ink = name.startsWith('light') ? 0.4 : 0.75;
+      if (!name.startsWith('light')) expect(vars['--tone-ink'], 'dark themes keep 75% of a tone').toBe('75%');
+      expect(css, 'the light block keeps --tone-ink at 40%').toMatch(/body\.vscode-light[\s\S]*?--tone-ink: 40%/);
+      const fg = st('--fg');
+      for (const [n, c] of Object.entries({ working, waiting, failed, warn: st('--warn'), success: st('--tl-success') })) {
+        const text: RGBA = [...[0, 1, 2].map((i) => c[i] * ink + fg[i] * (1 - ink)), 1] as RGBA;
+        const tint = over([c[0], c[1], c[2], 0.14], menu);
+        expect(contrast(text, tint), `${n} pill text on its tint`).toBeGreaterThanOrEqual(4.5);
+      }
       // The composer's mic: a white glyph on the theme's button blue, at rest and hovered.
       for (const t of ['--mic-bg', '--mic-hover']) {
         const back = over(resolve(`var(${t})`, vars), surface('--input-bg'));

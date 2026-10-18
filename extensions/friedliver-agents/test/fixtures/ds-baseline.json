@@ -267,7 +267,7 @@
     "webview/approval.tsx": 16,
     "webview/chat.tsx": 40,
     "webview/common.tsx": 4,
-    "webview/composerMenus.tsx": 17,
+    "webview/composerMenus.tsx": 16,
     "webview/connect.tsx": 7,
     "webview/controls.tsx": 17,
     "webview/gallery.tsx": 4,
@@ -285,6 +285,6 @@
     "px": 288,
     "effect": 11,
     "restyle": 246,
-    "rawControls": 215
+    "rawControls": 214
   }
 }

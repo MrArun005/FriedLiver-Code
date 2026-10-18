@@ -2259,6 +2259,11 @@ button.mini-select {
   background: var(--status-working);
 }
 
+/* The Ultracode-style option row: its Toggle sits at the row's end. */
+.cc-toggle {
+  margin-left: auto;
+}
+
 /* ---- Chat layout ---- */
 
 body[data-surface='chat'] {

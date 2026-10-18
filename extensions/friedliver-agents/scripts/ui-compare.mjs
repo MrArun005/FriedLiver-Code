@@ -340,9 +340,9 @@ async function measure(page, state, width) {
       row(name, 'effort track', '76x18', `${track.width}x${track.height}`);
       row(name, 'effort track radius', 9, radius(await css('.cc-slider', 'border-top-left-radius'), track.height));
       row(name, 'effort thumb', 14, (await box('.cc-thumb')).width);
-      const sw = await box('.cc-switch');
+      const sw = await box('.cc-toggle');
       row(name, 'toggle', '32x18', `${sw.width}x${sw.height}`);
-      row(name, 'toggle thumb', 14, px(await css('.cc-switch', 'width', '::after')));
+      row(name, 'toggle thumb', 14, px(await css('.cc-toggle', 'width', '::after')));
       row(name, 'divider', 1, (await box('.cc-divider')).height);
     }
     if (state === 'modes-menu') {

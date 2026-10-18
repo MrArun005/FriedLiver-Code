@@ -7,6 +7,7 @@ import { AGENT_FACES, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
+import { Toggle } from './ui';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
@@ -121,7 +122,7 @@ function ToggleRow({ chat, option, icon }: { chat: ChatView; option: SessionOpti
       <span class="cc-item-name" title={option.description}>
         {option.name}
       </span>
-      <button type="button" role="switch" aria-checked={on} aria-label={option.name} class="cc-switch" onClick={() => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value: !on })} />
+      <Toggle class="cc-toggle" checked={on} label={option.name} onChange={(value) => send({ type: 'setOption', chatId: chat.id, optionId: option.id, value })} />
     </div>
   );
 }

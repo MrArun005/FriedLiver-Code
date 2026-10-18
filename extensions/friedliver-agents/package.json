@@ -565,22 +565,22 @@
     "colors": [
       {
         "id": "friedliver.decision",
-        "description": "The one loud color: something waits for your decision (waiting badge, Accept, Run).",
+        "description": "The one loud color: something waits for your decision (waiting badge, needs-you dots). The theme's info blue, never the error red or the brand orange.",
         "defaults": {
-          "dark": "#d97757",
-          "light": "#a6461f",
-          "highContrast": "#ffffff",
-          "highContrastLight": "#a6461f"
+          "dark": "notificationsInfoIcon.foreground",
+          "light": "notificationsInfoIcon.foreground",
+          "highContrast": "notificationsInfoIcon.foreground",
+          "highContrastLight": "notificationsInfoIcon.foreground"
         }
       },
       {
         "id": "friedliver.decisionForeground",
-        "description": "Text on the decision color.",
+        "description": "Text on the decision color: the page color (dark on the dark themes' light blue, white on the light themes' deep blue).",
         "defaults": {
-          "dark": "#1f1209",
-          "light": "#ffffff",
-          "highContrast": "#000000",
-          "highContrastLight": "#ffffff"
+          "dark": "editor.background",
+          "light": "editor.background",
+          "highContrast": "editor.background",
+          "highContrastLight": "editor.background"
         }
       },
       {

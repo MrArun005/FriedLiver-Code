@@ -196,6 +196,7 @@ export function Toggle({
   size,
   disabled,
   title,
+  class: className,
 }: {
   checked: boolean;
   onChange(v: boolean): void;
@@ -203,12 +204,14 @@ export function Toggle({
   size?: 'md' | 'touch';
   disabled?: boolean;
   title?: string;
+  /** Layout only. */
+  class?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
-      class={cx('fl-toggle', size === 'touch' && 'fl-toggle--touch')}
+      class={cx('fl-toggle', size === 'touch' && 'fl-toggle--touch', className)}
       aria-checked={checked}
       aria-label={label}
       title={title ?? label}

@@ -435,9 +435,11 @@
 [data-tone='info'] {
   --tone: var(--status-working);
 }
-[data-tone='done'],
-[data-tone='success'] {
+[data-tone='done'] {
   --tone: var(--status-done);
+}
+[data-tone='success'] {
+  --tone: var(--tl-success);
 }
 [data-tone='failed'],
 [data-tone='error'],
@@ -2203,11 +2205,14 @@ button.sa-name:hover {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-8);
-  background: var(--menu-bg);
+  /* The Menu component's surface (§2.13): glass on elevation 3 (owner, 2026-10-18: the composer's menus follow Menu). */
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--elev-3);
   color: var(--fg);
   font-size: var(--t-100);
   text-align: left;
-  animation: var(--fade-menu);
+  animation: rise var(--dur) var(--ease-out);
 }
 .cc-modes-menu {
   left: auto;
@@ -2251,6 +2256,7 @@ button.sa-name:hover {
   justify-content: space-between;
   gap: var(--sp-3);
   padding: var(--sp-1) var(--sp-3);
+  font-size: var(--t-85);
   color: var(--fg-50);
 }
 .cc-modes-menu .cc-menu-title {
@@ -2268,7 +2274,7 @@ button.sa-name:hover {
 }
 .cc-menu-sub {
   padding: var(--sp-1) var(--sp-3);
-  font-size: var(--t-90);
+  font-size: var(--t-85);
   color: var(--fg-50);
 }
 .cc-divider {
@@ -2287,7 +2293,8 @@ button.cc-item,
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
   margin: 0 var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
   border-radius: var(--r-4);
@@ -2428,47 +2435,18 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   box-shadow: var(--shadow-thumb);
   transition: left var(--ease-toggle);
 }
-/* A toggle: 32×18, the thumb slides right when on. */
-button.cc-switch {
-  position: relative;
-  flex: none;
-  width: 32px;
-  height: 18px;
-  margin-left: auto;
-  border-radius: var(--r-pill);
-  background: var(--border);
-  transition: background-color var(--ease-toggle);
-}
-button.cc-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--r-round);
-  background: var(--thumb);
-  box-shadow: var(--shadow-thumb);
-  transition: left var(--ease-toggle);
-}
-button.cc-switch[aria-checked='true'] {
-  background: var(--toggle-on);
-}
-button.cc-switch[aria-checked='true']::after {
-  left: 16px;
-}
 /* The / palette's filter: the composer's tone inside the menu. */
 .cc-search {
   flex: none;
   width: auto;
-  margin: var(--sp-1);
-  padding: var(--sp-2) var(--sp-3);
+  height: var(--h-md);
+  margin: var(--sp-1) var(--sp-1) var(--sp-1);
+  padding: 0 var(--sp-2);
   border: 0;
   border-radius: var(--r-4);
   background: var(--input-bg);
   color: var(--fg);
   font-size: var(--t-90);
-  line-height: normal;
   outline: none;
 }
 .cc-search::placeholder {
