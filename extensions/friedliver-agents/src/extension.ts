@@ -305,6 +305,10 @@ export class Controller {
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
       registerBeforeProvider(() => this.core),
     );
+    // What FriedLiver's compact answers saved, per chat, for the usage tooltip and the Agent Manager.
+    const saved = (chatId: string, naive: number, sent: number) => this.core.noteTokens(chatId, { naive, sent });
+    this.projectIndex!.onSaved = saved;
+    this.browser.onSaved = saved;
     const unsubscribe = this.core.onAction((action) => {
       this.batcher.push(action);
       this.stateFile?.schedule();

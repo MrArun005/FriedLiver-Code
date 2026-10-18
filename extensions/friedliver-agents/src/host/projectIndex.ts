@@ -635,6 +635,8 @@ const linesOf = (text: string) => text.replace(/\r\n/g, '\n').replace(/\n$/, '')
 export interface IndexContext {
   chatId: string;
   seen: SeenFiles;
+  /** Told what an answer would have cost as whole-file reads and what it did cost, in estimated tokens. */
+  saved?(naive: number, sent: number): void;
 }
 
 export type IndexCall =
@@ -654,6 +656,14 @@ const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice
  * relative to the folder; with more than one folder they start with its name.
  */
 export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean, ctx?: IndexContext): Promise<string> {
+  const meter = { naive: 0 };
+  const out = await answer(indexes, call, building, ctx, meter);
+  if (meter.naive && ctx?.saved) ctx.saved(meter.naive, estimateTokens(out));
+  return out;
+}
+
+/** answerIndex's work; `meter.naive` gets the tokens of the whole files the answer stands in for. */
+async function answer(indexes: ProjectIndex[], call: IndexCall, building: boolean, ctx: IndexContext | undefined, meter: { naive: number }): Promise<string> {
   if (!indexes.length) return 'No project index: no trusted workspace folder is open, or friedliver.index.enabled is off. Search the files another way.';
   const multi = indexes.length > 1;
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
@@ -697,6 +707,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
         budget.take(head);
         const block = [head];
         const lines = linesOf(text);
+        meter.naive += estimateTokens(text);
         for (const [a, b] of windows(matchingLines(lines, call.query, READ_LIMITS.windowsPerFile), lines.length)) {
           const key = lines.slice(a - 1, b).join('\n');
           const first = shownAt.get(key);
@@ -728,6 +739,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       const got = await at[0].readChecked(at[1]);
       if (!got) return missing;
       const lines = linesOf(got.text);
+      meter.naive = estimateTokens(got.text);
       const syms = outline(at[1], got.text);
       const names = syms.filter((s) => !/^\s/.test(lines[s.line - 1] ?? '')).map((s) => s.name);
       const head = `${call.path} · ${lines.length} lines · #${got.hash.slice(0, 8)}${names.length ? ` · defines ${names.slice(0, 12).join(', ')}${names.length > 12 ? ` +${names.length - 12}` : ''}` : ''}`;
@@ -761,6 +773,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       if (!at) return missing;
       const text = await at[0].read(at[1]);
       if (text === null) return missing;
+      meter.naive = estimateTokens(text);
       const syms = outline(at[1], text);
       return cap(syms.length ? `${call.path}\n${compactOutline(linesOf(text), syms)}` : `${call.path} has no outline (no definitions found, or a language the outline doesn't read).`);
     }
@@ -786,6 +799,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       const d = unifiedDiff(was.text, got.text);
       if (!d || d.text.length > Math.max(4000, got.text.length * 0.6)) return `${call.path} changed too much to diff usefully (${ids}); index_read the parts you need.`;
       ctx.seen.set(ctx.chatId, abs, got.hash, got.text);
+      meter.naive = estimateTokens(got.text);
       return cap(`${call.path}: +${d.added} -${d.removed} since you last saw it (${ids})\n${d.text}`);
     }
     case 'index_changes': {

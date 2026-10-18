@@ -10,6 +10,7 @@ import { mkdir } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
+import { estimateTokens } from '../shared/tokens';
 import { extractPage, PageMemory, toSelector, type PageData } from './pageText';
 import { clampBrowserWidth, imageTokens, ownTab, saveScreenshot, shotParams, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
@@ -193,6 +194,8 @@ export class BrowserPanel implements vscode.Disposable {
   private tab?: vscode.BrowserTab;
   private cdp?: Promise<Cdp>;
   private readonly subscriptions: vscode.Disposable[] = [];
+  /** Told, per chat, what a snapshot or screenshot would have cost the naive way and what it cost. */
+  onSaved?: (chatId: string, naive: number, sent: number) => void;
   /** Each chat's last snapshot, for re-snapshots that send only the change. */
   private readonly pages = new PageMemory();
 
@@ -262,7 +265,10 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'browser_snapshot': {
         const page = await (await this.page()).evaluate<PageData>(SNAPSHOT);
-        return this.pages.answer(chatId, page, call);
+        const text = this.pages.answer(chatId, page, call);
+        // The naive way: every line of the page and every element, as the old snapshot sent.
+        this.onSaved?.(chatId, estimateTokens([...page.lines, ...page.elements].join('\n')), estimateTokens(text));
+        return text;
       }
       case 'browser_click': {
         const cdp = await this.page();
@@ -300,6 +306,7 @@ export class BrowserPanel implements vscode.Disposable {
         await mkdir(base, { recursive: true, mode: 0o700 });
         const file = await saveScreenshot(base, Buffer.from(data, 'base64'), 'jpg');
         const { width, height } = shot.size;
+        this.onSaved?.(chatId, imageTokens(view.width * view.dpr, view.height * view.dpr), imageTokens(width, height));
         return (
           `${await this.where(cdp, call.selector ? `Screenshot of ${call.selector} on` : 'Screenshot of')}\n` +
           `${width}×${height} JPEG, about ${imageTokens(width, height)} image tokens. Saved to ${file}. Read that file to see it; browser_snapshot costs far fewer tokens when text answers the question.`

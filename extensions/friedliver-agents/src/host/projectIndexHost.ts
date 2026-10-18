@@ -47,8 +47,12 @@ export class ProjectIndexHost implements vscode.Disposable {
   /** What each chat was shown of each file, for index_diff. */
   private readonly seen = new SeenFiles();
 
+  /** Told, per chat, what index answers would have cost as whole-file reads and what they cost. */
+  onSaved?: (chatId: string, naive: number, sent: number) => void;
+
   answer(call: IndexCall, chatId?: string): Promise<string> {
-    return answerIndex(this.indexes, call, this.building, chatId ? { chatId, seen: this.seen } : undefined);
+    const saved = (naive: number, sent: number) => chatId && this.onSaved?.(chatId, naive, sent);
+    return answerIndex(this.indexes, call, this.building, chatId ? { chatId, seen: this.seen, saved } : undefined);
   }
 
   /** A file a chat's agent read or wrote: remembered as seen if it is indexed and passes the index's checks. */
