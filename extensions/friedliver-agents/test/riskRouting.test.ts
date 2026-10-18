@@ -1,0 +1,305 @@
+// The host keeps careful requests one at a time whatever a view sends (no "don't ask again", no
+// Always allow, no remembered rule, no notification Allow), lists what a force push would drop, and
+// counts routine requests down only when the user turned that on, with Stop.
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { READ_ONLY_CONFIG, READ_ONLY_ENV, remoteOnlyCommits } from '@friedliver/main/workspace/git';
+import type { Item } from '../src/shared/model';
+import { disposeCores, gitRepo, makeCore, memoryPermissions, waitFor } from './helpers';
+
+afterEach(disposeCores);
+
+const perm = (core: ReturnType<typeof makeCore>, chatId: string) =>
+  core.chat(chatId)!.items.find((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission');
+
+describe('careful requests stay one at a time', () => {
+  it('refuses the agent’s own “don’t ask again” and Always allow for a careful command; a plain yes works', async () => {
+    const dir = await gitRepo();
+    const permissions = memoryPermissions();
+    const asked: { allow?: unknown }[] = [];
+    const core = makeCore(dir, { permissions, ui: { showReview: () => {}, closeReview: () => {}, askPermission: (a) => void asked.push(a), confirmRule: async () => true } });
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'rm -rf build' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    const p = perm(core, chat.id)!;
+    // No Allow button on its notification: it is allowed by holding on its card.
+    expect(asked[0]).not.toHaveProperty('allow');
+    core.answerPermission(p.requestId, 'always');
+    await core.allowAlways({ requestId: p.requestId }, { kind: 'exact', command: 'rm -rf build' });
+    expect(core.decisions()).toHaveLength(1);
+    expect(permissions.list()).toEqual([]);
+    core.answerPermission(p.requestId, 'allow');
+    await turn;
+    expect(perm(core, chat.id)?.answer).toBe('Yes');
+  });
+
+  it('a remembered rule never answers a careful command', async () => {
+    const dir = await gitRepo();
+    const permissions = memoryPermissions();
+    expect(permissions.add({ kind: 'prefix', command: 'git push' })).toBe(true);
+    const core = makeCore(dir, { permissions });
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.auto).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+    // The same rule still answers an ordinary push.
+    const again = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push origin main' })}`);
+    await again;
+    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({ auto: 'Always allowed: git push …' });
+  });
+});
+
+describe('a force push lists what it would drop', () => {
+  it('the remote-only commits, newest first, as of the last fetch', async () => {
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    const dir = await gitRepo();
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+    git(dir, 'remote', 'add', 'origin', remote);
+    git(dir, 'push', '-q', 'origin', 'main');
+    // Someone else pushes two commits; we fetch them, then go our own way.
+    const other = await mkdtemp(path.join(os.tmpdir(), 'fl-other-'));
+    git(other, 'clone', '-q', remote, '.');
+    git(other, 'config', 'user.email', 'p@example.com');
+    git(other, 'config', 'user.name', 'Priya');
+    for (const msg of ['fix(reports): CSV escaping', 'feat(checkout): order note']) {
+      await writeFile(path.join(other, `${msg.length}.txt`), msg);
+      git(other, 'add', '.');
+      git(other, 'commit', '-qm', msg);
+    }
+    git(other, 'push', '-q', 'origin', 'main');
+    git(dir, 'fetch', '-q', 'origin');
+    await writeFile(path.join(dir, 'mine.txt'), 'x');
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-qm', 'mine');
+    const dropped = await remoteOnlyCommits(dir, 'origin', undefined);
+    expect(dropped?.ref).toBe('origin/main');
+    expect(dropped?.commits.map((c) => [c.subject, c.author])).toEqual([
+      ['feat(checkout): order note', 'Priya'],
+      ['fix(reports): CSV escaping', 'Priya'],
+    ]);
+    expect(dropped?.more).toBe(0);
+    // Through the core: a force push from the workspace root (named relatively) lists them on its card.
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main', cwd: '.' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.detail?.dropped?.commits.map((c) => c.subject)).toEqual(['feat(checkout): order note', 'fix(reports): CSV escaping']);
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+    // Odd names are never passed to git, and a branch with no tracking ref gives nothing.
+    expect(await remoteOnlyCommits(dir, '--upload-pack=x', 'main')).toBeNull();
+    expect(await remoteOnlyCommits(dir, 'origin', 'nope')).toBeNull();
+  });
+});
+
+describe('listing the dropped commits never runs a program the repository names', () => {
+  it('ignores the repository’s gpg.program, log.showSignature, pager and fsmonitor', async (ctx) => {
+    if (process.platform === 'win32') return ctx.skip();
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    const dir = await gitRepo();
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+    const marker = path.join(dir, '..', `${path.basename(dir)}-PWNED`);
+    const evil = path.join(dir, '..', `${path.basename(dir)}-evil.sh`);
+    await writeFile(evil, `#!/bin/sh\necho "$@" >> '${marker}'\necho '[GNUPG:] SIG_CREATED ' >&2\necho '-----BEGIN PGP SIGNATURE-----'\necho x\necho '-----END PGP SIGNATURE-----'\n`, { mode: 0o755 });
+    git(dir, 'remote', 'add', 'origin', remote);
+    git(dir, 'push', '-q', 'origin', 'main');
+    const other = await mkdtemp(path.join(os.tmpdir(), 'fl-other-'));
+    git(other, 'clone', '-q', remote, '.');
+    git(other, 'config', 'user.email', 'p@example.com');
+    git(other, 'config', 'user.name', 'Priya');
+    git(other, 'config', 'gpg.program', evil);
+    await writeFile(path.join(other, 'signed.txt'), 'x');
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-S', '-m', 'signed');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(dir, 'fetch', '-q', 'origin');
+    for (const [k, v] of [
+      ['gpg.program', evil],
+      ['log.showSignature', 'true'],
+      ['core.pager', evil],
+      ['core.fsmonitor', evil],
+    ])
+      git(dir, 'config', k, v);
+    const { rmSync, existsSync } = await import('node:fs');
+    rmSync(marker, { force: true });
+    const dropped = await remoteOnlyCommits(dir, 'origin', 'main');
+    expect(dropped?.commits.map((c) => c.subject)).toEqual(['signed']);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('runs git with every program-running and network key off, and no system or global config', () => {
+    const c = READ_ONLY_CONFIG.join(' ');
+    for (const k of ['--no-pager', 'core.fsmonitor=false', 'core.hooksPath=/dev/null', 'core.pager=cat', 'log.showSignature=false', 'gpg.program=false', 'diff.external=', 'core.sshCommand=false', 'core.gitProxy=', 'credential.helper=', 'protocol.allow=never', 'safe.bareRepository=explicit', 'uploadpack.packObjectsHook='])
+      expect(c, k).toContain(k);
+    expect(READ_ONLY_ENV).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_ASKPASS: '', SSH_ASKPASS: '' });
+  });
+
+  it('reads only a root whose .git is a real folder: not a worktree’s .git file, not a link', async () => {
+    const dir = await gitRepo();
+    const wt = path.join(dir, '..', `${path.basename(dir)}-wt`);
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'side', wt], { cwd: dir });
+    expect(await remoteOnlyCommits(wt, 'origin', 'main')).toBeNull();
+    const linked = await mkdtemp(path.join(os.tmpdir(), 'fl-linked-'));
+    const { symlinkSync } = await import('node:fs');
+    symlinkSync(path.join(dir, '.git'), path.join(linked, '.git'));
+    expect(await remoteOnlyCommits(linked, 'origin', 'main')).toBeNull();
+    expect(await remoteOnlyCommits('relative/root', 'origin', 'main')).toBeNull();
+  });
+
+  it('uses the workspace root’s own repository, never a nested one the agent points at', async () => {
+    const dir = await gitRepo();
+    // A nested repository inside the workspace, with a remote whose branch has a commit the nested one lacks.
+    const nested = path.join(dir, 'vendor', 'nested');
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(nested, { recursive: true });
+    const g = (...args: string[]) => execFileSync('git', args, { cwd: nested });
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 't@example.com');
+    g('config', 'user.name', 'T');
+    await writeFile(path.join(nested, 'a.txt'), 'a');
+    g('add', '.');
+    g('commit', '-qm', 'one');
+    g('remote', 'add', 'origin', remote);
+    g('push', '-q', 'origin', 'main');
+    await writeFile(path.join(nested, 'b.txt'), 'b');
+    g('add', '.');
+    g('commit', '-qm', 'two');
+    g('push', '-q', 'origin', 'main');
+    g('reset', '-q', '--hard', 'HEAD~1');
+    expect((await remoteOnlyCommits(nested, 'origin', 'main'))?.commits).toHaveLength(1);
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main', cwd: nested })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.detail?.dropped).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+  });
+
+  it('is not asked for at all outside the workspace', async () => {
+    const outsideRepo = await gitRepo();
+    const dir = await gitRepo();
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: outsideRepo });
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: outsideRepo });
+    await writeFile(path.join(outsideRepo, 'later.txt'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: outsideRepo });
+    execFileSync('git', ['commit', '-qm', 'later'], { cwd: outsideRepo });
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: outsideRepo });
+    execFileSync('git', ['reset', '-q', '--hard', 'HEAD~1'], { cwd: outsideRepo });
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main', cwd: outsideRepo })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.detail?.dropped).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+  });
+});
+
+describe('routine countdown', () => {
+  it('is off unless set; when set, a routine request allows itself once after the countdown', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
+    const chat = await core.createChat('demo');
+    await core.send(chat.id, 'native-run');
+    expect(perm(core, chat.id)).toMatchObject({ answer: 'Yes', auto: 'Routine, allowed after the countdown' });
+  });
+
+  it('counts down only the exact allowlist: a routine-looking command with any extra word waits', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
+    const chat = await core.createChat('demo');
+    for (const command of ['ls -la', 'npm test; rm -rf ~', 'git -c core.pager=sh log']) {
+      const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command })}`);
+      await waitFor(() => core.decisions().length === 1);
+      const p = core.chat(chat.id)!.items.filter((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission').at(-1)!;
+      expect(p.autoAt, command).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(core.decisions(), command).toHaveLength(1);
+      core.answerPermission(p.requestId, 'reject');
+      await turn;
+    }
+  });
+
+  it('never counts down a request outside the workspace: a command’s folder or a read’s file', async () => {
+    const dir = await gitRepo();
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'fl-outside-'));
+    await writeFile(path.join(outside, 'notes.txt'), 'x');
+    const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
+    const chat = await core.createChat('demo');
+    for (const [kind, input] of [
+      ['execute', { command: 'git status', cwd: outside }],
+      ['execute', { command: 'git status', cwd: `../${path.basename(outside)}` }],
+      ['execute', { command: 'git status', cwd: '../../../../../../../../etc' }],
+      ['read', { file_path: path.join(outside, 'notes.txt'), locations: [path.join(outside, 'notes.txt')] }],
+    ] as const) {
+      const turn = core.send(chat.id, `native-perm ${kind} ${JSON.stringify(input)}`);
+      await waitFor(() => core.decisions().length === 1);
+      const p = core.chat(chat.id)!.items.filter((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission').at(-1)!;
+      expect(p.autoAt, kind).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(core.decisions(), kind).toHaveLength(1);
+      core.answerPermission(p.requestId, 'reject');
+      await turn;
+    }
+    // A read inside the workspace doesn't count down either: only the exact command list ever does.
+    await writeFile(path.join(dir, 'inside.txt'), 'x');
+    const read = core.send(chat.id, `native-perm read ${JSON.stringify({ file_path: path.join(dir, 'inside.txt'), locations: [path.join(dir, 'inside.txt')] })}`);
+    await waitFor(() => core.decisions().length === 1);
+    const r = core.chat(chat.id)!.items.filter((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission').at(-1)!;
+    expect(r.autoAt).toBeUndefined();
+    core.answerPermission(r.requestId, 'reject');
+    await read;
+  });
+
+  it('never counts down a review or careful request', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'npm install left-pad' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.autoAt).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 120));
+    expect(core.decisions()).toHaveLength(1);
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+  });
+
+  it('Stop ends it: the request waits like any other', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { autoRoutineSeconds: () => 1 });
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, 'native-run');
+    await waitFor(() => core.decisions().length === 1);
+    const p = perm(core, chat.id)!;
+    expect(p.autoAt).toBeGreaterThan(Date.now());
+    core.stopAuto(p.requestId);
+    expect(perm(core, chat.id)?.autoAt).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(core.decisions()).toHaveLength(1);
+    core.answerPermission(p.requestId, 'reject');
+    await turn;
+  });
+
+  it('without the setting, nothing counts down', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, 'native-run');
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.autoAt).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'allow');
+    await turn;
+  });
+});
