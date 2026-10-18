@@ -1048,10 +1048,14 @@ export class AgentCore {
     return this.autoTimers.delete(id);
   }
 
-  /** A force push: the commits it would drop from the remote branch, as of the last fetch. */
+  /**
+   * A force push: the commits it would drop from the remote branch, as of the last fetch. Git runs before
+   * the user says yes, so only in a workspace folder (a trusted one: the extension doesn't run in untrusted
+   * workspaces), and with the repository's program-running config off (git.remoteOnlyCommits).
+   */
   private async droppedBy(line: string | undefined, cwd: string | undefined): Promise<DroppedCommits | undefined> {
     const push = line ? forcePush(line) : undefined;
-    if (!push || !cwd) return undefined;
+    if (!push || !cwd || insideRoots(cwd, this.roots()) === null) return undefined;
     return (await git.remoteOnlyCommits(cwd, push.remote, push.dst, push.src ?? 'HEAD').catch(() => null)) ?? undefined;
   }
 

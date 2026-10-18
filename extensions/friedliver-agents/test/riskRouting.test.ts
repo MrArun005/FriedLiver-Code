@@ -90,6 +90,64 @@ describe('a force push lists what it would drop', () => {
   });
 });
 
+describe('listing the dropped commits never runs a program the repository names', () => {
+  it('ignores the repository’s gpg.program, log.showSignature, pager and fsmonitor', async (ctx) => {
+    if (process.platform === 'win32') return ctx.skip();
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    const dir = await gitRepo();
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+    const marker = path.join(dir, '..', `${path.basename(dir)}-PWNED`);
+    const evil = path.join(dir, '..', `${path.basename(dir)}-evil.sh`);
+    await writeFile(evil, `#!/bin/sh\necho "$@" >> '${marker}'\necho '[GNUPG:] SIG_CREATED ' >&2\necho '-----BEGIN PGP SIGNATURE-----'\necho x\necho '-----END PGP SIGNATURE-----'\n`, { mode: 0o755 });
+    git(dir, 'remote', 'add', 'origin', remote);
+    git(dir, 'push', '-q', 'origin', 'main');
+    const other = await mkdtemp(path.join(os.tmpdir(), 'fl-other-'));
+    git(other, 'clone', '-q', remote, '.');
+    git(other, 'config', 'user.email', 'p@example.com');
+    git(other, 'config', 'user.name', 'Priya');
+    git(other, 'config', 'gpg.program', evil);
+    await writeFile(path.join(other, 'signed.txt'), 'x');
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-S', '-m', 'signed');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(dir, 'fetch', '-q', 'origin');
+    for (const [k, v] of [
+      ['gpg.program', evil],
+      ['log.showSignature', 'true'],
+      ['core.pager', evil],
+      ['core.fsmonitor', evil],
+    ])
+      git(dir, 'config', k, v);
+    const { rmSync, existsSync } = await import('node:fs');
+    rmSync(marker, { force: true });
+    const dropped = await remoteOnlyCommits(dir, 'origin', 'main');
+    expect(dropped?.commits.map((c) => c.subject)).toEqual(['signed']);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('is not asked for at all outside the workspace', async () => {
+    const outsideRepo = await gitRepo();
+    const dir = await gitRepo();
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: outsideRepo });
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: outsideRepo });
+    await writeFile(path.join(outsideRepo, 'later.txt'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: outsideRepo });
+    execFileSync('git', ['commit', '-qm', 'later'], { cwd: outsideRepo });
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: outsideRepo });
+    execFileSync('git', ['reset', '-q', '--hard', 'HEAD~1'], { cwd: outsideRepo });
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main', cwd: outsideRepo })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.detail?.dropped).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+  });
+});
+
 describe('routine countdown', () => {
   it('is off unless set; when set, a routine request allows itself once after the countdown', async () => {
     const dir = await gitRepo();
