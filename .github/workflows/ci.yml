@@ -6,6 +6,9 @@ name: CI
 on:
   push:
   pull_request:
+  # update-prs.yml starts it on a pull request branch it merged main into: its push
+  # (made with the workflow token) starts no workflow by itself.
+  workflow_dispatch:
 
 # Read-only token; pull requests from forks get no secrets either (this is not pull_request_target).
 permissions:

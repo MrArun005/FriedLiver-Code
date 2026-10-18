@@ -36,15 +36,18 @@ release job gets a token that can write (`contents: write`).
 
 ### Releasing an update
 
-1. Pick the version: the pinned upstream version, then FriedLiver's own build
-   number, e.g. `1.142.0-2`. It must be newer than the last release, or apps
-   won't see it.
-2. Tag and push: `git tag v1.142.0-2 && git push origin v1.142.0-2`.
-3. `build.yml` builds all three OSes with `FRIEDLIVER_VERSION` set from the tag
+1. Run **Actions → Release → Run workflow** on `main` ([RELEASING.md](RELEASING.md)).
+   It refuses unless CI passed on main's head, picks the next version (the
+   pinned upstream version, then FriedLiver's own build number one higher than
+   the last tag, e.g. `1.142.0-8`) and writes the notes. (By hand still works:
+   `git tag v1.142.0-8 && git push origin v1.142.0-8`.)
+2. It calls `build.yml`, which builds all three OSes with `FRIEDLIVER_VERSION` set from the tag
    (stamped into `product.json` as `friedliverVersion`), then the release job
    writes `SHA256SUMS.txt` over every asset (it fails if the macOS arm64 DMG is
-   missing) and publishes the GitHub release.
-4. Running apps see it: the Agents extension asks
+   missing) and publishes the GitHub release, creating the tag. Then a Mac
+   downloads the published DMG and zip and checks them against
+   `SHA256SUMS.txt` and the signing certificate.
+3. Running apps see it: the Agents extension asks
    `api.github.com/repos/MrArun005/FriedLiver-Code/releases/latest` 30 s after
    start and every 4 h. When the release is newer than `friedliverVersion`, a
    bottom-right toast says "FriedLiver X.Y.Z is available" with **Install**,
@@ -212,7 +215,8 @@ a `.p12` (with `-legacy` for OpenSSL 3, so `security import` reads it), then
 set `MACOS_SIGN_P12` (`base64 -i cert.p12`), `MACOS_SIGN_P12_PASSWORD` and
 `MACOS_SIGN_IDENTITY` (its common name) in the repository's Actions secrets.
 A new certificate has a new root hash, so macOS asks once more after that
-release. Keep it valid for years: an expired certificate still verifies (no
+release; put the new hash in `CERT_ROOT` in `.github/workflows/release.yml`
+(the release check fails until then). Keep it valid for years: an expired certificate still verifies (no
 timestamp is needed for a self-signed one), but rotate before it leaks, not
 on a schedule.
 
