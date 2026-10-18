@@ -3,7 +3,7 @@
 import type { AgentRoster } from './accounts';
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import type { DictationUpdate } from './dictation';
-import type { OutsideImages } from './gallery';
+import type { ImageStoreInfo, OutsideImages } from './gallery';
 import { linkTarget } from './links';
 import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
 import { isApprovalLevel, type AgentDefaults, type ApprovalLevel } from './session';
@@ -47,6 +47,14 @@ export type WebviewMessage =
   | { type: 'imageThumb'; path: string }
   /** Shows an image file in Finder (the system's file manager). */
   | { type: 'revealImage'; path: string }
+  /** Done looking at one chat's images (`chatId`) or every image: they hide now, their copies and temp originals go on imagesCommit. */
+  | { type: 'imagesDone'; chatId?: string }
+  /** Brings back what the last imagesDone hid, before it is committed. */
+  | { type: 'imagesUndo' }
+  /** The undo time is over: delete what the last imagesDone hid. */
+  | { type: 'imagesCommit' }
+  /** Pin a gallery image (by its key) so Done looking and the storage limits keep it. */
+  | { type: 'imagePin'; key: string; pinned: boolean }
   /** `line`/`endLine` (1-based, optional) select those lines, for a code reference. */
   | { type: 'openFile'; path: string; line?: number; endLine?: number }
   /** A web link you clicked: where it opens is the friedliver.links.openIn setting, the other way with Cmd/Ctrl. */
@@ -151,6 +159,8 @@ export type HostMessage =
   | { type: 'claudeSessions'; sessions: ClaudeSession[] }
   /** The images those sessions read or took, for the Images view. */
   | { type: 'claudeImages'; sessions: OutsideImages[] }
+  /** FriedLiver's image copies: the space they use, and which gallery images are pinned or hidden. */
+  | { type: 'imageStore'; store: ImageStoreInfo }
   /** The mic's state for that chat's composer, or the words heard so far (see shared/dictation.ts). */
   | ({ type: 'dictation'; chatId: string } & DictationUpdate)
   /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
@@ -302,6 +312,14 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'attach':
       if (m.chatId === undefined) return { type: 'attach' };
       return id(m.chatId) ? { type: 'attach', chatId: m.chatId } : null;
+    case 'imagesDone':
+      if (m.chatId === undefined) return { type: 'imagesDone' };
+      return id(m.chatId) ? { type: 'imagesDone', chatId: m.chatId } : null;
+    case 'imagesUndo':
+    case 'imagesCommit':
+      return { type: m.type };
+    case 'imagePin':
+      return str(m.key, LIMITS.path + 256) && m.key && typeof m.pinned === 'boolean' ? { type: 'imagePin', key: m.key, pinned: m.pinned } : null;
     case 'imageSrc':
     case 'openImage':
     case 'imageThumb':
