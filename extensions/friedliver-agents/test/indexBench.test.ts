@@ -69,7 +69,7 @@ describe.skipIf(!repo)('project index re-open bench', () => {
     const table = [
       `Project index on ${path.basename(repo!)} (${process.platform}): ${full.size.toLocaleString()} files, root ${full.root.slice(0, 12)}, journal ${journal ? 'FSEvents' : 'none'}`,
       '',
-      '| Scenario | Tree ready | Verified | Search ready | git hint done | How | Stats | Reads | Re-indexed |',
+      '| Scenario | Tree ready | Verified | Search ready | All done | How | Stats | Reads | Re-indexed |',
       '|---|---|---|---|---|---|---|---|---|',
       ...rows.map(
         ([name, r]) =>

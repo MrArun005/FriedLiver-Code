@@ -28,24 +28,50 @@ checkout, a pull or a branch switch re-reads only what changed.
 
 ## On open
 
-1. The saved index loads (`globalStorage/index/index-<folder hash>.json`,
-   folder 0700, file 0600, written to a temp file and renamed). It must be
-   version 2 and well formed; each entry is used only if its file passes
-   today's checks. A corrupt, foreign or older file loads nothing, which is a
-   full build. Saved tree nodes are re-hashed and the kept roots must be
-   stored; anything off drops the history (the docs stay).
-2. Every listed file is stat'ed, 256 at a time. That is the floor: a
-   directory's mtime does not change when a file in it is edited, so without
-   a file-system journal (FSEvents/watchman since-tokens) every leaf needs
-   its stat. Only files whose stat changed are read; only those whose
-   content hash changed are re-tokenized. A checkout that rewrites a file with
-   the same bytes costs one read and no re-index.
-3. The status bar shows `Index · N files · #<root 8 hex> · K changed since
-   last open`. **FriedLiver: Rebuild Project Index (full)** (or a click on the
-   status item) drops the saved index and reads everything again.
+A save is two files in `globalStorage/index/` (folder 0700, files 0600, each
+written to a temp file and renamed): `index-<folder hash>.json`, the tree
+(every leaf's path, size, mtime-ns and hash; the kept roots; the journal
+mark; git's HEAD; the name rules it was made under), and
+`index-<folder hash>.docs.ndjson`, the search data, one JSON doc per line.
 
-When `.git/HEAD`, `ORIG_HEAD` or `FETCH_HEAD` changes, the same stat pass runs
-again, since the watcher may not report every file of a big checkout.
+1. **Tree ready.** The tree file loads with no file-system access: the
+   Merkle root, the status bar and `index_changes` answer at once. A save
+   made under other name rules (denylists, `files.exclude`) is re-checked
+   by name; a corrupt, foreign or older file loads nothing (a full build);
+   saved tree nodes are re-hashed and a bad one drops the history.
+2. **Search ready.** The docs stream in, 100 lines at a time, yielding to
+   the editor. A saved doc is used only while its leaf still has the same
+   content hash, so a file that changed meanwhile never shows stale
+   results; leaves left without a doc are read. Until then answers carry a
+   note that they may be incomplete. Every read (search snippets) still
+   re-checks its file: symlink, real path, size, name rules, `O_NOFOLLOW`.
+3. **Verified**, alongside step 2:
+   - **macOS: FSEvents journal.** `bin/friedliver-fsevents` (Swift,
+     `native/friedliver-fsevents.swift`) returns every event under the folder
+     since the saved event id. Only those paths are re-checked, through every
+     filter of the full build (`.gitignore` via `git check-ignore`, name
+     rules, symlinked or nested-repo directories, size, binary). Directory
+     events and changed `.gitignore` files rescan their directory. No END
+     from the helper, another journal UUID, dropped or wrapped events, a
+     mount, or the folder itself to rescan: the full check instead.
+   - **Elsewhere, or without a usable mark:** every listed file is stat'ed,
+     256 at a time, and read only if its stat changed. Windows' USN journal
+     would need a volume handle (administrator), so Windows uses this too.
+   - **git's hint**, in both cases: `git --no-optional-locks status
+     --porcelain` plus the diff from the last session's HEAD. With a journal
+     it runs alongside and its extra paths are checked after; without one it
+     goes first so likely changes show within moments. It is never trusted
+     alone.
+4. The mark saved is the one taken at the previous save (saves are 30 s
+   apart at least), so the watcher has delivered everything before it; the
+   next open replays the journal from there. Changes the editor's watcher
+   is told to skip (`files.watcherExclude`) between those points are only
+   caught by the next full check (**Rebuild Project Index (full)**).
+
+While open, watcher events update files live (one update at a time per
+file); a moved `.git/HEAD`, `ORIG_HEAD`, `FETCH_HEAD` or an edited
+`.gitignore` re-runs the stat pass. The status bar shows `Index · N files ·
+#<root 8 hex> · K changed since last open`.
 
 ## `index_changes`
 
@@ -56,25 +82,31 @@ a count of the rest. An unknown `since` lists the kept roots.
 
 ## Measured
 
-Synthetic tree, 20,000 files in 1,020 directories (the test in
-`test/projectIndex.test.ts`, MacBook, warm cache): full build about 2.8–4.5 s;
-re-open after editing 10 files about 0.6–1.2 s with 20,010 stats and 10 reads;
-the diff visits 21 of 1,021 directories.
-
 `.github/workflows/index-bench.yml` runs `test/indexBench.test.ts` on a
-throwaway clone of microsoft/TypeScript at v6.0.3: a full build, a re-open
-after editing 10 files, and one after touching 10 more with the same
-content. The numbers go to the run's summary. Run 39112512864 (ubuntu-latest,
-81,369 files indexed, saved index 93.9 MB):
+throwaway clone of microsoft/TypeScript at v6.0.3 (81,369 files indexed) on
+ubuntu-latest (no journal) and macos-latest (FSEvents journal): a full
+build, a re-open after editing 10 files, and one after touching 10 more
+with the same content. Run 39115942509:
 
-| Scenario | Time | Stats | Reads | Re-indexed |
-|---|---|---|---|---|
-| Full build | 30.1 s | 162,805 | 81,385 | 81,369 |
-| Re-open, 10 files edited | 4.9 s | 162,799 | 10 | 10 |
-| Re-open, 10 files touched (same content) | 4.9 s | 162,799 | 10 | 0 |
+| Runner | Scenario | Tree ready | Verified | Search ready | Stats | Reads | Re-indexed |
+|---|---|---|---|---|---|---|---|
+| macOS | Full build | – | 57.3 s | 57.3 s | 162,805 | 81,385 | 81,369 |
+| macOS | Re-open, 10 edited | 0.28 s | 0.65 s | 3.4 s | 20 | 10 | 10 |
+| macOS | Re-open, 10 touched | 0.28 s | 0.71 s | 3.5 s | 30 | 10 | 0 |
+| Linux | Full build | – | 58.4 s | 58.4 s | 162,805 | 81,385 | 81,369 |
+| Linux | Re-open, 10 edited | 0.34 s | 6.4 s | 7.5 s | 81,440 | 10 | 10 |
+| Linux | Re-open, 10 touched | 0.35 s | 6.2 s | 7.3 s | 81,440 | 10 | 0 |
 
-Re-open time is now the stat floor: each file is checked twice (lstat and
-realpath when the saved entry loads, again in the sync pass).
+Before the tree file, the journal and the stream, a re-open loaded one
+94 MB JSON (4.3 s blocking the extension host on Linux) and then stat'ed
+every file twice: 4.9 s to verified. The CI runners vary by up to 2x
+between runs (the same Linux full build took 33 s in run 39115448596, its
+re-open verified in 4.0 s), so compare rows within a run. Search ready is
+the docs stream (about 3 s for 81k docs); the tree, the status and
+`index_changes` do not wait for it.
+
+Synthetic tree, 20,000 files in 1,020 directories (`test/projectIndex.test.ts`,
+MacBook): the diff after 10 edits visits 21 of 1,021 directories.
 
 ## Later uses (design only)
 
