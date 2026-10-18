@@ -18,7 +18,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.dispose()));
 });
 
-async function start(over: { now?: () => number } = {}) {
+async function start(over: { now?: () => number; approvePairing?: (name: string) => Promise<boolean>; onSeen?: (d: Device) => void } = {}) {
   const devices = new Devices(memoryStore());
   const pairing = new Pairing(devices, over.now);
   const lockout = new Lockout(over.now);
@@ -166,6 +166,18 @@ describe('pairing over the server', () => {
     expect((await post(port, '/api/pair', { code, name: 'x' })).status).toBe(403);
   });
 
+  it('waits for the Mac to allow the new phone, and gives nothing if it says no', async () => {
+    let allow = false;
+    const asked: string[] = [];
+    const { port, pairing, devices } = await start({ approvePairing: async (name) => (asked.push(name), allow) });
+    expect((await post(port, '/api/pair', { code: pairing.start().code, name: 'Stranger' })).status).toBe(403);
+    expect(devices.list()).toEqual([]);
+    allow = true;
+    expect((await post(port, '/api/pair', { code: pairing.start().code, name: 'Mine' })).status).toBe(200);
+    expect(asked).toEqual(['Stranger', 'Mine']);
+    expect(devices.list().map((d) => d.name)).toEqual(['Mine']);
+  });
+
   it('refuses an expired code', async () => {
     let now = 0;
     const { port, pairing } = await start({ now: () => now });
@@ -178,28 +190,45 @@ describe('pairing over the server', () => {
     const { port, pairing } = await start();
     const { code } = pairing.start();
     for (let i = 0; i < 5; i++) expect((await post(port, '/api/pair', { code: `nope${i}`, name: 'x' })).status).toBe(403);
-    expect((await post(port, '/api/pair', { code, name: 'x' })).status).toBe(429);
+    await expect(post(port, '/api/pair', { code, name: 'x' })).rejects.toThrow();
   });
 });
 
 describe('every API route', () => {
-  it('needs a paired device’s token in the header, and locks out after bad ones', async () => {
+  it('needs a paired device’s token in the header', async () => {
     const { port, pairing } = await start();
     const { token } = await pair(port, pairing);
-    const routes: [string, string][] = [
-      ['GET', '/api/chats'],
-      ['GET', '/api/chats/chat-1'],
-      ['POST', '/api/action'],
-      ['POST', '/api/ticket'],
-      ['POST', '/api/forget'],
-    ];
-    for (const [method, path] of routes.slice(0, 4)) {
+    for (const [method, path] of [['GET', '/api/chats'], ['GET', '/api/chats/chat-1'], ['POST', '/api/action'], ['POST', '/api/ticket'], ['POST', '/api/forget']]) {
       const r = await call(port, method, path, { headers: { 'content-type': 'application/json', origin: `https://${HOST}:${port}` }, body: '{}' });
       expect(r.status, path).toBe(401);
     }
     // A cookie or a query-string token is not a token.
     expect((await call(port, 'GET', `/api/chats?token=${token}`, { headers: { cookie: `token=${token}` } })).status).toBe(401);
-    expect((await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}` } })).status).toBe(429);
+    // Requests with no token at all (a page's <img>) don't lock the phone's own address out.
+    expect((await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
+  });
+
+  it('locks an address out after five bad tokens, before TLS for new connections', async () => {
+    const { port, pairing } = await start();
+    const { token } = await pair(port, pairing);
+    for (let i = 0; i < 5; i++) expect((await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer wrong${i}` } })).status).toBe(401);
+    await expect(call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}` } })).rejects.toThrow();
+  });
+
+  it('refuses cross-site requests outright', async () => {
+    const { port, pairing } = await start();
+    const { token } = await pair(port, pairing);
+    expect((await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}`, 'sec-fetch-site': 'cross-site' } })).status).toBe(403);
+    expect((await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}`, 'sec-fetch-site': 'same-origin' } })).status).toBe(200);
+  });
+
+  it('tells the Mac the first time each device is used, by HTTP alone too', async () => {
+    const seen: string[] = [];
+    const { port, pairing } = await start({ onSeen: (d: { name: string }) => seen.push(d.name) });
+    const { token } = await pair(port, pairing, 'Pixel');
+    await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}` } });
+    await call(port, 'GET', '/api/chats', { headers: { authorization: `Bearer ${token}` } });
+    expect(seen).toEqual(['Pixel']);
   });
 
   it('serves the chats and takes checked actions for a paired device', async () => {
