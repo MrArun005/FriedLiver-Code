@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import * as vscode from 'vscode';
+import { SeenFiles } from './indexReads';
 import { answerIndex, ProjectIndex, readIndexFile, saveIndexFile, STAT_BATCH, type IndexCall } from './projectIndex';
 
 /** git files that move on a checkout, pull or branch switch: re-check every file's stat then. */
@@ -43,8 +44,24 @@ export class ProjectIndexHost implements vscode.Disposable {
     this.rebuild(false);
   }
 
-  answer(call: IndexCall): Promise<string> {
-    return answerIndex(this.indexes, call, this.building);
+  /** What each chat was shown of each file, for index_diff. */
+  private readonly seen = new SeenFiles();
+
+  answer(call: IndexCall, chatId?: string): Promise<string> {
+    return answerIndex(this.indexes, call, this.building, chatId ? { chatId, seen: this.seen } : undefined);
+  }
+
+  /** A file a chat's agent read or wrote: remembered as seen if it is indexed and passes the index's checks. */
+  observe(chatId: string, abs: string): void {
+    const ix = this.indexes.find((i) => abs.startsWith(i.root + path.sep));
+    const rel = ix && path.relative(ix.root, abs).split(path.sep).join('/');
+    if (!ix || !rel || !ix.has(rel)) return;
+    void ix.readChecked(rel).then((got) => got && this.seen.set(chatId, abs, got.hash, got.text));
+  }
+
+  /** Pins each folder's project hash as this chat's last turn. */
+  turnEnded(chatId: string): void {
+    for (const ix of this.indexes) ix.tree.pin(chatId);
   }
 
   private config() {

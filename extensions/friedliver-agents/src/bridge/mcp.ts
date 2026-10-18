@@ -172,6 +172,15 @@ function indexTools() {
       ...ro,
     },
     {
+      name: 'index_diff',
+      title: 'Diff since you saw it',
+      description:
+        'A compact unified diff of a project file against the version you were last shown in this chat (by index_read or a file read FriedLiver saw). ' +
+        'Use it instead of re-reading a file after it changed.',
+      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      ...ro,
+    },
+    {
       name: 'index_changes',
       title: 'Changed files',
       description:
@@ -179,7 +188,13 @@ function indexTools() {
       inputSchema: {
         $schema: DRAFT_07,
         type: 'object',
-        properties: { since: { type: 'string', pattern: '^[0-9a-fA-F]{8,64}$', description: 'An earlier project hash, or its first 8+ characters, from an earlier answer.' } },
+        properties: {
+          since: {
+            type: 'string',
+            pattern: '^([0-9a-fA-F]{8,64}|last_turn)$',
+            description: '"last_turn" for what changed since your previous turn in this chat (marking files you already have), or an earlier project hash (8+ characters).',
+          },
+        },
       },
       ...ro,
     },
