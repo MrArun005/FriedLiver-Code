@@ -111,6 +111,8 @@ export class Controller {
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
+  /** Where the Diagnose Claude Code Sessions command writes. */
+  private claudeReport?: vscode.OutputChannel;
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
   private claudeWatchers = new Map<string, FSWatcher>();
@@ -354,6 +356,7 @@ export class Controller {
     command('friedliver.fanout', () => this.fanoutCommand());
     command('friedliver.rewind', (chatId?: unknown) => this.rewindCommand(typeof chatId === 'string' ? chatId : undefined));
     command('friedliver.pipe', (chatId?: unknown) => this.pipeCommand(typeof chatId === 'string' ? chatId : undefined));
+    command('friedliver.diagnoseClaudeSessions', () => this.diagnoseClaudeSessions());
     this.editor = new EditorAgent(context, {
       core: this.core,
       showChat: (chatId, revealItem) => this.showChat(chatId, revealItem),
@@ -1557,6 +1560,29 @@ export class Controller {
       this.claudeTimer = undefined;
       void this.readClaudeSessions().catch((err: unknown) => this.log.warn(`Claude Code sessions: ${messageOf(err)}`));
     }, 500);
+  }
+
+  /** Writes what the Manager's Claude Code lane reads, and why each session is shown or hidden, to an output channel. */
+  private async diagnoseClaudeSessions(): Promise<void> {
+    if (!this.claudeReport) {
+      this.claudeReport = vscode.window.createOutputChannel('FriedLiver: Claude Code Sessions');
+      this.context.subscriptions.push(this.claudeReport);
+    }
+    const out = this.claudeReport;
+    const folders = this.folders();
+    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    const shown = vscode.workspace.getConfiguration('friedliver').get<boolean>('showClaudeCodeSessions', true);
+    const showAll = vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false);
+    const report: string[] = [];
+    const sessions = await listClaudeSessions({ home: os.homedir(), folders, skip: owned, showAll, report });
+    out.clear();
+    out.appendLine(`Claude Code sessions, ${new Date().toISOString()}`);
+    out.appendLine(`folders: ${folders.length ? folders.join(', ') : 'none (every project from the last week)'}`);
+    out.appendLine(`friedliver.showClaudeCodeSessions: ${shown}, friedliver.claudeSessions.showAll: ${showAll}`);
+    out.appendLine(`sessions FriedLiver's chats have: ${owned.size ? [...owned].join(', ') : 'none'}`);
+    out.appendLine(`listed: ${sessions.length}; the Manager last got: ${this.claudeSessions.length}`);
+    for (const line of report) out.appendLine(line);
+    out.show(true);
   }
 
   private async readClaudeSessions(): Promise<void> {
