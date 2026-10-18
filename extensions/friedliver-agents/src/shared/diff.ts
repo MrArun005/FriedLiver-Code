@@ -103,3 +103,89 @@ export function diffPreview(before: string | null | undefined, after: string | n
   }
   return { added, removed, lines, more };
 }
+
+/**
+ * A unified diff (hunks with `context` lines around each change) by Myers' O((N+M)·D) algorithm, so
+ * a few edits in a big file cost little. Null when more than `maxEdits` lines changed: a rewrite,
+ * which is cheaper to read whole.
+ */
+export function unifiedDiff(before: string, after: string, context = 3, maxEdits = 2000): { text: string; added: number; removed: number } | null {
+  const a = splitLines(before);
+  const b = splitLines(after);
+  const n = a.length;
+  const m = b.length;
+  const max = Math.min(n + m, maxEdits);
+  const off = max + 1;
+  const v = new Int32Array(2 * max + 3);
+  const trace: Int32Array[] = [];
+  let done = n === 0 && m === 0;
+  for (let d = 0; d <= max && !done; d++) {
+    trace.push(v.slice());
+    for (let k = -d; k <= d; k += 2) {
+      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      v[off + k] = x;
+      if (x >= n && y >= m) {
+        done = true;
+        break;
+      }
+    }
+  }
+  if (!done) return null;
+  // Walk back through the trace: ops in order, ' ' / '-' / '+'.
+  const ops: DiffLine[] = [];
+  let x = n;
+  let y = m;
+  for (let d = trace.length - 1; d >= 0; d--) {
+    const t = trace[d];
+    const k = x - y;
+    const prevK = k === -d || (k !== d && t[off + k - 1] < t[off + k + 1]) ? k + 1 : k - 1;
+    const px = d === 0 ? 0 : t[off + prevK];
+    const py = px - prevK;
+    while (x > px && y > py) {
+      ops.push({ op: ' ', text: a[--x] });
+      y--;
+    }
+    if (d > 0) ops.push(x === px ? { op: '+', text: b[--y] } : { op: '-', text: a[--x] });
+  }
+  ops.reverse();
+  let added = 0;
+  let removed = 0;
+  const out: string[] = [];
+  // Old and new line numbers (0-based) before each op.
+  const pos: [number, number][] = [];
+  let ai = 0;
+  let bi = 0;
+  for (const o of ops) {
+    pos.push([ai, bi]);
+    if (o.op !== '+') ai++;
+    if (o.op !== '-') bi++;
+  }
+  for (let i = 0; i < ops.length; ) {
+    if (ops[i].op === ' ') {
+      i++;
+      continue;
+    }
+    // A hunk: from `context` before this change to `context` after the last change within reach.
+    const start = Math.max(0, i - context);
+    let end = i;
+    for (let j = i; j < ops.length && j <= end + 2 * context; j++) if (ops[j].op !== ' ') end = j;
+    const stop = Math.min(ops.length, end + context + 1);
+    const slice = ops.slice(start, stop);
+    const oldLen = slice.filter((o) => o.op !== '+').length;
+    const newLen = slice.filter((o) => o.op !== '-').length;
+    const [oa, ob] = pos[start];
+    out.push(`@@ -${oldLen ? oa + 1 : oa},${oldLen} +${newLen ? ob + 1 : ob},${newLen} @@`);
+    for (const o of slice) {
+      if (o.op === '+') added++;
+      if (o.op === '-') removed++;
+      out.push(o.op + o.text);
+    }
+    i = stop;
+  }
+  return { text: out.join('\n'), added, removed };
+}

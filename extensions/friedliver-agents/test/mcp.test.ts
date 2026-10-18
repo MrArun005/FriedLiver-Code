@@ -18,7 +18,7 @@ describe('the FriedLiver tools server (MCP)', () => {
           protocolVersion: '2025-06-18',
           capabilities: { tools: { listChanged: true } },
           serverInfo: { name: 'friedliver', version: '1.0.0' },
-          instructions: expect.stringContaining('Tools from FriedLiver'),
+          instructions: expect.stringMatching(/Tools from FriedLiver[\s\S]*index_search[\s\S]*index_outline[\s\S]*index_read[\s\S]*index_diff/),
         },
       },
     });
@@ -31,7 +31,7 @@ describe('the FriedLiver tools server (MCP)', () => {
   it('lists the tools with schemas that match what the editor accepts', () => {
     const listed = handle(request(5, 'tools/list'));
     expect(listed && 'reply' in listed && (listed.reply as { result: { tools: unknown } }).result.tools).toBe(TOOLS);
-    expect(TOOLS.map((t) => t.name)).toEqual(['list_agents', 'list_chats', 'ask_agent', 'send_to_chat', 'read_chat', 'remember', 'index_search', 'index_symbols', 'index_outline', 'index_related', 'index_changes', 'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload', ...SYSTEM_TOOLS]);
+    expect(TOOLS.map((t) => t.name)).toEqual(['list_agents', 'list_chats', 'ask_agent', 'send_to_chat', 'read_chat', 'remember', 'index_search', 'index_symbols', 'index_read', 'index_outline', 'index_related', 'index_diff', 'index_changes', 'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload', ...SYSTEM_TOOLS]);
     const ask = TOOLS[2].inputSchema as unknown as { properties: Record<string, { enum?: string[]; maxLength?: number }>; required: string[] };
     expect(ask.properties.agent.enum).toEqual([...AGENT_KEYS]);
     expect(ask.properties.prompt.maxLength).toBe(BRIDGE_LIMITS.text);

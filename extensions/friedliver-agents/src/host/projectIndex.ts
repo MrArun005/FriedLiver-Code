@@ -9,7 +9,10 @@ import { constants } from 'node:fs';
 import { chmod, type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { isMark, type Journal, type JournalMark } from './changeJournal';
+import { Budget, compactOutline, findSymbol, numbered, READ_LIMITS, symbolRange, windows, type SeenFiles } from './indexReads';
 import { MerkleTree } from './merkle';
+import { unifiedDiff } from '../shared/diff';
+import { estimateTokens } from '../shared/tokens';
 
 export const INDEX_LIMITS = {
   /** Files larger than this are not indexed. */
@@ -351,7 +354,7 @@ export class ProjectIndex {
   }
 
   /** The text and content hash of an indexed file, re-checked first; drops the entry when anything is off. */
-  private async readChecked(rel: string): Promise<{ text: string; hash: string } | null> {
+  async readChecked(rel: string): Promise<{ text: string; hash: string } | null> {
     const got = (await this.check(rel)) ? (this.counts.read++, await readText(path.join(this.root, rel))) : null;
     if (got === null) this.remove(rel);
     return got;
@@ -593,7 +596,10 @@ export class ProjectIndex {
       }
     }
     const lowerTerms = new Set(terms);
-    const ranked = [...scores].map(([rel, score]) => {
+    // Boosts (at most +4.5) only for the best by BM25: scoring every symbol of every file with a common word is what made big repos slow.
+    // ponytail: top max(100, 10×limit) by BM25 get boosts; a file further down would need a 4.5-point boost to place.
+    const top = [...scores].sort((a, b) => b[1] - a[1]).slice(0, Math.max(100, limit * 10));
+    const ranked = top.map(([rel, score]) => {
       const symbols = this.docs.get(rel)!.symbols.filter((s) => lowerTerms.has(s.name.toLowerCase()) || tokenize(s.name).some((t) => lowerTerms.has(t)));
       const exact = symbols.some((s) => lowerTerms.has(s.name.toLowerCase()));
       return { rel, score: score + (exact ? 3 : 0) + Math.min(symbols.length, 3) * 0.5, symbols: symbols.slice(0, 5) };
@@ -623,6 +629,11 @@ export class ProjectIndex {
 
   has(rel: string): boolean {
     return this.docs.has(rel);
+  }
+
+  /** Every indexed file's folder-relative path. */
+  paths(): IterableIterator<string> {
+    return this.docs.keys();
   }
 
   /** What `rel` imports (resolved to indexed files where possible) and the indexed files that import it. */
@@ -791,11 +802,6 @@ export class ProjectIndex {
     return d && from ? { from, ...d } : null;
   }
 
-  /** Matching lines of an indexed file for a search result: up to `max`, each cut to INDEX_LIMITS.line. */
-  async snippets(rel: string, query: string, max = 3): Promise<{ line: number; text: string }[]> {
-    const text = await this.read(rel);
-    return text === null ? [] : matchingLines(text, query, max);
-  }
 }
 
 /** Bytes per read, each fed to the hash as it arrives. */
@@ -876,28 +882,38 @@ export const readIndexFile = (file: string): Promise<unknown> =>
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => undefined);
 
-function matchingLines(text: string, query: string, max: number): { line: number; text: string }[] {
-  const terms = [...new Set(query.toLowerCase().match(/[\w$]{2,}/g) ?? [])];
-  // The lines holding the most distinct terms, earliest first among equals.
+/** The 1-based lines holding the most distinct query terms (identifier parts too), best first, at most `max`. */
+function matchingLines(lines: string[], query: string, max: number): number[] {
+  const terms = [...new Set([...(query.toLowerCase().match(/[\w$]{2,}/g) ?? []), ...tokenize(query)])];
   const hits: { line: number; n: number }[] = [];
-  const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].toLowerCase();
     const n = terms.filter((t) => l.includes(t)).length;
-    if (n) hits.push({ line: i, n });
+    if (n) hits.push({ line: i + 1, n });
   }
   hits.sort((a, b) => b.n - a.n || a.line - b.line);
-  return hits
-    .slice(0, max)
-    .sort((a, b) => a.line - b.line)
-    .map((h) => ({ line: h.line + 1, text: lines[h.line].trim().slice(0, INDEX_LIMITS.line) }));
+  return hits.slice(0, max).map((h) => h.line);
+}
+
+/** A file's lines, without the empty one after a final newline. */
+const linesOf = (text: string) => text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
+
+/** Who is asking: the chat, and what it has been shown (index_diff, index_changes since its last turn). */
+export interface IndexContext {
+  chatId: string;
+  seen: SeenFiles;
+  /** Told what an answer would have cost as whole-file reads and what it did cost, in estimated tokens. */
+  saved?(naive: number, sent: number): void;
 }
 
 export type IndexCall =
-  | { tool: 'index_search'; query: string; limit?: number }
+  | { tool: 'index_search'; query: string; limit?: number; budget?: number }
+  | { tool: 'index_read'; path: string; symbol?: string; lines?: [number, number] }
   | { tool: 'index_symbols'; name: string }
   | { tool: 'index_outline'; path: string }
   | { tool: 'index_related'; path: string }
+  | { tool: 'index_diff'; path: string }
+  /** `since`: 8-64 hex of a kept project hash, or "last_turn" (this chat's). */
   | { tool: 'index_changes'; since?: string };
 
 const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice(0, INDEX_LIMITS.output)}\n… (cut at ${INDEX_LIMITS.output} characters)` : text);
@@ -906,7 +922,15 @@ const cap = (text: string) => (text.length > INDEX_LIMITS.output ? `${text.slice
  * The answers to the index_* tools over every folder's index. Paths in and out are
  * relative to the folder; with more than one folder they start with its name.
  */
-export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean | 'verifying'): Promise<string> {
+export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, building: boolean | 'verifying', ctx?: IndexContext): Promise<string> {
+  const meter = { naive: 0 };
+  const out = await answer(indexes, call, building, ctx, meter);
+  if (meter.naive && ctx?.saved) ctx.saved(meter.naive, estimateTokens(out));
+  return out;
+}
+
+/** answerIndex's work; `meter.naive` gets the tokens of the whole files the answer stands in for. */
+async function answer(indexes: ProjectIndex[], call: IndexCall, building: boolean | 'verifying', ctx: IndexContext | undefined, meter: { naive: number }): Promise<string> {
   if (!indexes.length) return 'No project index: no trusted workspace folder is open, or friedliver.index.enabled is off. Search the files another way.';
   const multi = indexes.length > 1;
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
@@ -925,8 +949,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
     }
     return undefined;
   };
-  const lineOf = (s: Sym) => `  ${s.kind} ${s.name}  (line ${s.line})`;
-  const missing = `${call.tool === 'index_outline' || call.tool === 'index_related' ? call.path : ''} is not in the index (not a workspace-relative path, excluded, or not indexed yet).`;
+  const missing = `${'path' in call ? call.path : ''} is not in the index (not a workspace-relative path, excluded, or not indexed yet).`;
   switch (call.tool) {
     case 'index_search': {
       const limit = Math.min(call.limit ?? 10, INDEX_LIMITS.results);
@@ -934,17 +957,83 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
         .flatMap((ix) => ix.search(call.query, limit).map((h) => ({ ...h, ix })))
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
-      if (!hits.length) return `${note}No indexed file matches "${call.query}".`;
+      const none = `${note}No indexed file matches "${call.query}".`;
+      if (!hits.length) return none;
+      // Room kept for the closing "More matches" line.
+      const budget = new Budget((call.budget ?? READ_LIMITS.budget) - (hits.length > 1 ? 40 : 0));
+      budget.take(note);
       const parts: string[] = [];
+      const more: string[] = [];
+      /** A window's text → the file it was first shown for. */
+      const shownAt = new Map<string, string>();
       for (const h of hits) {
-        const lines = [`${shown(h.ix, h.rel)}  (score ${h.score.toFixed(2)})`];
-        for (const s of h.symbols) lines.push(lineOf(s));
-        for (const s of await h.ix.snippets(h.rel, call.query)) lines.push(`  ${s.line}: ${s.text}`);
+        const text = await h.ix.read(h.rel);
         // The file failed its re-check and was dropped: say nothing about it.
-        if (!h.ix.has(h.rel)) continue;
-        parts.push(lines.join('\n'));
+        if (text === null) continue;
+        const name = shown(h.ix, h.rel);
+        const head = `${name}${h.symbols.length ? ` · ${h.symbols.map((s) => `${s.kind} ${s.name} ${s.line}`).join(', ')}` : ''}`;
+        if (!budget.fits(head)) {
+          more.push(name);
+          continue;
+        }
+        budget.take(head);
+        const block = [head];
+        const lines = linesOf(text);
+        meter.naive += estimateTokens(text);
+        for (const [a, b] of windows(matchingLines(lines, call.query, READ_LIMITS.windowsPerFile), lines.length)) {
+          const key = lines.slice(a - 1, b).join('\n');
+          const first = shownAt.get(key);
+          const part = first ? `(lines ${a}-${b}: same lines as ${first})` : numbered(lines, a, b, INDEX_LIMITS.line);
+          if (!budget.fits(part)) break;
+          budget.take(part);
+          block.push(part);
+          if (!first) shownAt.set(key, name);
+        }
+        parts.push(block.join('\n'));
       }
-      return parts.length ? cap(note + parts.join('\n\n')) : `${note}No indexed file matches "${call.query}".`;
+      if (!parts.length && !more.length) return none;
+      let out = note + parts.join('\n\n');
+      if (more.length) {
+        const limitAll = call.budget ?? READ_LIMITS.budget;
+        for (let n = more.length; n > 0; n--) {
+          const tail = `\n\nMore matches: ${more.slice(0, n).join(', ')}${n < more.length ? ` and ${more.length - n} more` : ''} (raise budget, or index_read one).`;
+          if (n === 1 || estimateTokens(out + tail) <= limitAll) {
+            out += tail;
+            break;
+          }
+        }
+      }
+      return cap(out);
+    }
+    case 'index_read': {
+      const at = find(call.path);
+      if (!at) return missing;
+      const got = await at[0].readChecked(at[1]);
+      if (!got) return missing;
+      const lines = linesOf(got.text);
+      meter.naive = estimateTokens(got.text);
+      const syms = outline(at[1], got.text);
+      const names = syms.filter((s) => !/^\s/.test(lines[s.line - 1] ?? '')).map((s) => s.name);
+      const head = `${call.path} · ${lines.length} lines · #${got.hash.slice(0, 8)}${names.length ? ` · defines ${names.slice(0, 12).join(', ')}${names.length > 12 ? ` +${names.length - 12}` : ''}` : ''}`;
+      let from = 1;
+      let to = lines.length;
+      let what = '';
+      if (call.symbol) {
+        const found = findSymbol(at[1], lines, syms, call.symbol);
+        if (!found.length) return `${head}\nNo definition named "${call.symbol}" in ${call.path}. Its outline:\n${compactOutline(lines, syms) || '(none)'}`;
+        ({ start: from, end: to } = symbolRange(at[1], lines, syms, found[0]));
+        const others = found.slice(1).map((s) => s.line);
+        what = `${found[0].kind} ${call.symbol}, lines ${from}-${to}${others.length ? ` (also defined at line ${others.join(', ')}: pass lines to read one)` : ''}`;
+      } else if (call.lines) {
+        from = Math.min(call.lines[0], lines.length);
+        to = Math.min(call.lines[1], lines.length);
+      } else if (lines.length > READ_LIMITS.smallLines || got.text.length > READ_LIMITS.smallChars) {
+        return cap(`${head}\nToo big to return whole: pass symbol (a name below, or Outer.inner) or lines: [from, to]. Outline:\n${compactOutline(lines, syms) || '(no definitions found)'}`);
+      }
+      ctx?.seen.set(ctx.chatId, path.join(at[0].root, at[1]), got.hash, got.text);
+      const last = Math.min(to, from + READ_LIMITS.maxLines - 1);
+      const tail = last < to ? `\n… cut at line ${last}; pass lines: [${last + 1}, ${to}] for more.` : '';
+      return cap(`${head}${what ? `\n--- ${what}` : ''}\n${numbered(lines, from, last)}${tail}`);
     }
     case 'index_symbols': {
       const hits = indexes.flatMap((ix) => ix.symbols(call.name, INDEX_LIMITS.results).map((h) => ({ ...h, ix }))).slice(0, INDEX_LIMITS.results);
@@ -954,8 +1043,11 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
     case 'index_outline': {
       const at = find(call.path);
       if (!at) return missing;
-      const syms = at[0].outline(at[1])!;
-      return cap(syms.length ? `${call.path}\n${syms.map(lineOf).join('\n')}` : `${call.path} has no outline (no definitions found, or a language the outline doesn't read).`);
+      const text = await at[0].read(at[1]);
+      if (text === null) return missing;
+      meter.naive = estimateTokens(text);
+      const syms = outline(at[1], text);
+      return cap(syms.length ? `${call.path}\n${compactOutline(linesOf(text), syms)}` : `${call.path} has no outline (no definitions found, or a language the outline doesn't read).`);
     }
     case 'index_related': {
       const at = find(call.path);
@@ -965,23 +1057,55 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       const imp = r.imports.map((x) => (x.endsWith('(external)') ? x : shown(at[0], x)));
       return cap(`${call.path}\nImports:\n${list(imp)}\nImported by:\n${list(r.importedBy.map((x) => shown(at[0], x)))}`);
     }
+    case 'index_diff': {
+      if (!ctx) return 'index_diff works only in a FriedLiver chat: it compares a file with what that chat was shown.';
+      const at = find(call.path);
+      if (!at) return missing;
+      const got = await at[0].readChecked(at[1]);
+      if (!got) return missing;
+      const abs = path.join(at[0].root, at[1]);
+      const was = ctx.seen.get(ctx.chatId, abs);
+      if (!was) return `You haven't been shown ${call.path} in this chat (by index_read, or a file read FriedLiver saw). Use index_read with a symbol or lines.`;
+      const ids = `#${was.hash.slice(0, 8)} → #${got.hash.slice(0, 8)}`;
+      if (was.hash === got.hash) return `${call.path} is unchanged since you last saw it (#${got.hash.slice(0, 8)}).`;
+      const d = unifiedDiff(was.text, got.text);
+      if (!d || d.text.length > Math.max(4000, got.text.length * 0.6)) return `${call.path} changed too much to diff usefully (${ids}); index_read the parts you need.`;
+      ctx.seen.set(ctx.chatId, abs, got.hash, got.text);
+      meter.naive = estimateTokens(got.text);
+      return cap(`${call.path}: +${d.added} -${d.removed} since you last saw it (${ids})\n${d.text}`);
+    }
     case 'index_changes': {
       const id = (h: string) => h.slice(0, 12);
+      const lastTurn = call.since === 'last_turn';
+      if (lastTurn && !ctx) return 'since: "last_turn" works only in a FriedLiver chat.';
       const parts: string[] = [];
       for (const ix of indexes) {
-        const r = ix.changes(call.since);
         const head = multi ? `${path.basename(ix.root)}: ` : '';
+        let r: ReturnType<ProjectIndex['changes']>;
+        if (lastTurn) {
+          const pin = ix.tree.pins.get(ctx!.chatId);
+          const d = pin ? ix.tree.diff(pin, INDEX_LIMITS.changes) : null;
+          if (!pin || !d) {
+            parts.push(`${head}No earlier turn of this chat to compare with yet. Now ${id(ix.tree.root())}; ask without since for the changes since the project was opened.`);
+            continue;
+          }
+          r = { from: pin, ...d };
+        } else r = ix.changes(call.since);
         if (!r) {
           if (!call.since) parts.push(`${head}No earlier project hash to compare with yet (the folder's first index). Now ${id(ix.tree.root())}.`);
           continue;
         }
-        const from = r.from === ix.tree.base ? `${id(r.from)} (when the project was opened)` : id(r.from);
+        const from = lastTurn ? 'your last turn' : r.from === ix.tree.base ? `${id(r.from)} (when the project was opened)` : id(r.from);
         const now = id(ix.tree.root());
         if (!r.total) {
-          parts.push(`${head}Project hash ${now}, the same as ${r.from === ix.tree.base ? 'when the project was opened' : id(r.from)}. No files changed.`);
+          parts.push(`${head}Project hash ${now}, the same as ${lastTurn ? 'at your last turn' : r.from === ix.tree.base ? 'when the project was opened' : id(r.from)}. No files changed.`);
           continue;
         }
-        const lines = r.changes.map((c) => `${c.change} ${shown(ix, c.path)}`);
+        const mark = (c: { path: string; change: string }) => {
+          const was = c.change === 'D' || !ctx ? undefined : ctx.seen.get(ctx.chatId, path.join(ix.root, c.path));
+          return was ? (was.hash === ix.tree.get(c.path) ? ' · you have this version' : ' · you saw an older version: index_diff') : '';
+        };
+        const lines = r.changes.map((c) => `${c.change} ${shown(ix, c.path)}${mark(c)}`);
         if (r.total > r.changes.length) lines.push(`… and ${r.total - r.changes.length} more`);
         parts.push(`${head}Project hash ${now}: ${r.total} file${r.total === 1 ? '' : 's'} changed since ${from} (A added, M modified, D deleted)\n${lines.join('\n')}`);
       }
@@ -991,5 +1115,56 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
       }
       return cap(note + parts.join('\n\n'));
     }
+  }
+}
+
+const PRIMER_OPEN = '<friedliver-project-map>';
+const PRIMER_CLOSE = '</friedliver-project-map>';
+
+/**
+ * A compact map of the project for the start of a session: its top-level folders with file counts,
+ * then the indexed files that best match the first prompt with their main definitions, within
+ * `maxTokens`. Lists are cut to fit; undefined when not even the frame fits or nothing is indexed.
+ */
+export function projectPrimer(indexes: ProjectIndex[], prompt: string, maxTokens: number): string | undefined {
+  const total = indexes.reduce((n, ix) => n + ix.size, 0);
+  if (!total) return undefined;
+  const multi = indexes.length > 1;
+  const tops: string[] = [];
+  for (const ix of indexes) {
+    const dirs = new Map<string, number>();
+    const files: string[] = [];
+    for (const rel of ix.paths()) {
+      const i = rel.indexOf('/');
+      if (i < 0) files.push(rel);
+      else dirs.set(rel.slice(0, i), (dirs.get(rel.slice(0, i)) ?? 0) + 1);
+    }
+    const parts = [...[...dirs].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([d, n]) => `${d}/ ${n}`), ...files.sort()];
+    tops.push(`${multi ? `${path.basename(ix.root)}: ` : ''}${parts.join(' · ')}`);
+  }
+  const query = prompt.slice(0, 2000);
+  const hits = indexes
+    .flatMap((ix) => ix.search(query, 8).map((h) => ({ ...h, ix })))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((h) => {
+      const top = (h.ix.outline(h.rel) ?? []).filter((s) => h.symbols.includes(s) || !h.symbols.length);
+      const names = [...new Set([...h.symbols, ...top].map((s) => s.name))].slice(0, 4);
+      return `- ${multi ? `${path.basename(h.ix.root)}/` : ''}${h.rel}${names.length ? `: ${names.join(', ')}` : ''}`;
+    });
+  const head =
+    `${PRIMER_OPEN}\nFriedLiver's index of this project (${total.toLocaleString('en-US')} files). Cheapest way in: index_search, then index_outline, ` +
+    'index_read with a symbol or lines, and index_diff after a file changes; read whole files only when you need all of one.';
+  const build = (top: string[], rel: string[]) =>
+    [head, top.length ? `Top level: ${top.join('\n')}` : '', rel.length ? `Likely relevant to the task:\n${rel.join('\n')}` : '', PRIMER_CLOSE].filter(Boolean).join('\n');
+  let rel = hits;
+  // Shorten the folder lists to a line each first, then drop relevant files from the end.
+  let top = tops.map((t) => (t.length > 600 ? `${t.slice(0, t.lastIndexOf(' · ', 600))} · …` : t));
+  for (;;) {
+    const text = build(top, rel);
+    if (estimateTokens(text) <= maxTokens) return text;
+    if (rel.length) rel = rel.slice(0, -1);
+    else if (top.length) top = [];
+    else return undefined;
   }
 }

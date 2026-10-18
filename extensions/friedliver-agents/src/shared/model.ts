@@ -43,7 +43,9 @@ export type NoticeAction =
   /** The host looks the install command up from the agent; a webview never supplies it. */
   | { label: string; do: 'install'; agent: AgentKey }
   /** Opens Agents & Accounts on the agent's card. */
-  | { label: string; do: 'accounts'; agent: AgentKey };
+  | { label: string; do: 'accounts'; agent: AgentKey }
+  /** Sends the agent's own /compact. */
+  | { label: string; do: 'compact' };
 
 export interface PermissionOption {
   optionId: string;
@@ -262,6 +264,16 @@ export interface ChatView {
   approval?: ApprovalLevel;
   /** Messages sent while the agent worked, in order: each goes when the turn before it ends. */
   queue?: QueuedMessage[];
+  /** Tokens: what FriedLiver's compact answers would have cost the naive way, what they did, and the agent's cache use. */
+  tokens?: TokenTally;
+}
+
+/** Running totals for the "tokens saved" readout; cacheRead and input come from the agent's own usage reports. */
+export interface TokenTally {
+  naive: number;
+  sent: number;
+  cacheRead: number;
+  input: number;
 }
 
 export interface QueuedMessage {
@@ -317,6 +329,8 @@ export type Action =
   | { t: 'session'; chatId: string; session: ChatSession | undefined }
   | { t: 'approval'; chatId: string; level: ApprovalLevel }
   | { t: 'queue'; chatId: string; queue: QueuedMessage[] }
+  /** Adds to a chat's token totals. */
+  | { t: 'tokens'; chatId: string; add: Partial<TokenTally> }
   /** The whole state at once: chats restored after a reload. */
   | { t: 'restore'; state: AppState };
 
@@ -449,6 +463,12 @@ export function reduce(state: AppState, action: Action): AppState {
       });
     case 'archive':
       return editChat(state, action.chatId, (c) => ({ ...c, archived: action.archived || undefined }));
+    case 'tokens':
+      return editChat(state, action.chatId, (c) => {
+        const t = c.tokens ?? { naive: 0, sent: 0, cacheRead: 0, input: 0 };
+        const add = (k: keyof TokenTally) => t[k] + (Number.isFinite(action.add[k]) && action.add[k]! > 0 ? Math.round(action.add[k]!) : 0);
+        return { ...c, tokens: { naive: add('naive'), sent: add('sent'), cacheRead: add('cacheRead'), input: add('input') } };
+      });
     case 'session':
       return editChat(state, action.chatId, (c) => ({ ...c, session: action.session }));
     case 'approval':

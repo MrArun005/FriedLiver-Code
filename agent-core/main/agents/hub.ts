@@ -77,6 +77,8 @@ export interface HubOptions {
    * front of the session's first message. `files` names what it came from.
    */
   rulesFor?(chatId: string, agentId: AgentId): Promise<{ text: string; files: string[] } | undefined>;
+  /** Text put in front of a new session's first message, made from that message (a project map); none when absent. */
+  primerFor?(chatId: string, agentId: AgentId, text: string): Promise<string | undefined>;
   /** Extra `_meta` for a chat's session/new (e.g. a read-only chat's tool limits). */
   sessionMetaFor?(chatId: string, agentId: AgentId): Record<string, unknown> | undefined;
   /** Chats that never load or resume a session: each start is a fresh session/new (read-only chats). */
@@ -104,6 +106,8 @@ interface ChatState extends Chat {
   starting?: Promise<void>;
   /** Rules for an agent without a system prompt, sent with the session's first message. */
   pendingRules?: string;
+  /** A new session whose first message still gets the primer (HubOptions.primerFor). */
+  primePending?: boolean;
 }
 
 interface RunningAgent {
@@ -221,7 +225,15 @@ export class AgentHub {
       if (chat.cancelled) return { stopReason: 'cancelled' };
       const rules = chat.pendingRules;
       chat.pendingRules = undefined;
-      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, rules ? [{ type: 'text', text: rules }, ...blocks] : blocks));
+      let primer: string | undefined;
+      if (chat.primePending) {
+        chat.primePending = false;
+        const text = blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n');
+        primer = await this.options.primerFor?.(chat.id, chat.agentId, text).catch((err: unknown) => void this.options.log?.(`Couldn't make the project map: ${String(err)}`));
+      }
+      // Rules first, then the map: the same order every session, so a cached prefix stays the same.
+      const front = [rules, primer].flatMap((t): acp.ContentBlock[] => (t ? [{ type: 'text', text: t }] : []));
+      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, [...front, ...blocks]));
     } catch (err) {
       if (agent && isAuthRequired(err)) throw new AuthRequiredError(agent.conn.spec, agent.conn.authMethods);
       throw err;
@@ -491,6 +503,7 @@ export class AgentHub {
     const newMeta = system ? { ...meta, systemPrompt: { append: rules.text } } : meta;
     const session = await agent.conn.newSession(cwd, mcpServers, newMeta);
     chat.pendingRules = rules && !system ? rules.text : undefined;
+    chat.primePending = true;
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(

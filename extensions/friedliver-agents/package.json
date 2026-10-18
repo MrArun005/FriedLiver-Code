@@ -995,6 +995,11 @@
           "default": 150,
           "minimum": 10,
           "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files."
+        },
+        "friedliver.index.primer": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start each new chat with a compact project map from the index: top-level folders with file counts and the files most likely relevant to the first message (at most 1,500 tokens, sharing the shared rules' 8 KB cap). Saves the agent exploring to find its way."
         }
       }
     },
