@@ -7,6 +7,7 @@ import {
   allAgree,
   carryOutText,
   confidenceOf,
+  discussingLabel,
   fallbackConclusion,
   parseConclusion,
   parseDiscuss,
@@ -577,4 +578,30 @@ describe('/discuss: saved and restored', () => {
   });
 
   it('a turn prompt names the read-only rule', () => expect(turnPrompt(base, 'gemini')).toMatch(/refuses any edit, command or other change/));
+});
+
+describe('/discuss: the chat header says so while it runs', () => {
+  const d: DiscussionItem = {
+    kind: 'discussion',
+    id: 'discuss-1',
+    question: 'Postgres or MySQL?',
+    participants: [{ agent: 'claude' }, { agent: 'gemini' }],
+    maxRounds: 3,
+    round: 2,
+    state: 'running',
+    speaking: 'gemini',
+    turns: [],
+    tokens: 0,
+    budget: 60000,
+  };
+  const user: Item = { kind: 'user', text: 'q', images: [] };
+
+  it('names who speaks, then who sums up, and nothing once it ends or moved on', () => {
+    expect(discussingLabel([user, d])).toBe('Discussing · Gemini speaking');
+    expect(discussingLabel([user, { ...d, speaking: undefined }])).toBe('Discussing');
+    expect(discussingLabel([user, { ...d, state: 'summarizing', speaking: undefined }])).toBe('Discussing · Claude summing up');
+    expect(discussingLabel([user, { ...d, state: 'done', ended: 'agreed' }])).toBeUndefined();
+    expect(discussingLabel([user, { ...d, continued: true }])).toBeUndefined();
+    expect(discussingLabel([user])).toBeUndefined();
+  });
 });

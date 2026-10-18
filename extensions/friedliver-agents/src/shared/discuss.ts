@@ -365,6 +365,14 @@ export function discussMeta(d: DiscussionItem): string {
   }
 }
 
+/** The chat header's status while this chat's discussion runs: another agent may be speaking after the starter's turn ended. */
+export function discussingLabel(items: Item[]): string | undefined {
+  const d = items.findLast((i): i is DiscussionItem => i.kind === 'discussion');
+  if (!d || d.continued || d.state === 'done') return undefined;
+  if (d.state === 'summarizing') return `Discussing · ${name(d.participants[0].agent)} summing up`;
+  return d.speaking ? `Discussing · ${name(d.speaking)} speaking` : 'Discussing';
+}
+
 /** How far it got, 0..1: turns spoken of all the rounds' turns. */
 export function discussProgress(d: DiscussionItem): number {
   if (d.state !== 'running') return 1;

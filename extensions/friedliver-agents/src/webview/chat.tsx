@@ -1,6 +1,6 @@
 import { render } from 'preact';
 import { DiscussionCard } from './discussion';
-import { withoutDiscussionTurns } from '../shared/discuss';
+import { discussingLabel, withoutDiscussionTurns } from '../shared/discuss';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
@@ -452,6 +452,7 @@ const IS_MAC = /Mac/.test(navigator.platform);
 /** The open chat: who and what, its connections, and the actions that join it to other agents. */
 function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState; onSelect: Select }) {
   const status = statusOf(chat);
+  const discussing = discussingLabel(chat.items);
   const agents = useRoster().agents;
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
@@ -515,7 +516,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </Popover>
         )}
         <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
-          {chat.session?.starting && status === 'idle' ? 'Starting' : DOT_LABEL[status]}
+          {chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status]}
         </Pill>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />
