@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseCall } from '../src/bridge/protocol';
-import { symbolRange } from '../src/host/indexReads';
+import { findSymbol, SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex } from '../src/host/projectIndex';
 import { estimateTokens } from '../src/shared/tokens';
 
@@ -170,5 +170,83 @@ describe('index_search windows', () => {
     expect(out).toMatch(/More matches: /);
     expect(parseCall('index_search', { query: 'x', budget: 50 })).toBeNull();
     expect(parseCall('index_search', { query: 'x', budget: 500 })).toEqual({ tool: 'index_search', query: 'x', budget: 500 });
+  });
+});
+
+describe('change-aware context', () => {
+  const ctx = (chatId = 'chat-1') => ({ chatId, seen: new SeenFiles() });
+  const file = Array.from({ length: 400 }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n';
+
+  it('index_diff gives only the hunks since this chat last saw the file, then nothing', async () => {
+    const root = await project({ 'src/a.ts': file, 'src/b.ts': 'export const b = 1;\n' });
+    const ix = await build(root);
+    const c = ctx();
+    expect(await answerIndex([ix], { tool: 'index_diff', path: 'src/a.ts' }, false, c)).toMatch(/haven't been shown src\/a\.ts.*index_read/);
+    await answerIndex([ix], { tool: 'index_read', path: 'src/a.ts', lines: [1, 5] }, false, c);
+    await writeFile(path.join(root, 'src/a.ts'), file.replace('v200 = 200', 'v200 = 2000').replace('v300 = 300;', 'v300 = 300;\nexport const extra = 1;'));
+    await ix.update('src/a.ts');
+    const d = await answerIndex([ix], { tool: 'index_diff', path: 'src/a.ts' }, false, c);
+    expect(d).toMatch(/^src\/a\.ts: \+2 -1 since you last saw it \(#[0-9a-f]{8} → #[0-9a-f]{8}\)/);
+    expect(d).toContain('-export const v200 = 200;\n+export const v200 = 2000;');
+    expect(d).toContain('+export const extra = 1;');
+    expect(d).not.toContain('v100');
+    expect(estimateTokens(d)).toBeLessThan(estimateTokens(file) / 10);
+    expect(await answerIndex([ix], { tool: 'index_diff', path: 'src/a.ts' }, false, c)).toMatch(/unchanged since you last saw it/);
+    // Another chat saw nothing.
+    expect(await answerIndex([ix], { tool: 'index_diff', path: 'src/a.ts' }, false, ctx('chat-2'))).toMatch(/haven't been shown/);
+    expect(await answerIndex([ix], { tool: 'index_diff', path: 'src/a.ts' }, false)).toMatch(/only in a FriedLiver chat/);
+  });
+
+  it('never diffs a file that is no longer readable: no old or new content leaks', async () => {
+    const root = await project({ 'src/a.ts': 'SECRETLINE = 1\n', 'other.txt': 'x' });
+    const ix = await build(root);
+    const c = ctx();
+    await answerIndex([ix], { tool: 'index_read', path: 'src/a.ts' }, false, c);
+    await rm(path.join(root, 'src/a.ts'));
+    await symlink(path.join(root, 'other.txt'), path.join(root, 'src/a.ts'));
+    const out = await answerIndex([ix], { tool: 'index_diff', path: 'src/a.ts' }, false, c);
+    expect(out).toContain('is not in the index');
+    expect(out).not.toContain('SECRETLINE');
+    expect(parseCall('index_diff', { path: '/etc/passwd' })).toBeNull();
+  });
+
+  it('index_changes since the last turn says which changed files this chat already has', async () => {
+    const root = await project({ 'a.ts': 'one\n', 'b.ts': 'two\n', 'c.ts': 'three\n' });
+    const ix = await build(root);
+    const c = ctx();
+    expect(await answerIndex([ix], { tool: 'index_changes', since: 'last_turn' }, false, c)).toMatch(/No earlier turn/);
+    await answerIndex([ix], { tool: 'index_read', path: 'a.ts' }, false, c);
+    ix.tree.pin(c.chatId);
+    for (const f of ['a.ts', 'b.ts']) await writeFile(path.join(root, f), 'changed\n');
+    await ix.update('a.ts');
+    await ix.update('b.ts');
+    await answerIndex([ix], { tool: 'index_read', path: 'b.ts' }, false, c);
+    const out = await answerIndex([ix], { tool: 'index_changes', since: 'last_turn' }, false, c);
+    expect(out).toContain('2 files changed since your last turn');
+    expect(out).toContain('M a.ts · you saw an older version: index_diff');
+    expect(out).toContain('M b.ts · you have this version');
+    expect(parseCall('index_changes', { since: 'last_turn' })).toEqual({ tool: 'index_changes', since: 'last_turn' });
+  });
+});
+
+describe('untrusted input stays cheap', () => {
+  it('a dotted name over thousands of same-named definitions finishes fast', () => {
+    const text = Array.from({ length: 2000 }, () => 'class a {\n  a() {\n  }\n}').join('\n');
+    const lines = text.split('\n');
+    const syms = outline('x.ts', text);
+    expect(syms.length).toBe(2000);
+    const t = performance.now();
+    findSymbol('x.ts', lines, syms, Array(60).fill('a').join('.'));
+    findSymbol('x.ts', lines, syms, 'a.a');
+    expect(performance.now() - t).toBeLessThan(500);
+  });
+
+  it('a long unterminated string full of backslashes finishes fast', () => {
+    const line = `const s = "${'\\\\a'.repeat(20_000)}`;
+    const text = `function f() {\n${line}\n${line}\n}\n`;
+    const lines = text.split('\n');
+    const t = performance.now();
+    symbolRange('x.ts', lines, outline('x.ts', text), { name: 'f', kind: 'function', line: 1 });
+    expect(performance.now() - t).toBeLessThan(500);
   });
 });
