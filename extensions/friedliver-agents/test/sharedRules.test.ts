@@ -158,6 +158,37 @@ describe('the remember tool', () => {
   });
 });
 
+describe("no text an agent already reads on its own", () => {
+  it('leaves out of rules.md what the agent loads natively: CLAUDE.md for Claude, AGENTS.md for Codex, GEMINI.md for Gemini', async () => {
+    const { folder, personal } = await project();
+    await writeFile(path.join(folder, 'CLAUDE.md'), '# Claude\n\nBe terse.\n\nNo Docker.');
+    await writeFile(path.join(folder, 'AGENTS.md'), 'Run npm test before pushing.');
+    expect((await importRules(folder)).added).toBe(4);
+    await writeFile(path.join(folder, PROJECT_RULES), `Use pnpm.\n\n${await readFile(path.join(folder, PROJECT_RULES), 'utf8')}`);
+    const text = async (agent?: 'claude' | 'codex' | 'gemini') => (await loadRules({ personalDir: personal, folder, trusted: true, agent }))!.text;
+    const claude = await text('claude');
+    expect(claude).toContain('Use pnpm.');
+    expect(claude).toContain('Run npm test');
+    expect(claude).not.toContain('Be terse.');
+    expect(claude).not.toContain('Imported from CLAUDE.md');
+    const codex = await text('codex');
+    expect(codex).toContain('Be terse.');
+    expect(codex).not.toContain('Run npm test');
+    // Gemini reads neither file, and an unknown agent gets everything.
+    expect(await text('gemini')).toContain('Be terse.');
+    expect(await text('gemini')).toContain('Run npm test');
+    expect(await text()).toContain('Run npm test');
+  });
+
+  it('sends no project rules at all when every paragraph is already in the native file', async () => {
+    const { folder, personal } = await project();
+    await writeFile(path.join(folder, 'CLAUDE.md'), 'Be terse.');
+    await importRules(folder);
+    const rules = (await loadRules({ personalDir: personal, folder, trusted: true, agent: 'claude' }))!;
+    expect(rules.files).toEqual([PERSONAL_LABEL]);
+  });
+});
+
 describe('rules reach every agent', () => {
   const RULES = { text: '<friedliver-rules>Use pnpm.</friedliver-rules>', files: [PERSONAL_LABEL, PROJECT_RULES], truncated: false };
   const replies = (core: ReturnType<typeof makeCore>, id: string) => core.chat(id)!.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('\n');
@@ -186,9 +217,17 @@ describe('rules reach every agent', () => {
 
   it.each(['codex', 'gemini'] as const)('go to %s in front of the first message only', async (agent) => {
     const folder = await tmp();
-    const core = makeCore(folder, { sharedRules: async () => RULES });
+    const asked: unknown[] = [];
+    const core = makeCore(folder, {
+      sharedRules: async (a) => {
+        asked.push(a);
+        return RULES;
+      },
+    });
     const chat = await core.createChat(agent);
     await core.send(chat.id, 'hi');
+    // Asked per agent, so each gets the rules minus its own native file.
+    expect(asked).toEqual([agent]);
     expect(replies(core, chat.id)).toContain('Use pnpm.');
     await core.send(chat.id, 'system');
     await core.send(chat.id, 'again');

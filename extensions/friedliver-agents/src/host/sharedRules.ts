@@ -96,14 +96,32 @@ export async function ensureFile(base: string, rel: string): Promise<string> {
   return safePath(base, rel);
 }
 
+/** The file at the folder's root each agent reads by itself every session. */
+export const NATIVE_RULES: Record<string, string> = { claude: 'CLAUDE.md', codex: 'AGENTS.md', gemini: 'GEMINI.md' };
+
+/** `rules` without the paragraphs `native` already has (as importRules matched them), and without the import note for that file. */
+export function withoutNative(rules: string, native: string, name: string): string {
+  const seen = new Set(blocks(native).map(norm));
+  const note = norm(`<!-- Imported from ${name} -->`);
+  return blocks(rules)
+    .filter((b) => !seen.has(norm(b)) && norm(b) !== note)
+    .join('\n\n');
+}
+
 /**
- * The rules for a new session. A workspace the user hasn't trusted gives only the
- * personal rules: its files are someone else's words.
+ * The rules for a new session of `agent`. A workspace the user hasn't trusted gives only the
+ * personal rules: its files are someone else's words. Text the agent already loads from its own
+ * file (CLAUDE.md for Claude…) isn't sent again: an import into rules.md would otherwise pay twice.
  */
-export async function loadRules(opts: { personalDir: string; folder?: string; trusted: boolean }, cap = RULES_CAP): Promise<Rules | undefined> {
+export async function loadRules(opts: { personalDir: string; folder?: string; trusted: boolean; agent?: string }, cap = RULES_CAP): Promise<Rules | undefined> {
   const parts: { label: string; text: string }[] = [{ label: PERSONAL_LABEL, text: await readSafe(opts.personalDir, PERSONAL_FILE) }];
   if (opts.trusted && opts.folder) {
-    for (const rel of [PROJECT_RULES, PROJECT_MEMORY]) parts.push({ label: rel, text: await readSafe(opts.folder!, rel) });
+    const nativeName = opts.agent ? NATIVE_RULES[opts.agent] : undefined;
+    const native = nativeName ? await readSafe(opts.folder, nativeName) : '';
+    for (const rel of [PROJECT_RULES, PROJECT_MEMORY]) {
+      const text = await readSafe(opts.folder, rel);
+      parts.push({ label: rel, text: rel === PROJECT_RULES && native.trim() ? withoutNative(text, native, nativeName!) : text });
+    }
   }
   return combineRules(parts, cap);
 }
