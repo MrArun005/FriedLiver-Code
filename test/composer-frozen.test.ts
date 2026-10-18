@@ -7,7 +7,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const CSS = path.resolve(__dirname, '..', 'extensions', 'friedliver-agents', 'media', 'webview.css');
+// The section lives in webview.css today; the design-system work (ds/components) moves it, unchanged,
+// into components.css. Whichever file holds it must hold it unchanged.
+const MEDIA = path.resolve(__dirname, '..', 'extensions', 'friedliver-agents', 'media');
 const START = '/* ---- Composer (§2.1';
 const END = '/* ---- Banners above the composer';
 // Change only with the owner's sign-off on the new composer.
@@ -15,12 +17,16 @@ const APPROVED = '55b16fb5d2b0669d520938102b661efd24162884f1e08940c1ba8e61b5eab1
 
 describe('approved composer', () => {
   it('keeps its styles', () => {
-    const css = fs.readFileSync(CSS, 'utf8').replace(/\r\n/g, '\n');
+    const css = ['components.css', 'webview.css']
+      .map((f) => path.join(MEDIA, f))
+      .filter((f) => fs.existsSync(f))
+      .map((f) => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n'))
+      .find((text) => text.includes(START)) ?? '';
     const a = css.indexOf(START);
     const b = css.indexOf(END);
     expect(a).toBeGreaterThan(-1);
     expect(b).toBeGreaterThan(a);
     const hash = crypto.createHash('sha256').update(css.slice(a, b)).digest('hex');
-    expect(hash, 'the composer section of webview.css changed; it is frozen (WORKBENCH-MODERN-PLAN.md, frozen surfaces)').toBe(APPROVED);
+    expect(hash, 'the composer section changed; it is frozen (WORKBENCH-MODERN-PLAN.md, frozen surfaces)').toBe(APPROVED);
   });
 });
