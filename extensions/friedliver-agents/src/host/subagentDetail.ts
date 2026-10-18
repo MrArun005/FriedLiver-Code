@@ -58,6 +58,8 @@ export interface DetailState {
   rev: number;
   /** Calls waiting for their result, by tool-use id. */
   pending: Map<string, SubagentTool>;
+  /** Pending calls on a file that holds secrets: their output isn't kept. */
+  secret: Set<string>;
   files: Map<string, SubagentFile>;
   filesMore: number;
   handback?: string;
@@ -73,6 +75,7 @@ export const newDetail = (partial = false): DetailState => ({
   seq: 0,
   rev: 0,
   pending: new Map(),
+  secret: new Set(),
   files: new Map(),
   filesMore: 0,
   quiet: false,
@@ -106,8 +109,23 @@ function touch(s: DetailState, file: string, edit: boolean): void {
   else f.reads++;
 }
 
+export const HIDDEN = '(not shown: a file that holds secrets)';
+const careful = (p: string) => !!p && !p.includes('\0') && !!sensitivePath(p.replace(/^['"]|['"]$/g, ''))?.careful;
+
+/**
+ * Whether a call touches a file that holds secrets (.env*, keys, ~/.ssh, .git…): its file, its search path, or, for a
+ * command, any word of it that names one (`cat .env`, `--file=id_rsa`). Its contents then aren't shown, only the call.
+ */
+export function holdsSecrets(name: string, input: Record<string, unknown>): boolean {
+  const file = str(input.file_path) ?? str(input.notebook_path) ?? str(input.path);
+  if (file && careful(file)) return true;
+  if (name !== 'Bash') return false;
+  // ponytail: word scan, not a shell parser; a path built at run time ($HOME/.env via a variable) isn't seen.
+  return (str(input.command) ?? '').slice(0, 64 * 1024).split(/[\s|;&<>()=,`]+/).some(careful);
+}
+
 /** A tool call as the chat's step rows show one: a title its verb reads from, a kind, the command, a diff, the input. */
-function toolStep(b: Block): Omit<SubagentTool, 'seq' | 'rev'> {
+function toolStep(b: Block, secret: boolean): Omit<SubagentTool, 'seq' | 'rev'> {
   const name = b.name ?? 'Tool';
   const input = (b.input ?? {}) as Record<string, unknown>;
   const file = str(input.file_path) ?? str(input.notebook_path);
@@ -117,6 +135,7 @@ function toolStep(b: Block): Omit<SubagentTool, 'seq' | 'rev'> {
     const line = redactSecrets(str(input.command) ?? '');
     return { ...base, title: cut(line.replace(/\s+/g, ' '), 200), cmd: { line: cut(line, 4096), ...(line.length > 4096 ? { cut: true as const } : {}) }, ...(about ? { about: redactSecrets(about) } : {}) };
   }
+  if (EDITS.has(name) && file && secret) return { ...base, title: `${name === 'Write' ? 'Write' : 'Edit'} ${file}`, out: [{ t: 'text', text: HIDDEN }] };
   if (EDITS.has(name) && file) {
     const old = name === 'Write' ? null : redactSecrets((str(input.old_string) ?? '').slice(0, MAX_DIFF_IN));
     const now = redactSecrets((str(input.new_string) ?? str(input.content) ?? str(input.new_source) ?? '').slice(0, MAX_DIFF_IN));
@@ -142,7 +161,7 @@ function toolStep(b: Block): Omit<SubagentTool, 'seq' | 'rev'> {
               : (name === 'Agent' || name === 'Task') && about
                 ? about
                 : name;
-  const shown = name === 'Read' || name === 'Glob' || name === 'Grep' ? '' : redactSecrets(JSON.stringify(input, null, 2) ?? '');
+  const shown = secret || name === 'Read' || name === 'Glob' || name === 'Grep' ? '' : redactSecrets(JSON.stringify(input, null, 2) ?? '');
   return { ...base, title: redactSecrets(cut(title, 300)), ...(shown && shown !== '{}' ? { input: cut(shown, MAX_IN) } : {}) };
 }
 
@@ -189,11 +208,12 @@ export function feedDetail(s: DetailState, o: Line): void {
       s.pending.delete(b.tool_use_id);
       step.status = b.is_error ? 'failed' : 'completed';
       if (step.startedAt !== undefined && !Number.isNaN(at)) step.ms = Math.max(0, at - step.startedAt);
-      const file = step.locations[0];
-      const hidden = file && sensitivePath(file)?.careful;
-      const text = hidden ? '(not shown: a file that holds secrets)' : redactSecrets(tail(textOf(b.content), MAX_OUT));
-      // An edit's diff says what it did; its "updated successfully" line adds nothing unless it failed.
-      if (text.trim() && (!step.out?.length || b.is_error)) step.out = [...(step.out ?? []), { t: 'text', text }];
+      if (s.secret.delete(b.tool_use_id)) step.out = [{ t: 'text', text: HIDDEN }];
+      else {
+        const text = redactSecrets(tail(textOf(b.content), MAX_OUT));
+        // An edit's diff says what it did; its "updated successfully" line adds nothing unless it failed.
+        if (text.trim() && (!step.out?.length || b.is_error)) step.out = [...(step.out ?? []), { t: 'text', text }];
+      }
       step.rev = ++s.rev;
     }
     return;
@@ -210,11 +230,17 @@ export function feedDetail(s: DetailState, o: Line): void {
         s.handback = redactSecrets(str(input.message)?.slice(0, MAX_REPORT) ?? '');
         continue;
       }
-      const step = push(s, toolStep(b)) as SubagentTool;
+      const secret = holdsSecrets(b.name ?? '', input);
+      const step = push(s, toolStep(b, secret)) as SubagentTool;
       if (!Number.isNaN(at)) step.startedAt = at;
       s.pending.set(b.id, step);
+      if (secret) s.secret.add(b.id);
       // ponytail: a call whose result never comes stays pending; capped so a crashed run can't grow it.
-      if (s.pending.size > WINDOW) s.pending.delete(s.pending.keys().next().value!);
+      if (s.pending.size > WINDOW) {
+        const oldest = s.pending.keys().next().value!;
+        s.pending.delete(oldest);
+        s.secret.delete(oldest);
+      }
       const file = step.locations[0];
       if (file) touch(s, file, EDITS.has(b.name ?? ''));
     } else if (b.type === 'text' && b.text?.trim()) {
