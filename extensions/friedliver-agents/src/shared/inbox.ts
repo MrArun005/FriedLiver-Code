@@ -1,14 +1,16 @@
-// The Decision Inbox: everything any agent waits on, in every open chat, as one keyboard queue.
+// The Decision Inbox: everything any agent waits on, in every open chat, as one keyboard queue,
+// in risk lanes (Careful, Review, Routine) so what can hurt is looked at first.
 // Plain data and pure functions; the Agent Manager draws it (webview/inbox.tsx). Every answer is
 // one of the messages the chat's own cards send, so it takes the same path through the host, with
 // the same checks (an option the agent offered, a grant the request offered, the origin again).
+import { approvalOf } from './approval';
 import { DecisionTargets, KEY_GRACE_MS } from './decisionTarget';
 import type { WebviewMessage } from './messages';
 import { BRIDGE_TIMEOUT_MS, bridgeTitle, decisionOf, shortCommand, waitingItems, type AppState, type ChatView, type Item } from './model';
-import { describeGrant, siteOrigin, type Grant } from './permissions';
+import { siteOrigin } from './permissions';
 import { oneClickQuestion, recommended } from './questions';
-import { ruleCandidates } from './rules';
-import { ESCALATING, denyOption, primaryOption } from './tools';
+import { RISK_ORDER, type RiskTone } from './risk';
+import { denyOption, primaryOption } from './tools';
 import { openChats } from './view';
 
 export type Waiting = Extract<Item, { kind: 'permission' | 'review' | 'command' | 'bridge' | 'question' }>;
@@ -29,17 +31,19 @@ export interface InboxEntry {
   item: Waiting;
   /** Entries with the same key ask the very same thing of the same target, and may be answered together. */
   same?: string;
+  /** Its lane: careful, review or routine (a question is review). */
+  risk: RiskTone;
 }
 
-export interface InboxGroup {
-  chat: ChatView;
+export interface InboxLane {
+  tone: RiskTone;
   entries: InboxEntry[];
 }
 
 export interface Inbox {
-  /** One per chat, the chat with the oldest request first. */
-  groups: InboxGroup[];
-  /** The groups' entries in order: what j and k walk. */
+  /** Careful, then Review, then Routine; only lanes with something in them. Oldest first in each. */
+  lanes: InboxLane[];
+  /** The lanes' entries in order: what j and k walk. */
   entries: InboxEntry[];
 }
 
@@ -82,9 +86,9 @@ function rowTitle(state: Pick<AppState, 'chats'>, chat: ChatView, i: Waiting, ti
 
 const isWaitingKind = (i: Item): i is Waiting => i.kind === 'permission' || i.kind === 'review' || i.kind === 'command' || i.kind === 'bridge' || i.kind === 'question';
 
-/** Every request waiting in an open chat, oldest first, grouped by chat. Read-only chats ask nothing, so they are left out. */
+/** Every request waiting in an open chat, in risk lanes, oldest first in each. Read-only chats ask nothing, so they are left out. */
 export function inbox(state: Pick<AppState, 'chats'>): Inbox {
-  const all: { entry: InboxEntry; chat: ChatView; n: number }[] = [];
+  const all: { entry: InboxEntry; n: number }[] = [];
   for (const chat of openChats(state.chats)) {
     if (chat.readOnly) continue;
     for (const item of waitingItems(chat.items)) {
@@ -100,20 +104,17 @@ export function inbox(state: Pick<AppState, 'chats'>): Inbox {
         ...(item.at !== undefined ? { at: item.at } : {}),
         ...(item.kind === 'bridge' && item.at !== undefined ? { timeoutAt: item.at + BRIDGE_TIMEOUT_MS } : {}),
         ...(same ? { same } : {}),
+        risk: item.kind === 'question' ? 'review' : approvalOf(item, chat, state).risk.tone,
       };
-      all.push({ entry, chat, n: all.length });
+      all.push({ entry, n: all.length });
     }
   }
   // Oldest first; without a time (an older saved state), in the order the chats hold them.
   all.sort((a, b) => (a.entry.at ?? 0) - (b.entry.at ?? 0) || a.n - b.n);
-  const groups = new Map<string, InboxGroup>();
-  for (const { entry, chat } of all) {
-    const g = groups.get(chat.id) ?? { chat, entries: [] };
-    g.entries.push(entry);
-    groups.set(chat.id, g);
-  }
-  const list = [...groups.values()];
-  return { groups: list, entries: list.flatMap((g) => g.entries) };
+  const lanes = (['careful', 'review', 'routine'] as const)
+    .map((tone) => ({ tone, entries: all.filter((x) => x.entry.risk === tone).map((x) => x.entry) }))
+    .filter((l) => l.entries.length);
+  return { lanes, entries: lanes.flatMap((l) => l.entries) };
 }
 
 /** The entries that ask exactly what `entry` asks, `entry` among them, in queue order. */
@@ -121,115 +122,62 @@ export function identical(entries: readonly InboxEntry[], entry: InboxEntry): In
   return entry.same ? entries.filter((e) => e.same === entry.same) : [entry];
 }
 
+/** What "Allow all N" may answer together: identical requests, and only routine ones. Careful and review are one at a time. */
+export function batchable(entries: readonly InboxEntry[], entry: InboxEntry): InboxEntry[] {
+  const same = identical(entries, entry);
+  return entry.risk === 'routine' && same.length >= 2 && same.every((e) => e.risk === 'routine') ? same : [entry];
+}
+
+export { RISK_ORDER };
+
 // ---- Answers: the messages the chat's own cards send ----
 
 export interface InboxChoice {
   label: string;
   message: WebviewMessage;
-  /** decide: the one-time yes; deny: a no; escalate: changes how the agent asks from now on. */
-  tone?: 'decide' | 'deny' | 'escalate';
 }
 
 export interface InboxActions {
-  /** Numbered 1–9, in the order the chat's card numbers them. */
+  /** A question's options, numbered 1–9 as on its card. */
   choices: InboxChoice[];
-  /** a: the one-time yes. */
+  /** The one-time yes (Allow once, Accept). */
   allow?: WebviewMessage;
-  /** d: no. */
+  /** No (Deny, Reject, Skip). */
   deny?: WebviewMessage;
-  /** A: FriedLiver's "Always allow", only where the request offers one; the most specific choice. */
-  always?: { message: WebviewMessage; scope: string };
-  /** Enter: the loud answer, or opening the chat where answering needs it (a diff to read, a form). */
-  primary: WebviewMessage | 'open';
-  /** The edit's diff in the editor (reviews). */
+  /** Enter: allow (with the card's scope, held when careful), or open where answering needs reading first. */
+  primary: 'allow' | 'open' | WebviewMessage;
+  /** The edit's diff in the editor (reviews, and permission requests that change files). */
   diff?: WebviewMessage;
 }
 
-/** The grants "Always allow" offers on the chat's card for this request, most specific first. */
-export function alwaysChoices(i: Waiting): Grant[] {
-  if (i.kind === 'permission') {
-    const line = i.detail?.command?.line;
-    return [...(line && i.toolKind === 'execute' ? ruleCandidates(line) : []), ...(i.detail?.always ?? [])];
-  }
-  if (i.kind === 'command') return i.outside ? [] : ruleCandidates(i.commandLine);
-  return [];
-}
-
-export function entryActions(entry: InboxEntry): InboxActions {
+export function entryActions(entry: InboxEntry, state?: Pick<AppState, 'chats'>): InboxActions {
   const i = entry.item;
-  if (i.kind === 'permission') {
-    const answer = (optionId: string): WebviewMessage => ({ type: 'permission', requestId: i.requestId, optionId });
-    const yes = primaryOption(i.options);
-    const no = denyOption(i.options);
-    const grant = alwaysChoices(i)[0];
+  if (i.kind === 'question') {
+    // A single choice answers here, Claude's pick first, as on its card; anything else is answered in the chat.
+    const field = oneClickQuestion(i.fields);
+    const options = (field?.options ?? []).map((o) => ({ o, ...recommended(o.title) })).sort((a, b) => Number(b.recommended) - Number(a.recommended));
     return {
-      choices: i.options.map((o) => ({
-        label: o.name,
-        message: answer(o.optionId),
-        tone: o === yes ? 'decide' : o.kind.startsWith('reject') ? 'deny' : ESCALATING.test(o.name) || o.kind === 'allow_always' ? 'escalate' : undefined,
-      })),
-      ...(yes ? { allow: answer(yes.optionId) } : {}),
-      ...(no ? { deny: answer(no.optionId) } : {}),
-      ...(grant ? { always: { message: { type: 'allowAlways', requestId: i.requestId, grant }, scope: describeGrant(grant).scope } } : {}),
-      // A diff or a plan needs reading, and the chat shows it in full; the inbox shows the diff too, so only a plan opens.
-      primary: yes && !i.detail?.plan ? answer(yes.optionId) : 'open',
+      choices: field ? options.map(({ o, label }) => ({ label, message: { type: 'answerQuestion', requestId: i.requestId, action: 'accept', values: { [field.key]: o.value } } })) : [],
+      deny: { type: 'answerQuestion', requestId: i.requestId, action: 'decline' },
+      primary: 'open',
     };
   }
-  if (i.kind === 'command') {
-    const run = (approve: boolean): WebviewMessage => ({ type: 'command', commandId: i.commandId, approve });
-    const grant = alwaysChoices(i)[0];
-    return {
-      choices: [
-        { label: 'Run', message: run(true), tone: 'decide' },
-        { label: 'Deny', message: run(false), tone: 'deny' },
-      ],
-      allow: run(true),
-      deny: run(false),
-      ...(grant ? { always: { message: { type: 'allowAlways', commandId: i.commandId, grant }, scope: describeGrant(grant).scope } } : {}),
-      primary: run(true),
-    };
-  }
-  if (i.kind === 'review') {
-    const review = (action: 'open' | 'accept' | 'reject'): WebviewMessage => ({ type: 'review', reviewId: i.reviewId, action });
-    return {
-      choices: [
-        { label: 'Accept', message: review('accept'), tone: 'decide' },
-        { label: 'Reject', message: review('reject'), tone: 'deny' },
-      ],
-      allow: review('accept'),
-      deny: review('reject'),
-      // The inbox has the edit's size only; Enter opens the diff to read it first.
-      primary: review('open'),
-      diff: review('open'),
-    };
-  }
-  if (i.kind === 'bridge') {
-    const answer = (a: 'allow' | 'allowChat' | 'allowAlways' | 'deny'): WebviewMessage => ({ type: 'bridge', requestId: i.requestId, answer: a });
-    return {
-      choices: [
-        { label: 'Allow', message: answer('allow'), tone: 'decide' },
-        { label: 'Allow for this chat', message: answer('allowChat') },
-        { label: 'Deny', message: answer('deny'), tone: 'deny' },
-      ],
-      allow: answer('allow'),
-      deny: answer('deny'),
-      ...(i.always ? { always: { message: answer('allowAlways'), scope: i.always } } : {}),
-      primary: answer('allow'),
-    };
-  }
-  // A question: a single choice answers here, Claude's pick first, as on its card; anything else is answered in the chat.
-  const field = oneClickQuestion(i.fields);
-  const options = (field?.options ?? []).map((o) => ({ o, ...recommended(o.title) })).sort((a, b) => Number(b.recommended) - Number(a.recommended));
+  const chat = state?.chats.find((c) => c.id === entry.chatId) ?? { agent: 'claude' as const, label: '', cwd: '' };
+  const a = approvalOf(i, chat, state);
+  const file = i.kind === 'permission' ? i.detail?.files?.find((f) => f.full) : undefined;
+  const diff: WebviewMessage | undefined =
+    i.kind === 'review' ? { type: 'review', reviewId: i.reviewId, action: 'open' } : file && i.kind === 'permission' ? { type: 'permissionDiff', requestId: i.requestId, path: file.path } : undefined;
   return {
-    choices: field
-      ? options.map(({ o, label }) => ({ label, message: { type: 'answerQuestion', requestId: i.requestId, action: 'accept', values: { [field.key]: o.value } } }))
-      : [],
-    deny: { type: 'answerQuestion', requestId: i.requestId, action: 'decline' },
-    primary: 'open',
+    choices: [],
+    ...(a.allow.once ? { allow: a.allow.once } : {}),
+    ...(a.deny ? { deny: a.deny } : {}),
+    // A review's Enter opens its diff (the inbox has only its size); a plan opens the chat to be read; no plain yes, the chat too.
+    primary: i.kind === 'review' ? diff! : !a.allow.once || (i.kind === 'permission' && i.detail?.plan) ? 'open' : 'allow',
+    ...(diff ? { diff } : {}),
   };
 }
 
-/** The answers "Apply to all N identical" sends: each entry's own one-time yes or no. Never "Always allow". */
+/** The answers "Allow all N" sends: each entry's own one-time yes or no. Never a remembered scope. */
 export function batchMessages(entries: readonly InboxEntry[], answer: 'allow' | 'deny'): WebviewMessage[] {
   return entries.flatMap((e) => entryActions(e)[answer] ?? []);
 }
@@ -272,11 +220,17 @@ export { KEY_GRACE_MS };
 export type InboxCommand =
   | { do: 'move'; by: 1 | -1 }
   | { do: 'send'; messages: WebviewMessage[] }
+  /** Allow the selected request the way its card says: its scope, held when careful. */
+  | { do: 'allow' }
+  /** The next scope on its card. */
+  | { do: 'scope' }
+  /** Put the cursor in "Or tell … instead". */
+  | { do: 'reply' }
   /** Open the chat at the request. */
   | { do: 'open' }
-  /** Leave the inbox. */
+  /** Leave the inbox (nothing selected). */
   | { do: 'close' }
-  /** Ask to confirm answering every identical request. */
+  /** Ask to confirm allowing every identical routine request. */
   | { do: 'batch' }
   /** An answer key while the selection is new (the grace period): it does nothing. */
   | { do: 'wait' };
@@ -286,39 +240,46 @@ export interface InboxKeyEvent {
   ctrlKey?: boolean;
   metaKey?: boolean;
   altKey?: boolean;
+  shiftKey?: boolean;
 }
 
 /**
- * What a key does to the selected entry. j/k (or the arrows) move, 1–9 pick a numbered answer, a allows
- * once, A always allows (where offered), d denies, Enter gives the primary answer, o opens the chat, b
- * asks to answer every identical request, Esc closes. `armed` is false for the grace period after the
- * selection changed: an answer key then does nothing, so a key already on its way can't answer a request
- * you haven't seen. null: not the inbox's key.
+ * What a key does to the selected entry. j/k (or the arrows) move; Enter (or a) allows with the card's
+ * scope, held for a careful request; Esc (or d) denies; Tab moves the scope; Shift+Enter (or b) asks
+ * to allow every identical routine request; Cmd/Ctrl+D opens the full diff; r replies instead; o opens
+ * the chat; 1–9 answer a question. `armed` is false for the grace period after the selection
+ * changed: an answer key then does nothing, so a key already on its way can't answer a request you
+ * haven't seen. null: not the inbox's key.
  */
 export function inboxKey(e: InboxKeyEvent, entry: InboxEntry | undefined, armed: boolean, entries: readonly InboxEntry[] = []): InboxCommand | null {
+  const answer = (c: InboxCommand): InboxCommand => (armed ? c : { do: 'wait' });
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'd') {
+    const diff = entry && entryActions(entry).diff;
+    return diff ? { do: 'send', messages: [diff] } : null;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   if (e.key === 'j' || e.key === 'ArrowDown') return { do: 'move', by: 1 };
   if (e.key === 'k' || e.key === 'ArrowUp') return { do: 'move', by: -1 };
-  if (e.key === 'Escape') return { do: 'close' };
-  if (!entry) return null;
+  if (!entry) return e.key === 'Escape' ? { do: 'close' } : null;
   if (e.key === 'o') return { do: 'open' };
+  if (e.key === 'r' && entry.item.kind !== 'question') return { do: 'reply' };
   const actions = entryActions(entry);
-  if (e.key === 'Enter' && actions.primary === 'open') return { do: 'open' };
-  let message: WebviewMessage | undefined;
-  if (/^[1-9]$/.test(e.key)) message = actions.choices[Number(e.key) - 1]?.message;
-  else if (e.key === 'a') message = actions.allow;
-  else if (e.key === 'A') message = actions.always?.message;
-  else if (e.key === 'd') message = actions.deny;
-  else if (e.key === 'Enter') message = actions.primary === 'open' ? undefined : actions.primary;
-  else if (e.key === 'b') {
-    if (identical(entries, entry).length < 2) return null;
-    return armed ? { do: 'batch' } : { do: 'wait' };
+  if (e.key === 'Tab' && !e.shiftKey) return entry.item.kind === 'question' ? null : { do: 'scope' };
+  if ((e.key === 'Enter' && e.shiftKey) || e.key === 'b') return batchable(entries, entry).length >= 2 ? answer({ do: 'batch' }) : null;
+  if (e.key === 'Enter') {
+    if (actions.primary === 'open') return { do: 'open' };
+    return answer(actions.primary === 'allow' ? { do: 'allow' } : { do: 'send', messages: [actions.primary] });
   }
-  if (!message) return null;
-  return armed ? { do: 'send', messages: [message] } : { do: 'wait' };
+  if (e.key === 'a') return actions.allow ? answer({ do: 'allow' }) : null;
+  if (e.key === 'Escape' || e.key === 'd') return actions.deny ? answer({ do: 'send', messages: [actions.deny] }) : null;
+  if (/^[1-9]$/.test(e.key)) {
+    const m = actions.choices[Number(e.key) - 1]?.message;
+    return m ? answer({ do: 'send', messages: [m] }) : null;
+  }
+  return null;
 }
 
-/** Keys while "Apply to all N identical" asks to confirm: Enter or a allows them all once, d denies them all, Esc goes back. */
+/** Keys while "Allow all N" asks to confirm: Enter or a allows them all once, d denies them all, Esc goes back. */
 export function confirmKey(e: InboxKeyEvent, armed: boolean): 'allow' | 'deny' | 'cancel' | 'wait' | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   if (e.key === 'Escape') return 'cancel';

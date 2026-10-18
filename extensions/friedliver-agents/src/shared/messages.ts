@@ -94,6 +94,8 @@ export type WebviewMessage =
   | { type: 'permissionDiff'; requestId: string; path: string }
   /** Always allow a command from now on (after a confirmation), and allow this one. */
   | { type: 'allowAlways'; requestId?: string; commandId?: string; grant: Grant }
+  /** Stop a routine request's auto-allow countdown. */
+  | { type: 'stopAuto'; id: string }
   /** Manage Permissions: open it, revoke one remembered "Always allow", or all of them. */
   | { type: 'managePermissions' }
   | { type: 'revokePermission'; id: string }
@@ -317,6 +319,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return { type: m.type };
     case 'revokePermission':
       return str(m.id, 5000) && m.id ? { type: 'revokePermission', id: m.id } : null;
+    case 'stopAuto':
+      return id(m.id) ? { type: 'stopAuto', id: m.id } : null;
     case 'reviewAll':
       return id(m.chatId) && (m.action === 'accept' || m.action === 'reject') ? { type: 'reviewAll', chatId: m.chatId, action: m.action } : null;
     case 'unqueue':

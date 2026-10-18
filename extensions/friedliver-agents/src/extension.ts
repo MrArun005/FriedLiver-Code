@@ -209,6 +209,8 @@ export class Controller {
       browserPage: (selector) => this.browser.inspect(selector),
       index: async (call) => (this.projectIndex ? this.projectIndex.answer(call) : 'The project index is still starting. Try again shortly.'),
       approvalDefault: () => this.approvalDefault(),
+      // User settings only: a repository must not make requests allow themselves.
+      autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
       sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
       remember: (fact) => {
         const folder = this.folders()[0];
@@ -795,6 +797,9 @@ export class Controller {
         case 'permissionDiff':
           if (!this.core.showProposal(m.requestId, m.path)) void vscode.window.showInformationMessage("FriedLiver couldn't build the whole file for this change. The card shows the agent's own diff.");
           return;
+        case 'stopAuto':
+          this.core.stopAuto(m.id);
+          return;
         case 'allowAlways':
           await this.core.allowAlways(m.requestId !== undefined ? { requestId: m.requestId } : { commandId: m.commandId! }, m.grant);
           return;
@@ -1220,8 +1225,9 @@ export class Controller {
   }
 
   /** Commands wait in the chat; a notification offers Run only when it shows the whole command exactly as it will run. */
-  private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string }): void {
-    const shown = commandNotice(ask.commandLine);
+  private askCommand(ask: { chatId?: string; commandId: string; agentLabel: string; commandLine: string; careful?: boolean }): void {
+    // A careful command is allowed only by holding on its card: no Run here.
+    const shown = { ...commandNotice(ask.commandLine), ...(ask.careful ? { runnable: false } : {}) };
     if (shown.runnable) this.runnable.add(ask.commandId);
     const buttons = [
       ...(shown.runnable ? [{ title: 'Run', run: () => this.runnable.has(ask.commandId) && this.core.decideCommand(ask.commandId, true) }] : []),
@@ -1229,7 +1235,7 @@ export class Controller {
       ...(ask.chatId ? [{ title: 'Show', run: () => void this.showChat(ask.chatId!, ask.commandId) }] : []),
       this.manageButton,
     ];
-    const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${shown.runnable ? '' : ' (open the chat to see all of it)'}`;
+    const text = `${plainText(ask.agentLabel)} wants to run: ${shown.text}${ask.careful ? ' (careful: allow it in the chat)' : shown.runnable ? '' : ' (open the chat to see all of it)'}`;
     this.notifyDecision(ask.commandId, ask.chatId, text, buttons);
   }
 
@@ -1255,13 +1261,13 @@ export class Controller {
   /** On every approval toast: the remembered "Always allow" answers, to look over or revoke. */
   private readonly manageButton = { title: 'Manage', run: () => this.managePermissions() };
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void {
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean }): void {
     if (isExternal(ask.chatId)) {
-      // No chat holds this request, so it always gets its own popup, whatever else is waiting.
+      // No chat holds this request, so it always gets its own popup, whatever else is waiting. Careful: once only.
       const buttons: Record<string, BridgeAnswer | 'manage'> = {
         Allow: 'allow',
-        'Allow for this session': 'allowChat',
-        ...(ask.always ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
+        ...(ask.careful ? {} : { 'Allow for this session': 'allowChat' as const }),
+        ...(ask.always && !ask.careful ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
         Deny: 'deny',
         Manage: 'manage',
       };
@@ -1274,10 +1280,15 @@ export class Controller {
       return;
     }
     const always = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId)?.always;
+    // A careful one (a purchase, a form submit) is allowed only by holding on its card.
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
-      { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
-      { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
-      ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
+      ...(ask.careful
+        ? []
+        : [
+            { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
+            { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
+            ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
+          ]),
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
       this.manageButton,

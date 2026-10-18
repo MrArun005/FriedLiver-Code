@@ -265,7 +265,7 @@ describe('the external client (Claude Code outside FriedLiver)', () => {
     const { h, done, asks, page, requests, signal } = ext();
     const origins: (string | undefined)[] = [];
     h.browser = async (_c, call, _s, expect) => (done.push(call.tool), origins.push(expect), 'ok');
-    const click = requests.call(S1, { tool: 'browser_click', text: 'Pay' }, signal);
+    const click = requests.call(S1, { tool: 'browser_click', text: 'Next' }, signal);
     await tick();
     page.origin = 'https://evil.example';
     requests.answer(asks[0].requestId, 'allowChat');
@@ -402,7 +402,29 @@ describe('"Always allow", remembered for every chat and later session', () => {
     let calls = 0;
     // The page is on the allowed site when asked, and somewhere else by the time it would act.
     h.browserPage = async () => ({ ...page, origin: calls++ === 0 ? 'https://www.irctc.co.in' : 'https://evil.example' });
-    await expect(requests.call(S1, { tool: 'browser_click', text: 'Pay' }, signal)).rejects.toThrow(/page changed to https:\/\/evil.example/);
+    await expect(requests.call(S1, { tool: 'browser_click', text: 'Next' }, signal)).rejects.toThrow(/page changed to https:\/\/evil.example/);
+  });
+
+  it('a purchase or a form submit asks every time, once only: no remembered site or "this chat" lets it through', async () => {
+    const { h, asks, store, requests, signal } = setup();
+    store.add({ kind: 'site', origin: 'https://www.irctc.co.in' });
+    const pay = requests.call('chat-1', { tool: 'browser_click', text: 'Pay now' }, signal);
+    await tick();
+    const [item] = bridgeItems(h);
+    expect(item).toMatchObject({ state: 'awaiting' });
+    expect(asks.at(-1)).toMatchObject({ careful: true });
+    // The wider answers do nothing for it; a plain allow, once, does.
+    if (item.kind === 'bridge') {
+      requests.answer(item.requestId, 'allowChat');
+      requests.answer(item.requestId, 'allowAlways');
+      expect(bridgeItems(h)[0]).toMatchObject({ state: 'awaiting' });
+      requests.answer(item.requestId, 'allow');
+    }
+    await expect(pay).resolves.toBe('ok');
+    // Nothing was remembered for the chat: the next one asks again.
+    void requests.call('chat-1', { tool: 'browser_click', selector: 'button#place-order' }, signal).catch(() => {});
+    await tick();
+    expect(bridgeItems(h).at(-1)).toMatchObject({ state: 'awaiting' });
   });
 
   it('offers nothing for a page whose origin is unknown', async () => {

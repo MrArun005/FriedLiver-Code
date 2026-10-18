@@ -736,6 +736,14 @@
           "scope": "machine",
           "description": "The approval level new chats start at. Full auto is chosen per chat, never here. Read from user settings only, so a repository can't make agents run without asking."
         },
+        "friedliver.approvals.autoRoutineSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 60,
+          "scope": "machine",
+          "markdownDescription": "Routine requests (reads, `git status`, the project's tests, lint and build) allow themselves once after this many seconds, with a visible countdown you can stop (Esc). 0 turns it off. Review and careful requests always wait for you. Read from user settings only."
+        },
         "friedliver.notify.decisions": {
           "type": "boolean",
           "default": true,
