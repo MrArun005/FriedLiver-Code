@@ -1,4 +1,6 @@
 import { render } from 'preact';
+import { DiscussionCard } from './discussion';
+import { withoutDiscussionTurns } from '../shared/discuss';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
@@ -716,7 +718,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     stick.current = true;
     setLimit(WINDOW);
   }, [chat.id]);
-  const { items, approvals } = useMemo(() => foldApprovals(chat.items), [chat.items]);
+  const { items, approvals } = useMemo(() => foldApprovals(withoutDiscussionTurns(chat.items)), [chat.items]);
   // The marked decision card moves on when it is answered: its hint and outline follow.
   useEffect(() => syncDecisionTarget(chat), [chat.items]);
   const groups = useMemo(() => {
@@ -1068,6 +1070,8 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
       return <BridgeView item={item} chat={chat} state={state} />;
     case 'question':
       return <QuestionCard item={item} chat={chat} />;
+    case 'discussion':
+      return <DiscussionCard item={item} chat={chat} />;
   }
 }
 

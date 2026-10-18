@@ -27,6 +27,7 @@ export const ICONS = {
   unarchive: 'M2.5 3.5h11v2.75h-11zM3.5 6.25v6.25h9V6.25M8 11.5V8.25M6.5 9.75 8 8.25l1.5 1.5',
   handoff: 'M2.5 8h7.5M7.5 5l3 3-3 3M13.25 3.5v9',
   ask: 'M2.75 3.5h10.5v6.75H8L5 12.75v-2.5H2.75z',
+  discuss: 'M2.25 2.75h7.5v5H6l-2.25 2v-2h-1.5zM11.75 6.25h2v5h-1.25v2l-2.25-2H7v-1.75',
   pipe: 'M2.5 6.5h7.5M2.5 9.5h7.5M9.5 4.5 13 8l-3.5 3.5',
   chevron: 'M5 6.5l3 3 3-3',
   chevronDown: 'M4 6l4 4 4-4',

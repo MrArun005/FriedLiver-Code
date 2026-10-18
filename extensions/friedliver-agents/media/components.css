@@ -1341,6 +1341,168 @@ textarea.fl-input {
   justify-content: flex-start;
 }
 
+/* ---- Discussion card (§2.30): a Card holding a /discuss: who, progress, the folded transcript, the conclusion ---- */
+
+.fl-discuss__who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  font-size: var(--t-90);
+  color: var(--fg);
+}
+.fl-discuss__person {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.fl-discuss__log > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--h-sm);
+  width: fit-content;
+  font-size: var(--t-90);
+  color: var(--fg-2);
+  cursor: pointer;
+  list-style: none;
+}
+.fl-discuss__log > summary::-webkit-details-marker {
+  display: none;
+}
+.fl-discuss__log > summary:hover {
+  color: var(--fg);
+}
+.fl-discuss__log > summary:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+  border-radius: var(--r-row);
+}
+.fl-discuss__log > summary > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+  transform: rotate(-90deg);
+  transition: transform var(--dur) var(--ease-out);
+}
+.fl-discuss__log[open] > summary > .icon {
+  transform: none;
+}
+.fl-discuss__turns {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-2);
+}
+.fl-discuss__turn {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.fl-discuss__turn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--t-90);
+}
+.fl-discuss__turn-head > b {
+  font-weight: var(--w-strong);
+  color: var(--fg);
+}
+.fl-discuss__turn-head > .icon {
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-discuss__round {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__body {
+  min-width: 0;
+  padding-left: calc(var(--i-md) + var(--sp-1));
+}
+.fl-discuss__turn[data-failed] .fl-discuss__body {
+  font-size: var(--t-90);
+  color: var(--error);
+}
+.fl-discuss__stance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-left: calc(var(--i-md) + var(--sp-1));
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__section {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.fl-discuss__label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--t-90);
+  font-weight: var(--w-strong);
+  color: var(--fg);
+}
+.fl-discuss__label > .icon {
+  width: var(--i-sm);
+  height: var(--i-sm);
+  color: var(--fg-2);
+}
+.fl-discuss__section ul {
+  display: grid;
+  gap: var(--sp-half);
+  margin: 0;
+  padding-left: var(--sp-4);
+  line-height: var(--lh);
+}
+.fl-discuss__point {
+  display: grid;
+  gap: var(--sp-1);
+}
+.fl-discuss__point > b {
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+.fl-discuss__side {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-left: var(--sp-4);
+  line-height: var(--lh);
+}
+.fl-discuss__side > .fl-avatar {
+  flex: none;
+  align-self: center;
+}
+.fl-discuss__next {
+  font-weight: var(--w-medium);
+  color: var(--sel-fg);
+  line-height: var(--lh);
+}
+.fl-discuss__empty,
+.fl-discuss__note {
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.fl-discuss__note {
+  font-size: var(--t-85);
+}
+.fl-discuss__hint {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fl-discuss__log > summary > .icon {
+    transition: none;
+  }
+}
+
 /* ---- Dialog (§2.15): glass r8 on a 75% overlay, elevation 4. Sheet: r12 top, a handle ---- */
 
 .fl-overlay {
