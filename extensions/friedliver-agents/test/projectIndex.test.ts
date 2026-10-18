@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
 import type { Journal } from '../src/host/changeJournal';
-import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
+import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -177,12 +177,19 @@ describe('what is never indexed', () => {
     const outside = await project({ 'leak.ts': 'outsidesecret' });
     const root = await project({ 'ok.ts': 'fine' });
     await symlink(path.join(outside, 'leak.ts'), path.join(root, 'link.ts'));
-    const doc = (rel: string) => ({ rel, mtimeNs: '0', size: 1, hash: 'a'.repeat(64), len: 1, tokens: [['outsidesecret', 1]], symbols: [], imports: [] });
+    const rels = ['link.ts', '.env', 'gone.ts', 'ok.ts'];
+    const hash = 'a'.repeat(64);
+    const store = await mkdtemp(path.join(os.tmpdir(), 'fl-store-'));
+    dirs.push(store);
+    const file = path.join(store, 'ix.json');
+    await writeFile(file, JSON.stringify({ v: 3, leaves: rels.map((r) => [r, 1, '0', hash]) }));
+    await writeFile(docsFileOf(file), rels.map((rel) => JSON.stringify({ rel, hash, len: 1, tokens: [['outsidesecret', 1]], symbols: [], imports: [] })).join('\n'));
     const ix = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
-    await ix.load({ v: 2, docs: [doc('link.ts'), doc('.env'), doc('gone.ts'), doc('ok.ts')] });
+    ix.load(await readIndexFile(file));
     // Loading checks names only (it must be instant): the secret goes now.
-    expect(ix.has('.env')).toBe(false);
+    expect(ix.tree.get('.env')).toBeUndefined();
     // Before the files are checked, a search never returns what the symlink points at: every read re-checks.
+    await ix.loadDocs(docsFileOf(file));
     expect(await answerIndex([ix], { tool: 'index_search', query: 'outsidesecret' }, 'verifying')).not.toContain('link.ts');
     await ix.catchUp();
     expect(['link.ts', '.env', 'gone.ts'].map((r) => ix.has(r))).toEqual([false, false, false]);
@@ -198,8 +205,7 @@ describe('incremental updates and caps', () => {
     await ix.update('a.ts');
     expect(ix.search('zebra', 5)).toEqual([]);
     expect(ix.search('quokka', 5)[0].rel).toBe('a.ts');
-    const copy = new ProjectIndex(root, { maxFiles: 10, maxBytes: 1e8 });
-    await copy.load(JSON.parse(JSON.stringify(ix)));
+    const copy = await reopen(root, await saveOf(ix));
     expect(copy.search('quokka', 5)[0].rel).toBe('a.ts');
     await rm(path.join(root, 'a.ts'));
     await ix.update('a.ts');
@@ -237,11 +243,12 @@ describe('the index_* tools on the tools server', () => {
 });
 
 /** What the editor does on open: the saved index back, then every listed file through update(). */
-async function reopen(root: string, saved: unknown, opts: Partial<ConstructorParameters<typeof ProjectIndex>[1]> = {}, journal?: Journal): Promise<ProjectIndex> {
+async function reopen(root: string, file: string | undefined, opts: Partial<ConstructorParameters<typeof ProjectIndex>[1]> = {}, journal?: Journal): Promise<ProjectIndex> {
   const ix = new ProjectIndex(root, { maxFiles: 100_000, maxBytes: 1e9, ...opts });
-  await ix.load(saved);
+  if (file) ix.load(await readIndexFile(file));
   ix.counts.stat = ix.counts.read = ix.counts.reindex = 0;
-  await ix.catchUp(journal);
+  // As the editor does: the saved docs stream in while the files are checked.
+  await Promise.all([file ? ix.loadDocs(docsFileOf(file)) : undefined, ix.catchUp(journal)]);
   return ix;
 }
 
@@ -256,9 +263,14 @@ const fakeJournal = (changes: { files?: string[]; dirs?: string[] } | null, next
     return changes && { files: changes.files ?? [], dirs: changes.dirs ?? [], next: { kind: 'fsevents', uuid: 'U', id: next } };
   },
 });
-const saveOf = (ix: ProjectIndex) => {
+/** Saves as the editor does (a tree file and a docs file); returns the tree file. */
+const saveOf = async (ix: ProjectIndex): Promise<string> => {
   ix.tree.snapshot();
-  return JSON.parse(JSON.stringify(ix));
+  const store = await mkdtemp(path.join(os.tmpdir(), 'fl-store-'));
+  dirs.push(store);
+  const file = path.join(store, 'index', 'ix.json');
+  await saveIndexFile(file, ix);
+  return file;
 };
 
 describe('the Merkle tree over the index', () => {
@@ -294,7 +306,7 @@ describe('the Merkle tree over the index', () => {
     const files = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`d${i % 4}/f${i}.ts`, `export const v${i} = ${i};\n`]));
     const root = await project({ ...files, 'd0/logo.bin': 'PNG\0\0' });
     const first = await build(root);
-    const saved = saveOf(first);
+    const saved = await saveOf(first);
     const before = first.tree.root();
 
     await writeFile(path.join(root, 'd0/f0.ts'), 'export const changed = 1;\n');
@@ -317,9 +329,11 @@ describe('the Merkle tree over the index', () => {
       { path: 'd3/new.ts', change: 'A' },
     ]);
     expect(ix.search('fresh', 5)[0].rel).toBe('d3/new.ts');
+    // The saved doc of an edited file is never used, whichever finished first: loading or checking.
+    expect(ix.search('v0', 5).map((h) => h.rel)).not.toContain('d0/f0.ts');
 
     // Nothing changed: nothing read.
-    const again = await reopen(root, saveOf(ix));
+    const again = await reopen(root, await saveOf(ix));
     expect([again.counts.read, again.counts.reindex]).toEqual([0, 0]);
     expect(again.changes()!.total).toBe(0);
   });
@@ -348,27 +362,38 @@ describe('the Merkle tree over the index', () => {
     ix.tree.snapshot();
     await saveIndexFile(file, ix);
     expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect((await reopen(root, await readIndexFile(file))).counts.read).toBe(0);
+    for (const f of [file, docsFileOf(file)]) expect((await stat(f)).mode & 0o777).toBe(0o600);
+    expect((await reopen(root, file)).counts.read).toBe(0);
+    const tree = await readFile(file, 'utf8');
+    const docs = await readFile(docsFileOf(file), 'utf8');
 
-    for (const bad of ['{not json', JSON.stringify({ v: 1, docs: [] }), JSON.stringify({ v: 2, docs: 'x', merkle: 7 })]) {
+    for (const bad of ['{not json', JSON.stringify({ v: 2, docs: [] }), JSON.stringify({ v: 3, leaves: 'x', merkle: 7 })]) {
       await writeFile(file, bad);
-      const re = await reopen(root, await readIndexFile(file));
+      const re = await reopen(root, file);
       expect(re.counts.read).toBe(2); // a full build
       expect(re.size).toBe(2);
       expect(re.changes()).toBeNull(); // no earlier root to compare with
     }
-    // A forged node in an otherwise good file: the history goes, the docs stay.
-    const good = JSON.parse(JSON.stringify(ix));
-    good.merkle.nodes[0][1][0][1] = 'f'.repeat(64);
-    await writeFile(file, JSON.stringify(good));
-    const re = await reopen(root, await readIndexFile(file));
+    // A forged node in an otherwise good tree: the history goes, the rest stays.
+    const forged = JSON.parse(tree);
+    forged.merkle.nodes[0][1][0][1] = 'f'.repeat(64);
+    await writeFile(file, JSON.stringify(forged));
+    let re = await reopen(root, file);
     expect([re.counts.read, re.changes()]).toEqual([0, null]);
+    // Docs corrupt or missing: the tree stays, those files are read again.
+    await writeFile(file, tree);
+    await writeFile(docsFileOf(file), docs.split('\n')[0] + '\n{broken');
+    re = await reopen(root, file);
+    expect([re.counts.read, re.size, re.changes()!.total]).toEqual([1, 2, 0]);
+    await rm(docsFileOf(file));
+    re = await reopen(root, file);
+    expect([re.counts.read, re.size]).toEqual([2, 2]);
+    expect(re.search('two', 5)[0].rel).toBe('b.ts');
   });
 
   it('answers index_changes', async () => {
     const root = await project({ 'a.ts': 'one', 'b.ts': 'two' });
-    const ix = await reopen(root, saveOf(await build(root)));
+    const ix = await reopen(root, await saveOf(await build(root)));
     expect(await answerIndex([ix], { tool: 'index_changes' }, false)).toMatch(/^Project hash [0-9a-f]{12}, the same as when the project was opened\./);
     await writeFile(path.join(root, 'a.ts'), 'changed');
     await ix.update('a.ts');
@@ -392,7 +417,7 @@ describe('the Merkle tree over the index', () => {
     const full = await reopen(root, undefined);
     const fullMs = performance.now() - t;
     expect(full.size).toBe(N);
-    const saved = saveOf(full);
+    const saved = await saveOf(full);
     for (const r of rels.slice(0, 10)) await writeFile(path.join(root, r), 'export const touched = 1;\n');
     t = performance.now();
     const re = await reopen(root, saved);
@@ -407,7 +432,7 @@ describe('the Merkle tree over the index', () => {
 
 describe('opening: ready at once, then caught up from the journal', () => {
   const files40 = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`d${i % 4}/f${i}.ts`, `export const v${i} = ${i};\n`]));
-  const savedWith = (ix: ProjectIndex, id = '100') => {
+  const savedWith = async (ix: ProjectIndex, id = '100') => {
     ix.mark = { kind: 'fsevents', uuid: 'U', id };
     return saveOf(ix);
   };
@@ -415,19 +440,25 @@ describe('opening: ready at once, then caught up from the journal', () => {
   it('serves the saved index before any file is checked', async () => {
     const root = await project(files40);
     const first = await build(root);
-    const saved = saveOf(first);
+    const saved = await saveOf(first);
     const ix = new ProjectIndex(root, { maxFiles: 1000, maxBytes: 1e8 });
-    await ix.load(saved);
+    ix.load(await readIndexFile(saved));
+    // The tree first: its root, status and index_changes, with no file touched.
     expect(ix.counts.stat).toBe(0);
     expect(ix.size).toBe(40);
     expect(ix.tree.root()).toBe(first.tree.root());
+    expect(ix.changes()!.total).toBe(0);
+    expect(ix.loading).toBe(true);
+    // Then the docs stream in, still without touching the files.
+    await ix.loadDocs(docsFileOf(saved));
+    expect([ix.counts.stat, ix.loading]).toEqual([0, false]);
     expect(ix.search('v7', 5)[0].rel).toBe('d3/f7.ts');
-    expect(await answerIndex([ix], { tool: 'index_search', query: 'v7' }, 'verifying')).toContain('Checking files changed since the last session');
+    expect(await answerIndex([ix], { tool: 'index_search', query: 'v7' }, 'verifying')).toContain('checking files changed since the last session');
   });
 
   it('re-checks only the journal\'s paths, rescans its directories, and moves the mark', async () => {
     const root = await project(files40);
-    const saved = savedWith(await build(root));
+    const saved = await savedWith(await build(root));
     await writeFile(path.join(root, 'd0/f0.ts'), 'export const edited = 1;\n');
     await writeFile(path.join(root, 'd1/new.ts'), 'export const added = 1;\n');
     await rm(path.join(root, 'd2/f2.ts'));
@@ -452,13 +483,13 @@ describe('opening: ready at once, then caught up from the journal', () => {
 
   it('checks every file without a saved mark, or when the journal cannot vouch for the history', async () => {
     const root = await project(files40);
-    const unmarked = saveOf(await build(root));
+    const unmarked = await saveOf(await build(root));
     const a = await reopen(root, unmarked, {}, fakeJournal({ files: [] }));
     expect(a.counts.stat).toBe(40);
     expect(a.mark?.id).toBe('900'); // taken before the check, so the next open can use the journal
-    const b = await reopen(root, savedWith(await build(root)), {}, fakeJournal(null));
+    const b = await reopen(root, await savedWith(await build(root)), {}, fakeJournal(null));
     expect(b.counts.stat).toBe(40);
-    const c = await reopen(root, savedWith(await build(root))); // no journal at all (Linux, Windows)
+    const c = await reopen(root, await savedWith(await build(root))); // no journal at all (Linux, Windows)
     expect(c.counts.stat).toBe(40);
   });
 
@@ -473,7 +504,7 @@ describe('opening: ready at once, then caught up from the journal', () => {
     const first = await build(root);
     expect(first.has('logs/a.ts')).toBe(true);
     await first.catchUp(); // records HEAD
-    const saved = savedWith(first);
+    const saved = await savedWith(first);
 
     await writeFile(path.join(root, '.gitignore'), 'logs/\n');
     await writeFile(path.join(root, 'src/b.ts'), 'edited, committed');
@@ -493,7 +524,7 @@ describe('opening: ready at once, then caught up from the journal', () => {
     const root = await project({ 'a.ts': 'one', 'b.ts': 'two' }, true);
     execFileSync('git', ['add', '.'], { cwd: root });
     execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-qm', 'x'], { cwd: root });
-    const saved = savedWith(await build(root));
+    const saved = await savedWith(await build(root));
     await writeFile(path.join(root, 'a.ts'), 'hinted');
     const ix = await reopen(root, saved, {}, fakeJournal({}));
     expect(ix.search('hinted', 5)[0]?.rel).toBe('a.ts');
