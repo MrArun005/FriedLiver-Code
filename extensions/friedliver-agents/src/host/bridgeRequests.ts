@@ -1,7 +1,7 @@
 import { isBrowserCall, isExternal, isIndexCall, type BridgeCall, type BrowserCall } from '../bridge/protocol';
 import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
-import { AGENT_FACES, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
+import { AGENT_FACES, BRIDGE_TIMEOUT_MS, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { siteOrigin, type Grant, type ToolGrant } from '../shared/permissions';
 import type { Permissions } from './permissions';
 import { agentList, chatList, renderChat } from './transcript';
@@ -15,7 +15,7 @@ export type BridgeAnswer = 'allow' | 'allowChat' | 'allowAlways' | 'deny';
 /** Who asked, as Manage Permissions names it. */
 export const EXTERNAL_AGENT = 'Claude Code (outside FriedLiver)';
 
-const APPROVAL_TIMEOUT_MS = 10 * 60_000;
+const APPROVAL_TIMEOUT_MS = BRIDGE_TIMEOUT_MS;
 const DEFAULT_READ = 10;
 /** Requests one chat may have waiting on the user, so an agent can't bury its chat in questions. */
 export const MAX_WAITING_PER_CHAT = 3;

@@ -65,6 +65,8 @@ export interface CommandItem {
   durationMs?: number;
   /** Ran without asking, and why: "Full auto", or the "Always allow" rule that covers it. */
   auto?: string;
+  /** When it arrived (the host's clock); waiting items get it, for the Decision Inbox's ages. */
+  at?: number;
 }
 
 export interface ReviewItem {
@@ -77,6 +79,7 @@ export interface ReviewItem {
   state: 'pending' | 'accepted' | 'rejected';
   /** Decided without the diff editor, and why: "Auto-accept edits", "Approved above". */
   auto?: string;
+  at?: number;
 }
 
 // ---- Connections between chats ----
@@ -103,6 +106,9 @@ export interface ChatLink {
   count: number;
 }
 
+/** How long a request through the FriedLiver tools waits for you before it is refused on its own. */
+export const BRIDGE_TIMEOUT_MS = 10 * 60_000;
+
 /** Chats an agent may start through the FriedLiver tools, counted from a chat the user started. */
 export const MAX_LINK_DEPTH = 2;
 
@@ -122,6 +128,7 @@ export interface BridgeItem {
   always?: string;
   /** Why it went ahead without asking: a remembered rule. */
   auto?: string;
+  at?: number;
 }
 
 /**
@@ -172,7 +179,7 @@ export type Item =
    * `toolKind` and `detail` (optional) say what is being approved: the diff, the command, the plan.
    * `auto` says FriedLiver answered it under the chat's approval level or a rule.
    */
-  | { kind: 'permission'; requestId: string; toolCallId?: string; title: string; options: PermissionOption[]; answer?: string; toolKind?: string; detail?: PermissionDetail; auto?: string }
+  | { kind: 'permission'; requestId: string; toolCallId?: string; title: string; options: PermissionOption[]; answer?: string; toolKind?: string; detail?: PermissionDetail; auto?: string; at?: number }
   | ReviewItem
   | CommandItem
   | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; actions?: NoticeAction[] }
@@ -190,6 +197,7 @@ export interface QuestionItem {
   state: 'awaiting' | 'answered' | 'declined';
   /** The answer, in one line, once given. */
   summary?: string;
+  at?: number;
 }
 
 export interface ChatView {
@@ -299,6 +307,9 @@ export const MAX_ITEM_TEXT = 512 * 1024;
 /** Transcript items kept per chat. Past it the oldest replies and steps go; nothing that waits for you does. */
 export const MAX_ITEMS = 2000;
 
+/** Items that keep when they arrived: your messages, and everything that waits for you. */
+const STAMPED = new Set<Item['kind']>(['user', 'permission', 'review', 'command', 'bridge', 'question']);
+
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.t) {
     case 'created':
@@ -312,7 +323,7 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'items':
       return editChat(state, action.chatId, (c) => ({
         ...c,
-        items: capItems([...c.items, ...action.items.map((i) => (i.kind === 'user' && i.at === undefined && action.at !== undefined ? { ...i, at: action.at } : i))]),
+        items: capItems([...c.items, ...action.items.map((i) => (STAMPED.has(i.kind) && !('at' in i && i.at !== undefined) && action.at !== undefined ? ({ ...i, at: action.at } as Item) : i))]),
         lastActivity: action.at ?? c.lastActivity,
       }));
     case 'update':
@@ -626,17 +637,17 @@ export function waitingItems(items: Item[]): Item[] {
 
 /** Everything the agents are waiting on the user for, oldest chat first. */
 export function decisions(state: Pick<AppState, 'chats'>): Decision[] {
-  const out: Decision[] = [];
-  for (const chat of state.chats) {
-    for (const i of waitingItems(chat.items)) {
-      if (i.kind === 'permission') out.push({ chatId: chat.id, kind: 'permission', id: i.requestId, title: i.title });
-      else if (i.kind === 'review') out.push({ chatId: chat.id, kind: 'review', id: i.reviewId, title: `Review edit to ${basename(i.path)}` });
-      else if (i.kind === 'command') out.push({ chatId: chat.id, kind: 'command', id: i.commandId, title: `Run ${shortCommand(i.commandLine)}` });
-      else if (i.kind === 'bridge') out.push({ chatId: chat.id, kind: 'bridge', id: i.requestId, title: bridgeTitle(state, chat, i) });
-      else if (i.kind === 'question') out.push({ chatId: chat.id, kind: 'question', id: i.requestId, title: `Answer: ${i.message.slice(0, 80)}` });
-    }
-  }
-  return out;
+  return state.chats.flatMap((chat) => waitingItems(chat.items).flatMap((i) => decisionOf(state, chat, i) ?? []));
+}
+
+/** What an item asks of the user, as a decision: its id and a title, waiting or not; undefined for an item that never asks. */
+export function decisionOf(state: Pick<AppState, 'chats'>, chat: ChatView, i: Item): Decision | undefined {
+  if (i.kind === 'permission') return { chatId: chat.id, kind: 'permission', id: i.requestId, title: i.title };
+  if (i.kind === 'review') return { chatId: chat.id, kind: 'review', id: i.reviewId, title: `Review edit to ${basename(i.path)}` };
+  if (i.kind === 'command') return { chatId: chat.id, kind: 'command', id: i.commandId, title: `Run ${shortCommand(i.commandLine)}` };
+  if (i.kind === 'bridge') return { chatId: chat.id, kind: 'bridge', id: i.requestId, title: bridgeTitle(state, chat, i) };
+  if (i.kind === 'question') return { chatId: chat.id, kind: 'question', id: i.requestId, title: `Answer: ${i.message.slice(0, 80)}` };
+  return undefined;
 }
 
 /** "Claude 2 wants to ask Gemini", "Claude 2 wants to read Codex 3". */
