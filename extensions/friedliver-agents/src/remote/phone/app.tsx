@@ -10,6 +10,8 @@ import type { AgentKey } from '../../shared/model';
 import type { QuestionField, QuestionValue } from '../../shared/questions';
 import type { ApprovalLevel } from '../../shared/session';
 import type { PhoneChat, PhoneEvent, PhoneFile, PhoneItem, PhoneList, PhoneSummary, RemoteAction } from '../protocol';
+// The design system's components (COMPONENTS.md), touch-sized by [data-density='touch'] on the body.
+import { Avatar as UiAvatar, Button, Checkbox, FilterPill, Icon as UiIcon, IconButton, Input, Pill, RadioRow, Row, Segmented, Textarea } from '../../webview/ui';
 
 // ---- Storage and the API ----
 
@@ -52,7 +54,6 @@ async function api<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pro
 
 // ---- Small pieces ----
 
-const AGENT_LETTER: Record<AgentKey, string> = { claude: 'C', codex: 'X', gemini: 'G', demo: 'D' };
 const AGENT_NAMES: Record<AgentKey, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
 const LEVELS: { level: ApprovalLevel; name: string }[] = [
   { level: 'ask', name: 'Manual' },
@@ -69,31 +70,11 @@ function ago(at: number, now: number): string {
 }
 
 function Avatar({ agent, small }: { agent: AgentKey; small?: boolean }) {
-  return (
-    <span class={`avatar avatar--${agent}${small ? ' avatar--small' : ''}`} aria-hidden="true">
-      {AGENT_LETTER[agent]}
-    </span>
-  );
+  return <UiAvatar agent={agent} size={small ? 'md' : 'lg'} />;
 }
 
 function Dot({ status }: { status: string }) {
-  return <span class={`dot dot--${status}`} aria-hidden="true" />;
-}
-
-function Icon({ name }: { name: 'back' | 'plus' | 'stop' | 'send' | 'more' | 'chev' }) {
-  const d = {
-    back: 'M10 3 5 8l5 5',
-    plus: 'M8 3v10M3 8h10',
-    stop: 'M4.5 4.5h7v7h-7z',
-    send: 'M8 13V3M4 7l4-4 4 4',
-    more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
-    chev: 'm6 4 4 4-4 4',
-  }[name];
-  return (
-    <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d={d} fill={name === 'stop' ? 'currentColor' : 'none'} stroke="currentColor" stroke-width={name === 'more' ? 2.4 : 1.4} stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
+  return <span class="fl-dot" data-state={status} aria-hidden="true" />;
 }
 
 // ---- Markdown, as elements ----
@@ -236,28 +217,19 @@ function Diff({ file }: { file: PhoneFile }) {
 }
 
 function LockIcon() {
-  return (
-    <svg class="lock" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-      <path d="M4.5 7V5.5a3.5 3.5 0 0 1 7 0V7M3.5 7h9v6.5h-9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
-    </svg>
-  );
+  return <UiIcon name="lock" size={12} />;
 }
 
 function Chip({ tone, label }: { tone: Tone; label: string }) {
   return (
-    <span class={`chip chip--${tone}`}>
-      {tone === 'careful' ? <LockIcon /> : null}
+    <Pill tone={tone} dot={tone !== 'careful'} icon={tone === 'careful' ? 'lock' : undefined}>
       {label}
-    </span>
+    </Pill>
   );
 }
 
 function Glyph({ name }: { name: 'check' | 'x' }) {
-  return (
-    <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
-      <path d={name === 'check' ? 'm3.5 8.5 3 3 6-7' : 'm4.5 4.5 7 7m0-7-7 7'} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  );
+  return <UiIcon name={name === 'check' ? 'check' : 'close'} />;
 }
 
 function CommandPreview({ line, cwd }: { line: string; cwd?: string }) {
@@ -520,16 +492,8 @@ function PendingRow({ req, open, swiped }: { req: Req; open(): void; swiped(dir:
             {!allow && quickAllowBlocked(req) ? <span class="meta">Tap to review</span> : null}
           </span>
         </span>
-        {req.deny ? (
-          <button class="round" aria-label={req.denyWord} onClick={req.deny}>
-            <Glyph name="x" />
-          </button>
-        ) : null}
-        {allow ? (
-          <button class="round round--yes" aria-label={`${req.allowWord} once`} onClick={allow}>
-            <Glyph name="check" />
-          </button>
-        ) : null}
+        {req.deny ? <IconButton round variant="secondary" icon="close" label={req.denyWord} onClick={req.deny} /> : null}
+        {allow ? <IconButton round variant="primary" icon="check" label={`${req.allowWord} once`} onClick={allow} /> : null}
       </div>
     </div>
   );
@@ -556,8 +520,11 @@ function HoldBar({ label, onDone }: { label: string; onDone(): void }) {
     setHolding(false);
   };
   return (
-    <button
-      class={`btn-lg btn-lg--hold${holding ? ' btn-lg--holding' : ''}`}
+    <Button
+      variant="danger"
+      block
+      class="fl-btn--hold"
+      data-holding={holding ? '' : undefined}
       aria-label={`${label}: press and hold`}
       onPointerDown={(e) => (e.preventDefault(), start())}
       onPointerUp={stop}
@@ -567,11 +534,8 @@ function HoldBar({ label, onDone }: { label: string; onDone(): void }) {
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !e.repeat && (e.preventDefault(), start())}
       onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && stop()}
     >
-      <span class="btn-lg__fill" aria-hidden="true" />
-      <span class="btn-lg__label">
-        <LockIcon /> {holding ? 'Keep holding…' : `Hold to ${label.toLowerCase()}`}
-      </span>
-    </button>
+      <LockIcon /> {holding ? 'Keep holding…' : `Hold to ${label.toLowerCase()}`}
+    </Button>
   );
 }
 
@@ -587,31 +551,22 @@ function QuestionFields({ q, values, set }: { q: Extract<PhoneItem, { k: 'questi
               {(f.options ?? []).map((o) => {
                 const picked = values[f.key];
                 const on = f.type === 'choice' ? picked === o.value : Array.isArray(picked) && picked.includes(o.value);
+                if (f.type === 'choice') return <RadioRow key={o.value} name={f.key} checked={on} onChange={() => set(f.key, o.value)} label={o.title} desc={o.description} />;
+                const list = Array.isArray(picked) ? picked : [];
                 return (
-                  <button
-                    key={o.value}
-                    role={f.type === 'choice' ? 'radio' : 'checkbox'}
-                    aria-checked={on}
-                    class={`choice${on ? ' choice--on' : ''}`}
-                    onClick={() => {
-                      if (f.type === 'choice') return set(f.key, o.value);
-                      const list = Array.isArray(picked) ? picked : [];
-                      set(f.key, on ? list.filter((x) => x !== o.value) : [...list, o.value]);
-                    }}
-                  >
-                    <span class="choice__title">{o.title}</span>
-                    {o.description ? <span class="choice__desc">{o.description}</span> : null}
-                  </button>
+                  <Checkbox key={o.value} checked={on} onChange={() => set(f.key, on ? list.filter((x) => x !== o.value) : [...list, o.value])}>
+                    {o.title}
+                    {o.description ? <span class="meta"> · {o.description}</span> : null}
+                  </Checkbox>
                 );
               })}
             </div>
           ) : f.type === 'boolean' ? (
-            <label class="check">
-              <input type="checkbox" checked={values[f.key] === true} onChange={(e) => set(f.key, (e.target as HTMLInputElement).checked)} /> {f.title}
-            </label>
+            <Checkbox checked={values[f.key] === true} onChange={(v) => set(f.key, v)}>
+              {f.title}
+            </Checkbox>
           ) : (
-            <input
-              class="input"
+            <Input
               inputMode={f.type === 'number' ? 'decimal' : 'text'}
               value={String(values[f.key] ?? '')}
               onInput={(e) => {
@@ -670,13 +625,18 @@ function RequestPanel({ req, done }: { req: Req; done(): void }) {
             {rows.map((r) => {
               const on = r.scope === choice.scope && r.i === choice.i;
               return (
-                <button key={`${r.scope}${r.i}`} role="radio" aria-checked={on} class={`choice${on ? ' choice--on' : ''}`} onClick={() => setChoice({ scope: r.scope, i: r.i })}>
-                  <span class="choice__top">
-                    <span class="choice__title">{SCOPE_TITLES[r.scope]}</span>
-                    {r.scope === 'once' ? null : <span class="tag-mac">Confirm on Mac</span>}
-                  </span>
-                  <span class="choice__desc">{r.rule}</span>
-                </button>
+                <RadioRow
+                  key={`${r.scope}${r.i}`}
+                  name="how-long"
+                  checked={on}
+                  onChange={() => setChoice({ scope: r.scope, i: r.i })}
+                  label={
+                    <>
+                      {SCOPE_TITLES[r.scope]} {r.scope === 'once' ? null : <Pill tone="info">Confirm on Mac</Pill>}
+                    </>
+                  }
+                  desc={r.rule}
+                />
               );
             })}
           </div>
@@ -690,31 +650,31 @@ function RequestPanel({ req, done }: { req: Req; done(): void }) {
           <div class="sheet__extra">
             <p class="meta">Other answers from {AGENT_NAMES[req.agent]}</p>
             {req.extra.map((x) => (
-              <button key={x.label} class="btn-text btn-text--sm btn-text--left" onClick={() => (x.run(), done())}>
+              <Button key={x.label} variant="quiet" size="sm" onClick={() => (x.run(), done())}>
                 {x.label}
-              </button>
+              </Button>
             ))}
           </div>
         ) : null}
       </div>
       <footer class="sheet__actions">
         {q ? (
-          <button class="btn-lg" disabled={!ready} onClick={() => (req.answer?.(values), done())}>
+          <Button variant="primary" block disabled={!ready} onClick={() => (req.answer?.(values), done())}>
             Answer
-          </button>
+          </Button>
         ) : chosen && !req.onMac ? (
           careful ? (
             <HoldBar label={primary} onDone={go} />
           ) : (
-            <button class="btn-lg" onClick={go}>
+            <Button variant="primary" block onClick={go}>
               {primary}
-            </button>
+            </Button>
           )
         ) : null}
         {req.deny ? (
-          <button class="btn-text" onClick={() => (req.deny!(), done())}>
+          <Button variant="quiet" block onClick={() => (req.deny!(), done())}>
             {req.denyWord}
-          </button>
+          </Button>
         ) : null}
       </footer>
     </>
@@ -764,9 +724,9 @@ function RequestSheet({ reqs, open, setOpen, close }: { reqs: Req[]; open: Open;
           <Glyph name="check" /> Answered
         </p>
         {settled.next ? (
-          <button class="btn-text btn-text--sm" onClick={() => (setSettled(undefined), go(settled.next))}>
+          <Button variant="quiet" size="sm" onClick={() => (setSettled(undefined), go(settled.next))}>
             Next: {settled.next.verb} {settled.next.target && !settled.next.prose ? settled.next.target : ''}
-          </button>
+          </Button>
         ) : null}
       </div>
     );
@@ -775,18 +735,18 @@ function RequestSheet({ reqs, open, setOpen, close }: { reqs: Req[]; open: Open;
       <div class="sheet__state">
         <p class="sheet__state-title">This request is no longer waiting.</p>
         <p class="meta">It was answered elsewhere, or the agent moved on.</p>
-        <button class="btn-text" onClick={close}>
+        <Button variant="quiet" onClick={close}>
           Close
-        </button>
+        </Button>
       </div>
     );
   } else if (target.kind === 'changed') {
     content = (
       <div class="sheet__state">
         <p class="sheet__state-title">This request changed. Review it again.</p>
-        <button class="btn-text" onClick={() => setOpen({ id: open.id, sig: reqs.find((r) => r.id === open.id)!.sig })}>
+        <Button variant="quiet" onClick={() => setOpen({ id: open.id, sig: reqs.find((r) => r.id === open.id)!.sig })}>
           Review again
-        </button>
+        </Button>
       </div>
     );
   } else {
@@ -806,22 +766,18 @@ function RequestSheet({ reqs, open, setOpen, close }: { reqs: Req[]; open: Open;
         <header class="sheet__nav">
           {reqs.length > 1 && req && !settled ? (
             <>
-              <button class="round round--quiet" aria-label="Previous request" onClick={() => step(-1)}>
-                <Icon name="back" />
-              </button>
+              <IconButton round icon="back" label="Previous request" onClick={() => step(-1)} />
               <span class="meta">
                 {at + 1} of {reqs.length} waiting
               </span>
-              <button class="round round--quiet round--flip" aria-label="Next request" onClick={() => step(1)}>
-                <Icon name="back" />
-              </button>
+              <IconButton round icon="forward" label="Next request" onClick={() => step(1)} />
             </>
           ) : (
             <span class="meta">Waiting for you</span>
           )}
-          <button class="btn-text btn-text--sm" onClick={close}>
+          <Button variant="quiet" size="sm" onClick={close}>
             Close
-          </button>
+          </Button>
         </header>
         {content}
       </div>
@@ -931,12 +887,8 @@ function ListScreen({ list, live, open, newChat, settings }: { list: PhoneList |
       <header class="bar">
         <h1 class="bar__title">Chats</h1>
         <span class={`live${live ? ' live--on' : ''}`}>{live ? 'Live' : 'Reconnecting…'}</span>
-        <button class="icon-btn" aria-label="Settings" onClick={settings}>
-          <Icon name="more" />
-        </button>
-        <button class="icon-btn icon-btn--accent" aria-label="New chat" onClick={newChat}>
-          <Icon name="plus" />
-        </button>
+        <IconButton icon="more" label="Settings" onClick={settings} />
+        <IconButton icon="plus" variant="brand" label="New chat" onClick={newChat} />
       </header>
       <main class="list">
         {!list ? <p class="empty">Loading…</p> : null}
@@ -971,9 +923,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
     return (
       <div class="screen">
         <header class="bar">
-          <button class="icon-btn" aria-label="Back" onClick={back}>
-            <Icon name="back" />
-          </button>
+          <IconButton icon="back" label="Back" onClick={back} />
         </header>
         <p class="empty">Loading…</p>
       </div>
@@ -1005,9 +955,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
   return (
     <div class="screen screen--chat">
       <header class="bar bar--chat">
-        <button class="icon-btn" aria-label="Back" onClick={back}>
-          <Icon name="back" />
-        </button>
+        <IconButton icon="back" label="Back" onClick={back} />
         <div class="bar__chat">
           <p class="bar__chat-title">{chat.title}</p>
           <p class="bar__chat-meta">
@@ -1016,24 +964,21 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
           </p>
         </div>
       </header>
-      <div class="levels" role="radiogroup" aria-label="Approvals">
-        {LEVELS.map((l) => (
-          <button key={l.level} role="radio" aria-checked={chat.approval === l.level} class={`level${chat.approval === l.level ? ' level--on' : ''}${l.level === 'full' ? ' level--auto' : ''}`} onClick={() => chat.approval !== l.level && void act({ type: 'approval', chatId: chat.id, level: l.level })}>
-            {l.name}
-          </button>
-        ))}
+      <div class="levels">
+        <Segmented
+          label="Approvals"
+          block
+          value={chat.approval}
+          onChange={(level) => chat.approval !== level && void act({ type: 'approval', chatId: chat.id, level })}
+          options={LEVELS.map((l) => ({ value: l.level, label: l.name }))}
+        />
       </div>
       {chat.subagentList.length ? (
         <div class="subs">
-          <button class="subs__head" aria-expanded={subsOpen} onClick={() => setSubsOpen(!subsOpen)}>
-            <span>
-              {chat.subagentList.length} subagent{chat.subagentList.length === 1 ? '' : 's'}
-              {live.length ? ` · ${live.length} running` : ''}
-            </span>
-            <span class={`chev${subsOpen ? ' chev--open' : ''}`}>
-              <Icon name="chev" />
-            </span>
-          </button>
+          <Row expanded={subsOpen} onPress={() => setSubsOpen(!subsOpen)}>
+            {chat.subagentList.length} subagent{chat.subagentList.length === 1 ? '' : 's'}
+            {live.length ? ` · ${live.length} running` : ''}
+          </Row>
           {subsOpen ? (
             <ul class="subs__list">
               {chat.subagentList.map((s) => (
@@ -1060,8 +1005,9 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
       {undo ? (
         <div class="undo" role="status">
           <span class="undo__text">{undo.text}</span>
-          <button
-            class="btn-text btn-text--sm"
+          <Button
+            variant="quiet"
+            size="sm"
             onClick={() => {
               clearTimeout(undo.timer);
               flushUndo.current = undefined;
@@ -1069,17 +1015,19 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
             }}
           >
             Undo
-          </button>
+          </Button>
         </div>
       ) : reqs.length > 1 ? (
-        <button class="waiting" onClick={() => setSheet({ id: reqs[0].id, sig: reqs[0].sig })}>
-          <span class="waiting__dot" aria-hidden="true" />
-          {reqs.length} waiting<span class="waiting__go">Review</span>
-        </button>
+        <div class="waiting">
+          <Button block onClick={() => setSheet({ id: reqs[0].id, sig: reqs[0].sig })}>
+            <Dot status="needs-you" />
+            {reqs.length} waiting · Review
+          </Button>
+        </div>
       ) : null}
       {sheet ? <RequestSheet reqs={reqs} open={sheet} setOpen={setSheet} close={() => setSheet(undefined)} /> : null}
       <footer class="composer">
-        <textarea
+        <Textarea
           class="composer__input"
           rows={1}
           placeholder="Message…"
@@ -1088,13 +1036,9 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
           aria-label="Message"
         />
         {chat.busy ? (
-          <button class="send send--stop" aria-label="Stop" onClick={() => void act({ type: 'stop', chatId: chat.id })}>
-            <Icon name="stop" />
-          </button>
+          <IconButton icon="stop" variant="secondary" label="Stop" onClick={() => void act({ type: 'stop', chatId: chat.id })} />
         ) : null}
-        <button class="send" aria-label="Send" disabled={!text.trim()} onClick={() => void send()}>
-          <Icon name="send" />
-        </button>
+        <IconButton icon="up" variant="brand" label="Send" disabled={!text.trim()} onClick={() => void send()} />
       </footer>
     </div>
   );
@@ -1109,22 +1053,21 @@ function NewChatSheet({ list, act, close }: { list: PhoneList; act(a: RemoteActi
       <div class="sheet__panel">
         <header class="sheet__head">
           <h2>New chat</h2>
-          <button class="link" onClick={() => close()}>
+          <Button variant="link" onClick={() => close()}>
             Cancel
-          </button>
+          </Button>
         </header>
         <p class="field__title">Agent</p>
         <div class="pills">
           {list.agents.map((a) => (
-            <button key={a.key} class={`pill${agent === a.key ? ' pill--on' : ''}`} aria-pressed={agent === a.key} onClick={() => setAgent(a.key)}>
-              <Avatar agent={a.key} />
+            <FilterPill key={a.key} size="touch" pressed={agent === a.key} onPress={() => setAgent(a.key)}>
               {a.name}
-            </button>
+            </FilterPill>
           ))}
         </div>
         <p class="field__title">Folder</p>
         {list.folders.length ? (
-          <select class="input" value={folder} onChange={(e) => setFolder((e.target as HTMLSelectElement).value)}>
+          <select class="fl-input" value={folder} onChange={(e) => setFolder((e.target as HTMLSelectElement).value)}>
             {list.folders.map((f) => (
               <option key={f.path} value={f.path}>
                 {f.name}
@@ -1135,9 +1078,10 @@ function NewChatSheet({ list, act, close }: { list: PhoneList; act(a: RemoteActi
           <p class="hint">Open a folder in FriedLiver on your Mac first.</p>
         )}
         <p class="field__title">First message</p>
-        <textarea class="input input--area" rows={4} value={text} placeholder="What should it do?" onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
-        <button
-          class="btn btn--primary btn--wide"
+        <Textarea rows={4} value={text} placeholder="What should it do?" onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
+        <Button
+          variant="primary"
+          block
           disabled={!agent || !folder}
           onClick={async () => {
             const r = await act({ type: 'newChat', agent: agent!, folder, text });
@@ -1145,7 +1089,7 @@ function NewChatSheet({ list, act, close }: { list: PhoneList; act(a: RemoteActi
           }}
         >
           Start chat
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1158,9 +1102,9 @@ function Settings({ close, forget }: { close(): void; forget(): void }) {
       <div class="sheet__panel">
         <header class="sheet__head">
           <h2>This phone</h2>
-          <button class="link" onClick={close}>
+          <Button variant="link" onClick={close}>
             Done
-          </button>
+          </Button>
         </header>
         <p class="field__title">Paired as</p>
         <p>{store.get('name') ?? 'Phone'}</p>
@@ -1170,9 +1114,9 @@ function Settings({ close, forget }: { close(): void; forget(): void }) {
             <p class="fp">{fp}</p>
           </>
         ) : null}
-        <button class="btn btn--danger btn--wide" onClick={forget}>
+        <Button variant="danger" block onClick={forget}>
           Forget this phone
-        </button>
+        </Button>
         <p class="hint">Unpairs this phone. Your Mac can also revoke it under FriedLiver: Remote Control.</p>
       </div>
     </div>
@@ -1217,11 +1161,12 @@ function Pairing({ code, fp, done }: { code: string | undefined; fp: string | un
           </>
         ) : null}
         <p class="field__title">Name this phone</p>
-        <input class="input" value={name} maxLength={40} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+        <Input value={name} maxLength={40} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
         {error ? <p class="notice notice--error">{error}</p> : null}
-        <button
-          class="btn btn--primary btn--wide"
-          disabled={busy}
+        <Button
+          variant="primary"
+          block
+          loading={busy}
           onClick={async () => {
             setBusy(true);
             try {
@@ -1238,7 +1183,7 @@ function Pairing({ code, fp, done }: { code: string | undefined; fp: string | un
           }}
         >
           Pair
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1428,5 +1373,15 @@ function App() {
     </>
   );
 }
+
+// The design system's theme hooks: the light or dark token blocks by the phone's own setting, and touch sizes.
+const light = window.matchMedia('(prefers-color-scheme: light)');
+const theme = () => {
+  document.body.classList.toggle('vscode-light', light.matches);
+  document.body.classList.toggle('vscode-dark', !light.matches);
+};
+document.body.dataset.density = 'touch';
+theme();
+light.addEventListener('change', theme);
 
 render(<App />, document.getElementById('root')!);

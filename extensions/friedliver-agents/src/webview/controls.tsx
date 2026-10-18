@@ -18,6 +18,7 @@ import { questionGroups, recommended, type QuestionField } from '../shared/quest
 import { denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
 import { ClampedText, LiveState, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 import { agentName } from '../shared/names';
+import { Button, Checkbox, IconButton, Input, MenuItem, Pill, selectTrigger } from './ui';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -98,9 +99,9 @@ function FileChange({ file, requestId, open: startOpen }: { file: ProposedFile; 
           </span>
         </button>
         {requestId && file.full && (
-          <button class="ghost sm" title="See the whole file with this change, read-only" onClick={() => send({ type: 'permissionDiff', requestId, path: file.path })}>
+          <Button variant="quiet" size="sm" title="See the whole file with this change, read-only" onClick={() => send({ type: 'permissionDiff', requestId, path: file.path })}>
             Open diff
-          </button>
+          </Button>
         )}
       </div>
       {open && file.lines.length > 0 && <DiffView lines={file.lines} more={file.more} />}
@@ -200,13 +201,11 @@ export function QueueList({ chat }: { chat: ChatView }) {
             </span>
             <span class="spacer" />
             {now && (
-              <button class="ghost sm" title={chat.busy ? `Give it to ${agentName(chat.agent)} while it works` : 'Send it now'} onClick={() => send({ type: 'steer', chatId: chat.id, id: q.id })}>
-                <Icon name="send" /> {now}
-              </button>
+              <Button variant="quiet" icon="send" size="sm" title={chat.busy ? `Give it to ${agentName(chat.agent)} while it works` : 'Send it now'} onClick={() => send({ type: 'steer', chatId: chat.id, id: q.id })}>
+                {now}
+              </Button>
             )}
-            <button class="ghost icon-btn sm" title="Don't send" aria-label="Remove from the queue" onClick={() => send({ type: 'unqueue', chatId: chat.id, id: q.id })}>
-              <Icon name="close" />
-            </button>
+            <IconButton icon="close" label="Remove from the queue" muted size="sm" title="Don't send" onClick={() => send({ type: 'unqueue', chatId: chat.id, id: q.id })} />
           </div>
         </div>
       ))}
@@ -225,12 +224,12 @@ export function EditsBar({ chat }: { chat: ChatView }) {
         {waiting} edit{waiting === 1 ? '' : 's'} waiting
       </span>
       <span class="spacer" />
-      <button class="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' })}>
+      <Button size="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' })}>
         Accept all
-      </button>
-      <button class="sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
+      </Button>
+      <Button size="sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
         Reject all
-      </button>
+      </Button>
     </div>
   );
 }
@@ -418,30 +417,22 @@ export function TaskOptions({
                   key={o.id}
                   label={`${o.name} for ${AGENT_FACES[agent].name}`}
                   title={`${AGENT_FACES[agent].name} ${o.name}: ${o.choices.find((c) => c.value === value)?.name ?? value}`}
-                  buttonClass="mini-select"
-                  trigger={
-                    <>
-                      <span class="chip-text">{o.choices.find((c) => c.value === value)?.name ?? value}</span>
-                      <Icon name="chevron" />
-                    </>
-                  }
+                  buttonClass="fl-select fl-select--sm"
+                  trigger={selectTrigger(o.choices.find((c) => c.value === value)?.name ?? value)}
                 >
                   {(close) =>
                     o.choices.map((c) => (
-                      <button
+                      <MenuItem
                         key={c.value}
-                        role="menuitemradio"
-                        aria-checked={c.value === value}
-                        data-value={c.value}
+                        label={c.name}
+                        checked={c.value === value}
+                        value={c.value}
                         title={c.description}
-                        onClick={() => {
+                        onSelect={() => {
                           close();
                           onChange(agent, key, c.value);
                         }}
-                      >
-                        <span class="grow">{c.name}</span>
-                        {c.value === value && <Icon name="check" />}
-                      </button>
+                      />
                     ))
                   }
                 </Popover>
@@ -552,9 +543,9 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
     skip();
   };
   return (
-    <section class="fl-card apv question" data-on={on ? '' : undefined} id={`item-${item.requestId}`} aria-label={`${agentName(chat.agent)} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
+    <section class="fl-card fl-card--bare apv question" data-enter="" data-focus={on ? '' : undefined} id={`item-${item.requestId}`} aria-label={`${agentName(chat.agent)} asks you`} {...chooseOn(chat, item.requestId)} onKeyDown={onCardKey}>
       <div class="q-head">
-        <span class="fl-chip q-chip">{g.field.title}</span>
+        <Pill class="q-chip">{g.field.title}</Pill>
         {groups.length > 1 && (
           <span class="q-step" aria-live="polite">
             {step + 1} of {groups.length}
@@ -584,7 +575,11 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
                 <span class="q-opt-text">
                   <span class="q-opt-label">
                     {label}
-                    {rec && <span class="fl-chip q-rec">Recommended</span>}
+                    {rec && (
+                      <Pill tone="info" class="q-rec">
+                        Recommended
+                      </Pill>
+                    )}
                   </span>
                   {o.description && <span class="q-opt-desc">{o.description}</span>}
                 </span>
@@ -601,8 +596,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
                 </button>
               ) : (
                 <div class="q-other">
-                  <input
-                    type="text"
+                  <Input
                     value={other}
                     placeholder="Type your answer, then Enter"
                     aria-label={`Other answer to ${g.field.title}`}
@@ -634,18 +628,18 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
       </div>
       <div class="q-foot">
         {step > 0 && (
-          <button type="button" class="fl-btn fl-btn--ghost" onClick={() => (setStep(step - 1), setOther(null), setActive(0))}>
+          <Button variant="quiet" onClick={() => (setStep(step - 1), setOther(null), setActive(0))}>
             Back
-          </button>
+          </Button>
         )}
         <span class="spacer" />
-        <button type="button" class="fl-btn fl-btn--ghost" onClick={skip}>
-          Skip <span class="k">Esc</span>
-        </button>
+        <Button variant="quiet" kbd="Esc" onClick={skip}>
+          Skip
+        </Button>
         {(!last || g.field.type !== 'choice') && (
-          <button type="button" class={`fl-btn ${on ? 'fl-btn--brand' : 'fl-btn--quiet'}`} onClick={() => next(values)}>
-            {last ? 'Submit' : 'Next'} <span class="k">{MAC ? '⌘⏎' : 'Ctrl+⏎'}</span>
-          </button>
+          <Button variant={on ? 'brand' : 'secondary'} kbd={MAC ? '⌘⏎' : 'Ctrl+⏎'} onClick={() => next(values)}>
+            {last ? 'Submit' : 'Next'}
+          </Button>
         )}
       </div>
     </section>
@@ -658,13 +652,13 @@ const isTypingIn = (t: EventTarget | null) => t instanceof HTMLElement && (t.tag
 function FieldInput({ field, value, onChange }: { field: QuestionField; value: Values[string] | undefined; onChange(v: Values[string] | undefined): void }) {
   if (field.type === 'boolean')
     return (
-      <label class="check">
-        <input type="checkbox" checked={value === true} onChange={(e) => onChange(e.currentTarget.checked)} /> Yes
-      </label>
+      <Checkbox checked={value === true} onChange={onChange}>
+        Yes
+      </Checkbox>
     );
   if (field.type === 'number')
     return (
-      <input
+      <Input
         class="q-input"
         type="number"
         aria-label={field.title}
@@ -673,6 +667,6 @@ function FieldInput({ field, value, onChange }: { field: QuestionField; value: V
       />
     );
   return (
-    <input class="q-input" type="text" aria-label={field.title} value={String(value ?? '')} maxLength={10_000} onInput={(e) => onChange(e.currentTarget.value)} />
+    <Input class="q-input" aria-label={field.title} value={String(value ?? '')} maxLength={10_000} onInput={(e) => onChange(e.currentTarget.value)} />
   );
 }

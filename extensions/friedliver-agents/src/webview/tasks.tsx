@@ -42,6 +42,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
+import { Button, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
@@ -160,9 +161,7 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           <td class="c-age num" />
           <td class="c-act">
             {onOpen && (
-              <button class="ghost icon-btn sm" title="Show in chat" aria-label={`Show ${sub.title} in ${parent}`} onClick={() => onOpen(sub.id)}>
-                <Icon name="open" />
-              </button>
+              <IconButton icon="open" label={`Show ${sub.title} in ${parent}`} muted size="sm" title="Show in chat" onClick={() => onOpen(sub.id)} />
             )}
           </td>
         </tr>
@@ -172,9 +171,9 @@ function SubRows({ subs, onOpen, parent }: { subs: Subagent[]; onOpen?(id: strin
           <td class="c-status" />
           <td class="c-agent" />
           <td class="c-task">
-            <button type="button" class="link sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
+            <Button variant="link" class="sub-fold" aria-expanded={open} aria-label={`${done.length} done subagent${done.length === 1 ? '' : 's'} of ${parent}: ${open ? 'hide' : 'show'}`} onClick={() => setOpen(!open)}>
               ↳ {done.length} done · {open ? 'hide' : 'show'}
-            </button>
+            </Button>
           </td>
           <td class="c-activity num" />
           <td class="c-files num" />
@@ -207,7 +206,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
   const col = claudeColumn(s, now);
   return (
     <>
-      <article class="task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
+      <article class="fl-card task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
         <div class="card-top">
           <Glyph agent="claude" />
           <span class="tag" title={OUTSIDE_TIP}>
@@ -217,9 +216,9 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
           <span title="Last activity">{ago(s.lastActivity, now)}</span>
         </div>
         <h3 class="card-title">
-          <button class="title-btn" title={s.title} onClick={() => openClaude(s.id)}>
+          <Button variant="text" title={s.title} onClick={() => openClaude(s.id)}>
             {s.title}
-          </button>
+          </Button>
         </h3>
         <div class="card-state">
           <Dot state={col} />
@@ -230,9 +229,9 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
         </div>
         <div class="card-actions">
           <span class="spacer" />
-          <button class="sm" title={s.chatId ? 'Open the FriedLiver chat that continues it' : openTip(col)} onClick={() => openClaude(s.id)}>
-            <Icon name="open" /> Open in FriedLiver
-          </button>
+          <Button size="sm" icon="open" title={s.chatId ? 'Open the FriedLiver chat that continues it' : openTip(col)} onClick={() => openClaude(s.id)}>
+            Open in FriedLiver
+          </Button>
         </div>
       </article>
       <SubCards label={`Subagents of ${s.title}`} subs={claudeSubagents(s, now)} />
@@ -267,9 +266,7 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
         <td class="c-files num">{plural(s.messages, 'message')}</td>
         <td class="c-age num" />
         <td class="c-act">
-          <button class="ghost icon-btn sm" title={openTip(col)} aria-label={`Open ${s.title} in FriedLiver`} onClick={() => openClaude(s.id)}>
-            <Icon name="open" />
-          </button>
+          <IconButton icon="open" label={`Open ${s.title} in FriedLiver`} muted size="sm" title={openTip(col)} onClick={() => openClaude(s.id)} />
         </td>
       </tr>
       <SubRows subs={claudeSubagents(s, now)} parent={s.title} />
@@ -315,7 +312,7 @@ function Manager() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       // The Inbox has its own keys (inbox.tsx): its digits pick answers, not views.
-      if (view === 'inbox' || t?.closest('.popover') || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (view === 'inbox' || t?.closest('.fl-menu') || e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTyping(t)) {
         if (e.key === 'Escape' && t === search.current) {
           setQuery('');
@@ -385,28 +382,29 @@ function Manager() {
                 <Dot state="done" /> {tally.done} done
               </span>
               {tally.archived > 0 && (
-                <button
-                  class="link count-item"
+                <Button
+                  variant="link"
+                  icon="history"
+                  class="count-item"
                   onClick={() => {
                     setHistoryOpen(true);
                     requestAnimationFrame(() => document.getElementById('history')?.scrollIntoView({ block: 'start', behavior: scrollBehavior() }));
                   }}
                 >
-                  <Icon name="history" /> {tally.archived} archived
-                </button>
+                  {tally.archived} archived
+                </Button>
               )}
             </div>
           </div>
           <span class="spacer" />
           {view === 'inbox' ? null : waiting.length > 0 ? (
-            <button class="pill loud" onClick={() => setView('inbox')} title="Open the Inbox (5)">
-              <Dot state="needs-you" />
+            <FilterPill size="md" tone="waiting" class="mgr-waiting" onPress={() => setView('inbox')} title="Open the Inbox (5)">
               {waiting.length} decision{waiting.length === 1 ? '' : 's'} waiting
-            </button>
+            </FilterPill>
           ) : (
-            <span class="pill quiet">
-              <Icon name="check" /> Nothing waiting
-            </span>
+            <Pill size="md" tone="muted" icon="check">
+              Nothing waiting
+            </Pill>
           )}
           {view !== 'inbox' && (
             <label class="search">
@@ -549,9 +547,9 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         <label class="check" title="A separate git checkout on its own branch, so agents can't clash">
           <input type="checkbox" checked={own} onChange={(e) => setWorktree(e.currentTarget.checked)} /> Own worktree
         </label>
-        <button class="primary" disabled={!prompt.trim()} onClick={start}>
+        <Button variant="primary" disabled={!prompt.trim()} onClick={start}>
           Start <Kbd>⏎</Kbd>
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -613,9 +611,9 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
   if (d.kind === 'question') {
     return (
       <div class="actions">
-        <button class="decide sm" onClick={() => open(chat.id)}>
+        <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
           Answer
-        </button>
+        </Button>
       </div>
     );
   }
@@ -673,8 +671,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
   const archive = () => send({ type: 'archive', chatId: chat.id, archived: true });
   return (
     <article
-      class="task-card"
+      class="fl-card fl-card--interactive task-card"
       data-status={status}
+      data-tone={status === 'needs-you' ? 'waiting' : status === 'error' ? 'error' : undefined}
       data-nav={chat.id}
       tabIndex={tabbable ? 0 : -1}
       aria-label={`${chatTip(chat)}. ${DOT_LABEL[status]}`}
@@ -701,9 +700,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         <CardMore chat={chat} canMerge={canMerge} changes={files > 0 || !!chat.branch} archive={archive} />
       </div>
       <h3 class="card-title">
-        <button class="title-btn" title={chat.title} onClick={() => open(chat.id)}>
+        <Button variant="text" title={chat.title} onClick={() => open(chat.id)}>
           {chat.title}
-        </button>
+        </Button>
       </h3>
       <div class="card-state" data-decision={line.decision ? '' : undefined}>
         <Dot state={status} />
@@ -752,13 +751,13 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       {(chat.busy || (canMerge && !line.decision)) && (
         <div class="card-actions">
           {chat.busy ? (
-            <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-              <Icon name="stop" /> Stop
-            </button>
+            <Button variant="quiet-danger" size="sm" icon="stop" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+              Stop
+            </Button>
           ) : (
-            <button class="sm" onClick={() => send({ type: 'merge', chatId: chat.id })}>
-              <Icon name="merge" /> Merge
-            </button>
+            <Button size="sm" icon="merge" onClick={() => send({ type: 'merge', chatId: chat.id })}>
+              Merge
+            </Button>
           )}
         </div>
       )}
@@ -777,46 +776,30 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
   // Hand off only to agents the pickers offer (Demo when shown).
   const agents = useRoster().agents;
   return (
-    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn sm card-more" trigger={<Icon name="more" />}>
+    <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
         <>
-          <button role="menuitem" onClick={() => (close(false), open(chat.id))}>
-            <Icon name="open" /> Open chat
-          </button>
-          <button role="menuitem" disabled={!changes} title={changes ? undefined : 'No changes yet'} onClick={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))}>
-            <Icon name="diff" /> View changes
-          </button>
-          <button role="menuitem" onClick={() => (close(false), ask())}>
-            <Icon name="ask" /> Ask another agent…
-          </button>
-          <div class="pop-sep" role="separator" />
-          <div class="pop-title" aria-hidden="true">Hand off to</div>
+          <MenuItem icon="open" label="Open chat" onSelect={() => (close(false), open(chat.id))} />
+          <MenuItem icon="diff" label="View changes" disabled={!changes} title={changes ? undefined : 'No changes yet'} onSelect={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))} />
+          <MenuItem icon="ask" label="Ask another agent…" onSelect={() => (close(false), ask())} />
+          <MenuSep />
+          <MenuTitle>Hand off to</MenuTitle>
           {agents.map((agent) => (
-            <button key={agent} role="menuitem" onClick={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}>
-              <Glyph agent={agent} size="sm" />
-              <span class="grow">{agentName(agent)}</span>
-              {agent === chat.agent && <span class="hint">new chat</span>}
-            </button>
+            <MenuItem
+              key={agent}
+              lead={<Glyph agent={agent} size="sm" />}
+              label={agentName(agent)}
+              end={agent === chat.agent ? 'new chat' : undefined}
+              onSelect={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}
+            />
           ))}
-          <div class="pop-sep" role="separator" />
+          <MenuSep />
           <PipeTargets chat={chat} close={close} />
-          <div class="pop-sep" role="separator" />
-          <button role="menuitem" onClick={() => (close(), send({ type: 'renameChat', chatId: chat.id }))}>
-            <Icon name="rename" /> Rename chat
-          </button>
-          {canMerge && (
-            <button role="menuitem" onClick={() => (close(), send({ type: 'merge', chatId: chat.id }))}>
-              <Icon name="merge" /> Merge into main
-            </button>
-          )}
-          {chat.branch && !chat.busy && (
-            <button role="menuitem" class="danger" onClick={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))}>
-              <Icon name="trash" /> Delete worktree
-            </button>
-          )}
-          <button role="menuitem" onClick={() => (close(false), archive())}>
-            <Icon name="archive" /> Archive
-          </button>
+          <MenuSep />
+          <MenuItem icon="rename" label="Rename chat" onSelect={() => (close(), send({ type: 'renameChat', chatId: chat.id }))} />
+          {canMerge && <MenuItem icon="merge" label="Merge into main" onSelect={() => (close(), send({ type: 'merge', chatId: chat.id }))} />}
+          {chat.branch && !chat.busy && <MenuItem icon="trash" label="Delete worktree" tone="error" onSelect={() => (close(), send({ type: 'removeWorktree', chatId: chat.id }))} />}
+          <MenuItem icon="archive" label="Archive" onSelect={() => (close(false), archive())} />
         </>
       )}
     </Popover>
@@ -841,9 +824,9 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
         </span>
         <span class="hint">{group.chats.length} agents, same task</span>
         <span class="spacer" />
-        <button class="ghost sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
+        <Button variant="quiet" size="sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? 'Show' : 'Hide'}
-        </button>
+        </Button>
       </header>
       {!collapsed && (
         <div class="compare-grid" style={{ gridTemplateColumns: `repeat(${group.chats.length}, minmax(0, 1fr))` }}>
@@ -857,9 +840,11 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                   <span class="compare-agent" title={chatTip(c)}>
                     {agentName(c.agent)}
                   </span>
-                  <button class="title-btn compare-topic" title={c.title} onClick={() => open(c.id)}>
-                    {c.title}
-                  </button>
+                  <span class="compare-topic">
+                    <Button variant="text" truncate title={c.title} onClick={() => open(c.id)}>
+                      {c.title}
+                    </Button>
+                  </span>
                   <Dot state={status} />
                   <span class="hint">{DOT_LABEL[status]}</span>
                   <span class="spacer" />
@@ -869,13 +854,13 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                 </div>
                 <p class="compare-reply">{reply || <span class="hint">No reply yet.</span>}</p>
                 <div class="actions">
-                  <button class="ghost sm" onClick={() => send({ type: 'viewChanges', chatId: c.id })}>
-                    <Icon name="diff" /> Changes
-                  </button>
+                  <Button variant="quiet" size="sm" icon="diff" onClick={() => send({ type: 'viewChanges', chatId: c.id })}>
+                    Changes
+                  </Button>
                   <span class="spacer" />
-                  <button class="sm" disabled={c.busy} title={c.busy ? 'Still working' : c.branch ? 'Merge this one, archive the others' : 'Archive the others'} onClick={() => keep(c.id)}>
-                    <Icon name="keep" /> Keep this one
-                  </button>
+                  <Button size="sm" icon="keep" disabled={c.busy} title={c.busy ? 'Still working' : c.branch ? 'Merge this one, archive the others' : 'Archive the others'} onClick={() => keep(c.id)}>
+                    Keep this one
+                  </Button>
                 </div>
               </article>
             );
@@ -1036,45 +1021,45 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
   const d = line.decision;
   if (!d) {
     return chat.busy ? (
-      <button class="ghost danger sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
-        <Icon name="stop" /> Stop
-      </button>
+      <Button variant="quiet-danger" icon="stop" size="sm" onClick={() => send({ type: 'stop', chatId: chat.id })}>
+        Stop
+      </Button>
     ) : null;
   }
   if (d.kind === 'review') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
+      <Button variant="primary" size="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
         Review
-      </button>
+      </Button>
     );
   }
   // A careful request is allowed by holding on its card, never in one click from a row.
   const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
   if (item && approvalOf(item, chat).hold) {
     return (
-      <button class="decide sm" onClick={() => open(chat.id)}>
+      <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
         Review
-      </button>
+      </Button>
     );
   }
   if (d.kind === 'command') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
-        <Icon name="play" /> Run
-      </button>
+      <Button variant="primary" icon="play" size="sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
+        Run
+      </Button>
     );
   }
   if (d.kind === 'bridge') {
     return (
-      <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
+      <Button variant="primary" size="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
         Allow
-      </button>
+      </Button>
     );
   }
   return (
-    <button class="decide sm" onClick={() => open(chat.id)}>
+    <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
       Answer
-    </button>
+    </Button>
   );
 }
 
@@ -1101,12 +1086,12 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
                 {c.title}
               </button>
               <span class="hint num">{age(c.createdAt, now)}</span>
-              <button class="ghost sm" onClick={() => send({ type: 'archive', chatId: c.id, archived: false })}>
-                <Icon name="unarchive" /> Unarchive
-              </button>
-              <button class="ghost danger sm" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
-                <Icon name="trash" /> Remove
-              </button>
+              <Button variant="quiet" size="sm" icon="unarchive" onClick={() => send({ type: 'archive', chatId: c.id, archived: false })}>
+                Unarchive
+              </Button>
+              <Button variant="quiet-danger" size="sm" icon="trash" onClick={() => send({ type: 'removeChat', chatId: c.id })}>
+                Remove
+              </Button>
             </li>
           ))}
           {outside.map((s) => (

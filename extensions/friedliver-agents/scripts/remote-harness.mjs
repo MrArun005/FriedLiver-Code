@@ -207,7 +207,7 @@ const server = await R.RemoteServer.start({
   host: { list: () => list, chat: (id) => views[id] ?? { ...chats[id], items: [], earlier: 0, queued: 0, subagentList: [] }, act: async () => ({ ok: true }) },
   assets: {
     js: fs.readFileSync(path.join(ext, 'media/dist/remote.js'), 'utf8'),
-    css: fs.readFileSync(path.join(ext, 'media/remote.css'), 'utf8'),
+    css: ['tokens.css', 'components.css', 'remote.css'].map((f) => fs.readFileSync(path.join(ext, 'media', f), 'utf8')).join('\n'),
     icon: fs.readFileSync(path.join(ext, 'media/remote-icon.svg'), 'utf8'),
     manifest: '{}',
   },
@@ -255,7 +255,7 @@ for (const scheme of ['dark', 'light']) {
   await phone(scheme, 'list');
   await phone(scheme, 'chat-approval', undefined, { open: 'chat-3' });
   await phone(scheme, 'chat-command', undefined, { open: 'chat-7' });
-  await phone(scheme, 'subagents', (p) => p.click('.subs__head'), { open: 'chat-5' });
+  await phone(scheme, 'subagents', (p) => p.click('.subs .fl-row'), { open: 'chat-5' });
   await phone(scheme, 'chat-careful', (p) => p.evaluate(() => document.querySelector('.ask--careful')?.scrollIntoView({ block: 'center' })), { open: 'chat-8' });
 }
 await phone('dark', 'new-chat', (p) => p.click('[aria-label="New chat"]'));
