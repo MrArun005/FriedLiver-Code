@@ -1,26 +1,26 @@
 // The Decision Inbox, the Agent Manager's fifth view: every request any agent waits on as one
-// keyboard queue, the oldest first and grouped by chat, and beside it exactly what answering does.
+// keyboard queue in risk lanes (Careful, Review, Routine), the oldest first in each, each row naming
+// its chat; beside it the request's own card and "Or tell … instead".
 // The logic is shared/inbox.ts; every answer is a message the chat's own cards send.
-import { Fragment } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   InboxSelection,
   KEY_GRACE_MS,
   answered,
+  batchable,
   browserOrigin,
   confirmKey,
   entryActions,
-  identical,
   inbox,
   inboxKey,
   type InboxEntry,
   type InboxKind,
 } from '../shared/inbox';
 import type { WebviewMessage } from '../shared/messages';
-import { AGENT_FACES, age, basename, formatDuration, type AppState, type ChatView } from '../shared/model';
+import { AGENT_FACES, age, formatDuration, type AppState, type ChatView } from '../shared/model';
 import { oneClickQuestion, recommended } from '../shared/questions';
-import { Glyph, Icon, Markdown, StepLabel, isTyping, longTitle, send, type IconName } from './common';
-import { AlwaysAllow, PermissionDetailView } from './controls';
+import { Glyph, Icon, Markdown, isTyping, send, type IconName } from './common';
+import { ApprovalCard, cardKeys } from './approval';
 
 const KIND: Record<InboxKind, { icon: IconName; label: string }> = {
   command: { icon: 'terminal', label: 'Run a command' },
@@ -33,7 +33,6 @@ const KIND: Record<InboxKind, { icon: IconName; label: string }> = {
   permission: { icon: 'shield', label: 'Allow a tool' },
 };
 
-const BROWSER_ACTION: Record<string, string> = { browser_open: 'Open', browser_click: 'Click', browser_type: 'Type', browser_back: 'Go back', browser_reload: 'Reload' };
 /** How long an answered row takes to fold away. */
 const LEAVE_MS = 200;
 
@@ -46,8 +45,9 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
   const selection = useRef(new InboxSelection()).current;
   const [, redraw] = useState(0);
   const [confirm, setConfirm] = useState<{ ids: string[]; at: number } | null>(null);
+  const reply = useRef<HTMLTextAreaElement>(null);
   const selected = selection.selected(box.entries, Date.now());
-  const same = selected ? identical(box.entries, selected) : [];
+  const same = selected ? batchable(box.entries, selected) : [];
   const confirming = confirm && selected && confirm.ids.includes(selected.id) ? same.filter((e) => confirm.ids.includes(e.id)) : [];
 
   // Answered rows fold away instead of vanishing; the selection has already moved on.
@@ -105,41 +105,44 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
         redraw((n) => n + 1);
       } else if (command.do === 'close') onClose();
       else if (command.do === 'open' && selected) openAt(selected);
-      else if (command.do === 'batch' && selected) setConfirm({ ids: identical(box.entries, selected).map((x) => x.id), at });
+      else if (command.do === 'batch' && selected) setConfirm({ ids: same.map((x) => x.id), at });
       else if (command.do === 'send') sendAll(command.messages);
+      else if (command.do === 'allow' && selected && !e.repeat) cardKeys.get(selected.id)?.press();
+      else if (command.do === 'scope' && selected) cardKeys.get(selected.id)?.cycle();
+      else if (command.do === 'reply') reply.current?.focus();
     };
+    // Enter let go: a hold not yet done drains back.
+    const onUp = (e: KeyboardEvent) => e.key === 'Enter' && selected && cardKeys.get(selected.id)?.release();
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onUp);
+    };
   });
 
   if (!box.entries.length && !leaving.length) return <Empty history={history} chats={chats} now={now} />;
 
-  // The queue's groups, with the rows still folding away kept where they were.
-  const rows = [...box.entries, ...leaving].sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
-  const order = [...new Set([...box.groups.map((g) => g.chat.id), ...rows.map((r) => r.chatId)])];
+  // The lanes, with the rows still folding away kept where they were.
+  const lanes = (['careful', 'review', 'routine'] as const)
+    .map((tone) => ({ tone, rows: [...box.entries, ...leaving].filter((r) => r.risk === tone).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)) }))
+    .filter((l) => l.rows.length);
   return (
     <div class="inbox">
       <div class="inbox-list" ref={list} role="listbox" aria-label="Waiting for you" aria-activedescendant={selected ? `inbox-${selected.id}` : undefined} tabIndex={0}>
-        {order.map((chatId) => {
-          const chat = chats.get(chatId);
-          const mine = rows.filter((r) => r.chatId === chatId);
-          if (!chat || !mine.length) return null;
-          const waiting = mine.filter((r) => !leaving.includes(r)).length;
+        {lanes.map((lane) => {
+          const waiting = lane.rows.filter((r) => !leaving.includes(r)).length;
           return (
-            <div key={chatId} role="group" aria-label={chat.title} class="inbox-group">
-              <div class="inbox-group-head" aria-hidden="true">
-                <span class="inbox-topic" title={chat.title}>
-                  {chat.title}
-                </span>
-                <span class="inbox-who" title={chat.label}>
-                  <Glyph agent={chat.agent} size="sm" />
-                  {AGENT_FACES[chat.agent].name}
-                </span>
+            <div key={lane.tone} role="group" aria-label={LANE[lane.tone]} class="inbox-lane" data-tone={lane.tone}>
+              <div class="inbox-lane-head" aria-hidden="true">
+                <span class="inbox-lane-dot" />
+                {LANE[lane.tone]}
                 {waiting > 0 && <span class="col-count">{waiting}</span>}
               </div>
-              {mine.map((e) => (
-                <Row key={e.id} entry={e} chat={chat} now={now} on={e.id === selected?.id} leaving={leaving.includes(e)} onPick={() => choose(e.id)} />
-              ))}
+              {lane.rows.map((e) => {
+                const chat = chats.get(e.chatId);
+                return chat ? <Row key={e.id} entry={e} chat={chat} now={now} on={e.id === selected?.id} leaving={leaving.includes(e)} onPick={() => choose(e.id)} /> : null;
+              })}
             </div>
           );
         })}
@@ -153,6 +156,7 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
           now={now}
           same={same}
           confirming={confirming}
+          reply={reply}
           onBatch={() => setConfirm({ ids: same.map((x) => x.id), at: Date.now() })}
           onCancel={() => setConfirm(null)}
           onAnswerAll={(answer) => {
@@ -164,6 +168,8 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
     </div>
   );
 }
+
+const LANE: Record<InboxEntry['risk'], string> = { careful: 'Careful', review: 'Review', routine: 'Routine' };
 
 function Row({ entry: e, chat, now, on, leaving, onPick }: { entry: InboxEntry; chat: ChatView; now: number; on: boolean; leaving: boolean; onPick(): void }) {
   return (
@@ -182,6 +188,7 @@ function Row({ entry: e, chat, now, on, leaving, onPick }: { entry: InboxEntry; 
         <Icon name={KIND[e.kind].icon} size={14} />
       </span>
       <span class="inbox-title">{e.title}</span>
+      <span class="inbox-chat">{chat.title}</span>
       {e.at !== undefined && <span class="inbox-age">{age(e.at, now)}</span>}
     </div>
   );
@@ -200,27 +207,26 @@ interface DetailProps {
   now: number;
   same: InboxEntry[];
   confirming: InboxEntry[];
+  reply: { current: HTMLTextAreaElement | null };
   onBatch(): void;
   onCancel(): void;
   onAnswerAll(answer: 'allow' | 'deny'): void;
 }
 
-/** Exactly what answering does: the command and its folder, the diff, the site and the action, the question and its options. */
-function Detail({ entry: e, chat, state, now, same, confirming, onBatch, onCancel, onAnswerAll }: DetailProps) {
-  const actions = entryActions(e);
+/** The request's card (the same one the chat shows), and beside it "Or tell … instead". */
+function Detail({ entry: e, chat, state, now, same, confirming, reply, onBatch, onCancel, onAnswerAll }: DetailProps) {
   const i = e.item;
   const left = timeLeft(e, now);
-  const n = actions.choices.length;
   return (
-    <section class="ask inbox-detail" aria-label={`${KIND[e.kind].label}: ${e.title}`} aria-live="polite">
+    <section class="inbox-detail" aria-label={`${KIND[e.kind].label}: ${e.title}`} aria-live="polite">
       <header class="inbox-detail-head">
-        <span class="inbox-kind">
-          <Icon name={KIND[e.kind].icon} size={14} />
+        <span class="inbox-kind" data-tone={e.risk}>
+          <Icon name={KIND[e.kind].icon} size={16} />
         </span>
-        <span class="inbox-detail-kind">{KIND[e.kind].label}</span>
+        <h2 class="inbox-detail-title">{e.title}</h2>
         <span class="spacer" />
-        <button type="button" class="link inbox-open" title="See it in its chat (o)" onClick={() => openAt(e)}>
-          Open in chat
+        <button type="button" class="fl-btn fl-btn--ghost inbox-open" title="See it in its chat (o)" onClick={() => openAt(e)}>
+          Open in chat <Icon name="open" size={14} />
         </button>
       </header>
       <div class="inbox-meta">
@@ -245,167 +251,127 @@ function Detail({ entry: e, chat, state, now, same, confirming, onBatch, onCance
           </>
         )}
       </div>
-      <div class="ask-body inbox-what">
-        {i.kind === 'permission' && (
-          <>
-            {!(i.detail?.command && i.detail.command.line.trim() === i.title.trim()) && (
-              <div class="inbox-ask">{longTitle(i.title) ? <StepLabel title={i.title} toolKind={i.toolKind} cmd={i.detail?.command} /> : i.title}</div>
-            )}
-            <PermissionDetailView detail={i.detail} requestId={i.requestId} open />
-            {i.detail?.command && !i.detail.command.cwd && <div class="hint mono">in {chat.cwd}</div>}
-          </>
-        )}
-        {i.kind === 'command' && (
-          <>
-            <pre class={`cmdline${i.commandLine.includes('\n') ? ' lines' : ''}`}>
-              <span class="prompt">$ </span>
-              {i.commandLine}
-            </pre>
-            <div class="hint mono" title={i.cwd}>
-              in {i.cwd}
-            </div>
-            {i.outside && <div class="warn">This folder is outside the workspace.</div>}
-          </>
-        )}
-        {i.kind === 'review' && (
-          <div class="file-line">
-            <button type="button" class="file-row" title={`${i.path}: open the diff`} onClick={() => send({ type: 'review', reviewId: i.reviewId, action: 'open' })}>
-              <Icon name="file" /> <span class="file-name">{basename(i.path)}</span>
-              {i.isNew && <span class="tag">new</span>}
-              <span class="stats">
-                <span class="plus">+{i.added}</span> <span class="minus">−{i.removed}</span>
-              </span>
-            </button>
-            <span class="hint mono inbox-path" title={i.path}>
-              {i.path}
-            </span>
-          </div>
-        )}
-        {i.kind === 'bridge' && <BridgeWhat entry={e} state={state} />}
-        {i.kind === 'question' && <QuestionWhat entry={e} />}
+      <div class="inbox-body">
+        <div class="inbox-main">
+          {i.kind === 'question' ? <QuestionWhat entry={e} /> : <ApprovalCard item={i} chat={chat} state={state} on />}
+          {confirming.length >= 2 ? (
+            <Confirm entries={confirming} state={state} now={now} onAnswer={onAnswerAll} onCancel={onCancel} />
+          ) : (
+            same.length >= 2 && (
+              <div class="apv-batch">
+                <Icon name="layers" size={14} />
+                <span class="apv-batch-text">
+                  <b>
+                    {same.length - 1} more routine request{same.length === 2 ? '' : 's'}
+                  </b>{' '}
+                  · the same in {new Set(same.map((x) => x.chatId)).size} chats
+                </span>
+                <button type="button" class="fl-btn fl-btn--sm fl-btn--quiet" onClick={onBatch}>
+                  Allow all {same.length} <span class="k">⇧⏎</span>
+                </button>
+              </div>
+            )
+          )}
+        </div>
+        {i.kind !== 'question' && <Reply entry={e} chat={chat} box={reply} />}
       </div>
-
-      {confirming.length >= 2 ? (
-        <Confirm entries={confirming} state={state} now={now} onAnswer={onAnswerAll} onCancel={onCancel} />
-      ) : (
-        <>
-          {n > 0 && (
-            <div class="actions" role="group" aria-label="Answers">
-              {actions.choices.slice(0, 9).map((c, k) => (
-                <button key={k} type="button" class={`sm ${c.tone === 'decide' ? 'decide' : c.tone === 'escalate' ? 'escalate' : ''}`} onClick={() => send(c.message)}>
-                  <span class="opt-num">{k + 1}.</span>
-                  {c.label}
-                </button>
-              ))}
-              {i.kind === 'permission' && actions.always && (
-                <AlwaysAllow line={i.detail?.command?.line && i.toolKind === 'execute' ? i.detail.command.line : undefined} grants={i.detail?.always} target={{ requestId: i.requestId }} />
-              )}
-              {i.kind === 'command' && actions.always && <AlwaysAllow line={i.commandLine} target={{ commandId: i.commandId }} />}
-              {i.kind === 'bridge' && actions.always && (
-                <button type="button" class="link always-allow" title={`Don't ask again for ${actions.always.scope}: every chat, every agent, after restarts.`} onClick={() => send(actions.always!.message)}>
-                  Always allow <span class="always-scope">{actions.always.scope}</span>
-                </button>
-              )}
-            </div>
-          )}
-          {actions.diff && (
-            <div class="inbox-more">
-              <button type="button" class="sm" onClick={() => send(actions.diff!)}>
-                <Icon name="diff" /> Open diff
-              </button>
-            </div>
-          )}
-          {same.length >= 2 && (
-            <div class="inbox-batch">
-              <span>
-                {same.length} identical request{same.length === 1 ? '' : 's'} wait{same.length === 1 ? 's' : ''}
-                {new Set(same.map((x) => x.chatId)).size > 1 ? ` in ${new Set(same.map((x) => x.chatId)).size} chats` : ''}
-              </span>
-              <span class="spacer" />
-              <button type="button" class="sm" onClick={onBatch}>
-                Apply to all {same.length} identical… <kbd>b</kbd>
-              </button>
-            </div>
-          )}
-        </>
-      )}
-      <Keys entry={e} n={n} confirming={confirming.length >= 2} batch={same.length >= 2} />
+      <Keys entry={e} confirming={confirming.length >= 2} batch={same.length >= 2} />
     </section>
   );
 }
 
-function BridgeWhat({ entry: e, state }: { entry: InboxEntry; state: AppState }) {
-  const i = e.item;
-  if (i.kind !== 'bridge') return null;
-  if ('browser' in i.target) {
-    const origin = browserOrigin(i);
-    return (
-      <div class="bridge-text">
-        <div class="bridge-label">
-          {BROWSER_ACTION[i.tool] ?? 'Use'}
-          {origin && i.tool !== 'browser_open' ? ` on ${origin}` : ''}
-        </div>
-        {i.text || <span class="hint">{origin ? `the page at ${origin}` : 'the open page'}</span>}
-      </div>
-    );
-  }
-  const other = 'chatId' in i.target ? state.chats.find((c) => c.id === (i.target as { chatId: string }).chatId) : undefined;
-  const agent = 'agent' in i.target ? i.target.agent : other?.agent;
+/** "Or tell Claude instead": denies the request and sends the message to its chat. */
+function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: { current: HTMLTextAreaElement | null } }) {
+  const [text, setText] = useState('');
+  const deny = entryActions(entry).deny;
+  const go = () => {
+    const t = text.trim();
+    if (!t) return;
+    if (deny) send(deny);
+    send({ type: 'send', chatId: chat.id, text: t, images: [] });
+    setText('');
+  };
   return (
-    <>
-      {agent && (
-        <div class="inbox-target">
-          <Icon name="handoff" size={14} />
-          <Glyph agent={agent} size="sm" />
-          <span title={other?.label}>{other ? `${AGENT_FACES[other.agent].name} · ${other.title}` : `A new ${AGENT_FACES[agent].name} chat`}</span>
-        </div>
-      )}
-      {i.text && (
-        <div class="bridge-text">
-          <div class="bridge-label">{i.tool === 'remember' ? 'Fact' : i.tool === 'ask_agent' ? 'Question' : i.tool === 'send_to_chat' ? 'Message' : 'Read the transcript'}</div>
-          {i.text}
-        </div>
-      )}
-    </>
+    <aside class="inbox-reply" aria-label={`Or tell ${AGENT_FACES[chat.agent].name} instead`}>
+      <label class="inbox-reply-label" for={`reply-${entry.id}`}>
+        Or tell {AGENT_FACES[chat.agent].name} instead
+      </label>
+      <textarea
+        id={`reply-${entry.id}`}
+        ref={box}
+        rows={3}
+        value={text}
+        maxLength={10_000}
+        placeholder="What to do instead… (denies and sends)"
+        onInput={(e) => setText(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            go();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
+      />
+      <button type="button" class="fl-btn fl-btn--quiet" disabled={!text.trim()} onClick={go}>
+        Send and deny <span class="k">{MAC ? '⌘⏎' : 'Ctrl+⏎'}</span>
+      </button>
+    </aside>
   );
 }
+
+const MAC = /Mac/.test(navigator.platform);
 
 function QuestionWhat({ entry: e }: { entry: InboxEntry }) {
   const i = e.item;
   if (i.kind !== 'question') return null;
+  const actions = entryActions(e);
   const field = oneClickQuestion(i.fields);
+  const options = (field?.options ?? []).map((o) => ({ o, ...recommended(o.title) })).sort((a, b) => Number(b.recommended) - Number(a.recommended));
   return (
-    <>
+    <div class="fl-card apv inbox-question">
       <div class="q-question">
         <Markdown text={i.message} />
       </div>
       {field ? (
-        // The options with their descriptions; the numbered answers below pick them.
-        <ul class="inbox-options">
-          {(field.options ?? [])
-            .map((o) => ({ o, ...recommended(o.title) }))
-            .sort((a, b) => Number(b.recommended) - Number(a.recommended))
-            .filter(({ o }) => o.description)
-            .map(({ o, label }) => (
-              <li key={o.value}>
-                <span class="inbox-option">{label}</span> <span class="hint">{o.description}</span>
-              </li>
-            ))}
-        </ul>
+        <div class="q-options" role="listbox" aria-label={field.title}>
+          {options.map(({ o, label, recommended: rec }, n) => (
+            <button key={o.value} type="button" class="q-opt" role="option" aria-selected={false} onClick={() => send(actions.choices[n].message)}>
+              <span class="q-opt-text">
+                <span class="q-opt-label">
+                  {label}
+                  {rec && <span class="fl-chip q-rec">Recommended</span>}
+                </span>
+                {o.description && <span class="q-opt-desc">{o.description}</span>}
+              </span>
+              {n < 9 && <kbd class="q-key">{n + 1}</kbd>}
+            </button>
+          ))}
+        </div>
       ) : (
         <div class="hint">
-          {i.fields.length} question{i.fields.length === 1 ? '' : 's'} to answer in the chat: {i.fields.map((f) => f.title).join(', ')}. Enter opens it.
+          {i.fields.length} question{i.fields.length === 1 ? '' : 's'} to answer in the chat: {i.fields.map((f) => f.title).join(', ')}.
         </div>
       )}
-    </>
+      <div class="q-foot">
+        <span class="spacer" />
+        <button type="button" class="fl-btn fl-btn--ghost" onClick={() => actions.deny && send(actions.deny)}>
+          Skip <span class="k">Esc</span>
+        </button>
+        <button type="button" class="fl-btn fl-btn--quiet" onClick={() => openAt(e)}>
+          Answer in the chat <span class="k">⏎</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
-/** "Apply to all N identical": the requests it answers, by chat, before anything happens. Never Always allow. */
+/** "Allow all N": the requests it answers, by chat, before anything happens. Once each, never remembered. */
 function Confirm({ entries, state, now, onAnswer, onCancel }: { entries: InboxEntry[]; state: AppState; now: number; onAnswer(a: 'allow' | 'deny'): void; onCancel(): void }) {
   return (
     <div class="inbox-confirm" role="group" aria-label={`Answer ${entries.length} identical requests`}>
-      <div class="inbox-confirm-head">Answer these {entries.length} identical requests once each?</div>
+      <div class="inbox-confirm-head">Allow these {entries.length} identical routine requests, once each?</div>
       <ul class="inbox-confirm-list">
         {entries.map((e) => {
           const chat = state.chats.find((c) => c.id === e.chatId);
@@ -422,49 +388,47 @@ function Confirm({ entries, state, now, onAnswer, onCancel }: { entries: InboxEn
           );
         })}
       </ul>
-      <div class="actions">
-        <button type="button" class="sm decide" onClick={() => onAnswer('allow')}>
-          Allow all {entries.length} once
+      <div class="inbox-confirm-actions">
+        <button type="button" class="fl-btn fl-btn--ghost" onClick={onCancel}>
+          Cancel <span class="k">Esc</span>
         </button>
-        <button type="button" class="sm" onClick={() => onAnswer('deny')}>
-          Deny all {entries.length}
+        <button type="button" class="fl-btn fl-btn--ghost" onClick={() => onAnswer('deny')}>
+          Deny all {entries.length} <span class="k">d</span>
         </button>
-        <button type="button" class="sm" onClick={onCancel}>
-          Cancel
+        <button type="button" class="fl-btn fl-btn--brand" onClick={() => onAnswer('allow')}>
+          Allow all {entries.length} once <span class="k">⏎</span>
         </button>
       </div>
     </div>
   );
 }
 
-function Keys({ entry, n, confirming, batch }: { entry: InboxEntry; n: number; confirming: boolean; batch: boolean }) {
-  const a = entryActions(entry);
-  const parts: [string, string][] = confirming
+/** One short line of hints, in place of a legend. */
+function Keys({ entry, confirming, batch }: { entry: InboxEntry; confirming: boolean; batch: boolean }) {
+  const question = entry.item.kind === 'question';
+  const parts: [string[], string][] = confirming
     ? [
-        ['↩', 'allow all'],
-        ['d', 'deny all'],
-        ['esc', 'back'],
+        [['⏎'], 'allow all'],
+        [['d'], 'deny all'],
+        [['Esc'], 'back'],
       ]
     : [
-        ['j k', 'move'],
-        ...(n ? [[n > 1 ? `1–${Math.min(9, n)}` : '1', 'choose'] as [string, string]] : []),
-        ...(a.allow ? [['a', 'allow once'] as [string, string]] : []),
-        ...(a.always ? [['A', 'always allow'] as [string, string]] : []),
-        ...(a.deny ? [['d', entry.kind === 'question' ? 'skip' : 'deny'] as [string, string]] : []),
-        ['↩', a.primary === 'open' ? 'open in chat' : entry.kind === 'review' ? 'open diff' : 'yes'],
-        ['o', 'open in chat'],
-        ...(batch ? [['b', 'all identical'] as [string, string]] : []),
-        ['esc', 'close'],
+        [['J', 'K'], 'move'],
+        [['⏎'], question ? 'answer in chat' : entry.risk === 'careful' ? 'hold to allow' : entry.kind === 'review' ? 'open diff' : 'allow'],
+        [['Esc'], question ? 'skip' : 'deny'],
+        ...(question ? [] : ([[['Tab'], 'scope'], [['R'], 'reply']] as [string[], string][])),
+        ...(batch ? ([[['⇧⏎'], 'allow all']] as [string[], string][]) : []),
+        [['O'], 'open in chat'],
       ];
   return (
-    <div class="hint inbox-keys" aria-hidden="true">
-      {parts.map(([k, what], x) => (
-        <Fragment key={x}>
-          {x > 0 && <span class="sep"> · </span>}
-          <span class="inbox-key">
-            <kbd>{k}</kbd> {what}
-          </span>
-        </Fragment>
+    <div class="inbox-keys" aria-hidden="true">
+      {parts.map(([keys, what], x) => (
+        <span key={x} class="inbox-key">
+          {keys.map((k) => (
+            <kbd key={k}>{k}</kbd>
+          ))}{' '}
+          {what}
+        </span>
       ))}
     </div>
   );

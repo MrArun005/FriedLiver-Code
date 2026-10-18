@@ -2,7 +2,7 @@
 // locks them (the UI never offers what policy forbids), the note that says exactly what gets
 // remembered, the primary button's words, Tab, and press-and-hold.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { allowMessage, approvalOf, nextScope, primaryLabel, scopeNote, type Approvable } from '../src/shared/approval';
+import { allowMessage, approvalOf, nextScope, primaryLabel, scopeRule, type Approvable } from '../src/shared/approval';
 import { HOLD_MS, Hold } from '../src/shared/hold';
 import { parseWebviewMessage } from '../src/shared/messages';
 import type { ChatView, Item } from '../src/shared/model';
@@ -139,32 +139,33 @@ describe('scopes against policy', () => {
   });
 });
 
-describe('the note says exactly what gets remembered', () => {
-  it('nothing for Once', () => {
-    expect(scopeNote(approvalOf(run('npm test'), chat), run('npm test'), chat, 'once')).toBeUndefined();
+describe('each scope names exactly what it remembers', () => {
+  it('Once remembers nothing', () => {
+    expect(scopeRule(approvalOf(run('npm test'), chat), run('npm test'), chat, 'once')).toBe('Just this time; ask again next time');
   });
 
-  it('a command rule: the rule, the folder, every chat', () => {
+  it('a command rule: the rule, the folder, every chat; this chat: the agent’s own words', () => {
     const item = run('npm test -- --run');
     const a = approvalOf(item, chat);
-    expect(scopeNote(a, item, chat, 'always', 0)).toBe('`npm test -- --run` in `~/code/shop`, every chat and agent. Undo in Manage Permissions.');
-    expect(scopeNote(a, item, chat, 'always', 1)).toBe('`npm test *` in `~/code/shop`, every chat and agent. Undo in Manage Permissions.');
-    expect(scopeNote(a, item, chat, 'chat')).toBe("Claude won't ask again for this until the chat ends: its own “don't ask again for this session”.");
+    expect(scopeRule(a, item, chat, 'always', 0)).toBe('`npm test -- --run` in `~/code/shop`, every chat');
+    expect(scopeRule(a, item, chat, 'always', 1)).toBe('`npm test *` in `~/code/shop`, every chat');
+    expect(scopeRule(a, item, chat, 'chat')).toBe("Until this chat ends: “don't ask again for this session”");
   });
 
   it('a folder, a site and an agent tool', () => {
     const e = edit('/Users/arun/code/shop/src/a.ts', [{ kind: 'folder', folder: '/Users/arun/code/shop/src', access: 'write' }]);
-    expect(scopeNote(approvalOf(e, chat), e, chat, 'always')).toBe('Changing files in `~/code/shop/src` and below, every chat. Undo in Manage Permissions.');
+    expect(scopeRule(approvalOf(e, chat), e, chat, 'always')).toBe('Changes in `~/code/shop/src` and below, every chat');
     const open = bridge({ tool: 'browser_open', target: { browser: true }, text: 'https://staging.shop.dev/checkout', always: 'https://staging.shop.dev' });
-    expect(scopeNote(approvalOf(open, chat), open, chat, 'always')).toBe('`https://staging.shop.dev` in the browser, for every agent, in every chat. Undo in Manage Permissions.');
-    expect(scopeNote(approvalOf(open, chat), open, chat, 'chat')).toMatch(/any site in the browser, without asking, until this chat ends/);
+    expect(scopeRule(approvalOf(open, chat), open, chat, 'always')).toBe('`https://staging.shop.dev` in the browser, every agent, every chat');
+    expect(scopeRule(approvalOf(open, chat), open, chat, 'chat')).toBe('Any site in the browser, until this chat ends');
     const ask = bridge({ always: 'in every chat' });
-    expect(scopeNote(approvalOf(ask, chat), ask, chat, 'always')).toBe('Any agent may ask another agent without asking, in every chat. Undo in Manage Permissions.');
+    expect(scopeRule(approvalOf(ask, chat), ask, chat, 'always')).toBe('Ask another agent, every agent, every chat');
   });
 
-  it('none for a locked scope', () => {
+  it('nothing for a locked scope', () => {
     const item = run('rm -rf build');
-    expect(scopeNote(approvalOf(item, chat), item, chat, 'always')).toBeUndefined();
+    expect(scopeRule(approvalOf(item, chat), item, chat, 'always')).toBeUndefined();
+    expect(scopeRule(approvalOf(item, chat), item, chat, 'chat')).toBeUndefined();
   });
 
   it('the primary button repeats the scope', () => {

@@ -6,7 +6,7 @@
 import { approvalOf } from './approval';
 import { DecisionTargets, KEY_GRACE_MS } from './decisionTarget';
 import type { WebviewMessage } from './messages';
-import { BRIDGE_TIMEOUT_MS, bridgeTitle, decisionOf, shortCommand, waitingItems, type AppState, type ChatView, type Item } from './model';
+import { BRIDGE_TIMEOUT_MS, decisionOf, shortCommand, waitingItems, type AppState, type ChatView, type Item } from './model';
 import { siteOrigin } from './permissions';
 import { oneClickQuestion, recommended } from './questions';
 import { RISK_ORDER, type RiskTone } from './risk';
@@ -77,11 +77,11 @@ export function sameKey(chat: ChatView, i: Waiting): string | undefined {
   return undefined;
 }
 
-/** A row's words under its chat's header: a bridge request without the chat's own topic, a command as "Run …". */
+/** A row's words: the card's verb and target ("Click button#place-order", "Run npm test", "Ask Gemini"); a question its message. */
 function rowTitle(state: Pick<AppState, 'chats'>, chat: ChatView, i: Waiting, title: string): string {
-  if (i.kind === 'bridge') return bridgeTitle(state, chat, i, true);
-  const line = i.kind === 'permission' ? i.detail?.command?.line : undefined;
-  return line && i.kind === 'permission' && line.trim() === i.title.trim() ? `Run ${shortCommand(line)}` : title;
+  if (i.kind === 'question') return title;
+  const a = approvalOf(i, chat, state);
+  return a.verb ? `${a.verb} ${a.mono ? shortCommand(a.target) : a.target}` : title;
 }
 
 const isWaitingKind = (i: Item): i is Waiting => i.kind === 'permission' || i.kind === 'review' || i.kind === 'command' || i.kind === 'bridge' || i.kind === 'question';
