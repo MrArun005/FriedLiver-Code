@@ -160,6 +160,37 @@ export function claudeSubagents(s: ClaudeSession, now: number): Subagent[] {
   });
 }
 
+/** What the host knows of FriedLiver's chats: their views, and the agent session each continues. */
+interface ChatSessions {
+  state: { chats: ChatView[] };
+  chats: Record<string, { sessionId?: string }>;
+}
+
+/** The FriedLiver chat that continues this agent session, if any. */
+export function chatOfSession(saved: ChatSessions, sessionId: string): string | undefined {
+  return Object.entries(saved.chats).find(([, c]) => c.sessionId === sessionId)?.[0];
+}
+
+/**
+ * Ties each outside session to the FriedLiver chat that only resumed it: no turn run, none running. The reader lists
+ * such a session only while something else (the Claude Code extension, the CLI) wrote to it last, so the chat holds none
+ * of its work. The newest such chat wins; a chat that ran a turn keeps its own card.
+ */
+export function linkResumeChats(sessions: ClaudeSession[], saved: ChatSessions): ClaudeSession[] {
+  const idle = new Map<string, string>();
+  for (const c of saved.state.chats) {
+    const sid = saved.chats[c.id]?.sessionId;
+    if (sid && c.turns === 0 && !c.busy) idle.set(sid, c.id);
+  }
+  return sessions.map((s) => (idle.has(s.id) ? { ...s, chatId: idle.get(s.id) } : s));
+}
+
+/** The chats with their own card: a chat tied to an outside session shows in that session's card instead. Never removes one. */
+export function withoutLinkedChats(chats: ChatView[], sessions: ClaudeSession[]): ChatView[] {
+  const linked = new Set(sessions.flatMap((s) => (s.chatId ? [s.chatId] : [])));
+  return linked.size ? chats.filter((c) => !linked.has(c.id)) : chats;
+}
+
 /** Every word of the query must appear in the title or "claude code". */
 export function filterClaudeSessions(list: ClaudeSession[], query: string): ClaudeSession[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);

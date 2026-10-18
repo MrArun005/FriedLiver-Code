@@ -31,6 +31,7 @@ import {
   matchesQuery,
   nextDecision,
   openChats,
+  withoutLinkedChats,
   subagents,
   sortChats,
   statusOf,
@@ -226,7 +227,7 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
         </div>
         <div class="card-actions">
           <span class="spacer" />
-          <button class="sm" title={openTip(col)} onClick={() => openClaude(s.id)}>
+          <button class="sm" title={s.chatId ? 'Open the FriedLiver chat that continues it' : openTip(col)} onClick={() => openClaude(s.id)}>
             <Icon name="open" /> Open in FriedLiver
           </button>
         </div>
@@ -305,12 +306,14 @@ function Manager() {
   const search = useRef<HTMLInputElement>(null);
   const lastJump = useRef<string | undefined>(undefined);
 
-  const shown = useMemo(() => filterChats(openChats(state.chats), query), [state, query]);
+  // A chat that only resumed an outside session shows in that session's card, not as an idle card of its own.
+  const own = useMemo(() => withoutLinkedChats(state.chats, claude), [state, claude]);
+  const shown = useMemo(() => filterChats(openChats(own), query), [own, query]);
   const outside = useMemo(() => filterClaudeSessions(claude.filter((s) => !s.archived), query), [claude, query]);
   const oldOutside = useMemo(() => claude.filter((s) => s.archived), [claude]);
-  const shownState = useMemo<AppState>(() => ({ ...state, chats: state.chats.filter((c) => c.archived || shown.includes(c)) }), [state, shown]);
+  const shownState = useMemo<AppState>(() => ({ ...state, chats: own.filter((c) => c.archived || shown.includes(c)) }), [state, own, shown]);
   const waiting = useMemo(() => decisions({ chats: openChats(state.chats) }), [state]);
-  const tally = { ...counts(state) };
+  const tally = { ...counts({ ...state, chats: own }) };
   tally.archived += oldOutside.length;
 
   const jump = () => {
@@ -473,7 +476,7 @@ function Manager() {
           {view === 'map' && <AgentMap state={shownState} outside={outside} now={now} {...nav} />}
         </div>
 
-        {view !== 'images' && <History chats={state.chats.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />}
+        {view !== 'images' && <History chats={own.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />}
       </div>
     </LiveState.Provider>
   );
