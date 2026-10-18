@@ -1055,8 +1055,12 @@ export class AgentCore {
    */
   private async droppedBy(line: string | undefined, cwd: string | undefined): Promise<DroppedCommits | undefined> {
     const push = line ? forcePush(line) : undefined;
-    if (!push || !cwd || insideRoots(cwd, this.roots()) === null) return undefined;
-    return (await git.remoteOnlyCommits(cwd, push.remote, push.dst, push.src ?? 'HEAD').catch(() => null)) ?? undefined;
+    const dir = push && cwd ? insideRoots(cwd, this.roots()) : null;
+    const real = dir ? realPath(dir) : null;
+    // The workspace root holding it, by its real path: git is pointed at exactly that root's .git folder.
+    const root = real ? this.roots().map((r) => realPath(r)).find((r): r is string => !!r && (real === r || real.startsWith(r.endsWith(path.sep) ? r : r + path.sep))) : undefined;
+    if (!push || !root) return undefined;
+    return (await git.remoteOnlyCommits(root, push.remote, push.dst, push.src ?? 'HEAD').catch(() => null)) ?? undefined;
   }
 
   /**
