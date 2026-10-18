@@ -1111,6 +1111,54 @@ BLOCKS.LINKS = async () => {
   await a.close();
 };
 
+// ---- DETAIL: the map's detail panel stays in view wherever you scrolled; a bottom sheet when narrow ----
+BLOCKS.DETAIL = async () => {
+  for (const width of [1200, 640]) {
+    const p = await open('surface=tasks&theme=dark-2026&view=map', width, 800);
+    await p.evaluate((ss) => window.postMessage({ type: 'claudeSessions', sessions: ss }, '*'), [bigSession(Date.now())]);
+    await p.locator('.map-fold').last().waitFor();
+    await p.locator('.map-fold').last().click();
+    await p.waitForTimeout(150);
+    // Scroll to the bottom, then pick the last agent.
+    await p.evaluate(() => {
+      const m = document.querySelector('.manager');
+      m.scrollTop = m.scrollHeight;
+    });
+    // SVG takes the attribute in lower case: with "tabIndex" the nodes were never focusable.
+    check(await p.locator('.map-sub').first().evaluate((g) => g.getAttribute('tabindex') === '0' && (g.focus(), document.activeElement === g)), 'map nodes take keyboard focus');
+    const last = p.locator('.map-sub:not(.map-fold)').last();
+    const name = (await last.getAttribute('aria-label')).replace('Subagent: ', '');
+    await last.click();
+    const panel = p.locator('.map-detail');
+    await panel.waitFor();
+    await p.waitForTimeout(300);
+    const r = await panel.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: window.innerHeight, w: Math.round(b.width), vw: window.innerWidth, pos: window.getComputedStyle(el).position, radius: window.getComputedStyle(el).borderTopLeftRadius };
+    });
+    const shown = await panel.locator('.tip-title').innerText();
+    check(r.top >= 0 && r.top < r.h && shown === name, `at ${width}px the panel is in view and shows the agent clicked at the bottom [${JSON.stringify(r)} ${shown}]`);
+    if (width === 640) check(r.pos === 'fixed' && r.bottom === r.h && r.w === r.vw && r.radius === '12px' && (await panel.locator('.sheet-handle').count()) === 1, `at 640px it is a bottom sheet with a handle [${JSON.stringify(r)}]`);
+    else check(r.pos === 'sticky' && r.bottom <= r.h, `at 1200px it sticks in the right column [${r.pos}]`);
+    check(await p.evaluate(() => !!document.activeElement?.closest('.map-detail')), 'focus moves into it');
+    // Another agent updates it in place; the page doesn't jump.
+    const prev = p.locator('.map-sub:not(.map-fold)').nth(-2);
+    // Above the sheet when narrow.
+    await prev.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    const scroll = await p.evaluate(() => document.querySelector('.manager').scrollTop);
+    const prevName = (await prev.getAttribute('aria-label')).replace('Subagent: ', '');
+    await prev.click({ force: true });
+    const now2 = { title: await panel.locator('.tip-title').innerText(), scroll: await p.evaluate(() => document.querySelector('.manager').scrollTop) };
+    check(now2.title === prevName && Math.abs(now2.scroll - scroll) < 2, `picking another agent updates it in place [${now2.title} vs ${prevName}; ${scroll} -> ${now2.scroll}]`);
+    await p.screenshot({ path: path.join(os.homedir(), `code/FriedLiver-Code-design/review/detail-${width === 640 ? 'sheet-640' : 'panel-1200'}.png`) }).catch(() => {});
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(100);
+    const back = await p.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    check(!(await p.locator('.map-detail').count()) && back === `Subagent: ${prevName}`, `Esc closes it and focus goes back to the agent [${back}]`);
+    await p.close();
+  }
+};
+
 await run();
 await browser.close();
 server.kill();
