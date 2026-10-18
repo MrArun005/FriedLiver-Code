@@ -15,6 +15,7 @@ export function Pill({
   title,
   children,
   sub,
+  class: className,
 }: {
   tone?: Tone;
   icon?: IconName;
@@ -23,9 +24,11 @@ export function Pill({
   title?: string;
   children: ComponentChildren;
   sub?: ComponentChildren;
+  /** A hook for tests or layout; never for looks. */
+  class?: string;
 }) {
   return (
-    <span class={cx('fl-pill', size && size !== 'sm' && `fl-pill--${size}`)} data-tone={tone} title={title}>
+    <span class={cx('fl-pill', size && size !== 'sm' && `fl-pill--${size}`, className)} data-tone={tone} title={title}>
       {dot && <span class="fl-pill__dot" aria-hidden="true" />}
       {icon && <Icon name={icon} />}
       <span class="fl-pill__text">{children}</span>
@@ -40,18 +43,23 @@ export function FilterPill({
   onPress,
   icon,
   size,
+  tone,
   children,
   title,
+  class: className,
 }: {
   pressed?: boolean;
   onPress(): void;
   icon?: IconName;
   size?: 'sm' | 'md' | 'touch';
+  tone?: Tone;
   children: ComponentChildren;
   title?: string;
+  /** A hook for tests or layout; never for looks. */
+  class?: string;
 }) {
   return (
-    <button type="button" class={cx('fl-pill', size && size !== 'sm' && `fl-pill--${size}`)} aria-pressed={pressed} title={title} onClick={onPress}>
+    <button type="button" class={cx('fl-pill', size && size !== 'sm' && `fl-pill--${size}`, className)} data-tone={tone} aria-pressed={pressed} title={title} onClick={onPress}>
       {icon && <Icon name={icon} />}
       <span class="fl-pill__text">{children}</span>
     </button>
@@ -147,6 +155,7 @@ const DismissButton = ({ onDismiss }: { onDismiss(): void }) => <IconButton icon
 export function Card({
   variant = 'inline',
   size,
+  bare,
   focus,
   tone,
   as: Tag = 'section',
@@ -155,8 +164,10 @@ export function Card({
   children,
   ...rest
 }: {
-  variant?: 'inline' | 'flat' | 'raised';
+  variant?: 'inline' | 'flat' | 'raised' | 'ghost';
   size?: 'sm' | 'md';
+  /** Sections pad themselves (a card built of header, preview and footer rows). */
+  bare?: boolean;
   focus?: boolean;
   tone?: 'waiting' | 'error' | 'careful';
   as?: 'section' | 'article' | 'div';
@@ -168,7 +179,7 @@ export function Card({
   return (
     <Tag
       {...rest}
-      class={cx('fl-card', variant !== 'inline' && `fl-card--${variant}`, size === 'sm' && 'fl-card--sm', className)}
+      class={cx('fl-card', variant !== 'inline' && `fl-card--${variant}`, size === 'sm' && 'fl-card--sm', bare && 'fl-card--bare', className)}
       data-focus={focus ? '' : undefined}
       data-tone={tone}
       aria-label={label}

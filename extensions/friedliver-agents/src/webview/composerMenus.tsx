@@ -7,7 +7,7 @@ import { AGENT_FACES, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
-import { Toggle } from './ui';
+import { IconButton, Toggle } from './ui';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
@@ -434,21 +434,18 @@ export function AgentMap({ chat, linked, close }: { chat: ChatView; linked: Chat
         <div class="cc-map-head">
           <div class="cc-map-title">Agent map</div>
           <span class="cc-map-actions">
-            <button
-              type="button"
-              class="ghost icon-btn sm cc-map-manager"
-              aria-label="Open Agent Manager"
-              title="Open Agent Manager"
+            <IconButton
+              icon="tasks"
+              label="Open Agent Manager"
+              size="sm"
+              muted
+              class="cc-map-manager"
               onClick={() => {
                 close();
                 send({ type: 'openTasks' });
               }}
-            >
-              <Icon name="tasks" />
-            </button>
-            <button type="button" class="ghost icon-btn sm cc-map-close" aria-label="Close" title="Close (Esc)" onClick={close}>
-              <Icon name="close" />
-            </button>
+            />
+            <IconButton icon="close" label="Close" muted size="sm" class="cc-map-close" title="Close (Esc)" onClick={close} />
           </span>
         </div>
         <div class="cc-map-sub">

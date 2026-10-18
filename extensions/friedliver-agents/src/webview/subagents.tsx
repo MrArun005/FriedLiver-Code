@@ -6,6 +6,7 @@ import type { ChatView } from '../shared/model';
 import { shortDuration, subagentAnswer, subagents, type Subagent, type ToolItem } from '../shared/view';
 import { Markdown, scrollBehavior, send, useNow } from './common';
 import { Steps } from './steps';
+import { Button } from './ui';
 
 const DOT = { working: 'working', done: 'done', failed: 'error', quiet: 'idle' } as const;
 const NO_WAIT = new Set<string>();
@@ -48,9 +49,9 @@ export function SubagentCard({ chat, item, steps }: { chat: ChatView; item: Tool
               <Markdown text={answer} chatId={chat.id} cwd={chat.cwd} />
             </div>
           )}
-          <button type="button" class="link sa-manager" onClick={() => send({ type: 'openTasks' })}>
+          <Button variant="link" class="sa-manager" onClick={() => send({ type: 'openTasks' })}>
             Open in Agent Manager
-          </button>
+          </Button>
         </div>
       )}
     </section>

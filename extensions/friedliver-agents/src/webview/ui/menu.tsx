@@ -142,6 +142,8 @@ export function Popover({
 export function MenuItem({
   icon,
   lead,
+  class: className,
+  value,
   label,
   desc,
   end,
@@ -155,6 +157,10 @@ export function MenuItem({
   icon?: IconName;
   /** In place of the icon: an avatar or another 16px mark. */
   lead?: ComponentChildren;
+  /** A hook for tests or layout; never for looks. */
+  class?: string;
+  /** The choice's value, as data-value (pickers). */
+  value?: string;
   label: ComponentChildren;
   desc?: ComponentChildren;
   end?: ComponentChildren;
@@ -170,8 +176,9 @@ export function MenuItem({
     <button
       type="button"
       role={checked === undefined ? 'menuitem' : 'menuitemradio'}
-      class="fl-menu__item"
+      class={cx('fl-menu__item', className)}
       aria-checked={checked}
+      data-value={value}
       data-tone={tone}
       disabled={disabled}
       title={title}

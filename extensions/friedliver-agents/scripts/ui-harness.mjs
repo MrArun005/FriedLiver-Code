@@ -376,7 +376,7 @@ async function shoot() {
     check((await gemini.locator('.acct-key[data-active]').innerText()).includes('GEMINI_API_KEY: set'), 'a saved key shows only as set');
     check(!(await p.content()).includes('sk-'), 'no key text on the page');
     check(!(await p.locator('select').count()), 'defaults use our menu, not a native select');
-    await gemini.locator('.acct-choice button.mini-select').first().click();
+    await gemini.locator('.acct-choice button.fl-select').first().click();
     await p.locator('.fl-menu [role="menuitemradio"][data-value="large"]').click();
     check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'setDefault', agent: 'gemini', key: 'model', value: 'large' }), 'picking a default model posts setDefault');
     await p.locator('#card-claude button:has-text("Sign out of Claude")').click();
@@ -416,7 +416,7 @@ async function shoot() {
     await p.keyboard.press('Escape');
     check((await p.locator('.fl-menu').count()) === 0 && (await trigger.evaluate((el) => el === document.activeElement)), 'Escape closes the menu and focus returns');
 
-    await p.click('.pill.loud');
+    await p.click('.mgr-waiting');
     check((await p.locator('.inbox').count()) === 1, 'the decisions pill opens the Inbox');
     // Esc says no in the Inbox; the view switch (1) goes back to the board.
     await p.keyboard.press('1');
@@ -1570,7 +1570,7 @@ async function inboxChecks({ open, check }) {
   check((await p.locator('.inbox-detail .apv-batch').count()) === 0, 'the same command in another folder is never batched');
   await p.locator(`.inbox-row[data-id="${ids.click}"]`).click();
   check((await p.locator('.inbox-detail .apv-site').innerText()).includes('staging.shop.test'), 'a browser action shows its site');
-  check((await p.locator('.inbox-detail .apv[data-risk="careful"] .fl-hold').count()) === 1, 'a payment click is careful: hold to allow');
+  check((await p.locator('.inbox-detail .apv[data-risk="careful"] .fl-btn--hold').count()) === 1, 'a payment click is careful: hold to allow');
   await p.locator(`.inbox-row[data-id="bridge-c-open"]`).click();
   await grace(p);
   await clear(p);
@@ -1673,9 +1673,9 @@ async function approvalsChecks({ open, check }) {
   await p.waitForSelector('.apv');
   await grace(p);
   check((await p.locator('#item-perm-test.apv-row .apv-token').count()) === 1, 'npm test is a routine sentence row with its scope token');
-  check((await p.locator('#item-perm-edit .fl-split').count()) === 1 && (await p.locator('#item-perm-edit[data-on]').count()) === 1, 'the edit is a card with the split Allow, ringed as the one the keys act on');
+  check((await p.locator('#item-perm-edit .fl-split').count()) === 1 && (await p.locator('#item-perm-edit[data-focus]').count()) === 1, 'the edit is a card with the split Allow, ringed as the one the keys act on');
   for (const id of ['perm-push', 'perm-env', 'bridge-click'])
-    check((await p.locator(`#item-${id}[data-risk="careful"] .fl-hold`).count()) === 1 && (await p.locator(`#item-${id} .fl-split`).count()) === 0, `${id}: careful, hold to allow, no scope menu`);
+    check((await p.locator(`#item-${id}[data-risk="careful"] .fl-btn--hold`).count()) === 1 && (await p.locator(`#item-${id} .fl-split`).count()) === 0, `${id}: careful, hold to allow, no scope menu`);
   check((await p.locator('.fl-btn--brand:not(.fl-split-caret)').count()) === 1, 'one brand primary on screen (its split caret aside)');
   check((await p.locator('#item-perm-push .apv-commit').count()) === 3 && (await p.locator('#item-perm-push').innerText()).includes('Safer:'), 'the force push lists the commits it would drop and the safer way');
 
@@ -1707,12 +1707,12 @@ async function approvalsChecks({ open, check }) {
   check((await answers(p)).length === 0, 'careful: a short Enter does nothing (the fill drains back)');
   await p.keyboard.down('Enter');
   await p.waitForTimeout(300);
-  check((await p.locator('#item-perm-push .fl-hold[data-holding]').count()) === 1, 'careful: holding shows the fill');
+  check((await p.locator('#item-perm-push .fl-btn--hold[data-holding]').count()) === 1, 'careful: holding shows the fill');
   await p.waitForTimeout(450);
   await p.keyboard.up('Enter');
   check(JSON.stringify(await answers(p)) === JSON.stringify([{ type: 'permission', requestId: 'perm-push', optionId: 'allow' }]), 'careful: held 600 ms, it allows once');
   await clear(p);
-  const hold = p.locator('#item-perm-env .fl-hold');
+  const hold = p.locator('#item-perm-env .fl-btn--hold');
   await hold.hover();
   await p.mouse.down();
   await p.waitForTimeout(250);
@@ -1767,7 +1767,7 @@ async function approvalsChecks({ open, check }) {
   check(JSON.stringify(await ib.locator('.inbox-lane-head').allInnerTexts().then((t) => t.map((x) => x.replace(/\s+\d+$/, '').trim()))) === JSON.stringify(['Careful', 'Review', 'Routine']), 'the Inbox groups by Careful, Review, Routine');
   check((await ib.locator('.inbox-lane[data-tone="careful"] .inbox-row').count()) === 3 && (await ib.locator('.inbox-lane[data-tone="routine"] .inbox-row').count()) === 3, 'three careful, three routine');
   check((await ib.locator('.inbox-row').first().locator('.inbox-chat').innerText()) === 'Fix formatCents for negative amounts', 'each row names its chat');
-  check((await ib.locator('.inbox-detail .apv[data-risk="careful"] .fl-hold').count()) === 1, 'the detail is the same card, holding for careful');
+  check((await ib.locator('.inbox-detail .apv[data-risk="careful"] .fl-btn--hold').count()) === 1, 'the detail is the same card, holding for careful');
   await clear(ib);
   await ib.keyboard.press('Enter');
   await ib.waitForTimeout(700);

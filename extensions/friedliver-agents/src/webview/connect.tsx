@@ -4,6 +4,7 @@ import { useContext, useState } from 'preact/hooks';
 import { AGENT_FACES, AGENT_KEYS, type AgentKey, type ChatView } from '../shared/model';
 import { clip, openChats } from '../shared/view';
 import { Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
+import { Button } from './ui';
 
 /** Text beside the icon, or the icon alone where room is short. */
 function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['name']; text: string; compact?: boolean }) {
@@ -16,10 +17,10 @@ function Trigger({ icon, text, compact }: { icon: Parameters<typeof Icon>[0]['na
   );
 }
 
-export function HandoffMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
+export function HandoffMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-btn--sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   const agents = useRoster().agents;
   return (
-    <Popover label={`Hand off ${chat.label} to`} title={compact ? 'Hand off' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="handoff" text="Hand off" compact={compact} />}>
+    <Popover label={`Hand off ${chat.label} to`} title={compact ? 'Hand off' : undefined} buttonClass={compact ? `${buttonClass} fl-btn--icon fl-btn--muted` : buttonClass} trigger={<Trigger icon="handoff" text="Hand off" compact={compact} />}>
       {(close) => (
         <>
           <div class="fl-menu__title" aria-hidden="true">Continue with</div>
@@ -47,12 +48,12 @@ export function HandoffMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat:
 const defaultConsultant = (agent: AgentKey): AgentKey => (agent === 'claude' ? 'codex' : 'claude');
 
 /** Ask another agent a short question; its answer comes back into this chat. */
-export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
+export function AskMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-btn--sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   const [agent, setAgent] = useState<AgentKey>(defaultConsultant(chat.agent));
   const [text, setText] = useState('');
   const agents = useRoster().agents;
   return (
-    <Popover kind="dialog" label={`Ask another agent from ${chat.label}`} title={compact ? 'Ask another agent' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="ask" text="Ask" compact={compact} />}>
+    <Popover kind="dialog" label={`Ask another agent from ${chat.label}`} title={compact ? 'Ask another agent' : undefined} buttonClass={compact ? `${buttonClass} fl-btn--icon fl-btn--muted` : buttonClass} trigger={<Trigger icon="ask" text="Ask" compact={compact} />}>
       {(close) => {
         const ask = () => {
           if (!text.trim()) return;
@@ -85,12 +86,12 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
               }}
             />
             <div class="row end">
-              <button type="button" class="ghost sm" onClick={() => close()}>
+              <Button variant="quiet" size="sm" onClick={() => close()}>
                 Cancel
-              </button>
-              <button type="button" class="primary sm" disabled={!text.trim()} onClick={ask}>
+              </Button>
+              <Button variant="primary" size="sm" disabled={!text.trim()} onClick={ask}>
                 Ask {AGENT_FACES[agent].name}
-              </button>
+              </Button>
             </div>
           </div>
         );
@@ -100,9 +101,9 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
 }
 
 /** Forward every finished turn of this chat to another one; picking a piped chat again stops the pipe. */
-export function PipeMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
+export function PipeMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-btn--sm' }: { chat: ChatView; compact?: boolean; buttonClass?: string }) {
   return (
-    <Popover label={`Pipe ${chat.label} to`} title={compact ? 'Pipe to' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="pipe" text="Pipe to" compact={compact} />}>
+    <Popover label={`Pipe ${chat.label} to`} title={compact ? 'Pipe to' : undefined} buttonClass={compact ? `${buttonClass} fl-btn--icon fl-btn--muted` : buttonClass} trigger={<Trigger icon="pipe" text="Pipe to" compact={compact} />}>
       {(close) => <PipeTargets chat={chat} close={close} />}
     </Popover>
   );
