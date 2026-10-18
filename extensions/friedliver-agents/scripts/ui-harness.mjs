@@ -67,6 +67,9 @@ if (!opts['no-build']) {
 // ---- Images: the host's own thumbnail and preview code, on the fixture's real files ----
 
 const hostCode = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-harness-')), 'imageAccess.cjs');
+// Leave no temp folder behind, also when --serve is stopped with Ctrl-C or kill.
+process.on('exit', () => fs.rmSync(path.dirname(hostCode), { recursive: true, force: true }));
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(130));
 {
   const { build } = await import('esbuild');
   await build({ entryPoints: [path.join(ext, 'src/host/imageAccess.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: hostCode, logLevel: 'error' });
@@ -126,6 +129,34 @@ function readTheme(name) {
   return { kind, colors, css: `:root { ${vars.join(' ')} }` };
 }
 
+const TAB_TITLES = [
+  'Fix the flaky login test on CI',
+  'Refactor the session store to Redis',
+  'Why is the dashboard slow on first load?',
+  'Add dark mode to settings',
+  'Migrate payments to the v2 API',
+  'Write release notes for 1.142',
+  'Explain the auth middleware',
+  'Bump TypeScript to 5.6',
+  'Draft the onboarding email copy',
+  'Find the memory leak in the worker',
+  'Port the CSV export to streams',
+  'Review PR #482: rate limits',
+  'Rename the billing module',
+  'Add retries to webhook delivery',
+  'Sketch the agent map layout',
+];
+/** The fixture's chats, cloned up to `n` with realistic titles and every agent, and the first `n` as open tabs. */
+function withTabs(state, n) {
+  const agents = ['claude', 'codex', 'gemini', 'claude', 'demo', 'codex'];
+  const base = state.chats.filter((c) => !c.archived);
+  for (let i = 0; state.chats.filter((c) => !c.archived).length < n; i++) {
+    const from = base[i % base.length];
+    state.chats.push({ ...from, id: `chat-t${i}`, agent: agents[i % agents.length], title: TAB_TITLES[i % TAB_TITLES.length], origin: undefined });
+  }
+  return state.chats.filter((c) => !c.archived).slice(0, n).map((c) => c.id);
+}
+
 function page(params) {
   const surface = ['tasks', 'chat', 'images', 'permissions', 'accounts'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
   const theme = readTheme(params.get('theme') ?? 'black-blue');
@@ -150,13 +181,15 @@ function page(params) {
                 ? imagesData
                 : fixture(Date.now());
   const focus = params.get('focus');
+  // &tabs=N: N open tabs (more chats, realistic titles, every agent), for the tab strip at real widths.
+  const openTabs = params.get('tabs') ? withTabs(data.state, Number(params.get('tabs'))) : null;
   // Agents & Accounts gets its page view instead of a snapshot.
   const snapshot =
     surface === 'accounts'
       ? { type: 'accounts', view: { ...accountsFixture(Date.now()), ...(focus ? { focus: { agent: focus, n: 1 } } : {}) } }
       : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
-  const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))], ['imagesTab', params.get('imagesTab')]].filter(([, v]) => v);
+  const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))], ['imagesTab', params.get('imagesTab')], ['openTabs', openTabs]].filter(([, v]) => v);
   const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
   const stub = `
     window.__posted = [];
@@ -1042,14 +1075,122 @@ async function shoot() {
     const reopened = await strip();
     check(reopened.at(-1) === other && (await p.locator('.tabs [aria-selected="true"]').getAttribute('data-chat')) === other, 'opening a chat from the list adds its tab at the end');
     await p.screenshot({ path: path.join(opts.out, 'tabs-close.png'), clip: { x: 0, y: 0, width: 1200, height: 140 } }).catch(() => {});
-    // More tabs than fit: the strip scrolls sideways, fading at its edges; the tabs keep their size.
-    const many = await open('surface=chat&theme=dark-2026&select=chat-c5', 520, 700);
-    const fit = await many.evaluate(() => {
-      const t = document.querySelector('.tabs');
-      return { scrolls: t.scrollWidth > t.clientWidth, fade: window.getComputedStyle(t).maskImage !== 'none', min: Math.min(...[...t.querySelectorAll('.tab-wrap')].map((w) => w.getBoundingClientRect().width)), page: document.documentElement.scrollWidth <= window.innerWidth };
-    });
-    check(fit.scrolls && fit.fade && fit.min >= 80 && fit.page, `at 520px the tabs scroll sideways with faded edges, none squeezed [${JSON.stringify(fit)}]`);
-    await many.close();
+    // Crowded strips shrink before they scroll: every tab keeps its mark and status, the open one its title;
+    // the strip shows whole tabs only, mark-only tabs carry their dot as a badge (COMPONENTS.md §2.18 Fit).
+    const stripState = (page) =>
+      page.evaluate(() => {
+        const t = document.querySelector('.tabs');
+        const tabs = [...t.querySelectorAll('[role="tab"]')];
+        const open = t.querySelector('[aria-selected="true"]');
+        const lab = (tab) => tab.querySelector('.fl-tab__label');
+        const sb = t.getBoundingClientRect();
+        const ob = open.getBoundingClientRect();
+        const css = window.getComputedStyle(t);
+        const px = (v) => parseFloat(css.getPropertyValue(v)) || 0;
+        const lo = sb.left + px('--clip-l');
+        const hi = sb.right - px('--clip-r');
+        const ol = lab(open);
+        const others = tabs.filter((x) => x !== open);
+        const visible = (r) => r.right > lo + 0.5 && r.left < hi - 0.5;
+        return {
+          fit: t.dataset.fit,
+          tabs: tabs.length,
+          marks: tabs.every((x) => x.querySelectorAll('.fl-mark').length === 1 && x.querySelectorAll('.fl-dot').length === 1),
+          openLabel: Math.round(ol.getBoundingClientRect().width),
+          openTitleWhole: ol.scrollWidth <= ol.clientWidth + 1,
+          otherLabels: t.dataset.fit === 'icon' ? others.every((x) => lab(x).getBoundingClientRect().width === 0) : true,
+          // Mark-only tabs: one glyph wide, the dot a badge inside the mark's corner.
+          markOnly:
+            t.dataset.fit !== 'icon' ||
+            others.every((x) => {
+              const r = x.getBoundingClientRect();
+              const m = x.querySelector('.fl-mark').getBoundingClientRect();
+              const d = x.querySelector('.fl-dot').getBoundingClientRect();
+              return r.width <= 27 && d.left >= m.left && d.right <= m.right + 3 && d.top >= m.top && d.bottom <= m.bottom + 3;
+            }),
+          openInView: ob.left >= lo - 1 && ob.right <= hi + 1,
+          // No partial tab: each is wholly inside the shown part of the strip or wholly outside it; no fade over anything.
+          whole: [...t.querySelectorAll('.fl-tab-wrap')].every((w) => {
+            const r = w.getBoundingClientRect();
+            return !visible(r) || (r.left >= lo - 0.5 && r.right <= hi + 0.5);
+          }),
+          noFade: css.maskImage === 'none',
+          page: document.documentElement.scrollWidth <= window.innerWidth,
+        };
+      });
+    for (const theme of ['dark-2026', 'light-2026'])
+      for (const n of [2, 6, 15])
+        for (const w of [300, 420, 600]) {
+          const many = await open(`surface=chat&theme=${theme}&tabs=${n}`, w, 500);
+          const s = await stripState(many);
+          check(
+            s.tabs === n && s.marks && s.markOnly && s.otherLabels && s.openInView && s.whole && s.noFade && s.page &&
+              (s.openLabel >= 110 || s.openTitleWhole) && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
+            `${theme} ${n} tabs at ${w}px: whole tabs only, a mark and a dot on each (a badge when mark-only), the open one titled (≥ 110) and in view [${JSON.stringify(s)}]`,
+          );
+          if (n === 15) {
+            // A wheel notch moves the strip by whole tabs: still no partial tab.
+            const before = await many.evaluate(() => document.querySelector('.tabs').scrollLeft);
+            await many.hover('.tabs');
+            await many.mouse.wheel(0, before > 0 ? -120 : 120);
+            await many.waitForTimeout(500);
+            const after = await many.evaluate(() => document.querySelector('.tabs').scrollLeft);
+            const s2 = await stripState(many);
+            check(after !== before && s2.whole, `${theme} 15 tabs at ${w}px: a wheel notch scrolls by whole tabs [${before} → ${after}, whole ${s2.whole}]`);
+          }
+          // Narrow: the trailing cluster folds (no open count, no Agent Manager button); "+" stays.
+          const cluster = await many.evaluate(() => ({
+            count: document.querySelector('.all-count')?.getBoundingClientRect().width ?? 0,
+            manager: document.querySelector('.switcher .manager-btn')?.getBoundingClientRect().width ?? 0,
+            plus: document.querySelector('.switcher [aria-label="New chat with"], .switcher [title="New chat"]')?.getBoundingClientRect().width ?? 0,
+          }));
+          check(w < 360 ? cluster.count === 0 && cluster.manager === 0 && cluster.plus > 0 : cluster.count > 0 && cluster.manager > 0, `${theme} ${w}px: the strip's buttons ${w < 360 ? 'fold to All chats and +' : 'show the count and the Agent Manager'} [${JSON.stringify(cluster)}]`);
+          await many.close();
+        }
+    {
+      // A mark-only tab says what it is at once: a tooltip below it with the title, agent and status.
+      const tip = await open('surface=chat&theme=dark-2026&tabs=15', 420, 500);
+      // The mark just before the open tab: in the shown window, so hovering it scrolls nothing.
+      const other = tip.locator('.tabs .fl-tab-wrap:has(+ .fl-tab-wrap[data-active]) [role="tab"]');
+      const name = await other.getAttribute('aria-label');
+      await other.hover();
+      await tip.waitForTimeout(120);
+      const t = await tip.evaluate(() => {
+        const el = document.querySelector('.fl-tip');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const s = document.querySelector('.tabs').getBoundingClientRect();
+        return { text: el.textContent, below: r.top >= s.bottom - 2, inside: r.left >= 0 && r.right <= window.innerWidth };
+      });
+      const shown = await tip.evaluate(() => {
+        const s = document.querySelector('.tabs').getBoundingClientRect();
+        const o = document.querySelector('.tabs [aria-selected="true"]').getBoundingClientRect();
+        return o.left >= s.left && o.right <= s.right;
+      });
+      check(!!t && shown && t.below && t.inside && / · (Idle|Working|Needs you|Done|Problem)/.test(t.text) && t.text === name, `hovering a mark-only tab shows its tooltip at once, below, in view [${JSON.stringify(t)} vs ${name}]`);
+      await tip.close();
+    }
+    {
+      // Keys switch tabs: Ctrl+Tab / Ctrl+Shift+Tab cycle, Cmd/Ctrl+1..8 pick one, 9 the last; the "All chats" list leads with every open tab.
+      const k = await open('surface=chat&theme=dark-2026&tabs=15', 420, 600);
+      const ids = await k.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.chat));
+      const on = () => k.locator('.tabs [aria-selected="true"]').getAttribute('data-chat');
+      const cmd = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await k.click('.composer textarea');
+      await k.keyboard.press(`${cmd}+Digit1`);
+      const first = await on();
+      await k.keyboard.press('Control+Tab');
+      const second = await on();
+      await k.keyboard.press('Control+Shift+Tab');
+      const back = await on();
+      await k.keyboard.press(`${cmd}+Digit9`);
+      const last = await on();
+      check(first === ids[0] && second === ids[1] && back === ids[0] && last === ids.at(-1), `Cmd/Ctrl+1, Ctrl+Tab, Ctrl+Shift+Tab, Cmd/Ctrl+9 switch tabs [${[first, second, back, last].join(' ')}]`);
+      await k.click('.all-btn');
+      const listed = await k.locator('.all-chats [role="group"][aria-label="Open tabs"] [role="option"]').evaluateAll((os) => os.map((o) => o.id.slice(o.id.indexOf('-chat-') + 1)));
+      check(listed.length === ids.length && listed.every((id, i) => id === ids[i]), `"All chats" lists every open tab first, in strip order [${listed.length} of ${ids.length}]`);
+      await k.close();
+    }
         // Close them all: the empty state.
     for (let n = 0; n < 40 && (await p.locator('.tabs .tab-close').count()); n++) await p.locator('.tabs .tab-close').first().click();
     check((await p.locator('.empty').count()) === 1, 'closing the last tab shows the empty state');
@@ -1350,7 +1491,7 @@ async function imagesChecks({ open, check, posted }) {
       chats.every((c, n) => tabs[n + 1].includes(c.title) && tabs[n + 1].trim().endsWith(String(c.count))),
       `${width}: a tab per chat with images, newest first, with its topic and count`,
     );
-    check((await p.locator('.gallery-tabs button.tab .fl-avatar[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
+    check((await p.locator('.gallery-tabs button.tab .fl-mark[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
     const cards = await p.locator('.gallery-card').count();
     const asked = await thumbs(p);
     check(cards === all.length && asked > 0 && asked < cards / 2, `${width}: only cards near the screen ask for thumbnails (${asked} of ${cards})`);
@@ -1835,7 +1976,8 @@ function tabText(p) {
 
 function sharedGallery() {
   const out = path.join(path.dirname(hostCode), 'gallery.mjs');
-  if (!fs.existsSync(out)) spawnSync(process.execPath, [path.join(ext, 'node_modules/esbuild/bin/esbuild'), path.join(ext, 'src/shared/gallery.ts'), '--bundle', '--format=esm', '--platform=node', `--outfile=${out}`, '--log-level=error']);
+  // esbuild's JS API: bin/esbuild is the native binary on macOS, not a script node can run.
+  if (!fs.existsSync(out)) createRequire(import.meta.url)('esbuild').buildSync({ entryPoints: [path.join(ext, 'src/shared/gallery.ts')], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' });
   return out;
 }
 

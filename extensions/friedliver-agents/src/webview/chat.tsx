@@ -26,6 +26,8 @@ import {
 import {
   commandLabel,
   tabAfterClose,
+  tabForKey,
+  tabTip,
   openTab,
   closeTab,
   applyMention,
@@ -63,7 +65,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab } from './ui';
+import { AgentMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -122,9 +124,21 @@ function App() {
   };
   const closeActive = useRef(() => {});
   closeActive.current = () => chat && close(chat.id);
+  const switchTab = useRef<(e: KeyboardEvent) => boolean>(() => false);
+  switchTab.current = (e) => {
+    const to = tabForKey(tabs, chat?.id, e, IS_MAC);
+    if (to && to !== chat?.id) select(to);
+    return to !== undefined;
+  };
   useEffect(() => {
-    // Cmd/Ctrl+W closes the open chat's tab; caught before the webview forwards it, so the editor's own tab stays.
+    // Cmd/Ctrl+W closes the open chat's tab; Ctrl+Tab, Ctrl+Shift+Tab and Cmd/Ctrl+1..9 switch tabs.
+    // Caught before the webview forwards them, so the editor's own tabs stay.
     const onKey = (e: KeyboardEvent) => {
+      if (switchTab.current(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (!(IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'w') return;
       e.preventDefault();
       e.stopPropagation();
@@ -213,7 +227,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
   const shortcut = IS_MAC ? '⌘W' : 'Ctrl+W';
   const box = useRef<HTMLDivElement>(null);
   const agents = useRoster().agents;
-  const over = useTabStrip(box, tabs.length, active);
+  const { over, fit } = useTabStrip(box, tabs.length, active);
   // A tablist: one Tab stop; ←/→/Home/End move between tabs, Enter or Space opens one, Delete closes it.
   const focusable = active && strip.some((c) => c.id === active) ? active : strip[0]?.id;
   const onKeys = (e: KeyboardEvent) => {
@@ -236,7 +250,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
   const needs = open.filter((c) => boardColumn(statusOf(c)) === 'needs-you').length;
   return (
     <div class="switcher">
-      <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
+      <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-fit={fit} data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
         {strip.map((c) => (
           <Tab
             key={c.id}
@@ -245,12 +259,14 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
             tabIndex={c.id === focusable ? 0 : -1}
             aria-keyshortcuts="Delete"
             title={chatTip(c)}
+            aria-label={tabTip(c)}
+            tip={fit === 'icon' && c.id !== active ? tabTip(c) : undefined}
             onSelect={() => onSelect(c.id)}
             onAuxClick={(e) => e.button === 1 && (e.preventDefault(), onClose(c.id))}
             onClose={() => onClose(c.id)}
             closeTitle={`Close tab (${shortcut} · Delete)`}
           >
-            <Glyph agent={c.agent} size="sm" />
+            <AgentMark agent={c.agent} />
             <span class="fl-tab__label tab-title">{c.title}</span>
             <AutoBadge chat={c} short />
             <Dot state={statusOf(c)} />
@@ -279,6 +295,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
           <AllChats
             state={state}
             active={active}
+            tabs={tabs}
             onPick={(id) => {
               close(false);
               onSelect(id);
@@ -299,7 +316,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                   send({ type: 'newChat', agent });
                 }}
               >
-                <Glyph agent={agent} size="sm" />
+                <AgentMark agent={agent} />
                 <span class="grow">{AGENT_FACES[agent].name}</span>
                 {agent === 'demo' && <span class="hint">fake, local</span>}
                 <SignInMark agent={agent} />
@@ -310,17 +327,17 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
           </>
         )}
       </Popover>
-      <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" onClick={() => send({ type: 'openTasks' })} />
+      <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" class="manager-btn" onClick={() => send({ type: 'openTasks' })} />
     </div>
   );
 }
 
-function AllChats({ state, active, onPick, newAgent }: { state: AppState; active?: string; onPick: Select; newAgent?: AgentKey }) {
+function AllChats({ state, active, onPick, newAgent, tabs }: { state: AppState; active?: string; onPick: Select; newAgent?: AgentKey; tabs?: string[] }) {
   const [query, setQuery] = useState('');
   const [at, setAt] = useState(0);
   const listId = useId();
   const now = useNow(10_000);
-  const groups = switcherGroups(state.chats, query);
+  const groups = switcherGroups(state.chats, query, tabs);
   const flat = groups.flatMap((g) => g.chats);
   const current = flat[Math.min(at, flat.length - 1)];
   const archived = state.chats.filter((c) => c.archived).length;
@@ -365,7 +382,7 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
         {groups.map((g) => (
           <div key={g.status} role="group" aria-label={g.title}>
             <div class="pop-group" aria-hidden="true">
-              {g.status === 'starred' ? <Icon name="star" /> : <Dot state={g.status} still />}
+              {g.status === 'tabs' ? <Icon name="layers" /> : g.status === 'starred' ? <Icon name="star" /> : <Dot state={g.status} still />}
               {g.title}
               <span class="col-count">{g.chats.length}</span>
             </div>
@@ -380,12 +397,13 @@ function AllChats({ state, active, onPick, newAgent }: { state: AppState; active
                 onClick={() => onPick(c.id)}
                 onMouseMove={() => setAt(flat.indexOf(c))}
               >
-                <Glyph agent={c.agent} size="sm" />
+                <AgentMark agent={c.agent} />
                 <span class="chat-item-text">
                   <span class="pick-title" title={`${chatTip(c)} · ${switcherMeta(c, now)}`}>
                     {c.title}
                   </span>
                 </span>
+                {g.status === 'tabs' && <Dot state={statusOf(c)} still={statusOf(c) !== 'working'} />}
                 <span class="chat-item-time">{ago(c.lastActivity, now)}</span>
                 <span class="chat-item-more" onClick={(e) => e.stopPropagation()}>
                   <Popover label={`More for ${c.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm" trigger={<Icon name="more" />}>

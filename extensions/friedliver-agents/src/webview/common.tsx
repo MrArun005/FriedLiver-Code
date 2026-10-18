@@ -9,7 +9,7 @@ import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/
 import type { HostMessage, WebviewMessage } from '../shared/messages';
 import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
-import { settleOrder, type Settled } from '../shared/view';
+import { TAB_MIN, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -585,23 +585,102 @@ export function Kbd({ children }: { children: ComponentChildren }) {
 
 export { Popover } from './ui/menu';
 
-/** A strip of tabs: with more than fit it scrolls sideways (true: its edges fade), and the open tab stays in view. */
-export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): boolean {
+/** How much of each end of a strip to clip so that no tab shows in part (§2.18): a cut tab goes entirely. */
+function clipPartialTabs(el: HTMLElement) {
+  const s = el.getBoundingClientRect();
+  let left = 0;
+  let right = 0;
+  for (const tab of el.children) {
+    const r = tab.getBoundingClientRect();
+    if (r.left < s.left - 0.5 && r.right > s.left + 0.5) left = Math.max(left, r.right - s.left);
+    if (r.right > s.right + 0.5 && r.left < s.right - 0.5) right = Math.max(right, s.right - r.left);
+  }
+  el.style.setProperty('--clip-l', `${Math.ceil(left)}px`);
+  el.style.setProperty('--clip-r', `${Math.ceil(right)}px`);
+}
+
+/**
+ * Marks only, and still too many (§2.18): show a whole window of them beside the open tab, the open tab
+ * taking the room left over (--open-w, from --tab-open-min up), and scroll to that window, so the strip
+ * starts and ends on whole tabs with no gap. As close to where it was scrolled as the open tab allows.
+ */
+function windowMarks(el: HTMLElement) {
+  const wraps = [...el.children] as HTMLElement[];
+  const at = wraps.findIndex((w) => w.hasAttribute('data-active'));
+  const mark = wraps.find((w) => !w.hasAttribute('data-active'));
+  const reset = () => {
+    el.removeAttribute('data-windowed');
+    el.style.removeProperty('--open-w');
+  };
+  if (el.dataset.fit !== 'icon' || at < 0 || !mark) return reset();
+  const step = mark.getBoundingClientRect().width + (parseFloat(window.getComputedStyle(el).columnGap) || 0);
+  const k = Math.floor((el.clientWidth - TAB_MIN.open) / step);
+  if (k >= wraps.length - 1 || k < 0) return reset();
+  el.setAttribute('data-windowed', '');
+  el.style.setProperty('--open-w', `${el.clientWidth - k * step}px`);
+  const first = Math.max(Math.max(0, at - k), Math.min(Math.round(el.scrollLeft / step), at, wraps.length - 1 - k));
+  el.scrollLeft = first * step;
+}
+
+/**
+ * A strip of tabs: crowded, its tabs shrink (`fit`, tabFit()); with more than fit even then it scrolls sideways
+ * (`over`), snapping to whole tabs, with any tab an edge cuts clipped away; a mouse wheel steps it a tab at a
+ * time, and the open tab stays in view.
+ */
+export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): { over: boolean; fit: TabFit } {
   const [over, setOver] = useState(false);
+  const [fit, setFit] = useState<TabFit>('full');
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
+    const measure = () => {
+      setFit(tabFit(el.clientWidth, count));
+      setOver(el.scrollWidth > el.clientWidth + 1);
+      clipPartialTabs(el);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => clipPartialTabs(el));
+    };
+    // A plain (vertical) wheel steps the strip a whole tab per notch; a trackpad's sideways swipe scrolls (and snaps) itself.
+    let pending = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      pending += e.deltaY;
+      if (Math.abs(pending) < 40) return;
+      const s = el.getBoundingClientRect();
+      const lefts = [...el.children].map((t) => t.getBoundingClientRect().left - s.left);
+      const to = pending > 0 ? lefts.find((x) => x > 1) : lefts.filter((x) => x < -1).at(-1);
+      pending = 0;
+      if (to !== undefined) el.scrollBy({ left: to, behavior: scrollBehavior() });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(frame);
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+    };
   }, [count]);
+  // The tabs' widths changed with the fit or the open tab: is it still too wide, and what does an edge cut now?
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    windowMarks(el);
+    setOver(el.scrollWidth > el.clientWidth + 1);
+    clipPartialTabs(el);
+  }, [fit, active, count]);
   // After the tab is in the strip: a chat opened from the list or a notification gets its new tab shown (QA F04).
   useEffect(() => {
     box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [active, count]);
-  return over;
+  }, [active, count, fit]);
+  return { over, fit };
 }
 
 // ---- Images from files: the host hands out a data: URI per path, once it has checked the file. ----
