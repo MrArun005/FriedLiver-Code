@@ -397,6 +397,7 @@ export class RemoteServer {
   }
 
   private broadcast(event: PhoneEvent, only?: (p: Phone) => boolean): void {
+    if (only && ![...this.phones].some(only)) return;
     const frame = encodeFrame(0x1, Buffer.from(JSON.stringify(event)));
     for (const p of this.phones) {
       if (only && !only(p)) continue;
@@ -407,12 +408,20 @@ export class RemoteServer {
 
   private drop(which: (p: Phone) => boolean): void {
     this.broadcast({ type: 'revoked' }, which);
-    for (const p of [...this.phones]) if (which(p)) p.socket.end(encodeFrame(0x8, Buffer.from([0x0f, 0xa0])));
+    for (const p of [...this.phones]) {
+      if (!which(p)) continue;
+      this.phones.delete(p);
+      p.socket.end(encodeFrame(0x8, Buffer.from([0x0f, 0xa0])));
+      setTimeout(() => p.socket.destroy(), 1000).unref();
+    }
+    this.options.onConnections?.(this.connected());
     for (const t of [...this.tickets.keys()]) if (!this.options.devices.has(this.tickets.get(t)!.deviceId)) this.tickets.delete(t);
   }
 
   /** A phone that missed the last ping is gone (asleep, out of range). */
   private ping(): void {
+    // A device revoked elsewhere (another window, or expired) loses its socket here.
+    this.drop((p) => !this.options.devices.has(p.device.id));
     for (const p of [...this.phones]) {
       if (p.pinged) {
         p.socket.destroy();

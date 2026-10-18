@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICES_KEY, Devices, IDLE_DAYS, Lockout, MAX_BAD_CODES, PAIRING_TTL_MS, Pairing, deviceName, hashToken } from '../src/remote/auth';
+import { DEVICES_KEY, Devices, IDLE_DAYS, REVOKED_KEY, Lockout, MAX_BAD_CODES, PAIRING_TTL_MS, Pairing, deviceName, hashToken } from '../src/remote/auth';
 import { memoryStore } from './helpers';
 
 describe('pairing codes', () => {
@@ -110,6 +110,40 @@ describe('device tokens', () => {
     now += 120_000;
     expect(b.authenticate(other.token)).toBeDefined();
     expect(new Devices(store, () => now).list().map((d) => d.name)).toEqual(['Other']);
+  });
+
+  it('stay revoked when a window holding a stale list authenticates them and writes lastSeen', () => {
+    let now = 0;
+    const store = memoryStore();
+    const a = new Devices(store, () => now);
+    const phone = a.add('Phone');
+    const other = a.add('Other');
+    // Window B's view of the list lags: it still has the phone after A revoked it.
+    const stale = structuredClone(store.data[DEVICES_KEY]);
+    const lagging = { get: <T>(k: string) => (k === DEVICES_KEY ? (structuredClone(stale) as T) : store.get<T>(k)), update: store.update };
+    const b = new Devices(lagging, () => now);
+    a.revoke(phone.device.id);
+    expect(b.authenticate(phone.token)).toBeUndefined();
+    now += 120_000;
+    expect(b.authenticate(other.token)).toBeDefined();
+    // B's lastSeen write came from its stale list; the tombstone still keeps the phone out everywhere.
+    const fresh = new Devices(store, () => now);
+    expect(fresh.authenticate(phone.token)).toBeUndefined();
+    expect(fresh.list().map((d) => d.name)).toEqual(['Other']);
+    expect(JSON.stringify(store.data[REVOKED_KEY])).toContain(phone.device.id);
+  });
+
+  it('write lastSeen only for a device still there, re-reading the list first', () => {
+    let now = 0;
+    const store = memoryStore();
+    const devices = new Devices(store, () => now);
+    const { token, device } = devices.add('A');
+    const b = devices.add('B');
+    // Someone else removes B between this window's reads.
+    store.update(DEVICES_KEY, (store.data[DEVICES_KEY] as { id: string }[]).filter((d) => d.id !== b.device.id));
+    now += 120_000;
+    devices.authenticate(token);
+    expect((store.data[DEVICES_KEY] as { id: string; lastSeen: number }[]).map((d) => [d.id, d.lastSeen])).toEqual([[device.id, 120_000]]);
   });
 
   it('expire after a month unused', () => {

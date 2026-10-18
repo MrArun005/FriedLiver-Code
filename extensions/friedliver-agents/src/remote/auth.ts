@@ -12,6 +12,9 @@ export const MAX_BAD_CODES = 30;
 export const IDLE_DAYS = 30;
 export const MAX_DEVICES = 10;
 export const DEVICES_KEY = 'friedliver.remote.devices';
+/** Revoked devices, append-only: a window writing back a stale device list can't bring one back. */
+export const REVOKED_KEY = 'friedliver.remote.revoked';
+const MAX_REVOKED = 500;
 
 const LOCK_FAILS = 5;
 const LOCK_WINDOW_MS = 60_000;
@@ -57,12 +60,28 @@ export class Devices {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** The stored devices, without any unused for IDLE_DAYS. */
+  /** Revoked device ids and token hashes. */
+  private revoked(): Set<string> {
+    const raw = this.store.get<{ id: string; hash: string }[]>(REVOKED_KEY);
+    return new Set(Array.isArray(raw) ? raw.flatMap((r) => [String(r?.id), String(r?.hash)]) : []);
+  }
+
+  /** The stored devices, without revoked ones or any unused for IDLE_DAYS. */
   private load(): Saved[] {
     const raw = this.store.get<Saved[]>(DEVICES_KEY);
     const at = this.now();
+    const revoked = this.revoked();
     return Array.isArray(raw)
-      ? raw.filter((d) => d && typeof d.hash === 'string' && /^[0-9a-f]{64}$/.test(d.hash) && typeof d.id === 'string' && at - (Number(d.lastSeen) || 0) < IDLE_DAYS * 86_400_000)
+      ? raw.filter(
+          (d) =>
+            d &&
+            typeof d.hash === 'string' &&
+            /^[0-9a-f]{64}$/.test(d.hash) &&
+            typeof d.id === 'string' &&
+            !revoked.has(d.id) &&
+            !revoked.has(d.hash) &&
+            at - (Number(d.lastSeen) || 0) < IDLE_DAYS * 86_400_000,
+        )
       : [];
   }
 
@@ -83,15 +102,20 @@ export class Devices {
   authenticate(token: string): Device | undefined {
     if (typeof token !== 'string' || !token || token.length > 256) return undefined;
     const hash = Buffer.from(hashToken(token), 'hex');
-    const saved = this.load();
     let found: Saved | undefined;
-    for (const d of saved) if (timingSafeEqual(hash, Buffer.from(d.hash, 'hex'))) found = d;
+    for (const d of this.load()) if (timingSafeEqual(hash, Buffer.from(d.hash, 'hex'))) found = d;
     if (!found) return undefined;
     const at = this.now();
     found.lastSeen = at;
     if (at - (this.written.get(found.id) ?? -Infinity) >= SEEN_WRITE_MS) {
       this.written.set(found.id, at);
-      this.save(saved);
+      // Read again right before writing, change only this device, and only if it is still there.
+      const now = this.load();
+      const mine = now.find((d) => d.id === found!.id);
+      if (mine) {
+        mine.lastSeen = at;
+        this.save(now);
+      }
     }
     return shown(found);
   }
@@ -101,11 +125,20 @@ export class Devices {
   }
 
   revoke(id: string): void {
-    this.save(this.load().filter((d) => d.id !== id));
+    const list = this.load();
+    this.tombstone(list.filter((d) => d.id === id).map((d) => ({ id: d.id, hash: d.hash })).concat(list.some((d) => d.id === id) ? [] : [{ id, hash: '' }]));
+    this.save(list.filter((d) => d.id !== id));
   }
 
   revokeAll(): void {
+    this.tombstone(this.load().map((d) => ({ id: d.id, hash: d.hash })));
     this.save([]);
+  }
+
+  private tombstone(entries: { id: string; hash: string }[]): void {
+    const raw = this.store.get<{ id: string; hash: string }[]>(REVOKED_KEY);
+    const all = [...(Array.isArray(raw) ? raw : []), ...entries].slice(-MAX_REVOKED);
+    void Promise.resolve(this.store.update(REVOKED_KEY, all)).catch(() => {});
   }
 
   private save(list: Saved[]): void {
