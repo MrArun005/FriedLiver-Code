@@ -1515,8 +1515,12 @@ export class AgentCore {
       await this.ensureBridge();
       const result: acp.PromptResponse = this.stopping.has(chatId) ? { stopReason: 'cancelled' } : await this.hub.prompt(chatId, blocks);
       stopReason = result.stopReason;
-      // The agent's own count of this turn's input and what of it came from its prompt cache.
-      if (result.usage) this.noteTokens(chatId, { input: Number(result.usage.inputTokens), cacheRead: Number(result.usage.cachedReadTokens ?? 0) });
+      // The agent's own count of this turn's tokens, logged with the context and cost its last usage_update gave.
+      if (result.usage) {
+        const { used, size, cost } = this.chat(chatId)?.session?.usage ?? {};
+        const usage = { at: Date.now(), input: Number(result.usage.inputTokens), output: Number(result.usage.outputTokens), cacheRead: Number(result.usage.cachedReadTokens ?? 0), cacheWrite: Number(result.usage.cachedWriteTokens ?? 0) };
+        this.dispatch({ t: 'turnUsage', chatId, usage: { ...usage, ...(size ? { context: { used: used!, size } } : {}), ...(cost ? { cost } : {}) } });
+      }
       if (result.stopReason !== 'end_turn') notice = stopNotice(result.stopReason, this.label(agent));
     } catch (err) {
       this.settleChat(chatId);

@@ -1306,7 +1306,8 @@ acp
       await say(client, sessionId, `${text}${imageCount ? ` (+${imageCount} image)` : ''}${chosen}`);
     }
     if (choices.has(sessionId)) await reportUsage(client, sessionId, stateOf(sessionId), text);
-    return { stopReason: 'end_turn' };
+    // The turn's own token counts, as Claude's adapter reports them (fixed, so tests can check them).
+    return { stopReason: 'end_turn', usage: { inputTokens: 1200, outputTokens: 300, cachedReadTokens: 800, cachedWriteTokens: 100, totalTokens: 2400 } };
   })
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 
