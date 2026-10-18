@@ -8,6 +8,7 @@ import { cmdCommandLine, findOnWindowsPath, quoteWindowsArg } from '@friedliver/
 import { allowedExternal, allowedSignInUrl } from '@friedliver/main/agents/signIn';
 import { MAX_OUTPUT_LIMIT, TerminalManager, visibleText, type TerminalInfo } from '@friedliver/main/agents/terminals';
 import * as git from '@friedliver/main/workspace/git';
+import { gitRepo } from './helpers';
 
 // ---- A model of how cmd.exe reads `cmd /d /s /c "<line>"` ----
 // Phase 1 expands %VAR% (an undefined name stays as written). Phase 2 handles ^ and quotes:
@@ -279,5 +280,23 @@ describe.skipIf(process.platform === 'win32')('git helpers in a hostile reposito
     await git.mergeWorktree(dir, wt, 'task');
     await git.removeWorktree(dir, wt);
     expect(fs.existsSync(marker)).toBe(false);
+  });
+});
+
+describe('git snapshots', () => {
+  it('see a same-size edit made in the second the file was staged (racy git)', async () => {
+    const dir = await gitRepo();
+    const run = (...args: string[]) => execFileSync('git', args, { cwd: dir });
+    run('config', 'core.trustctime', 'false'); // only mtime and size then, so the test sets them exactly
+    const a = path.join(dir, 'a.txt');
+    const t = new Date('2020-01-01T00:00:00Z');
+    await writeFile(a, 'one\n');
+    fs.utimesSync(a, t, t);
+    run('add', 'a.txt');
+    fs.utimesSync(path.join(dir, '.git', 'index'), t, t); // staged in the same second as the file's mtime
+    const before = await git.snapshot(dir);
+    await writeFile(a, 'two\n');
+    fs.utimesSync(a, t, t);
+    expect(await git.snapshot(dir)).not.toBe(before);
   });
 });
