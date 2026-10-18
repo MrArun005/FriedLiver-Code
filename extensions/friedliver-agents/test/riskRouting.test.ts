@@ -181,6 +181,8 @@ describe('routine countdown', () => {
     const chat = await core.createChat('demo');
     for (const [kind, input] of [
       ['execute', { command: 'git status', cwd: outside }],
+      ['execute', { command: 'git status', cwd: `../${path.basename(outside)}` }],
+      ['execute', { command: 'git status', cwd: '../../../../../../../../etc' }],
       ['read', { file_path: path.join(outside, 'notes.txt'), locations: [path.join(outside, 'notes.txt')] }],
     ] as const) {
       const turn = core.send(chat.id, `native-perm ${kind} ${JSON.stringify(input)}`);

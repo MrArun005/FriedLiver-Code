@@ -65,7 +65,7 @@ import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
-import { inGitFolder, insideRoots, realPath } from './paths';
+import { inGitFolder, insideRoots, realPath, workspacePath } from './paths';
 import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
@@ -1799,7 +1799,8 @@ export class AgentCore {
       const allow = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
       // Routine, with a plain one-time yes, not a plan, and wholly inside the workspace (the command's folder,
       // every file it names, all of them resolvable): it may count down (off unless the user set it).
-      const inside = (p: string | undefined) => !!p && insideRoots(p, this.roots()) !== null;
+      // Relative paths resolve against the chat's folder, links are followed, and anything that doesn't resolve fails closed.
+      const inside = (p: string | undefined) => workspacePath(p, chat?.cwd, this.roots()) !== null;
       const inWorkspace = detail.command
         ? inside(detail.command.cwd ?? chat?.cwd)
         : files.complete && files.paths.length > 0 && [...files.paths, ...(detail.locations ?? [])].every(inside);
