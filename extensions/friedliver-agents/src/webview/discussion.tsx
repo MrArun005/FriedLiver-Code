@@ -541,7 +541,8 @@ function Thread({ ctx }: { ctx: Ctx }) {
 }
 
 /** A round's tag: how it moved (the summary's word, else worked out) and on what; else its tally. */
-const tagOf = (r: RoundView): string => (r.trend ? (r.on ? `${r.trend} on ${r.on}` : r.trend) : r.tally);
+const tagOf = (r: RoundView): string =>
+  r.trend ? (r.on ? `${r.trend} on ${r.on}` : r.trend) : [r.tally, r.lessSure.length ? `${r.lessSure.map(speakerName).join(' and ')} less sure` : ''].filter(Boolean).join(', ');
 
 function TurnCard({ ctx: { d, v, chat }, t }: { ctx: Ctx; t: TurnView }) {
   const [open, setOpen] = useState(false);

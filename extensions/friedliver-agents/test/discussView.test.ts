@@ -248,3 +248,13 @@ describe('/discuss: stance and trend parsing', () => {
     expect(parseConclusion('```conclusion\n{"agreed":[],"disagreed":[],"next":"n"}\n```', 'claude', ['claude'])!.rounds).toBeUndefined();
   });
 });
+
+describe('/discuss: a round that is still running', () => {
+  it('has no worked-out trend yet, but knows who is less sure', () => {
+    const r = running(DB, 2, 'codex');
+    const v = discussView({ ...r, turns: r.turns.filter((t) => t.by !== 'you') });
+    expect(v.rounds[1].trend).toBeUndefined();
+    expect(v.rounds[1].tally).toBe('2 to 1');
+    expect(v.rounds[1].lessSure).toEqual(['gemini']);
+  });
+});

@@ -120,6 +120,8 @@ export interface RoundView {
   conf: Partial<Record<AgentKey, number>>;
   /** Agents whose position changed in this round. */
   moved: AgentKey[];
+  /** Agents who kept their position but are less sure than the round before. */
+  lessSure: AgentKey[];
   /** "2 to 1", "split", "agreed"; empty when nobody holds a position. */
   tally: string;
   trend?: Trend;
@@ -242,6 +244,7 @@ export function discussView(d: DiscussionItem): DiscussView {
     }
     const prev = rounds[r - 2];
     const moved = prev ? agents.filter((a) => holds[a] !== undefined && prev.holds[a] !== undefined && holds[a] !== prev.holds[a]) : [];
+    const lessSure = prev ? agents.filter((a) => holds[a] !== undefined && holds[a] === prev.holds[a] && conf[a] !== undefined && prev.conf[a] !== undefined && conf[a]! < prev.conf[a]!) : [];
     const points = d.turns.filter((t) => t.by === 'you' && (t.round === r || (r === last && t.round > last)));
     const given = trends.get(r);
     // Worked out only for a finished round: mid-round, the tally says enough.
@@ -257,7 +260,7 @@ export function discussView(d: DiscussionItem): DiscussView {
             : r === d.maxRounds
               ? 'Last round'
               : 'Replies';
-    rounds.push({ round: r, turns: turns.filter((t) => t.round === r), points, holds, conf, moved, tally: tallyOf(holds), ...(trend ? { trend } : {}), ...(given?.on ? { on: given.on } : {}), label });
+    rounds.push({ round: r, turns: turns.filter((t) => t.round === r), points, holds, conf, moved, lessSure, tally: tallyOf(holds), ...(trend ? { trend } : {}), ...(given?.on ? { on: given.on } : {}), label });
   }
   const view: DiscussView = {
     title,
