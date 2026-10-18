@@ -22,7 +22,7 @@ export function HandoffMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat:
     <Popover label={`Hand off ${chat.label} to`} title={compact ? 'Hand off' : undefined} buttonClass={compact ? `${buttonClass} icon-btn` : buttonClass} trigger={<Trigger icon="handoff" text="Hand off" compact={compact} />}>
       {(close) => (
         <>
-          <div class="pop-title" aria-hidden="true">Continue with</div>
+          <div class="fl-menu__title" aria-hidden="true">Continue with</div>
           {agents.map((agent) => (
             <button
               key={agent}
@@ -62,7 +62,7 @@ export function AskMenu({ chat, compact, buttonClass = 'ghost sm' }: { chat: Cha
         };
         return (
           <div class="ask-form">
-            <div class="pop-title" aria-hidden="true">Ask, reply comes back here</div>
+            <div class="fl-menu__title" aria-hidden="true">Ask, reply comes back here</div>
             <div class="seg" role="radiogroup" aria-label="Agent" onKeyDown={radioKeys}>
               {agents.map((a) => (
                 <button key={a} type="button" role="radio" aria-checked={a === agent} tabIndex={a === agent ? 0 : -1} class="seg-item" onClick={() => setAgent(a)}>
@@ -119,7 +119,7 @@ export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: b
   const pipeTo = (id: string) => state.links.find((l) => l.kind === 'pipe' && l.from === chat.id && l.to === id);
   return (
     <>
-      <div class="pop-title" aria-hidden="true">Pipe each reply to</div>
+      <div class="fl-menu__title" aria-hidden="true">Pipe each reply to</div>
       <div class="pop-scroll">
         {others.length === 0 && (
           <button role="menuitem" disabled>

@@ -190,6 +190,8 @@ function page(params) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>${theme.css} body { background-color: ${background}; }</style>
+<link rel="stylesheet" href="/media/tokens.css">
+<link rel="stylesheet" href="/media/components.css">
 <link rel="stylesheet" href="/media/webview.css">
 <title>${surface} · harness</title>
 <script>${stub}</script>
@@ -363,7 +365,7 @@ async function shoot() {
     check(!(await p.content()).includes('sk-'), 'no key text on the page');
     check(!(await p.locator('select').count()), 'defaults use our menu, not a native select');
     await gemini.locator('.acct-choice button.mini-select').first().click();
-    await p.locator('.popover [role="menuitemradio"][data-value="large"]').click();
+    await p.locator('.fl-menu [role="menuitemradio"][data-value="large"]').click();
     check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'setDefault', agent: 'gemini', key: 'model', value: 'large' }), 'picking a default model posts setDefault');
     await p.locator('#card-claude button:has-text("Sign out of Claude")').click();
     check(JSON.stringify((await posted(p)).at(-1)) === JSON.stringify({ type: 'signOut', agent: 'claude' }), 'Sign out posts signOut');
@@ -374,10 +376,10 @@ async function shoot() {
     const p = await open(`surface=chat&side=1&select=${ids.side}`, 400, 900);
     await p.evaluate(() => window.postMessage({ type: 'roster', roster: { agents: ['claude', 'codex', 'gemini'], signIn: { claude: 'signed-in', gemini: 'needs-sign-in' } } }, '*'));
     await p.click('button[aria-label="New chat"]');
-    const items = await p.locator('.popover [role="menuitem"]').allInnerTexts();
+    const items = await p.locator('.fl-menu [role="menuitem"]').allInnerTexts();
     check(!items.some((t) => t.includes('Demo')) && items.some((t) => t.includes('Agents & Accounts')), `New chat leaves Demo out and links Agents & Accounts [${items}]`);
-    check((await p.locator('.popover .signin-mark[data-state="needs-sign-in"]').count()) === 1, 'a sign-in mark shows on Gemini');
-    await p.click('.popover [role="menuitem"]:has-text("Agents & Accounts")');
+    check((await p.locator('.fl-menu .signin-mark[data-state="needs-sign-in"]').count()) === 1, 'a sign-in mark shows on Gemini');
+    await p.click('.fl-menu [role="menuitem"]:has-text("Agents & Accounts")');
     check((await posted(p)).some((m) => m.type === 'openAccounts'), 'the menu opens Agents & Accounts');
     await p.close();
   }
@@ -396,10 +398,10 @@ async function shoot() {
 
     const trigger = p.locator(`[data-nav="chat-c3"] .card-connect button[aria-haspopup="menu"][aria-label="Hand off"]`);
     await trigger.click();
-    check(await p.locator('.popover[role="menu"]').isVisible(), 'Hand off opens a menu');
+    check(await p.locator('.fl-menu[role="menu"]').isVisible(), 'Hand off opens a menu');
     await p.keyboard.press('ArrowDown');
     await p.keyboard.press('Escape');
-    check((await p.locator('.popover').count()) === 0 && (await trigger.evaluate((el) => el === document.activeElement)), 'Escape closes the menu and focus returns');
+    check((await p.locator('.fl-menu').count()) === 0 && (await trigger.evaluate((el) => el === document.activeElement)), 'Escape closes the menu and focus returns');
 
     await p.click('.pill.loud');
     await p.waitForTimeout(100);
@@ -924,8 +926,8 @@ async function shoot() {
     // A command card offers "Always allow" for the exact line and for program + subcommand.
     const p = await open('surface=chat&side=1&select=chat-c2', 400, 900);
     await p.click('#item-perm-c2 button:has-text("Always allow")');
-    check(await p.locator('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")').isVisible(), 'Always allow offers the exact command');
-    await p.click('.popover [role="menuitem"]:has-text("rm src/legacyStore.ts")');
+    check(await p.locator('.fl-menu [role="menuitem"]:has-text("rm src/legacyStore.ts")').isVisible(), 'Always allow offers the exact command');
+    await p.click('.fl-menu [role="menuitem"]:has-text("rm src/legacyStore.ts")');
     const rule = (await posted(p)).find((m) => m.type === 'allowAlways');
     check(rule?.requestId === 'perm-c2' && rule.grant.kind === 'exact', 'Always allow posts the rule');
     check((await p.locator('.cc-mode').getAttribute('aria-label')) === 'Mode: Edit automatically' && (await p.locator('.composer').getAttribute('data-mode')) === 'edits', 'the mode button shows the mode in use');
@@ -937,7 +939,7 @@ async function shoot() {
     check(await p.locator('[data-nav="chat-c6"] .auto-badge').isVisible(), 'a Full auto task shows its badge');
     await p.click('.approval-seg [data-level="edits"]');
     await p.click('.task-options button[aria-label^="Claude Model"]');
-    await p.click('.popover [role="menuitemradio"][data-value="small"]');
+    await p.click('.fl-menu [role="menuitemradio"][data-value="small"]');
     await p.fill('.new-task textarea', 'Tidy the README');
     await p.press('.new-task textarea', 'Enter');
     const task = (await posted(p)).find((m) => m.type === 'createTask');
@@ -1096,9 +1098,9 @@ async function shoot() {
     await card.focus();
     check((await shown()) === '1', 'and when the card has keyboard focus');
     await card.locator('.card-more').click();
-    const items = await p.locator('.popover[role="menu"] [role^="menuitem"]').allInnerTexts();
+    const items = await p.locator('.fl-menu[role="menu"] [role^="menuitem"]').allInnerTexts();
     check(['Open chat', 'View changes', 'Ask another agent…'].every((t) => items.some((i) => i.includes(t))) && items.some((i) => i.includes('Claude')) && items.some((i) => i.includes('Rename')), `⋯ holds Open, View changes, Hand off, Ask, Pipe to and the rest [${items.join(' | ')}]`);
-    check((await p.locator('.popover .pop-title:text-is("Hand off to")').count()) === 1 && (await p.locator('.popover .pop-title:has-text("Pipe each reply to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
+    check((await p.locator('.fl-menu .pop-title:text-is("Hand off to")').count()) === 1 && (await p.locator('.fl-menu .pop-title:has-text("Pipe each reply to")').count()) === 1, '⋯ lists Hand off to and Pipe to');
     await p.keyboard.press('Escape');
     const calm = await p.evaluate(() => {
       const c = document.querySelector('.task-card');
@@ -1130,7 +1132,7 @@ async function shoot() {
           const inner = { left: r.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) };
           for (const el of box.querySelectorAll('*')) {
             const e = el.getBoundingClientRect();
-            if (!e.width || window.getComputedStyle(el).position === 'fixed' || el.closest('.popover')) continue;
+            if (!e.width || window.getComputedStyle(el).position === 'fixed' || el.closest('.fl-menu')) continue;
             if (e.left < inner.left - 0.5 || e.right > inner.right + 0.5) out.push(`${el.className || el.tagName} in ${box.getAttribute('data-nav') ?? sel} by ${Math.round(Math.max(inner.left - e.left, e.right - inner.right))}px`);
           }
         }
@@ -1205,7 +1207,7 @@ async function shoot() {
     const tagSameRow = await p.locator('.tl-step .step-row').evaluateAll((els) =>
       els.every((el) => {
         const tag = el.querySelector('.step-end .tag');
-        const dot = el.querySelector('.dot');
+        const dot = el.querySelector('.fl-dot');
         if (!tag || !dot) return true;
         const a = tag.getBoundingClientRect();
         const b = dot.getBoundingClientRect();
@@ -1297,7 +1299,7 @@ async function imagesChecks({ open, check, posted }) {
       chats.every((c, n) => tabs[n + 1].includes(c.title) && tabs[n + 1].trim().endsWith(String(c.count))),
       `${width}: a tab per chat with images, newest first, with its topic and count`,
     );
-    check((await p.locator('.gallery-tabs button.tab .glyph[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
+    check((await p.locator('.gallery-tabs button.tab .fl-avatar[data-agent="codex"]').count()) === 1, `${width}: each chat tab has its agent's glyph`);
     const cards = await p.locator('.gallery-card').count();
     const asked = await thumbs(p);
     check(cards === all.length && asked > 0 && asked < cards / 2, `${width}: only cards near the screen ask for thumbnails (${asked} of ${cards})`);

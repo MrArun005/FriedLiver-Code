@@ -1,6 +1,8 @@
 import { linkTarget } from '../shared/links';
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { Avatar } from './ui/display';
+import { IconButton } from './ui/controls';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
@@ -234,13 +236,9 @@ export function useNow(ms: number): number {
 }
 
 /** Every agent has a face: its letter on a 16% tint of its hue. */
+/** An agent's face: its letter on a 16% tint of its hue (the Avatar component). */
 export function Glyph({ agent, size }: { agent: AgentKey; size?: 'sm' | 'lg' }) {
-  const face = AGENT_FACES[agent];
-  return (
-    <span class={`glyph ${size ?? ''}`} data-agent={agent} title={face.name} aria-label={face.name} role="img">
-      {face.letter}
-    </span>
-  );
+  return <Avatar agent={agent} size={size} />;
 }
 
 export const DOT_LABEL: Record<string, string> = {
@@ -258,7 +256,7 @@ export const DOT_LABEL: Record<string, string> = {
  * an animation that never ends repaints the webview every frame.
  */
 export function Dot({ state, still }: { state: string; still?: boolean }) {
-  return <span class="dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
+  return <span class="fl-dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
 }
 
 /** Where a reply is shown: the chat (for Run in terminal) and its folder (for file links). */
@@ -548,6 +546,10 @@ const ICONS = {
   ask: 'M2.75 3.5h10.5v6.75H8L5 12.75v-2.5H2.75z',
   pipe: 'M2.5 6.5h7.5M2.5 9.5h7.5M9.5 4.5 13 8l-3.5 3.5',
   chevron: 'M5 6.5l3 3 3-3',
+  chevronDown: 'M4 6l4 4 4-4',
+  info: 'M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM8 7.25v3.5M8 5.25v.01',
+  warn: 'M8 2.25l6.25 11H1.75zM8 6.5v3M8 11.25v.01',
+  alert: 'M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM8 5v3.5M8 10.75v.01',
   more: 'M3 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0M7 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0M11 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
   branch: 'M5 2.75v10.5M11 6a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3zM11 6c0 3-6 2.25-6 5',
   diff: 'M4.5 2.5h4l3 3v8h-7zM6.5 8.25h3M8 6.75v3M6.5 11.25h3',
@@ -624,19 +626,19 @@ export function ClampedText({ text, onMore }: { text: string; onMore?: () => voi
 export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
-    <button
-      type="button"
-      class="ghost icon-btn sm copy-btn"
+    <IconButton
+      icon={done ? 'check' : 'copy'}
+      label={label}
       title={done ? 'Copied' : label}
-      aria-label={label}
+      size="sm"
+      muted
+      class="copy-btn"
       onClick={() => {
         send({ type: 'copy', text: text.slice(0, 1_000_000) });
         setDone(true);
         setTimeout(() => setDone(false), 1200);
       }}
-    >
-      <Icon name={done ? 'check' : 'copy'} />
-    </button>
+    />
   );
 }
 
@@ -648,140 +650,7 @@ export function Kbd({ children }: { children: ComponentChildren }) {
   return <kbd>{children}</kbd>;
 }
 
-const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';
-
-/**
- * A button that opens a menu or a small form. Escape, Tab or a click outside
- * closes it; Escape returns focus to the button. Menus move with the arrows.
- */
-export function Popover({
-  label,
-  title,
-  trigger,
-  kind = 'menu',
-  align = 'start',
-  buttonClass,
-  class: className,
-  disabled,
-  children,
-}: {
-  /** The panel's accessible name. */
-  label: string;
-  /** Tooltip and accessible name for a button that shows only an icon. */
-  title?: string;
-  trigger: ComponentChildren;
-  kind?: 'menu' | 'dialog';
-  align?: 'start' | 'end';
-  buttonClass?: string;
-  class?: string;
-  disabled?: boolean;
-  children: (close: (refocus?: boolean) => void) => ComponentChildren;
-}) {
-  const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState<{ up: boolean; dx: number; max?: number }>({ up: false, dx: 0 });
-  const button = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const id = useId();
-  const close = (refocus = true) => {
-    setOpen(false);
-    if (refocus) button.current?.focus();
-  };
-
-  useLayoutEffect(() => {
-    if (!open) setPlace({ up: false, dx: 0 });
-    if (!open || !panel.current || !button.current) return;
-    // Open on the side with room (below first), cap the height to that room so a long menu scrolls
-    // inside the window, and slide sideways to stay inside the webview.
-    const b = button.current.getBoundingClientRect();
-    const p = panel.current.getBoundingClientRect();
-    const below = window.innerHeight - b.bottom - 12;
-    const above = b.top - 12;
-    const up = p.height > below && above > below;
-    const room = Math.floor(up ? above : below);
-    const dx = p.right > window.innerWidth - 8 ? window.innerWidth - 8 - p.right : 0;
-    setPlace({ up, dx: p.left + dx < 8 ? 8 - p.left : dx, max: p.height > room ? room : undefined });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    // Menus focus their first item; forms their text field first.
-    const first =
-      kind === 'menu'
-        ? panel.current?.querySelector<HTMLElement>(MENU_ITEMS)
-        : (panel.current?.querySelector<HTMLElement>('input, textarea') ?? panel.current?.querySelector<HTMLElement>('button:not(:disabled)'));
-    first?.focus();
-    const outside = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!panel.current?.contains(t) && !button.current?.contains(t)) setOpen(false);
-    };
-    document.addEventListener('mousedown', outside);
-    return () => document.removeEventListener('mousedown', outside);
-  }, [open]);
-
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-      return;
-    }
-    if (e.key === 'Tab' && kind === 'menu') {
-      setOpen(false);
-      return;
-    }
-    if (kind !== 'menu' || !panel.current) return;
-    const items = [...panel.current.querySelectorAll<HTMLElement>(MENU_ITEMS)];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const go = (n: number) => {
-      e.preventDefault();
-      items[(n + items.length) % items.length]?.focus();
-    };
-    if (e.key === 'ArrowDown') go(at + 1);
-    else if (e.key === 'ArrowUp') go(at - 1);
-    else if (e.key === 'Home') go(0);
-    else if (e.key === 'End') go(items.length - 1);
-  };
-
-  return (
-    <span class={`pop ${className ?? ''}`}>
-      <button
-        ref={button}
-        type="button"
-        class={buttonClass}
-        title={title}
-        disabled={disabled}
-        aria-label={title}
-        aria-haspopup={kind === 'menu' ? 'menu' : 'dialog'}
-        aria-expanded={open}
-        aria-controls={open ? id : undefined}
-        onClick={() => setOpen(!open)}
-        onKeyDown={(e) => {
-          if (kind === 'menu' && !open && e.key === 'ArrowDown') {
-            e.preventDefault();
-            setOpen(true);
-          }
-        }}
-      >
-        {trigger}
-      </button>
-      {open && (
-        <div
-          ref={panel}
-          id={id}
-          class={`popover ${kind}`}
-          role={kind}
-          aria-label={label}
-          data-up={place.up ? '' : undefined}
-          data-end={align === 'end' ? '' : undefined}
-          style={{ transform: place.dx ? `translateX(${Math.round(place.dx)}px)` : undefined, maxHeight: place.max ? `${place.max}px` : undefined }}
-          onKeyDown={onKeyDown}
-        >
-          {children(close)}
-        </div>
-      )}
-    </span>
-  );
-}
+export { Popover } from './ui/menu';
 
 /** A strip of tabs: with more than fit it scrolls sideways (true: its edges fade), and the open tab stays in view. */
 export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): boolean {
