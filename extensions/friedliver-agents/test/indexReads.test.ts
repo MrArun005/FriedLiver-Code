@@ -6,6 +6,7 @@ import { parseCall } from '../src/bridge/protocol';
 import { findSymbol, SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex } from '../src/host/projectIndex';
 import { estimateTokens } from '../src/shared/tokens';
+import { disposeCores, makeCore, waitFor } from './helpers';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -249,4 +250,19 @@ describe('untrusted input stays cheap', () => {
     symbolRange('x.ts', lines, outline('x.ts', text), { name: 'f', kind: 'function', line: 1 });
     expect(performance.now() - t).toBeLessThan(500);
   });
+});
+
+describe('what the core tells the index', () => {
+  afterEach(disposeCores);
+  it('reports files an agent read and the end of each turn, per chat', async () => {
+    const root = await project({ 'src/a.ts': 'export const a = 1;\n' });
+    const seen: [string, string][] = [];
+    const ended: string[] = [];
+    const core = makeCore(root, { indexSeen: (chatId, file) => seen.push([chatId, file]), indexTurnEnded: (chatId) => ended.push(chatId) });
+    const chat = await core.createChat('demo');
+    await core.send(chat.id, `read-image ${path.join(root, 'src/a.ts')}`);
+    await waitFor(() => ended.length === 1);
+    expect(seen).toEqual([[chat.id, path.join(root, 'src/a.ts')]]);
+    expect(ended).toEqual([chat.id]);
+  }, 30_000);
 });

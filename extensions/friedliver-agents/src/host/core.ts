@@ -152,6 +152,10 @@ export interface CoreOptions {
   browserPage?: ToolHost['browserPage'];
   /** Answers the index_* tools (projectIndexHost.ts). */
   index?: ToolHost['index'];
+  /** A file (absolute) a chat's agent read or wrote: it has seen this version (projectIndexHost.ts observe). */
+  indexSeen?(chatId: string, file: string): void;
+  /** A chat's turn ended: index_changes since "last_turn" compares with now. */
+  indexTurnEnded?(chatId: string): void;
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -1388,6 +1392,7 @@ export class AgentCore {
     }
     // The chat stays busy until the turn's changes are known, so a new turn can't start in between.
     const files = await this.turnFiles(chatId, turnId);
+    this.options.indexTurnEnded?.(chatId);
     for (const map of [this.turnDecision, this.approvedWrites, this.reported]) map.delete(chatId);
     this.dispatch({ t: 'busy', chatId, busy: false, at: Date.now() });
     if (files.length) {
@@ -1447,6 +1452,11 @@ export class AgentCore {
     const diffs = (update.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.path] : []));
     if (next.kind === 'edit' || next.kind === 'delete' || next.kind === 'move' || diffs.length) {
       for (const file of [...(update.locations ?? []).map((l) => l.path), ...diffs]) this.noteFile(chatId, file);
+    }
+    // A finished read or edit: the agent has this version of the file now (index_diff compares with it).
+    if (next.status === 'completed' && (next.kind === 'read' || next.kind === 'edit' || diffs.length)) {
+      const files = [...(next.locations ?? []).map((l) => l.path), ...(next.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.path] : []))];
+      for (const file of new Set(files)) if (typeof file === 'string' && path.isAbsolute(file)) this.options.indexSeen?.(chatId, file);
     }
   }
 
@@ -1669,7 +1679,9 @@ export class AgentCore {
       const info = await stat(file);
       if (!info.isFile()) throw new Error(`${file} is not a regular file.`);
       if (info.size > MAX_AGENT_READ_BYTES) throw new Error(`${file} is ${Math.round(info.size / 1048576)} MB, more than an agent can read through FriedLiver at once.`);
-      return readTextFile({ ...req, path: file });
+      const read = await readTextFile({ ...req, path: file });
+      if (chatId) this.options.indexSeen?.(chatId, file);
+      return read;
     }
     if (req.line == null && req.limit == null) return { content: unsaved };
     const lines = unsaved.split('\n');
