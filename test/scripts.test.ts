@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
-import { codesignArgs, friedliverVersion, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
+import { codesignArgs, friedliverVersion, keepChromiumLocale, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
 
@@ -180,5 +180,29 @@ describe('upstream check', () => {
     expect(body).toContain('scripts/checksums.json');
     expect(body).toContain('was 24.18.0');
     expect(prBody({ from: '1.142.0', to: '1.142.1', commit: 'c'.repeat(40), node: '24.18.0', previousNode: '24.18.0', ripgrep: '1.17.1', previousRipgrep: '1.17.1' })).not.toContain('checksums.json');
+  });
+});
+
+describe('Chromium locale packs in the packaged app', () => {
+  it('keeps English (always) and the keep-list, drops the rest, ignores everything else', () => {
+    for (const keep of ['en.lproj', 'en_GB.lproj', 'en-US.pak', 'en-GB.pak', 'Info.plist', 'resources.pak', 'chrome_100_percent.pak', 'Base.lproj', 'MainMenu.nib', 'icudtl.dat']) {
+      expect(keepChromiumLocale(keep, 'en,en-GB'), keep).toBe(true);
+    }
+    for (const drop of ['de.lproj', 'zh_CN.lproj', 'pt_BR.lproj', 'hi.pak', 'fr.pak', 'en-AU.pak']) {
+      expect(keepChromiumLocale(drop, 'en,en-GB'), drop).toBe(false);
+    }
+  });
+
+  it('reads the keep-list in either spelling, and "all" keeps every pack', () => {
+    expect(keepChromiumLocale('hi.pak', 'en, hi')).toBe(true);
+    expect(keepChromiumLocale('pt_BR.lproj', 'pt-br')).toBe(true);
+    expect(keepChromiumLocale('en-US.pak', '')).toBe(true);
+    expect(keepChromiumLocale('de.lproj', 'all')).toBe(true);
+  });
+
+  it('runs on the packaged app before the installer is made and signed', () => {
+    const build = fs.readFileSync(path.join(root, 'scripts', 'build.mjs'), 'utf8');
+    expect(build).toContain('keepChromiumLocale(n)');
+    expect(build.indexOf('trimPackagedApp(out);')).toBeLessThan(build.indexOf('buildInstaller(arch, out);'));
   });
 });

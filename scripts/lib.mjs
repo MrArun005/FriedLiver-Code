@@ -271,3 +271,21 @@ export function codesignArgs(target, { identity = '', keychain = '', identifier 
 		target,
 	];
 }
+
+/**
+ * Whether a Chromium locale pack stays in the packaged app: `<lang>.lproj` in macOS's Electron
+ * Framework, `locales/<lang>.pak` on Windows and Linux. Chromium's own strings (spellcheck and
+ * webview context menus, some dialogs) fall back to English without theirs; FriedLiver's UI
+ * language comes from VS Code language packs and is unaffected. English is always kept, as
+ * Chromium's fallback. FRIEDLIVER_KEEP_LOCALES (comma-separated, `en_GB` or `en-GB`) overrides
+ * the keep-list; `all` keeps everything. Anything that isn't a locale pack is kept.
+ */
+export function keepChromiumLocale(entry, keep = (process.env.FRIEDLIVER_KEEP_LOCALES || 'en,en-GB')) {
+	const match = /^([a-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?)\.(lproj|pak)$/.exec(entry); // a locale code, not resources.pak or Base.lproj
+	if (!match || keep.trim() === 'all') {
+		return true;
+	}
+	const norm = s => s.trim().replace(/_/g, '-').toLowerCase();
+	const name = norm(match[1]);
+	return name === 'en' || name === 'en-us' || keep.split(',').map(norm).includes(name);
+}
