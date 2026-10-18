@@ -261,6 +261,14 @@ function finishMacApp(appPath, signing) {
 	} else {
 		log('no dictation helper in the app (native/build.sh not run): the mic falls back to the Fn Fn hint');
 	}
+	const journal = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-fsevents');
+	if (fs.existsSync(journal)) {
+		fs.chmodSync(journal, 0o755);
+		run('codesign', codesignArgs(journal, { ...signing, identifier: 'com.friedliver.fsevents' }));
+		log('change journal helper signed');
+	} else {
+		log('no change journal helper in the app (native/build.sh not run): the project index checks every file on open');
+	}
 }
 
 /**

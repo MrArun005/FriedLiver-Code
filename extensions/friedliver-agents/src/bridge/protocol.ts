@@ -177,6 +177,9 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       return (a.action === 'get' || a.action === 'mute' || a.action === 'unmute') && a.level === undefined ? { tool, action: a.action } : null;
     case 'system_screenshot_window':
       return windowId(a.window) ? { tool, window: a.window } : null;
+    case 'index_changes':
+      if (a.since === undefined) return { tool };
+      return typeof a.since === 'string' && /^[0-9a-fA-F]{8,64}$/.test(a.since) ? { tool, since: a.since } : null;
     default:
       return null;
   }

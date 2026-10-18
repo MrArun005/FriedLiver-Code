@@ -1,0 +1,54 @@
+name: Index bench
+
+# Re-open of the agents extension's project index on microsoft/TypeScript after
+# touching 10 files: time until it answers and until it is verified, against a
+# full build (test/indexBench.test.ts). macOS uses the FSEvents change journal
+# (the helper built here); Linux has no journal and checks every file. Numbers
+# go to the run's summary. Runs on demand and when the index code changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - extensions/friedliver-agents/src/host/projectIndex.ts
+      - extensions/friedliver-agents/src/host/merkle.ts
+      - extensions/friedliver-agents/src/host/changeJournal.ts
+      - extensions/friedliver-agents/native/friedliver-fsevents.swift
+      - extensions/friedliver-agents/test/indexBench.test.ts
+      - .github/workflows/index-bench.yml
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: The FSEvents helper (macOS)
+        if: runner.os == 'macOS'
+        run: extensions/friedliver-agents/native/build.sh "$RUNNER_TEMP/helpers/friedliver-dictate"
+      # A fixed tag, so runs compare: v6.0.3 is the last release written in TypeScript (main is the Go port).
+      - name: A throwaway TypeScript checkout (the bench edits files in it)
+        run: git clone --depth 1 --quiet --branch v6.0.3 https://github.com/microsoft/TypeScript.git "$RUNNER_TEMP/TypeScript"
+      - name: Bench
+        working-directory: extensions/friedliver-agents
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          npm ci
+          if [ "$RUNNER_OS" = macOS ]; then
+            export FL_INDEX_BENCH_JOURNAL="$RUNNER_TEMP/helpers/friedliver-fsevents"
+            FL_FSEVENTS_HELPER="$FL_INDEX_BENCH_JOURNAL" npx vitest run test/changeJournal.test.ts
+          fi
+          FL_INDEX_BENCH_REPO="$RUNNER_TEMP/TypeScript" npx vitest run test/indexBench.test.ts
