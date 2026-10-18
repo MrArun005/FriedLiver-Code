@@ -121,6 +121,8 @@ export interface CoreUi {
   confirmFullAuto?(ask: { label: string; agent: string; mode?: string }): Promise<boolean>;
   /** Asks before adding an "Always allow" command rule. */
   confirmRule?(rule: Extract<Grant, { kind: 'exact' | 'prefix' }>): Promise<boolean>;
+  /** FriedLiver Remote asked for something that keeps allowing (Auto, "Always allow"): the user's OK on the Mac. No hook: refused. */
+  confirmRemote?(ask: { title: string; detail: string; button: string }): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
   askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void;
   /** An agent asks a question as a small form, answered in the chat. */
@@ -173,6 +175,9 @@ export interface CoreOptions {
   /** Where checkpoints are kept across windows (global storage); folders outside git need it. */
   checkpointDir?: string;
 }
+
+/** Where a request came from: FriedLiver Remote (a paired phone) confirms on the Mac whatever keeps allowing. */
+export type Via = 'desktop' | 'remote';
 
 /** Rewind to a message: its files, the conversation, or both. */
 export type RewindMode = 'both' | 'code' | 'conversation';
@@ -394,7 +399,8 @@ export class AgentCore {
     if (!folder) throw new Error('Open a folder first. Agents work inside the folder you open.');
     const shared = options.shareWorktreeOf ? this.chat(options.shareWorktreeOf) : undefined;
     const resumeCwd = options.resume && this.options.folders().includes(options.resume.cwd) ? options.resume.cwd : undefined;
-    let cwd = shared?.cwd ?? resumeCwd ?? folder;
+    const chosenCwd = options.cwd && this.options.folders().includes(options.cwd) ? options.cwd : undefined;
+    let cwd = shared?.cwd ?? resumeCwd ?? chosenCwd ?? folder;
     let wt = shared && this.worktrees.get(shared.id);
     if (options.worktree && !wt) {
       const repo = await git.repoRoot(folder);
@@ -629,9 +635,9 @@ export class AgentCore {
   }
 
   /** FriedLiver's approval level for the chat, and the agent's matching mode. */
-  async setApproval(chatId: string, level: ApprovalLevel): Promise<void> {
+  async setApproval(chatId: string, level: ApprovalLevel, via: Via = 'desktop'): Promise<void> {
     const chat = this.requireChat(chatId);
-    if (level === 'full' && !(await this.confirmFull(chat))) return;
+    if (level === 'full' && !(await this.confirmFull(chat, via))) return;
     this.setLevel(chat, level);
     await this.applyLevel(chatId, true);
   }
@@ -651,7 +657,13 @@ export class AgentCore {
     if (level !== 'full') this.saveDefaults(chat.agent, { approval: level });
   }
 
-  private async confirmFull(chat: ChatView): Promise<boolean> {
+  private async confirmFull(chat: ChatView, via: Via = 'desktop'): Promise<boolean> {
+    if (via === 'remote') {
+      // Every time from the phone, whatever the desktop confirmed before.
+      const ok = await this.confirmRemote({ title: `Run ${chat.label} in Auto?`, detail: `${chat.label} would edit and run commands without asking until the chat is switched back.`, button: 'Use Auto' });
+      if (ok) this.confirmedFull.add(chat.id);
+      return ok;
+    }
     if (this.confirmedFull.has(chat.id)) return true;
     const mode = modeFor(chat.agent, modeOption(chat.session), 'full');
     const name = modeOption(chat.session)?.choices.find((c) => c.value === mode)?.name;
@@ -1798,7 +1810,7 @@ export class AgentCore {
    * user confirms it), then allows the request that asked. The grant must be one this very request
    * offered: the command on screen, or a folder or website its card listed. Never in a read-only chat.
    */
-  async allowAlways(target: { requestId: string } | { commandId: string }, grant: Grant): Promise<void> {
+  async allowAlways(target: { requestId: string } | { commandId: string }, grant: Grant, via: Via = 'desktop'): Promise<void> {
     let found: { chat: ChatView; line?: string; offered: Grant[] } | undefined;
     for (const chat of this.state.chats) {
       for (const i of chat.items) {
@@ -1808,10 +1820,16 @@ export class AgentCore {
     }
     const remembered = this.options.permissions;
     if (!found || found.chat.readOnly || !remembered) return;
+    const fromPhone = () => {
+      const { what, scope } = describeGrant(grant);
+      const title = grant.kind === 'folder' ? `${grant.access === 'read' ? 'reading' : 'changing'} files in ${scope}` : grant.kind === 'site' ? `${scope} in the browser` : grant.kind === 'tool' ? what.toLowerCase() : scope;
+      return this.confirmRemote({ title: `Always allow ${title}?`, detail: `${what}, in every chat, for every agent, until you revoke it in "FriedLiver: Manage Permissions".`, button: 'Always allow' });
+    };
     if (grant.kind === 'exact' || grant.kind === 'prefix') {
       // The rule must cover the very command on screen.
-      if (!found.line || !matchesRule(found.line, [grant]) || !(await this.options.ui.confirmRule?.(grant))) return;
-    } else if (!found.offered.some((g) => sameGrant(g, grant))) {
+      if (!found.line || !matchesRule(found.line, [grant])) return;
+      if (!(await (via === 'remote' ? fromPhone() : this.options.ui.confirmRule?.(grant)))) return;
+    } else if (!found.offered.some((g) => sameGrant(g, grant)) || (via === 'remote' && !(await fromPhone()))) {
       return;
     }
     if (!remembered.add(grant, AGENT_FACES[found.chat.agent].name)) return;
@@ -1822,6 +1840,12 @@ export class AgentCore {
     const pending = this.permissions.get(target.requestId);
     const once = pending?.options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
     if (once) this.answerPermission(target.requestId, once.optionId);
+  }
+
+  /** The user's OK on the Mac for a request from FriedLiver Remote; refused when the editor can't ask. */
+  private async confirmRemote(ask: { title: string; detail: string; button: string }): Promise<boolean> {
+    const confirm = this.options.ui.confirmRemote;
+    return confirm ? (await confirm({ ...ask, title: `${ask.title} Your phone asks.` })) === true : false;
   }
 
   /** Accept all / Reject all: the edits waiting now (the editor decides its reviews) and the rest of this turn's. */
