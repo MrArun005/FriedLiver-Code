@@ -932,6 +932,13 @@ pre {
   white-space: nowrap;
 }
 
+.req__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .req__verb {
   flex: none;
   font-weight: 600;

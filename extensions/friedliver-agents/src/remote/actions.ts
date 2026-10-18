@@ -44,6 +44,8 @@ export function slashCommand(text: string): string | undefined {
   return /^\s*\/([^\s/]+)/.exec(body)?.[1].toLowerCase();
 }
 
+const CHANGED = 'The command changed. Review it again.';
+
 const ON_MAC = 'Approve this one on your Mac: the phone can’t show the whole command plainly.';
 
 const refused = (error: string): ActionResult => ({ ok: false, error });
@@ -115,6 +117,8 @@ export class RemoteActions {
         const line = found.item.detail?.command?.line;
         if (allows && line !== undefined && !plainCommand(line)) return refused(ON_MAC);
         if (allows && option !== primaryOption(found.item.options) && requestRisk(found.item.detail).level === 'careful') return refused('This one can only be allowed once.');
+        // The phone allows only the command it showed: the same text, whole.
+        if (allows && line !== undefined && a.shown !== line) return refused(CHANGED);
         // Only the plain one-time yes goes ahead: every other allow keeps allowing or changes how the agent asks.
         if (option && allows && option !== primaryOption(found.item.options)) {
           const ok = await confirm({
@@ -131,6 +135,7 @@ export class RemoteActions {
         const found = this.waiting('command', a.commandId);
         if (!found) return refused('That command is no longer waiting.');
         if (a.approve && !plainCommand(found.item.commandLine)) return refused(ON_MAC);
+        if (a.approve && a.shown !== found.item.commandLine) return refused(CHANGED);
         core.decideCommand(a.commandId, a.approve);
         return { ok: true };
       }
@@ -166,6 +171,7 @@ export class RemoteActions {
         if (line !== undefined && !plainCommand(line)) return refused(ON_MAC);
         const risk = found.item.kind === 'command' ? commandRisk(found.item.commandLine) : found.item.kind === 'permission' ? requestRisk(found.item.detail) : undefined;
         if (risk?.level === 'careful') return refused('This one can only be allowed once.');
+        if (line !== undefined && a.shown !== line) return refused(CHANGED);
         await core.allowAlways(a.requestId ? { requestId: a.requestId } : { commandId: a.commandId! }, a.grant, via);
         return { ok: true };
       }
