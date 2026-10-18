@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { handle } from '../src/bridge/mcp';
+import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
 import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, readIndexFile, saveIndexFile, STAT_BATCH, tokenize } from '../src/host/projectIndex';
 
@@ -223,6 +223,10 @@ describe('the index_* tools on the tools server', () => {
     for (const p of ['/etc/passwd', '../x', 'a/../../b', 'C:\\x', '']) expect(parseCall('index_outline', { path: p }), p).toBeNull();
     expect(parseCall('index_search', { query: 'x', limit: 51 })).toBeNull();
     expect(parseCall('index_related', { path: 'src/a.ts' })).toEqual({ tool: 'index_related', path: 'src/a.ts' });
+    expect(parseCall('index_changes', {})).toEqual({ tool: 'index_changes' });
+    expect(parseCall('index_changes', { since: 'a1B2c3d4' })).toEqual({ tool: 'index_changes', since: 'a1B2c3d4' });
+    for (const since of ['abc', '../x', 'g'.repeat(12), 'a'.repeat(65), 7]) expect(parseCall('index_changes', { since }), String(since)).toBeNull();
+    expect(TOOLS.find((t) => t.name === 'index_changes')?.annotations).toEqual({ readOnlyHint: true });
   });
 });
 
