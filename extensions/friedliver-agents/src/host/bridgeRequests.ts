@@ -100,7 +100,9 @@ export class BridgeRequests {
       text: call.tool === 'ask_agent' ? call.prompt : call.tool === 'send_to_chat' ? call.message : '',
       state: 'awaiting',
     };
-    settled(await this.approve(caller, item, this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal, this.toolGrant(call.tool)));
+    // Reading the chat that handed this one its task, or that consulted it: the user (or their OK) already linked the two for that.
+    const linked = call.tool === 'read_chat' && this.host.state.links.some((l) => (l.kind === 'handoff' || l.kind === 'consult') && l.from === call.chatId && l.to === caller.id);
+    settled(await this.approve(caller, item, linked || this.host.policy() === 'allow' || this.allowedChats.has(caller.id), signal, this.toolGrant(call.tool)));
     // The state may have changed while the user decided.
     this.check(caller, call);
 

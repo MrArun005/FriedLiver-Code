@@ -14,6 +14,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex, STAT_BATCH, type IndexCall, type IndexContext } from '../src/host/projectIndex';
 import { compactOutput } from '@friedliver/main/agents/terminals';
+import { handoffContext, rewoundHistory } from '../src/host/transcript';
+import { longChat } from './fixtures/chats';
 import { imageTokens, shotParams } from '../src/host/browserRules';
 import { extractPage, PageMemory, renderPage, SNAPSHOT_LIMITS } from '../src/host/pageText';
 import { estimateTokens } from '../src/shared/tokens';
@@ -393,5 +395,15 @@ describe('token bench: command output', () => {
       rows.push({ category: 'Command output', task, without: tokens.count(raw), with: tokens.count(compactOutput(raw, undefined, '/storage/output/term-1.txt').text), calls: [1, 1] });
     }
     for (const r of rows.slice(before)) expect(r.with, r.task).toBeLessThan(r.without);
+  });
+});
+
+describe('token bench: hand-off', () => {
+  it('hands a long chat over as a compact summary instead of its transcript', async () => {
+    tokens ??= await counter();
+    const c = longChat();
+    // Before: the transcript (up to 24,000 characters), as hand-offs carried it, plus the same plan/commands/files sections.
+    rows.push({ category: 'Hand-off', task: 'Hand a 40-turn chat to another agent', without: tokens.count(rewoundHistory(c, c.items)), with: tokens.count(handoffContext(c, { 'src/limiter.ts': '1a2b3c4d' })), calls: [1, 1] });
+    expect(rows.at(-1)!.with).toBeLessThan(rows.at(-1)!.without);
   });
 });
