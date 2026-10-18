@@ -2,6 +2,9 @@ import type * as acp from '@agentclientprotocol/sdk';
 import type { Attachment } from '../shared/messages';
 import { MAX_LINK_DEPTH, lastReply, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
 import type { ApprovalLevel } from '../shared/session';
+import { createHash } from 'node:crypto';
+import { lstat, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { consultBrief, forwardText, handoffContext, handoffSummary } from './transcript';
 
 /** Forwards one pipe makes before it pauses, so two agents can't keep each other busy forever. */
@@ -82,7 +85,7 @@ export class Connections {
     const link = this.addLink('handoff', source.id, target.id, 'user', 1);
     const summary = handoffSummary(source);
     this.carry(link, source, target, 'handoff-to', 'handoff-from', summary, 'user');
-    this.host.preamble(target.id, handoffContext(source));
+    this.host.preamble(target.id, handoffContext(source, await fileHashes(source)));
     return this.require(target.id);
   }
 
@@ -313,4 +316,21 @@ export function pipeReaches(links: readonly ChatLink[], from: string, to: string
     for (const l of links) if (l.kind === 'pipe' && l.active && l.from === at) queue.push(l.to);
   }
   return false;
+}
+
+/** Short content hashes (first 8 hex of SHA-256) of the files a chat changed, as they are now; missing ones left out. */
+async function fileHashes(chat: ChatView): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(
+    chat.files.slice(0, 50).map(async (f) => {
+      const abs = path.resolve(chat.cwd, f);
+      // Only inside the chat's folder, a regular file, not followed out through a symlink.
+      if (!abs.startsWith(chat.cwd + path.sep)) return;
+      const st = await lstat(abs).catch(() => null);
+      if (!st?.isFile() || st.size > 16 * 1024 * 1024) return;
+      const data = await readFile(abs).catch(() => null);
+      if (data) out[f] = createHash('sha256').update(data).digest('hex').slice(0, 8);
+    }),
+  );
+  return out;
 }
