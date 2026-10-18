@@ -18,7 +18,7 @@ import { questionGroups, recommended, type QuestionField } from '../shared/quest
 import { denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
 import { ClampedText, LiveState, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 import { agentName } from '../shared/names';
-import { Button, Checkbox, IconButton, Input, MenuItem, Pill, selectTrigger } from './ui';
+import { Button, Checkbox, ChoiceRow, FileRef, IconButton, Input, MenuItem, Pill, selectTrigger } from './ui';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -46,12 +46,15 @@ export function usageSamples(chat: Pick<ChatView, 'id' | 'turns' | 'session'>): 
 }
 
 
+/** A reported mode's pill tone: plan the info blue, the modes that don't ask the error red. */
+const MODE_TONES: Record<string, 'info' | 'error' | 'muted'> = { plan: 'info', auto: 'error', full: 'error', edits: 'muted' };
+
 /** The mode the agent says it is in, loud when it runs without asking. */
 export function ModeBadge({ session, agent }: { session?: ChatSession; agent: AgentKey }) {
   const mode = reportedMode(session);
   if (!mode) return null;
   return (
-    <span class="mode-badge" data-tone={mode.tone} title={`${AGENT_FACES[agent].name} reports its mode: ${mode.name}`}>
+    <span class="fl-pill mode-badge" data-tone={MODE_TONES[mode.tone] ?? "muted"} title={`${AGENT_FACES[agent].name} reports its mode: ${mode.name}`}>
       {mode.name}
     </span>
   );
@@ -61,7 +64,7 @@ export function ModeBadge({ session, agent }: { session?: ChatSession; agent: Ag
 export function AutoBadge({ chat, short }: { chat: Pick<ChatView, 'approval'>; short?: boolean }) {
   if (chat.approval !== 'full') return null;
   return (
-    <span class="auto-badge" title="Auto: edits and commands go through without asking">
+    <span class="fl-pill auto-badge" data-tone="error" title="Auto: edits and commands go through without asking">
       <Icon name="bolt" />
       {!short && 'Auto'}
     </span>
@@ -93,7 +96,7 @@ function FileChange({ file, requestId, open: startOpen }: { file: ProposedFile; 
       <div class="file-line">
         <button class="file-row" aria-expanded={open} title={file.path} onClick={() => setOpen(!open)}>
           <Icon name="file" /> <span class="file-name">{basename(file.path)}</span>
-          {file.isNew && <span class="tag">new</span>}
+          {file.isNew && <span class="fl-pill" data-tone="muted">new</span>}
           <span class="stats">
             <span class="plus">+{file.added}</span> <span class="minus">−{file.removed}</span>
           </span>
@@ -137,9 +140,7 @@ export function PermissionDetailView({ detail, requestId, open }: { detail?: Per
       {detail.locations && detail.locations.length > 0 && (
         <div class="files">
           {detail.locations.map((l) => (
-            <button key={l} class="ref" title={l} onClick={() => send({ type: 'openFile', path: l })}>
-              {basename(l)}
-            </button>
+            <FileRef key={l} path={l} onOpen={() => send({ type: 'openFile', path: l })} />
           ))}
         </div>
       )}
@@ -196,7 +197,7 @@ export function QueueList({ chat }: { chat: ChatView }) {
         <div key={q.id} class="bubble queued" aria-label="Queued message">
           {q.text && <ClampedText text={q.text} />}
           <div class="queued-bar">
-            <span class="tag">
+            <span class="fl-pill" data-tone="muted">
               <Icon name="queue" /> queued{q.images ? ` · ${q.images} image${q.images === 1 ? '' : 's'}` : ''}
             </span>
             <span class="spacer" />
@@ -559,41 +560,32 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
         {choice ? (
           <div class="q-options" ref={list} role={g.field.type === 'multi' ? 'group' : 'listbox'} aria-label={g.field.title} onKeyDown={onListKey}>
             {options.map(({ o, label, recommended: rec }, n) => (
-              <button
+              <ChoiceRow
                 key={o.value}
-                type="button"
                 class="q-opt"
-                role={g.field.type === 'multi' ? 'checkbox' : 'option'}
-                aria-checked={g.field.type === 'multi' ? picked(o.value) : undefined}
-                aria-selected={g.field.type === 'multi' ? undefined : picked(o.value)}
+                multi={g.field.type === 'multi'}
+                selected={picked(o.value)}
                 data-picked={picked(o.value) ? '' : undefined}
                 onMouseEnter={() => setActive(n)}
                 onFocus={() => setActive(n)}
-                onClick={() => pick(o.value)}
-              >
-                {g.field.type === 'multi' && <span class="q-check">{picked(o.value) && <Icon name="check" size={12} />}</span>}
-                <span class="q-opt-text">
-                  <span class="q-opt-label">
-                    {label}
+                onPick={() => pick(o.value)}
+                label={
+                  <>
+                    {label}{' '}
                     {rec && (
                       <Pill tone="info" class="q-rec">
                         Recommended
                       </Pill>
                     )}
-                  </span>
-                  {o.description && <span class="q-opt-desc">{o.description}</span>}
-                </span>
-                {n < 9 && <kbd class="q-key">{n + 1}</kbd>}
-              </button>
+                  </>
+                }
+                desc={o.description}
+                kbd={n < 9 ? String(n + 1) : undefined}
+              />
             ))}
             {g.other &&
               (other === null ? (
-                <button type="button" class="q-opt q-opt-other" role={g.field.type === 'multi' ? 'button' : 'option'} onClick={() => setOther('')}>
-                  <span class="q-opt-text">
-                    <span class="q-opt-label">Other…</span>
-                  </span>
-                  {options.length < 9 && <kbd class="q-key">{options.length + 1}</kbd>}
-                </button>
+                <ChoiceRow action class="q-opt q-opt-other" multi={g.field.type === 'multi'} selected={false} label="Other…" kbd={options.length < 9 ? String(options.length + 1) : undefined} onPick={() => setOther('')} />
               ) : (
                 <div class="q-other">
                   <Input
