@@ -76,6 +76,8 @@
   /* Tints: a tone at 14% (rest) and 22% (hover) over whatever is under it. */
   --tint: 14%;
   --tint-hover: 22%;
+  /* How much of a tone its text keeps (the rest is --fg): all of it on dark, half on light. */
+  --tone-ink: 100%;
   /* The composer's mic: one brand blue in every theme, a white glyph (4.53:1, hover 5.2:1). */
   --mic-bg: #0078d4;
   --mic-hover: #026ec1;
@@ -231,6 +233,7 @@ body.vscode-high-contrast-light {
   --elev-4: 0 24px 64px -12px #00000047;
   --overlay: #00000066;
   --glass-alpha: 80%;
+  --tone-ink: 50%;
   --seg-on: var(--bg);
   /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
   --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
