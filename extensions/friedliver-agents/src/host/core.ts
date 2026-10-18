@@ -180,6 +180,8 @@ export interface CoreOptions {
   log?(line: string): void;
   /** Where checkpoints are kept across windows (global storage); folders outside git need it. */
   checkpointDir?: string;
+  /** A private folder for commands' whole output when an agent got it cut (terminals.ts compactOutput). */
+  outputDir?: string;
 }
 
 /** Rewind to a message: its files, the conversation, or both. */
@@ -1971,6 +1973,15 @@ export class AgentCore {
       onData: (terminalId, data) => {
         const k = known.get(terminalId);
         if (k) this.queueOutput(k.commandId, data);
+      },
+      saveOutput: async (info, text) => {
+        const dir = this.options.outputDir;
+        if (!dir) throw new Error('No folder for command output.');
+        await mkdir(dir, { recursive: true, mode: 0o700 });
+        const file = path.join(dir, `${info.sessionId.replace(/[^\w-]/g, '_').slice(0, 64)}-${info.terminalId}.txt`);
+        // Private, and replaced whole: a later call while the command runs has more.
+        await writeFile(file, text, { mode: 0o600 });
+        return file;
       },
       onExit: (terminalId, status) => {
         const k = known.get(terminalId);

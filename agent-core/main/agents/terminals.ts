@@ -38,6 +38,65 @@ export interface TerminalListener {
   onStart(info: TerminalInfo): void;
   onData(terminalId: string, data: string): void;
   onExit(terminalId: string, status: acp.TerminalExitStatus): void;
+  /** Keeps a command's whole output where the agent can read it, when what it gets is cut; resolves to that file. */
+  saveOutput?(info: TerminalInfo, text: string): Promise<string>;
+}
+
+/** Lines of a long output an agent gets from its start and its end. */
+export const OUTPUT_KEEP = { head: 60, tail: 100 };
+
+// CSI and OSC sequences and two-character escapes: colors, cursor moves, titles, hyperlinks.
+// eslint-disable-next-line no-control-regex -- matching escape sequences is the point
+const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+const FRAME = /^(\s+)at\s/;
+const LIB_FRAME = /node_modules|site-packages|[/\\]vendor[/\\]/;
+const RUNTIME_FRAME = /\bnode:|\(internal\/|<anonymous>|\bjava\.base\/|\bjdk\.internal\.|\bsun\.reflect\./;
+
+/** Repeated lines as one with a count, and runs of library or runtime stack frames as one line each. */
+function fold(lines: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    let j = i + 1;
+    while (j < lines.length && lines[j] === lines[i]) j++;
+    if (j - i >= 3 && lines[i].trim()) {
+      out.push(lines[i], `… the line above ${j - i - 1} more times`);
+      i = j;
+      continue;
+    }
+    const frame = FRAME.exec(lines[i]);
+    const kind = frame && (LIB_FRAME.test(lines[i]) ? 'lib' : RUNTIME_FRAME.test(lines[i]) ? 'runtime' : '');
+    if (kind) {
+      j = i + 1;
+      while (j < lines.length && FRAME.test(lines[j]) && (kind === 'lib' ? LIB_FRAME.test(lines[j]) : !LIB_FRAME.test(lines[j]) && RUNTIME_FRAME.test(lines[j]))) j++;
+      if (j - i >= 2) {
+        out.push(`${frame![1]}… ${j - i} ${kind === 'lib' ? 'frames in node_modules' : 'runtime frames'}`);
+        i = j;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out;
+}
+
+/**
+ * Command output as an agent should get it: no color codes or spinner frames (only the text after a
+ * line's last carriage return), repeated lines and library stack frames folded, and when still long,
+ * its first `head` and last `tail` lines with how many were left out (line numbers of the whole output).
+ * `whole` names where the whole output is, for the note.
+ */
+export function compactOutput(text: string, keep = OUTPUT_KEEP, whole?: string): { text: string; omitted: number } {
+  const lines = text
+    .replace(ANSI, '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => (l.includes('\r') ? l.slice(l.lastIndexOf('\r') + 1) : l));
+  const folded = fold(lines);
+  if (folded.length <= keep.head + keep.tail + 10) return { text: folded.join('\n'), omitted: 0 };
+  const omitted = lines.length - keep.head - keep.tail;
+  const note = `… ${omitted} lines left out (${keep.head + 1}-${keep.head + omitted})${whole ? `; the whole output: ${whole}` : ''}`;
+  return { text: [...fold(lines.slice(0, keep.head)), note, ...fold(lines.slice(-keep.tail))].join('\n'), omitted };
 }
 
 class RunningCommand {
@@ -154,8 +213,16 @@ export class TerminalManager {
     return { terminalId };
   }
 
-  output(req: acp.TerminalOutputRequest): acp.TerminalOutputResponse {
-    return this.get(req.terminalId).snapshot();
+  /** The output compacted (compactOutput); when lines were left out, the whole of it is saved first and named. */
+  async output(req: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {
+    const command = this.get(req.terminalId);
+    const snap = command.snapshot();
+    let r = compactOutput(snap.output);
+    if (r.omitted && this.listener?.saveOutput) {
+      const file = await this.listener.saveOutput(command.info, snap.output).catch(() => undefined);
+      if (file) r = compactOutput(snap.output, OUTPUT_KEEP, file);
+    }
+    return { ...snap, output: r.text, truncated: snap.truncated || r.omitted > 0 };
   }
 
   async waitForExit(req: acp.WaitForTerminalExitRequest): Promise<acp.WaitForTerminalExitResponse> {

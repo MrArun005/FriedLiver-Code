@@ -13,6 +13,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex, STAT_BATCH, type IndexCall, type IndexContext } from '../src/host/projectIndex';
+import { compactOutput } from '@friedliver/main/agents/terminals';
 import { imageTokens, shotParams } from '../src/host/browserRules';
 import { extractPage, PageMemory, renderPage, SNAPSHOT_LIMITS } from '../src/host/pageText';
 import { estimateTokens } from '../src/shared/tokens';
@@ -368,6 +369,29 @@ describe('token bench: screenshots', () => {
     rows.push({ category: 'Screenshots (formula)', task: 'Screenshot of the page (1280×800 at 2×)', without: old, with: imageTokens(whole.width, whole.height), calls: [1, 1] });
     rows.push({ category: 'Screenshots (formula)', task: 'Screenshot to check one button', without: old, with: imageTokens(button.width, button.height), calls: [1, 1] });
     rows.push({ category: 'Screenshots (formula)', task: 'Screenshot to check one panel', without: old, with: imageTokens(panel.width, panel.height), calls: [1, 1] });
+    for (const r of rows.slice(before)) expect(r.with, r.task).toBeLessThan(r.without);
+  });
+});
+
+describe('token bench: command output', () => {
+  it('compacts long, colored and repetitive output', async () => {
+    tokens ??= await counter();
+    const esc = '\x1b[';
+    const verbose = Array.from({ length: 1500 }, (_, i) => `${esc}32m ✓${esc}39m src/module${i % 40}.test.ts > suite ${i % 40} > case ${i} ${esc}2m(${i % 7}ms)${esc}22m`).join('\n') +
+      `\n\n Test Files  40 passed (40)\n      Tests  1500 passed (1500)\n   Duration  12.3s\n`;
+    const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
+    const build = Array.from({ length: 300 }, (_, i) => `${spinner[i % 8]} Compiling ${i}/300 modules\r`).join('') + '\n' +
+      Array.from({ length: 60 }, () => `${esc}33mwarning${esc}0m: 'url.parse()' is deprecated; use the WHATWG URL API`).join('\n') + '\nBuild finished in 8.2s\n';
+    const failure = ['FAIL src/parse.test.ts > parses dates', 'TypeError: Cannot read properties of undefined (reading \'getTime\')',
+      '    at parseDate (/app/src/parse.ts:41:17)',
+      ...Array.from({ length: 25 }, (_, i) => `    at Object.<anonymous> (/app/node_modules/vitest/dist/chunk-${i}.js:${100 + i}:${i})`),
+      '    at runTest (/app/src/test-utils.ts:12:3)',
+      ...Array.from({ length: 8 }, (_, i) => `    at process.processTicksAndRejections (node:internal/process/task_queues:${95 + i}:5)`),
+    ].join('\n').repeat(6);
+    const before = rows.length;
+    for (const [task, raw] of [['A test run, 1,500 passing lines', verbose], ['A build with a spinner and repeated warnings', build], ['Six failures with deep stack traces', failure]] as const) {
+      rows.push({ category: 'Command output', task, without: tokens.count(raw), with: tokens.count(compactOutput(raw, undefined, '/storage/output/term-1.txt').text), calls: [1, 1] });
+    }
     for (const r of rows.slice(before)) expect(r.with, r.task).toBeLessThan(r.without);
   });
 });
