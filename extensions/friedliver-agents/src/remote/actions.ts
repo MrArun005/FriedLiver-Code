@@ -3,7 +3,7 @@
 // that keeps allowing (Auto, "Always allow", an agent's "don't ask again")
 // waits for the user's OK on the Mac first.
 import type { AgentCore } from '../host/core';
-import { waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
+import { parseMention, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { primaryOption } from '../shared/tools';
 import { phoneChats } from './phoneView';
 import type { RemoteAction } from './protocol';
@@ -32,6 +32,17 @@ export const MAX_PHONE_COMMAND = 4000;
 export const DISGUISE = /(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 /** The phone shows this command whole and as it runs, so approving it there is informed. */
 export const plainCommand = (line: string) => line.length <= MAX_PHONE_COMMAND && !DISGUISE.test(line);
+/** Slash commands that only show information: they go from a phone without asking. */
+const HARMLESS_SLASH = new Set(['help', 'cost', 'status', 'usage', 'context', 'about', 'stats']);
+/** Slash commands that change permissions, approvals, modes or settings: never from a phone. */
+const SETTINGS_SLASH = /^(permissions?|allowed-?tools|approvals?|mode|modes|yolo|config|settings|sandbox|hooks|mcp|login|logout|auth|privacy|trust|dangerously.*|bypass.*|full-?access|auto(-?accept)?|accept-?edits|plan|agents|ide|terminal-setup|add-dir|directory|dir)$/i;
+
+/** The slash command a message would run (after any @mention), or undefined. */
+export function slashCommand(text: string): string | undefined {
+  const body = parseMention(text)?.text ?? text;
+  return /^\s*\/([^\s/]+)/.exec(body)?.[1].toLowerCase();
+}
+
 const ON_MAC = 'Approve this one on your Mac: the phone can’t show the whole command plainly.';
 
 const refused = (error: string): ActionResult => ({ ok: false, error });
@@ -56,6 +67,24 @@ export class RemoteActions {
     return undefined;
   }
 
+  /**
+   * A message from the phone that runs one of the agent's own slash commands: information-only ones go,
+   * ones that change permissions or settings are refused, anything else (advertised or not) needs the
+   * Mac's OK naming the command. Undefined: go ahead.
+   */
+  private async slashAllowed(text: string, chat: Pick<ChatView, 'agent' | 'label' | 'session'>, confirm: (ask: { title: string; detail: string; button: string }) => Promise<boolean>): Promise<ActionResult | undefined> {
+    const name = slashCommand(text);
+    if (!name || HARMLESS_SLASH.has(name)) return undefined;
+    if (SETTINGS_SLASH.test(name)) return refused(`Run /${name} on your Mac: from a phone, commands that change permissions or settings are refused.`);
+    const known = chat.session?.commands.some((c) => c.name.replace(/^\//, '').toLowerCase() === name);
+    const ok = await confirm({
+      title: `Send /${name} to ${chat.label}?`,
+      detail: known ? `It is one of ${chat.label}'s own commands and may change the chat or its settings.` : `${chat.label} didn't list this command; it may still run one.`,
+      button: 'Send',
+    });
+    return ok ? undefined : refused('Not confirmed on the Mac.');
+  }
+
   /** `device`: the paired phone, named on the Mac when it asks for an OK. */
   async run(a: RemoteAction, device: { id: string; name: string }): Promise<ActionResult> {
     const { core } = this.deps;
@@ -65,7 +94,10 @@ export class RemoteActions {
       (await this.deps.confirm({ ...ask, title: `Phone “${device.name}” asks: ${ask.title}` })) && stillPaired();
     switch (a.type) {
       case 'send': {
-        if (!this.chat(a.chatId)) return refused('No such chat.');
+        const chat = this.chat(a.chatId);
+        if (!chat) return refused('No such chat.');
+        const slash = await this.slashAllowed(a.text, chat, confirm);
+        if (slash) return slash;
         void core.send(a.chatId, a.text).catch((err: unknown) => this.deps.error?.(err));
         return { ok: true };
       }
@@ -140,6 +172,8 @@ export class RemoteActions {
       case 'newChat': {
         if (!this.deps.agents().includes(a.agent)) return refused('That agent is not available.');
         if (!this.deps.folders().includes(a.folder)) return refused('Pick one of the window’s folders.');
+        const slash = await this.slashAllowed(a.text, { agent: a.agent, label: a.agent } as ChatView, confirm);
+        if (slash) return slash;
         const chat = await core.createChat(a.agent, { cwd: a.folder, ...(a.text.trim() ? { title: a.text } : {}) });
         if (a.text.trim()) void core.send(chat.id, a.text).catch((err: unknown) => this.deps.error?.(err));
         return { ok: true, chatId: chat.id };

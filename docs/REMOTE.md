@@ -59,6 +59,17 @@ start again after a restart until you run the command.
   or containing control, bidi or zero-width characters, which the phone
   spells out as ⟨U+202E⟩ etc.) can only be denied on the phone. Approve them on
   the Mac.
+- **Slash commands** (a message starting with `/`, also after an `@agent`
+  mention):
+  - Information-only ones go straight through: `/help`, `/cost`, `/status`,
+    `/usage`, `/context`, `/about`, `/stats`.
+  - Ones that change permissions, approvals, modes or settings are refused
+    from the phone; run them on the Mac. Examples: `/permissions`,
+    `/allowed-tools`, `/config`, `/approvals`, `/mode`, `/yolo`, `/settings`,
+    `/plan`, and anything starting with `dangerously` or `bypass`.
+  - Every other command, listed by the agent or not (`/clear`, `/compact`,
+    `/model`, `/init`…), is sent only after the Mac's OK, which names the
+    phone and the command.
 - **It can't:** change a chat's model or mode; approve a plan's mode switch
   without the Mac; open files; run anything in a terminal; see inline edits;
   read your settings or keys.
