@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_GALLERY, collectGallery, filterGallery, isOutside, sourceCounts, type OutsideImages } from '../src/shared/gallery';
+import { MAX_GALLERY, bytesText, collectGallery, doneScope, filterGallery, isOutside, sourceCounts, type OutsideImages } from '../src/shared/gallery';
 import { EMPTY_STATE, type AppState, type ChatView, type ImageItem, type Item } from '../src/shared/model';
 
 type Tool = Extract<Item, { kind: 'tool' }>;
@@ -90,5 +90,17 @@ describe('the Images view', () => {
     expect(shown).toHaveLength(MAX_GALLERY);
     expect(shown[0].title).toBe(`${MAX_GALLERY + 49}`);
     expect(chats[0].count).toBe(MAX_GALLERY + 50);
+  });
+});
+
+describe('Done looking scope and storage text', () => {
+  it('covers one chat or every chat, never pinned images', () => {
+    const { images } = collectGallery(state());
+    expect(doneScope(images, new Set([images[0].key])).length).toBe(images.length - 1);
+    expect(doneScope(images, new Set(), 'a').map((i) => i.key)).toEqual(images.filter((i) => i.chatId === 'a').map((i) => i.key));
+  });
+
+  it('writes sizes short', () => {
+    expect([0, 300 * 1024, 212 * 1024 ** 2, 1024 ** 3, 1.25 * 1024 ** 3, 12 * 1024 ** 3].map(bytesText)).toEqual(['0 KB', '300 KB', '212 MB', '1 GB', '1.3 GB', '12 GB']);
   });
 });
