@@ -167,6 +167,8 @@ export interface ClaudeSession {
   subagents: ClaudeSubagent[];
   /** Idle for over a week: counted under Archived, not on the board. */
   archived?: boolean;
+  /** The FriedLiver chat that resumed it but never ran a turn: shown in this card only, and Open reuses it. */
+  chatId?: string;
 }
 
 /** What the transcripts say about one subagent; the view turns it into a state with the current time (see claudeSubagents). */
