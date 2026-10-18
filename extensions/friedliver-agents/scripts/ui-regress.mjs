@@ -92,25 +92,34 @@ BLOCKS.F01 = async () => {
 };
 
 // ---- F02 + security: the keys act on the one marked card; arrivals never take it over ----
+// The ApprovalCard (src/webview/approval.tsx) marks the card the keys act on with data-focus and a
+// box-shadow ring; Enter allows it, Esc denies, Tab cycles its scope (src/webview/controls.tsx decisionKey).
 const GRACE = 650;
+const marked = (pg) => pg.locator('.fl-card[data-focus]').evaluateAll((cs) => cs.map((c) => c.id));
 BLOCKS.F02 = async () => {
   // chat-c1 waits on two things: an agent's request to message another chat (older), then an edit permission.
   const p = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
-  const hinted = () => p.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id));
-  check(JSON.stringify(await hinted()) === JSON.stringify(['item-bridge-c1']), `only the oldest waiting card is marked [${await hinted()}]`);
-  const outline = await p.locator('#item-bridge-c1').evaluate((c) => window.getComputedStyle(c).outlineStyle);
-  check(outline === 'solid', 'the marked card has a visible outline');
+  check(JSON.stringify(await marked(p)) === JSON.stringify(['item-bridge-c1']), `only the oldest waiting card is marked [${await marked(p)}]`);
+  const ring = (id) => p.locator(id).evaluate((c) => window.getComputedStyle(c).boxShadow);
+  const [onRing, offRing] = [await ring('#item-bridge-c1'), await ring('#item-perm-c1')];
+  check(onRing !== 'none' && offRing === 'none', `the marked card, and only it, has a visible ring [${onRing} | ${offRing}]`);
+  check((await p.locator('.apv .fl-btn--brand:not(.fl-split-caret)').count()) === 1 && (await p.locator('#item-bridge-c1 .fl-btn--brand').count()) > 0, 'one brand Allow button on screen, on the marked card');
   await p.click('.composer textarea');
   await p.waitForTimeout(GRACE);
-  await p.keyboard.press('1');
+  await p.keyboard.press('Enter');
   let last = (await posted(p)).at(-1);
-  check(last?.type === 'bridge' && last.answer === 'allow' && (await p.inputValue('.composer textarea')) === '', `1 picks the marked card's first option and types nothing [${JSON.stringify(last)}]`);
-  await p.keyboard.press('9');
-  check((await p.inputValue('.composer textarea')) === '', 'a digit is never typed into the empty composer while a decision waits');
+  check(last?.type === 'bridge' && last.answer === 'allow' && (await p.inputValue('.composer textarea')) === '', `Enter allows the marked card and types nothing [${JSON.stringify(last)}]`);
+  check(!(await posted(p)).some((m) => m.type === 'send'), 'Enter on a waiting decision never sends the empty composer');
+  const scopeLabel = () => p.locator('#item-bridge-c1 .fl-split > .fl-btn:first-child').innerText();
+  const scopeBefore = await scopeLabel();
+  await p.keyboard.press('Tab');
+  const scopeAfter = await scopeLabel();
+  const inComposer = await p.evaluate(() => document.activeElement?.matches('.composer textarea'));
+  check(scopeAfter !== scopeBefore && inComposer && (await p.inputValue('.composer textarea')) === '', `Tab cycles the marked card's scope, never typed and never moves focus [${scopeBefore} → ${scopeAfter}]`);
   // Choosing the other card moves the keys and the mark, after the grace period.
   const before = (await posted(p)).length;
-  await p.click('#item-perm-c1 .ask-head');
-  check(JSON.stringify(await hinted()) === JSON.stringify(['item-perm-c1']), 'clicking a card marks it');
+  await p.click('#item-perm-c1 .apv-verb');
+  check(JSON.stringify(await marked(p)) === JSON.stringify(['item-perm-c1']), 'clicking a card marks it');
   await p.click('.composer textarea');
   await p.keyboard.press('ControlOrMeta+Enter');
   check((await posted(p)).length === before, 'a shortcut right after the mark moved does nothing');
@@ -118,24 +127,32 @@ BLOCKS.F02 = async () => {
   await p.keyboard.press('ControlOrMeta+Enter');
   last = (await posted(p)).at(-1);
   check(last?.type === 'permission' && last.requestId === 'perm-c1', `after the grace period Ctrl/Cmd+Enter answers the marked card [${JSON.stringify(last)}]`);
-  check((await p.locator('#item-bridge-c1 .opt-num').count()) === 3, 'the request card numbers its options too');
+  // Every request card carries the same key hints (Esc denies, ⏎ allows): the bridge card as the permission card.
+  const hints = (id) => p.locator(`${id} .apv-act kbd`).allInnerTexts();
+  const [bh, ph] = [await hints('#item-bridge-c1'), await hints('#item-perm-c1')];
+  check(bh.includes('Esc') && bh.includes('⏎') && JSON.stringify(bh) === JSON.stringify(ph), `the request card shows the same key hints as the permission card [${bh} | ${ph}]`);
   await p.close();
   // A new request that arrives just before the keypress never takes the keys.
   const q = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 900);
   await q.click('.composer textarea');
   await q.waitForTimeout(GRACE);
   await q.evaluate(() => window.postMessage({ type: 'action', action: { t: 'items', chatId: 'chat-c2', items: [{ kind: 'command', commandId: 'cmd-new', commandLine: 'rm -rf build', cwd: '/w', state: 'awaiting' }] } }, '*'));
-  await q.keyboard.press('1');
+  await q.waitForSelector('#item-cmd-new');
+  await q.keyboard.press('Enter');
   last = (await posted(q)).at(-1);
-  check(last?.type === 'permission' && last.requestId === 'perm-c2', `1 pressed as a new request arrives applies to the card already marked [${JSON.stringify(last)}]`);
-  check(JSON.stringify(await q.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
+  check(last?.type === 'permission' && last.requestId === 'perm-c2', `Enter pressed as a new request arrives applies to the card already marked [${JSON.stringify(last)}]`);
+  check(!(await posted(q)).some((m) => m.type === 'command'), 'the new request is not answered');
+  check(JSON.stringify(await marked(q)) === JSON.stringify(['item-perm-c2']), 'the new request is not marked');
   await q.close();
   // Each chat keeps its own mark.
   const r = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
-  await r.click('#item-perm-c1 .ask-head');
+  await r.click('#item-perm-c1 .apv-verb');
   await r.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c2' }, '*'));
   await r.waitForTimeout(200);
-  check(JSON.stringify(await r.locator('.ask:has(.hint.keys[data-on])').evaluateAll((cs) => cs.map((c) => c.id))) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
+  check(JSON.stringify(await marked(r)) === JSON.stringify(['item-perm-c2']), 'another chat keeps its own marked card');
+  await r.evaluate(() => window.postMessage({ type: 'select', chatId: 'chat-c1' }, '*'));
+  await r.waitForTimeout(200);
+  check(JSON.stringify(await marked(r)) === JSON.stringify(['item-perm-c1']), 'and coming back, the first chat still has the card you marked');
   await r.close();
 };
 
@@ -147,14 +164,19 @@ BLOCKS.F09 = async () => {
   c5.items = [...c5.items, questionItem()];
   await snapshot(p, state, 'chat-c5');
   await p.waitForSelector('#item-q-1');
-  const opts = await p.locator('#item-q-1 .q-opt').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+  // Each row is a ChoiceRow: label, description line, and its digit as a key hint.
+  const opts = await p.locator('#item-q-1 .q-opt').evaluateAll((bs) =>
+    bs.map((b) => [b.querySelector('.fl-radio__key')?.textContent, b.querySelector('.fl-radio__text > span:first-child')?.textContent?.trim(), b.querySelector('.fl-radio__desc')?.textContent].join(' ')),
+  );
   check(opts[0]?.startsWith('1 Redis') && opts[0].includes('Shared across instances; needs a Redis server') && opts[2]?.startsWith('3 In memory'), `options are numbered with their descriptions [${opts.slice(0, 3).join(' | ')}]`);
-  check(await p.locator('#item-q-1 .hint.keys[data-on]').isVisible(), 'the question shows the key hint');
+  const keyHints = await p.locator('#item-q-1 .fl-radio__key').evaluateAll((ks) => ks.filter((k) => k.getBoundingClientRect().width > 0 && window.getComputedStyle(k).visibility !== 'hidden').length);
+  check((await p.locator('#item-q-1[data-focus]').count()) === 1 && keyHints === opts.length, `the question is the marked card and shows its key hints [${keyHints}/${opts.length}]`);
   await p.click('.composer textarea');
   await p.waitForTimeout(GRACE);
   await p.keyboard.press('2');
   const last = (await posted(p)).at(-1);
   check(last?.type === 'answerQuestion' && last.values?.store === 'sqlite', `2 answers with the second option [${JSON.stringify(last)}]`);
+  check((await p.inputValue('.composer textarea')) === '', 'the digit is never typed into the empty composer while the question waits');
   await p.close();
 };
 
@@ -656,10 +678,16 @@ BLOCKS.F24 = async () => {
 BLOCKS.F23 = async () => {
   const p = await open('surface=chat&theme=dark-2026&select=chat-c2', 1200, 800);
   const card = p.locator('#item-perm-c2');
-  const body = (await card.locator('.ask-body').innerText()).trim();
-  check(body !== 'rm src/legacyStore.ts', `the card's title isn't the command again [${body}]`);
-  const allow = card.locator('.actions [aria-haspopup="menu"]');
-  check((await allow.getAttribute('class'))?.split(' ').includes('link'), 'Always allow… is a link');
+  // The ApprovalCard: a header row (verb + mono target), the preview under it ($ command).
+  const text = await card.innerText();
+  const times = text.split('rm src/legacyStore.ts').length - 1;
+  check(times === 1, `the card says the command once [${times}× in: ${text.replace(/\s+/g, ' ')}]`);
+  // Always is a row in the Allow menu (the split button's caret), not another answer button beside Allow.
+  const answers = await card.locator('.apv-act .fl-btn:not([aria-haspopup])').allInnerTexts();
+  check(answers.length === 2 && !answers.some((t) => /always/i.test(t)), `the card offers Deny and Allow, no Always button [${answers.map((t) => t.replace(/\s+/g, ' ')).join(' | ')}]`);
+  await card.locator('.apv-act [aria-haspopup="menu"]').click();
+  const rows = await p.locator('[role="menu"] [role^="menuitem"]').allInnerTexts();
+  check(rows.some((t) => /^Always/.test(t.trim())), `Always allow is in the Allow menu [${rows.map((t) => t.split('\n')[0]).join(' | ')}]`);
   await p.close();
 };
 
@@ -752,7 +780,7 @@ BLOCKS.CLICK = async () => {
   const q3 = await last(p, 'answerQuestion');
   check(q3?.requestId === 'q-form' && q3.values?.question_0 === 'Redis' && q3.values?.question_1 === 'Memory', `the last click sends every answer [${JSON.stringify(q3)}]`);
   // Command and review cards.
-  await p.locator('#item-cmd-1 button').first().click();
+  await p.locator('#item-cmd-1 .apv-act .fl-btn:not([aria-haspopup])').last().click();
   const cmd = await last(p, 'command');
   check(cmd?.commandId === 'cmd-1' && cmd.approve === true, `a click runs the command [${JSON.stringify(cmd)}]`);
   await p.locator('#item-rev-1 button:has-text("Accept")').click();
@@ -771,10 +799,10 @@ BLOCKS.CLICK = async () => {
   // Permission and bridge cards in a chat with two waiting: a click on the second (not the key target) acts on it.
   const c = await open('surface=chat&theme=dark-2026&select=chat-c1', 1200, 900);
   await c.waitForSelector('#item-perm-c1');
-  await c.locator('#item-perm-c1 .actions button').first().click();
+  await c.locator('#item-perm-c1 .apv-act .fl-btn:not([aria-haspopup])').last().click();
   const perm = await last(c, 'permission');
   check(perm?.requestId === 'perm-c1' && !!perm.optionId, `a click on a permission option answers that card at once [${JSON.stringify(perm)}]`);
-  await c.locator('#item-bridge-c1 .actions button').first().click();
+  await c.locator('#item-bridge-c1 .apv-act .fl-btn:not([aria-haspopup])').last().click();
   const bridge = await last(c, 'bridge');
   check(bridge?.requestId === 'bridge-c1', `a click on a bridge option answers it [${JSON.stringify(bridge)}]`);
   const st = fixture(Date.now()).state;
@@ -783,7 +811,7 @@ BLOCKS.CLICK = async () => {
   c1.items.find((i) => i.requestId === 'bridge-c1').state = 'allowed';
   await snapshot(c, st, 'chat-c1');
   await c.waitForTimeout(150);
-  check(!(await c.locator('#item-perm-c1 .actions').count()), 'the answered permission card resolves');
+  check(!(await c.locator('#item-perm-c1 .apv-act').count()) && (await c.locator('#item-perm-c1, .answered').filter({ hasText: 'Edit src/format.ts' }).count()) > 0, 'the answered permission card resolves');
   await c.close();
 };
 
@@ -813,7 +841,7 @@ BLOCKS.QUESTION = async () => {
     const p = await load(width, [rich(), after]);
     const labels = await p.locator('#item-q-rich .q-opt .fl-radio__text > span:first-child').allInnerTexts();
     check(/^Redis\s*Recommended/.test(labels[0]) && labels.at(-1).startsWith('Other'), `at ${width}px the recommended option comes first with its tag, Other… last [${labels.join(' | ')}]`);
-    const nums = await p.locator('#item-q-rich .q-num').allInnerTexts();
+    const nums = await p.locator('#item-q-rich .q-opt .fl-radio__key').allInnerTexts();
     check(nums.join(',') === '1,2,3,4', `rows are numbered [${nums}]`);
     await p.locator('#item-q-rich .q-opt').nth(1).hover();
     const pre = (await p.locator('#item-q-rich .q-preview pre').innerText()).trim();
@@ -900,7 +928,7 @@ BLOCKS.HANDOFF = async () => {
   await card.waitFor();
   const title = (await card.locator('.link-title').innerText()).trim();
   check(title === 'Handed off to Make the session store swappable', `the card names the target chat's topic [${title}]`);
-  check((await card.locator('.link-title').getAttribute('title')) === 'Codex 3: Make the session store swappable', 'the agent label is in its tooltip');
+  check((await card.locator('.link-title').getAttribute('title')) === 'Make the session store swappable · Codex', 'the topic and the plain agent name are in its tooltip');
   await p.close();
 };
 
