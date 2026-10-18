@@ -107,7 +107,7 @@ describe('listing the dropped commits never runs a program the repository names'
     const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
     const marker = path.join(dir, '..', `${path.basename(dir)}-PWNED`);
     const evil = path.join(dir, '..', `${path.basename(dir)}-evil.sh`);
-    await writeFile(evil, `#!/bin/sh\necho "$@" >> '${marker}'\necho '[GNUPG:] SIG_CREATED ' >&2\necho '-----BEGIN PGP SIGNATURE-----'\necho x\necho '-----END PGP SIGNATURE-----'\n`, { mode: 0o755 });
+    await writeFile(evil, `#!/bin/sh\necho "$@" >> '${marker}'\nprintf '[GNUPG:] BEGIN_SIGNING\n[GNUPG:] SIG_CREATED D 22 8 00 0 X\n' >&2\necho '-----BEGIN PGP SIGNATURE-----'\necho x\necho '-----END PGP SIGNATURE-----'\n`, { mode: 0o755 });
     git(dir, 'remote', 'add', 'origin', remote);
     git(dir, 'push', '-q', 'origin', 'main');
     const other = await mkdtemp(path.join(os.tmpdir(), 'fl-other-'));
