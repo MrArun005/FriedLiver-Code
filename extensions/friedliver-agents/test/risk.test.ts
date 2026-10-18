@@ -107,6 +107,23 @@ describe('commands', () => {
       expect(autoRoutineCommand(no), no).toBe(false);
   });
 
+  it.each([
+    ['cat .env', 'Reads a secrets file'],
+    ['head -5 .env.local', 'Reads a secrets file'],
+    ['grep KEY config/.env.production', 'Reads a secrets file'],
+    ['cat /Users/a/.ssh/id_rsa', 'Reads keys and credentials'],
+    ['ls /Users/a/.aws', 'Reads keys and credentials'],
+    ['cat credentials.json', 'Reads keys and credentials'],
+    ['cat .git/config', 'Reads git internals'],
+    ['printenv', 'Reads environment variables'],
+    ['printenv AWS_SECRET_ACCESS_KEY', 'Reads environment variables'],
+    ['env', 'Reads environment variables'],
+    ['set', 'Reads environment variables'],
+    ['export -p', 'Reads environment variables'],
+  ])('a look at secrets or the environment needs a look first: %s', (line, label) => {
+    expect(commandRisk(line)).toEqual({ tone: 'review', label, consequences: [] });
+  });
+
   it('never calls an unknown program routine', () => {
     expect(tone('./deploy.sh')).toBe('review');
     expect(tone('npm run deploy')).toBe('review');

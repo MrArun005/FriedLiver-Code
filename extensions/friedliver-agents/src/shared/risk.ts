@@ -112,7 +112,9 @@ export function forcePush(line: string): ForcePush | undefined {
   return undefined;
 }
 
-const READ_ONLY = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'ag', 'which', 'echo', 'file', 'stat', 'du', 'df', 'tree', 'whoami', 'diff', 'type', 'printenv', 'uname', 'sort', 'cut', 'jq']);
+const READ_ONLY = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'ag', 'which', 'echo', 'file', 'stat', 'du', 'df', 'tree', 'whoami', 'diff', 'type', 'uname', 'sort', 'cut', 'jq']);
+/** Commands that print the environment, where tokens and keys live. */
+const ENV_DUMP = new Set(['printenv', 'set', 'declare', 'compgen']);
 const GIT_READ = new Set(['status', 'diff', 'log', 'show', 'blame', 'rev-parse', 'ls-files', 'grep', 'describe', 'shortlog', 'reflog', 'remote', 'branch', 'tag']);
 /**
  * Shell syntax that runs more than one command, substitutes, redirects or expands (globs, ~, $VAR):
@@ -215,6 +217,11 @@ export function commandRisk(line: string): Risk {
   // Routine: one plain command, no shell syntax at all, no wrapper (sudo, env…), that only looks or runs the project's checks.
   const only = segs.length === 1 && !SHELL_SYNTAX.test(line) ? program(segs[0]) : undefined;
   const kind = only && only.words.length === segs[0].length ? routine(only.words) : undefined;
+  // Looking at the environment or at secrets is never routine.
+  const dumps = segs.some((s) => ENV_DUMP.has(s[0]) || (s[0] === 'env' && !program(s).words.length) || (s[0] === 'export' && s.slice(1).every((w) => w.startsWith('-'))));
+  if (dumps) return { tone: 'review', label: 'Reads environment variables', consequences: [] };
+  const secret = kind && segs[0].map((w) => sensitivePath(w)).find((h) => h?.careful);
+  if (secret) return { tone: 'review', label: `Reads ${secret.label === 'Secrets file' ? 'a secrets file' : secret.label.toLowerCase()}`, consequences: [] };
   if (kind) return { tone: 'routine', label: kind, consequences: [] };
   const words = program(segs[0] ?? []).words;
   const p = words[0];
