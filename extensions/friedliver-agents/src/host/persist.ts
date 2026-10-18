@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AGENT_FACES, EMPTY_STATE, isAgentKey, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
+import { AGENT_FACES, EMPTY_STATE, isAgentKey, MAX_USAGE_LOG, type TurnUsage, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
 import type { ChatSession, SessionOption } from '../shared/session';
 
 /** What the next window needs to bring a chat back. Never API keys or bridge tokens. */
@@ -202,6 +202,7 @@ export function parseSaved(raw: unknown): SavedState | null {
       archived: c.archived === true || undefined,
       starred: c.starred === true || undefined,
       session: savedSession(c.session),
+      usageLog: savedUsageLog(c.usageLog),
       // Full auto is never restored: a reopened chat asks again.
       approval: c.approval === 'edits' ? 'edits' : undefined,
     });
@@ -239,6 +240,21 @@ function savedSession(v: unknown): ChatSession | undefined {
   );
   const commands = (Array.isArray(v.commands) ? v.commands : []).filter((c): c is ChatSession['commands'][number] => isObj(c) && str(c.name) && str(c.description));
   return { options: options.slice(0, 32), commands: commands.slice(0, 200), live: false };
+}
+
+/** A chat's per-turn token log as saved: only well-formed turns, the newest MAX_USAGE_LOG. */
+function savedUsageLog(v: unknown): TurnUsage[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const n = (x: unknown) => typeof x === 'number' && Number.isFinite(x) && x >= 0;
+  const log = v
+    .filter((t): t is Obj => isObj(t) && [t.at, t.input, t.output, t.cacheRead, t.cacheWrite].every(n))
+    .slice(-MAX_USAGE_LOG)
+    .map((t): TurnUsage => {
+      const ctx = isObj(t.context) && n(t.context.used) && n(t.context.size) ? { used: t.context.used as number, size: t.context.size as number } : undefined;
+      const cost = isObj(t.cost) && n(t.cost.amount) && str(t.cost.currency) ? { amount: t.cost.amount as number, currency: t.cost.currency.slice(0, 8) } : undefined;
+      return { at: t.at as number, input: t.input as number, output: t.output as number, cacheRead: t.cacheRead as number, cacheWrite: t.cacheWrite as number, ...(ctx ? { context: ctx } : {}), ...(cost ? { cost } : {}) };
+    });
+  return log.length ? log : undefined;
 }
 
 function num(v: unknown, fallback: number): number {

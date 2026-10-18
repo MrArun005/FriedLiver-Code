@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFile, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, rm, stat, utimes } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -217,7 +217,14 @@ export async function snapshot(root: string): Promise<string> {
   const index = path.join(dir, 'index');
   try {
     const real = path.resolve(root, (await git(root, ['rev-parse', '--git-path', 'index'])).trim());
-    await copyFile(real, index).catch(() => {});
+    // The copy keeps the real index's mtime: git trusts an entry's stat only when the file is older
+    // than the index, so a fresh mtime would hide a same-size edit made in the second it was staged.
+    await copyFile(real, index)
+      .then(async () => {
+        const st = await stat(real);
+        await utimes(index, st.atime, st.mtime);
+      })
+      .catch(() => {});
     const env = { GIT_INDEX_FILE: index };
     await git(root, ['add', '-A', '--', '.'], env, SNAPSHOT_TIMEOUT_MS);
     return (await git(root, ['write-tree'], env, SNAPSHOT_TIMEOUT_MS)).trim();

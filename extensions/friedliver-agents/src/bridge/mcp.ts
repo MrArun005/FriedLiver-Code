@@ -7,6 +7,9 @@
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
 import { SYSTEM_LIMITS } from '../shared/system';
+import { READ_LIMITS } from '../host/indexReads';
+import { SHOT } from '../host/browserRules';
+import { SNAPSHOT_LIMITS } from '../host/pageText';
 import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
 
 /** Newest first; a client asking for another version gets the newest. */
@@ -17,7 +20,9 @@ const INSTRUCTIONS =
   'The user may be asked to allow each call, and may say no; carry on without it if so. ' +
   'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code. ' +
   'The system_* tools act on the user\'s Mac or Windows PC (open apps, files and links, the clipboard, notifications, volume, window screenshots); each is asked for. ' +
-  'The index_* tools query a ready index of this project; to find where something is, try index_search or index_symbols before grep or reading many files.';
+  'The index_* tools query a ready index of this project and cost far fewer tokens than reading files: ' +
+  'find code with index_search or index_symbols (not grep), look at a file with index_outline, read just the part you need with index_read (a symbol or lines, not the whole file), ' +
+  'and after a file changed use index_diff (what changed since you saw it) or index_changes with since "last_turn" instead of reading it again.';
 
 const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
 const CHAT_ID = { type: 'string', pattern: '^[\\w.:-]{1,128}$' };
@@ -114,18 +119,21 @@ export const TOOLS = [
 function indexTools() {
   const PATH = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A file path relative to the workspace folder, like "src/app.ts".' };
   const ro = { annotations: { readOnlyHint: true } };
-  const PREFER = ' Faster than grep for "where is X": prefer it first.';
+  const PREFER = ' Cheaper than grep or reading files for "where is X": use it first.';
   return [
     {
       name: 'index_search',
       title: 'Search the project index',
-      description: 'Searches FriedLiver\'s index of this project by keywords or identifiers (camelCase and snake_case parts match too) and returns the best-ranked files with matching definitions and lines.' + PREFER,
+      description:
+        "Searches FriedLiver's index of this project by keywords or identifiers (camelCase and snake_case parts match too). Returns the best-ranked files, " +
+        'each with its matching definitions and a few numbered ±3-line windows, within a token budget. Repeated windows are named, not repeated.' + PREFER,
       inputSchema: {
         $schema: DRAFT_07,
         type: 'object',
         properties: {
           query: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'Words or identifiers, like "refresh token expiry" or "parseConfig".' },
           limit: { type: 'integer', minimum: 1, maximum: 50, description: 'How many files to return. Default 10.' },
+          budget: { type: 'integer', minimum: READ_LIMITS.minBudget, maximum: READ_LIMITS.maxBudget, description: `Most tokens the answer may take. Default ${READ_LIMITS.budget}.` },
         },
         required: ['query'],
       },
@@ -139,9 +147,27 @@ function indexTools() {
       ...ro,
     },
     {
+      name: 'index_read',
+      title: 'Read part of a file',
+      description:
+        'Reads one definition (symbol, e.g. "parseConfig" or "UserService.save") or a line range of a project file, with numbered lines and a one-line header. ' +
+        'Use it instead of reading whole files: a file over 150 lines comes back as its outline unless you name a symbol or lines.',
+      inputSchema: {
+        $schema: DRAFT_07,
+        type: 'object',
+        properties: {
+          path: PATH,
+          symbol: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A function, class, method or type in the file; Outer.inner for one inside another.' },
+          lines: { type: 'array', items: { type: 'integer', minimum: 1 }, minItems: 2, maxItems: 2, description: 'First and last line, like [120, 180]. Not with symbol.' },
+        },
+        required: ['path'],
+      },
+      ...ro,
+    },
+    {
       name: 'index_outline',
       title: 'Outline a file',
-      description: 'The definitions in one file with their lines, without reading the whole file.',
+      description: 'The signatures of the definitions in one file, with their lines: the cheapest look at a file. Then index_read a symbol.',
       inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
       ...ro,
     },
@@ -150,6 +176,33 @@ function indexTools() {
       title: 'Related files',
       description: 'The files a file imports and the project files that import it (TS/JS, Python, Go, Java/Kotlin).',
       inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      ...ro,
+    },
+    {
+      name: 'index_diff',
+      title: 'Diff since you saw it',
+      description:
+        'A compact unified diff of a project file against the version you were last shown in this chat (by index_read or a file read FriedLiver saw). ' +
+        'Use it instead of re-reading a file after it changed.',
+      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      ...ro,
+    },
+    {
+      name: 'index_changes',
+      title: 'Changed files',
+      description:
+        "The project's current hash (the root of a Merkle tree over the indexed files) and the files added, modified or deleted since an earlier hash: by default since the project was last opened.",
+      inputSchema: {
+        $schema: DRAFT_07,
+        type: 'object',
+        properties: {
+          since: {
+            type: 'string',
+            pattern: '^([0-9a-fA-F]{8,64}|last_turn)$',
+            description: '"last_turn" for what changed since your previous turn in this chat (marking files you already have), or an earlier project hash (8+ characters).',
+          },
+        },
+      },
       ...ro,
     },
   ];
@@ -163,13 +216,25 @@ function browserTools() {
     inputSchema: Object.keys(properties).length ? { $schema: DRAFT_07, type: 'object', properties, ...(required.length ? { required } : {}) } : NO_INPUT,
     ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
   });
-  const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'A CSS selector, like "#submit" or a [data-fl="12"] one from browser_snapshot.' };
+  const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'An element id from browser_snapshot with elements: true, like "e12", or a CSS selector like "#submit".' };
   const ASKS = ' The user is asked to allow it first unless the chat is in Auto mode.';
   return [
     tool('browser_open', 'Open a page', 'Opens an http or https URL in FriedLiver\'s browser (opening the browser if needed) and waits for it to load. localhost:3000 works too.' + ASKS, {
       url: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'http://, https://, or a bare localhost:<port> address.' },
     }, ['url']),
-    tool('browser_snapshot', 'Read the page', 'The open page as text: its title, URL, visible text, and the links, buttons and fields with a selector for each, to use with browser_click and browser_type.', {}, [], true),
+    tool(
+      'browser_snapshot',
+      'Read the page',
+      "The open page's main content as compact markdown (headings, lists, links, code, tables; no menus, footers or banners), within a token budget. " +
+        'Again on the same page, only what changed since your last snapshot. With elements: true, the links, buttons and fields instead, each with an id like e12 to pass as selector to browser_click and browser_type. Use it rather than a screenshot whenever text answers the question.',
+      {
+        elements: { type: 'boolean', description: 'List the interactive elements (ids for browser_click / browser_type) instead of the content.' },
+        budget: { type: 'integer', minimum: SNAPSHOT_LIMITS.minBudget, maximum: SNAPSHOT_LIMITS.maxBudget, description: `Most tokens the answer may take. Default ${SNAPSHOT_LIMITS.budget}.` },
+        full: { type: 'boolean', description: 'The whole page even if you saw it before, not just the change.' },
+      },
+      [],
+      true,
+    ),
     tool('browser_click', 'Click', 'Clicks an element on the open page, found by CSS selector or by its visible text (give one of the two).' + ASKS, {
       selector: SELECTOR,
       text: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'Visible text of a link, button or label.' },
@@ -178,7 +243,18 @@ function browserTools() {
       selector: SELECTOR,
       text: { type: 'string', maxLength: BRIDGE_LIMITS.text, description: 'What to type.' },
     }, ['selector', 'text']),
-    tool('browser_screenshot', 'Screenshot', 'Saves a PNG of the visible page to a private file in FriedLiver\'s storage and returns its path; read that file to see it.', {}, [], true),
+    tool(
+      'browser_screenshot',
+      'Screenshot',
+      "Saves a JPEG of the visible page, or of one element, to a private file in FriedLiver's storage and returns its path and its cost in image tokens; read that file to see it. " +
+        'Only for what text can not tell (layout, colors, images): browser_snapshot is far cheaper. Crop to the element you care about with selector.',
+      {
+        selector: { ...SELECTOR, description: 'Only this element (an id like "e12" from browser_snapshot, or a CSS selector), with a small margin.' },
+        max_width: { type: 'integer', minimum: SHOT.minWidth, maximum: SHOT.maxMaxWidth, description: `Widest the image may be, in pixels. Default ${SHOT.maxWidth}.` },
+      },
+      [],
+      true,
+    ),
     tool('browser_console', 'Console', 'The open page\'s latest console messages and uncaught errors (up to 100).', {}, [], true),
     tool('browser_back', 'Go back', 'Goes back one page in the browser\'s history.' + ASKS),
     tool('browser_reload', 'Reload', 'Reloads the open page.' + ASKS),

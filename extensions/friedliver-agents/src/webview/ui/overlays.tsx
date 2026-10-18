@@ -1,34 +1,67 @@
 // Floating surfaces (COMPONENTS.md §2.12, §2.13, §2.15): tooltip, toast, dialog, sheet. Glass and
 // elevation come from components.css; these handle focus, Escape and timing.
 import type { ComponentChildren } from 'preact';
+import { createPortal } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Icon, type IconName } from './icon';
 import { Button, IconButton } from './controls';
 import { Countdown, type Tone } from './display';
 
-/** A tooltip for a control whose label isn't on screen: after 500ms of hover or on focus, above it. */
-export function Tooltip({ text, kbd, children }: { text: string; kbd?: string; children: ComponentChildren }) {
+/** Space between a tooltip and its target, and the viewport's edge (§2.14). */
+const TIP_GAP = 8;
+
+/**
+ * A tooltip on an element the caller keeps (§2.14): spread `handlers` on it, put `ref` on it, render `tip`.
+ * After `delay` ms of hover (500; 0 where the target shows no text), at once on focus; above it, or `below`; kept in the viewport.
+ */
+export function useTooltip<T extends HTMLElement>({ text, kbd, delay = 500, side = 'above' }: { text?: string; kbd?: string; delay?: number; side?: 'above' | 'below' }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  const box = useRef<HTMLSpanElement>(null);
+  const ref = useRef<T>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const show = (delay: number) => {
+  const show = (ms: number) => {
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const r = box.current?.getBoundingClientRect();
-      if (r) setAt({ x: r.left + r.width / 2, y: r.top });
-    }, delay);
+    const place = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (r) setAt({ x: r.left + r.width / 2, y: side === 'below' ? r.bottom + TIP_GAP : r.top - TIP_GAP });
+    };
+    if (ms) timer.current = setTimeout(place, ms);
+    else place();
   };
   const hide = () => (clearTimeout(timer.current), setAt(null));
   useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (!text) hide();
+  }, [text]);
+  // Centred on the target, then nudged back inside the viewport.
+  useLayoutEffect(() => {
+    const el = tipRef.current;
+    if (!el || !at) return;
+    const w = el.offsetWidth;
+    el.style.left = `${Math.max(TIP_GAP, Math.min(at.x - w / 2, window.innerWidth - w - TIP_GAP))}px`;
+  }, [at]);
+  const handlers = text
+    ? { onPointerEnter: () => show(delay), onPointerLeave: hide, onFocusIn: () => show(0), onFocusOut: hide }
+    : {};
+  // In <body>: a strip's clip-path or a container (containment makes it the fixed box) would cut or shift it.
+  const tip =
+    at && text ? createPortal(
+      <span ref={tipRef} class="fl-tip" role="tooltip" style={{ left: `${at.x}px`, top: `${at.y}px`, transform: side === 'below' ? undefined : 'translateY(-100%)' }}>
+        {text}
+        {kbd && <kbd class="fl-kbd">{kbd}</kbd>}
+      </span>,
+      document.body,
+    ) : null;
+  return { ref, handlers, tip };
+}
+
+/** A tooltip for a control whose label isn't on screen: after 500ms of hover or on focus, above it. */
+export function Tooltip({ text, kbd, delay, side, children }: { text: string; kbd?: string; delay?: number; side?: 'above' | 'below'; children: ComponentChildren }) {
+  const { ref, handlers, tip } = useTooltip<HTMLSpanElement>({ text, kbd, delay, side });
   return (
-    <span ref={box} style={{ display: 'inline-flex' }} onPointerEnter={() => show(500)} onPointerLeave={hide} onFocusIn={() => show(0)} onFocusOut={hide}>
+    <span ref={ref} style={{ display: 'inline-flex' }} {...handlers}>
       {children}
-      {at && (
-        <span class="fl-tip" role="tooltip" style={{ left: `${at.x}px`, top: `${at.y}px`, transform: 'translate(-50%, calc(-100% - 8px))' }}>
-          {text}
-          {kbd && <kbd class="fl-kbd">{kbd}</kbd>}
-        </span>
-      )}
+      {tip}
     </span>
   );
 }

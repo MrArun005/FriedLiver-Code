@@ -29,7 +29,7 @@ function runScripts(text: string): string[] {
 
 describe('GitHub workflows', () => {
   it('exist', () => {
-    expect(workflows.sort()).toEqual(['build.yml', 'ci.yml', 'upstream.yml', 'workbench-shots.yml']);
+    expect(workflows.sort()).toEqual(['build.yml', 'ci.yml', 'index-bench.yml', 'upstream.yml', 'workbench-shots.yml']);
   });
 
   for (const file of workflows) {

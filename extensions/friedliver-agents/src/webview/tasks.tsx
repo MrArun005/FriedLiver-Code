@@ -43,7 +43,7 @@ import {
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
 import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
-import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, reportedMode, type AgentDefaults, type ApprovalLevel } from '../shared/session';
+import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, TaskOptions, decisionId } from './controls';
@@ -295,6 +295,7 @@ function Manager() {
   const cameFrom = useRef<View>('board');
   if (view !== 'inbox') cameFrom.current = view;
   const tally = { ...counts({ ...state, chats: own }) };
+  const saved = totalSaved(own);
   tally.archived += oldOutside.length;
 
   useEffect(() => {
@@ -370,6 +371,14 @@ function Manager() {
               <span class="count-item">
                 <Dot state="done" /> {tally.done} done
               </span>
+              {saved > 0 && (
+                <span
+                  class="count-item"
+                  title="Estimated tokens FriedLiver's compact answers saved across these chats: index reads and diffs instead of whole files, page text instead of page dumps, smaller screenshots, compacted command output and hand-offs."
+                >
+                  <Icon name="bolt" /> ~{formatTokens(saved)} tokens saved
+                </span>
+              )}
               {tally.archived > 0 && (
                 <Button
                   variant="link"

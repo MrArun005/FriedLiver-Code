@@ -60,7 +60,9 @@ import {
   type Item,
   type NoticeAction,
   type QueuedMessage,
+  type TokenTally,
 } from '../shared/model';
+import { estimateTokens } from '../shared/tokens';
 import { BridgeServer } from './bridge';
 import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
@@ -90,6 +92,10 @@ const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_PROPOSAL_BYTES = 4 * 1024 * 1024;
 /** Tool calls remembered per chat until they finish, to fill in permission requests that name only an id. */
 const MAX_OPEN_TOOLS = 200;
+/** Tokens the project map at a session's start takes at most. */
+export const PRIMER_TOKENS = 1500;
+/** The share of the context window past which a chat is offered /compact. */
+export const CONTEXT_FULL = 0.85;
 /** Where agents' tool inputs name the files they act on (Claude, Codex, Gemini, and the obvious others). */
 const TARGET_KEYS = ['file_path', 'filePath', 'path', 'abs_path', 'notebook_path', 'old_path', 'new_path', 'source', 'destination', 'target'];
 /** Messages that can wait for a busy chat. */
@@ -153,6 +159,8 @@ export interface CoreOptions {
   bridgeScript?: string;
   /** Does the browser_* tools' calls (browser.ts); without it they say there is no browser. */
   browser?: ToolHost['browser'];
+  /** Whether read_chat between linked chats skips the user's OK (friedliver.chat.autoAllowLinkedReads). */
+  autoAllowLinkedReads?: () => boolean;
   /** Whether the external client's browser actions skip the user's OK (friedliver.browser.externalAutoApprove). */
   externalAutoApprove?: () => boolean;
   /** The browser page's origin and whether a selector there is a password field (browser.ts). */
@@ -161,6 +169,12 @@ export interface CoreOptions {
   index?: ToolHost['index'];
   /** The system_* tools (system.ts, the user's settings, the audit log). */
   system?: ToolHost['system'];
+  /** A file (absolute) a chat's agent read or wrote: it has seen this version (projectIndexHost.ts observe). */
+  indexSeen?(chatId: string, file: string): void;
+  /** A project map for a new session's first message (projectIndex.ts projectPrimer), at most `maxTokens`. */
+  primer?(chatId: string, text: string, maxTokens: number): Promise<string | undefined>;
+  /** A chat's turn ended: index_changes since "last_turn" compares with now. */
+  indexTurnEnded?(chatId: string): void;
   /** Whether agents may reach other agents and chats through those tools. "ask" when not given. */
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
@@ -183,6 +197,8 @@ export interface CoreOptions {
   log?(line: string): void;
   /** Where checkpoints are kept across windows (global storage); folders outside git need it. */
   checkpointDir?: string;
+  /** A private folder for commands' whole output when an agent got it cut (terminals.ts compactOutput). */
+  outputDir?: string;
 }
 
 /**
@@ -259,6 +275,10 @@ export class AgentCore {
   private readonly confirmedFull = new Set<string>();
   private readonly queues = new Map<string, Queued[]>();
   private readonly openTools = new Map<string, Map<string, OpenTool>>();
+  /** Bytes of shared rules each chat's session got, so the project map fits beside them. */
+  private readonly rulesBytes = new Map<string, number>();
+  /** Chats offered /compact on this climb toward a full context. */
+  private readonly compactOffered = new Set<string>();
   /** What a permission request would write, for "Open diff", by request. */
   private readonly proposals = new Map<string, Proposal[]>();
   /** Content the user approved on a permission card that showed its diff: the write that follows isn't asked again. */
@@ -297,6 +317,7 @@ export class AgentCore {
           this.noteTool(chatId, update);
           this.dispatch({ t: 'update', chatId, update: compactUpdate(update), at: Date.now() });
           if (update.sessionUpdate === 'available_commands_update') this.updateKnown(chatId);
+          if (update.sessionUpdate === 'usage_update') this.checkContext(chatId, Number(update.used), Number(update.size));
           this.collectImages(chatId, update);
         },
         session: (chatId, start) => this.sessionStarted(chatId, start),
@@ -319,6 +340,9 @@ export class AgentCore {
       terminalListener: (agentId) => this.commandHooks(agentId),
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
       rulesFor: (chatId) => this.rulesFor(chatId),
+      // The map shares the rules' cap: rules first, the map gets what is left (~4 bytes a token), at most PRIMER_TOKENS.
+      primerFor: async (chatId, _agent, text) =>
+        this.readOnlyChat(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
       freshSessionFor: (chatId) => this.readOnlyChat(chatId),
       sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
@@ -348,6 +372,7 @@ export class AgentCore {
       cancel: (chatId) => this.cancel(chatId),
       browser: options.browser,
       externalAutoApprove: options.externalAutoApprove,
+      autoAllowLinkedReads: options.autoAllowLinkedReads,
       browserPage: options.browserPage,
       index: options.index,
       system: options.system,
@@ -897,6 +922,8 @@ export class AgentCore {
 
   /** Stops and forgets a chat. A worktree it had stays on disk; only the record goes. */
   async removeChat(chatId: string): Promise<void> {
+    this.rulesBytes.delete(chatId);
+    this.compactOffered.delete(chatId);
     const chat = this.chat(chatId);
     if (!chat) return;
     if (chat.busy) await this.cancel(chatId);
@@ -1364,8 +1391,36 @@ export class AgentCore {
     return [...this.worktrees].filter(([, w]) => w.path === wt.path).map(([id]) => id);
   }
 
+  /**
+   * Past CONTEXT_FULL of the context window, once per climb: offers the agent's own /compact (or,
+   * without one, a hand-off, which carries a compact summary). Offered again after usage falls below 60%.
+   */
+  private checkContext(chatId: string, used: number, size: number): void {
+    if (!Number.isFinite(used) || !Number.isFinite(size) || size <= 0) return;
+    const share = used / size;
+    if (share < 0.6) this.compactOffered.delete(chatId);
+    if (share < CONTEXT_FULL || this.compactOffered.has(chatId)) return;
+    this.compactOffered.add(chatId);
+    const can = this.chat(chatId)?.session?.commands.some((c) => c.name === 'compact');
+    const text = `The context is ${Math.round(share * 100)}% full. ${
+      can ? 'Compact it now: the agent summarizes the conversation so far and goes on with room to spare.' : 'Hand the task off or start a new chat soon: a hand-off carries a compact summary.'
+    }`;
+    this.items(chatId, [{ kind: 'notice', tone: 'info', text, ...(can ? { actions: [{ label: 'Compact now', do: 'compact' as const }] } : {}) }]);
+  }
+
+  /** Adds to a chat's token totals (the "tokens saved" readout). */
+  noteTokens(chatId: string, add: Partial<TokenTally>): void {
+    if (this.chat(chatId)) this.dispatch({ t: 'tokens', chatId, add });
+  }
+
+  /** Sends the agent's own /compact as the chat's next message. */
+  async compact(chatId: string): Promise<void> {
+    await this.send(chatId, '/compact');
+  }
+
   private async rulesFor(chatId: string): Promise<{ text: string; files: string[] } | undefined> {
     const rules = await this.options.sharedRules?.();
+    this.rulesBytes.set(chatId, rules ? Buffer.byteLength(rules.text) : 0);
     if (rules?.truncated) {
       this.items(chatId, [{ kind: 'notice', tone: 'error', text: `The shared rules are over ${RULES_CAP / 1024} KB, so this session got only the first ${RULES_CAP / 1024} KB. Shorten .friedliver/rules.md or memory.md.` }]);
     }
@@ -1460,6 +1515,12 @@ export class AgentCore {
       await this.ensureBridge();
       const result: acp.PromptResponse = this.stopping.has(chatId) ? { stopReason: 'cancelled' } : await this.hub.prompt(chatId, blocks);
       stopReason = result.stopReason;
+      // The agent's own count of this turn's tokens, logged with the context and cost its last usage_update gave.
+      if (result.usage) {
+        const { used, size, cost } = this.chat(chatId)?.session?.usage ?? {};
+        const usage = { at: Date.now(), input: Number(result.usage.inputTokens), output: Number(result.usage.outputTokens), cacheRead: Number(result.usage.cachedReadTokens ?? 0), cacheWrite: Number(result.usage.cachedWriteTokens ?? 0) };
+        this.dispatch({ t: 'turnUsage', chatId, usage: { ...usage, ...(size ? { context: { used: used!, size } } : {}), ...(cost ? { cost } : {}) } });
+      }
       if (result.stopReason !== 'end_turn') notice = stopNotice(result.stopReason, this.label(agent));
     } catch (err) {
       this.settleChat(chatId);
@@ -1472,6 +1533,7 @@ export class AgentCore {
     }
     // The chat stays busy until the turn's changes are known, so a new turn can't start in between.
     const files = await this.turnFiles(chatId, turnId);
+    this.options.indexTurnEnded?.(chatId);
     for (const map of [this.turnDecision, this.approvedWrites, this.reported]) map.delete(chatId);
     this.dispatch({ t: 'busy', chatId, busy: false, at: Date.now() });
     if (files.length) {
@@ -1531,6 +1593,11 @@ export class AgentCore {
     const diffs = (update.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.path] : []));
     if (next.kind === 'edit' || next.kind === 'delete' || next.kind === 'move' || diffs.length) {
       for (const file of [...(update.locations ?? []).map((l) => l.path), ...diffs]) this.noteFile(chatId, file);
+    }
+    // A finished read or edit: the agent has this version of the file now (index_diff compares with it).
+    if (next.status === 'completed' && (next.kind === 'read' || next.kind === 'edit' || diffs.length)) {
+      const files = [...(next.locations ?? []).map((l) => l.path), ...(next.content ?? []).flatMap((c) => (c.type === 'diff' ? [c.path] : []))];
+      for (const file of new Set(files)) if (typeof file === 'string' && path.isAbsolute(file)) this.options.indexSeen?.(chatId, file);
     }
   }
 
@@ -1757,7 +1824,9 @@ export class AgentCore {
       const info = await stat(file);
       if (!info.isFile()) throw new Error(`${file} is not a regular file.`);
       if (info.size > MAX_AGENT_READ_BYTES) throw new Error(`${file} is ${Math.round(info.size / 1048576)} MB, more than an agent can read through FriedLiver at once.`);
-      return readTextFile({ ...req, path: file });
+      const read = await readTextFile({ ...req, path: file });
+      if (chatId) this.options.indexSeen?.(chatId, file);
+      return read;
     }
     if (req.line == null && req.limit == null) return { content: unsaved };
     const lines = unsaved.split('\n');
@@ -2086,6 +2155,19 @@ export class AgentCore {
       onData: (terminalId, data) => {
         const k = known.get(terminalId);
         if (k) this.queueOutput(k.commandId, data);
+      },
+      compacted: (info, raw, sent) => {
+        const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
+        if (chatId) this.noteTokens(chatId, { naive: estimateTokens(raw), sent: estimateTokens(sent) });
+      },
+      saveOutput: async (info, text) => {
+        const dir = this.options.outputDir;
+        if (!dir) throw new Error('No folder for command output.');
+        await mkdir(dir, { recursive: true, mode: 0o700 });
+        const file = path.join(dir, `${info.sessionId.replace(/[^\w-]/g, '_').slice(0, 64)}-${info.terminalId}.txt`);
+        // Private, and replaced whole: a later call while the command runs has more.
+        await writeFile(file, text, { mode: 0o600 });
+        return file;
       },
       onExit: (terminalId, status) => {
         const k = known.get(terminalId);

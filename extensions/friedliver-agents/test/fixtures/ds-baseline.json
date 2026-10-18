@@ -13,7 +13,7 @@
       ]
     },
     "webview.css": {
-      "colour": 9,
+      "colour": 8,
       "px": 128,
       "effect": 6,
       "restyle": [
@@ -124,7 +124,7 @@
     "webview/viewer.tsx": 1
   },
   "totals": {
-    "colour": 10,
+    "colour": 9,
     "px": 204,
     "effect": 7,
     "restyle": 92,

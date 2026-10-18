@@ -4,7 +4,7 @@ import { Fragment, type ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
-import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, turnsLeft, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
+import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, savedLines, turnsLeft, usageLines, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
 import { agentName, chatTip } from '../shared/names';
@@ -46,6 +46,7 @@ export function usageTitle(chat: ChatView, samples: number[]): string {
     const turns = turnsLeft(samples, usage.size);
     parts.push(turns === undefined ? 'Context lasts — (needs a couple of turns to estimate)' : `Context lasts ~${turns} more turns (estimate)`);
   }
+  parts.push(...savedLines(chat.tokens), ...usageLines(chat.usageLog));
   return parts.join('\n');
 }
 

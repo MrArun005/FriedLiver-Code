@@ -18,7 +18,7 @@ import type { AppState } from '../shared/model';
 import { ago } from '../shared/view';
 import { Glyph, Icon, send, useNearScreen, usePersisted, useTabStrip } from './common';
 import { Viewer, useSrc } from './viewer';
-import { Button, FilterPill, IconButton, Progress, Tab, Toast, ToastRegion } from './ui';
+import { AgentMark, Button, FilterPill, IconButton, Progress, Tab, Toast, ToastRegion } from './ui';
 
 const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 /** Done looking's key: Shift+Cmd+Backspace (Ctrl on Windows and Linux). */
@@ -65,7 +65,7 @@ export function Gallery({ state, outside, now, query: outerQuery, store }: Props
   const at = openKey ? shown.findIndex((i) => i.key === openKey) : -1;
 
   const strip = useRef<HTMLDivElement>(null);
-  const over = useTabStrip(strip, chats.length, tab);
+  const { over } = useTabStrip(strip, chats.length, tab);
   const toggle = (s: ImageSource) => setSources(sources.includes(s) ? sources.filter((x) => x !== s) : [...sources, s]);
 
   // Done looking: this tab's images (every image on All) hide now; their copies and temp files go when the undo time ends.
@@ -149,7 +149,7 @@ export function Gallery({ state, outside, now, query: outerQuery, store }: Props
                   (strip.current?.children[next]?.firstElementChild as HTMLElement | null)?.focus();
                 }}
               >
-                {c ? <Glyph agent={c.agent} size="sm" /> : <Icon name="grid" size={14} />}
+                {c ? <AgentMark agent={c.agent} /> : <Icon name="grid" size={14} />}
                 <span class="fl-tab__label tab-title">{c ? c.title : 'All'}</span>
                 <span class="fl-count tab-count">{c ? c.count : images.length}</span>
             </Tab>
