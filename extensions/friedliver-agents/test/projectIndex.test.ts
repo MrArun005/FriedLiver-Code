@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
@@ -7,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
 import type { Journal } from '../src/host/changeJournal';
-import { answerIndex, globToRegex, imports, INDEX_LIMITS, isSecret, outline, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
+import { answerIndex, globToRegex, imports, INDEX_DEFAULTS, INDEX_LIMITS, isSecret, outline, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -556,5 +557,14 @@ describe('opening: ready at once, then caught up from the journal', () => {
     await writeFile(path.join(root, 'other/b.ts'), 'changed');
     const ix = new ProjectIndex(path.join(root, 'sub'), { maxFiles: 10, maxBytes: 1e8 });
     expect((await ix.gitHint()).paths).toEqual(['a.ts']);
+  });
+});
+
+describe('index defaults', () => {
+  it('package.json offers the same defaults the host falls back to, big enough for a 150k-file repository', () => {
+    const props = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).contributes.configuration.properties;
+    expect(props['friedliver.index.maxFiles'].default).toBe(INDEX_DEFAULTS.maxFiles);
+    expect(props['friedliver.index.maxMemoryMB'].default).toBe(INDEX_DEFAULTS.maxMemoryMB);
+    expect(INDEX_DEFAULTS.maxFiles).toBeGreaterThanOrEqual(150_000);
   });
 });

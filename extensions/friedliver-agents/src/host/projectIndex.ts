@@ -14,6 +14,12 @@ import { MerkleTree } from './merkle';
 import { unifiedDiff } from '../shared/diff';
 import { estimateTokens } from '../shared/tokens';
 
+/**
+ * The friedliver.index.maxFiles / maxMemoryMB defaults: a 150k-file repository indexes fully.
+ * microsoft/TypeScript v6.0.3 (81k files) estimates 200 MB and holds ~775 MB of heap (index-bench).
+ */
+export const INDEX_DEFAULTS = { maxFiles: 200_000, maxMemoryMB: 400 };
+
 export const INDEX_LIMITS = {
   /** Files larger than this are not indexed. */
   fileBytes: 1024 * 1024,
@@ -191,6 +197,10 @@ export class ProjectIndex {
   private readonly postings = new Map<string, Map<string, number>>();
   private totalLen = 0;
   private bytes = 0;
+  /** What the docs cost by `cost`, the figure maxBytes caps. */
+  get estimatedBytes(): number {
+    return this.bytes;
+  }
   private readonly exclude: RegExp[];
   /** Set once a cap stopped files from being indexed. */
   capped = false;

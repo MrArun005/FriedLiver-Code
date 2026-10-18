@@ -992,13 +992,13 @@
         },
         "friedliver.index.maxFiles": {
           "type": "number",
-          "default": 50000,
+          "default": 200000,
           "minimum": 100,
           "markdownDescription": "Most files the project index holds per workspace folder."
         },
         "friedliver.index.maxMemoryMB": {
           "type": "number",
-          "default": 150,
+          "default": 400,
           "minimum": 10,
           "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files."
         },

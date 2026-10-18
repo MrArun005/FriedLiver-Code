@@ -11,7 +11,7 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import { fseventsJournal, journalHelper, type Journal, type JournalMark } from './changeJournal';
 import { SeenFiles } from './indexReads';
-import { answerIndex, docsFileOf, ProjectIndex, projectPrimer, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
+import { answerIndex, docsFileOf, INDEX_DEFAULTS, ProjectIndex, projectPrimer, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
 
 /** git files that move on a checkout, pull or branch switch: re-check every file's stat then. */
 const HEAD_MOVED = /[/\\]\.git[/\\](HEAD|ORIG_HEAD|FETCH_HEAD)$/;
@@ -88,8 +88,8 @@ export class ProjectIndexHost implements vscode.Disposable {
     const c = vscode.workspace.getConfiguration('friedliver.index');
     return {
       enabled: c.get<boolean>('enabled', true),
-      maxFiles: Math.max(100, c.get<number>('maxFiles', 50_000)),
-      maxBytes: Math.max(10, c.get<number>('maxMemoryMB', 150)) * 1024 * 1024,
+      maxFiles: Math.max(100, c.get<number>('maxFiles', INDEX_DEFAULTS.maxFiles)),
+      maxBytes: Math.max(10, c.get<number>('maxMemoryMB', INDEX_DEFAULTS.maxMemoryMB)) * 1024 * 1024,
     };
   }
 
