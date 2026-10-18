@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-marks-')), 'marks.mjs');
+process.on('exit', () => fs.rmSync(path.dirname(out), { recursive: true, force: true }));
 await build({ entryPoints: [path.join(ext, 'src/webview/ui/marks.ts')], bundle: true, format: 'esm', outfile: out, logLevel: 'error' });
 const { markFor } = await import(pathToFileURL(out).href);
 // The --hue-* fallbacks in media/tokens.css: an editor tab icon is a file, so it can't read the theme.
