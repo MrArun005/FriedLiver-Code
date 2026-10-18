@@ -39,7 +39,7 @@ import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
-import { clip, panelTitle } from './shared/view';
+import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
 import type { OutsideImages } from './shared/gallery';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -699,6 +699,12 @@ export class Controller {
           // Only a session this window listed, so a webview can't name some other folder's.
           const found = this.claudeSessions.find((s) => s.id === m.sessionId);
           if (!found) return;
+          // A chat already continues it (one that only resumed it shows in its card): that chat, not another.
+          const existing = found.chatId ?? chatOfSession(this.core.exportState(), found.id);
+          if (existing) {
+            await this.showChat(existing);
+            return;
+          }
           const chat = await this.core.createChat('claude', { title: found.title, resume: { sessionId: found.id, cwd: found.cwd } });
           this.refreshClaudeSessions();
           await this.showChat(chat.id);
@@ -1591,15 +1597,16 @@ export class Controller {
     // The Images view and the Manager's Images tab show what those sessions looked at.
     const gallery = shown && [...this.surfaces].some((s) => s.kind !== 'chat');
     this.watchClaudeSessions(gallery);
-    const owned = new Set(Object.values(this.core.exportState().chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
+    const saved = this.core.exportState();
+    const owned = new Set(Object.values(saved.chats).flatMap((c) => (c.sessionId ? [c.sessionId] : [])));
     const home = os.homedir();
     const folders = this.folders();
-    this.claudeSessions = manager ? await listClaudeSessions({
+    this.claudeSessions = manager ? linkResumeChats(await listClaudeSessions({
           home,
           folders,
           skip: owned,
           showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
-        }) : [];
+        }), saved) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
     const images = gallery ? await listClaudeImages({ home, folders, skip: owned }) : [];
     if (JSON.stringify(images) === JSON.stringify(this.claudeImages)) return;
