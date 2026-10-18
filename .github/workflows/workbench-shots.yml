@@ -2,7 +2,7 @@ name: Workbench shots
 
 # The workbench visual harness: download a FriedLiver build for macOS arm64 (the latest release,
 # a release tag, or a trusted Build FriedLiver run), screenshot every workbench surface in the
-# dark and light themes at 1440x900, check the approved chat composer against its computed-style
+# light themes and the owner's Dark 2026 at 1440x900, check the approved chat composer against its computed-style
 # baseline, and upload the screenshots. Pushes to ui/* that touch the harness run it against the
 # latest release.
 on:

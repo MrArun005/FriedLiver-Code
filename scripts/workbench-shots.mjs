@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const HARNESS = path.join(ROOT, 'test', 'workbench-harness');
-export const THEMES = { dark: 'FriedLiver Black Blue', light: 'FriedLiver Light Blue' };
+// FriedLiver's defaults, and the owner's own theme (the composer was approved in it).
+export const THEMES = { dark: 'FriedLiver Black Blue', light: 'FriedLiver Light Blue', 'dark-2026': 'Dark 2026' };
 const W = 1440;
 const H = 900;
 
@@ -101,6 +102,8 @@ async function run(themeKey, out, failures) {
 		executablePath: executable(path.resolve(values.app)),
 		args: [
 			ws,
+			// Opened as editors at startup: README, package.json, cart.ts, then format.ts in front.
+			...['README.md', 'package.json', 'src/cart.ts', 'src/format.ts'].map((f) => path.join(ws, f)),
 			`--user-data-dir=${path.join(dir, 'data')}`,
 			`--extensions-dir=${path.join(dir, 'ext')}`,
 			`--extensionDevelopmentPath=${path.join(HARNESS, 'ext')}`,
@@ -115,6 +118,8 @@ async function run(themeKey, out, failures) {
 		b.setContentSize(w, h);
 		b.center();
 	}, [W, H]);
+	// The runner's screen may be shorter than 900px; emulate the viewport so every shot is 1440x900.
+	await win.setViewportSize({ width: W, height: H });
 	await win.waitForSelector('.monaco-workbench', { timeout: 120_000 });
 	await win.waitForTimeout(8000);
 
@@ -142,18 +147,19 @@ async function run(themeKey, out, failures) {
 			await escape(3).catch(() => {});
 		}
 	};
-	const openFile = async (rel) => {
-		await cmd('workbench.action.quickOpen', 600);
-		await win.keyboard.type(rel, { delay: 20 });
-		await wait(700);
-		await win.keyboard.press('Enter');
-		await wait(900);
+	/** Runs a command until `selector` shows (a test-extension command may land before it activates). */
+	const until = async (command, selector) => {
+		for (let i = 0; i < 4; i++) {
+			await cmd(command, 300);
+			if (await win.locator(selector).first().waitFor({ timeout: 3000 }).then(() => true, () => false)) return wait(1200);
+		}
+		throw new Error(`${command}: ${selector} never showed`);
 	};
 
 	await cmd('notifications.clearAll', 300);
 	await step('01-workbench', async () => {
 		await cmd('workbench.view.explorer');
-		for (const f of ['README.md', 'package.json', 'src/cart.ts', 'src/format.ts']) await openFile(f);
+		await win.locator('.tabs-container .tab', { hasText: 'format.ts' }).first().waitFor({ timeout: 30_000 });
 		await wait(1500);
 		await shot('01-workbench');
 	});
@@ -168,7 +174,7 @@ async function run(themeKey, out, failures) {
 		await cmd('workbench.action.closeQuickOpen', 300);
 	});
 	await step('04-toasts', async () => {
-		await cmd('harness.toasts', 2000);
+		await until('harness.toasts', '.notifications-toasts .notification-toast');
 		await shot('04-toasts');
 	});
 	await step('05-notification-center', async () => {
@@ -220,7 +226,7 @@ async function run(themeKey, out, failures) {
 		await win.mouse.move(W / 2, H / 2);
 	});
 	await step('12-dialog', async () => {
-		await cmd('harness.dialog', 1200);
+		await until('harness.dialog', '.monaco-dialog-box');
 		await shot('12-dialog');
 		await escape(1);
 	});
@@ -251,6 +257,10 @@ async function run(themeKey, out, failures) {
 		if (await demo.count()) await demo.click();
 		await chat.locator('.composer').first().waitFor({ timeout: 30_000 });
 		await wait(1200);
+		// At rest: the focus ring is part of the approved look too, but focus is not deterministic.
+		await chat.evaluate(() => document.activeElement?.blur());
+		await win.mouse.move(W / 2, H / 2);
+		await wait(400);
 		await shot('17-composer');
 		const styles = await chat.evaluate(([parts, props]) => {
 			const out = {};
@@ -322,7 +332,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 		options: {
 			app: { type: 'string' },
 			out: { type: 'string', default: 'workbench-shots' },
-			themes: { type: 'string', default: 'dark,light' },
+			themes: { type: 'string', default: 'dark,light,dark-2026' },
 			'write-baseline': { type: 'boolean', default: false },
 		},
 	}));
