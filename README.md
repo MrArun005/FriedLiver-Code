@@ -223,8 +223,9 @@ Patches:
 | `0030-installers-without-microsoft-only-parts` | Installers build without the Windows appx package and the tunnel CLI |
 | `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
-| `0110-modern-workbench` | The FriedLiver workbench stylesheet: regions separate by tone, soft rounded overlays, an activity pill, thin scrollbars, a pill command center. Theme variables only; high contrast untouched |
+| `0110-modern-workbench` | The workbench built from the design system: imports the generated tokens and `workbench/friedliver.css` (buttons, fields, menus, the palette, toasts, dialogs from COMPONENTS.md); menu rows and toast sizes read the tokens; custom menus and dialogs on macOS. High contrast untouched |
 | `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |
+| `0140-welcome-says-friedliver` | The welcome page and walkthroughs say FriedLiver, not VS Code |
 
 ### Writing a patch
 
