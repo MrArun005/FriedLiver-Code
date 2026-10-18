@@ -6,7 +6,6 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { parseMarkdown, type Block, type Inline, type ListBlock } from '../../shared/markdown';
 import type { AgentKey } from '../../shared/model';
-import type { Grant } from '../../shared/permissions';
 import type { QuestionField } from '../../shared/questions';
 import type { ApprovalLevel } from '../../shared/session';
 import type { PhoneChat, PhoneEvent, PhoneFile, PhoneItem, PhoneList, PhoneSummary, RemoteAction } from '../protocol';
@@ -67,9 +66,9 @@ function ago(at: number, now: number): string {
   return `${Math.round(s / 86_400)}d`;
 }
 
-function Avatar({ agent }: { agent: AgentKey }) {
+function Avatar({ agent, small }: { agent: AgentKey; small?: boolean }) {
   return (
-    <span class={`avatar avatar--${agent}`} aria-hidden="true">
+    <span class={`avatar avatar--${agent}${small ? ' avatar--small' : ''}`} aria-hidden="true">
       {AGENT_LETTER[agent]}
     </span>
   );
@@ -201,63 +200,223 @@ function Markdown({ text }: { text: string }) {
 
 type Act = (a: RemoteAction) => Promise<boolean>;
 
+// ---- Approvals: one compact card, scope as a visible segmented control, one primary (RESEARCH.md §3–4) ----
+
+type Scope = 'once' | 'chat' | 'always';
+type Tone = 'routine' | 'review' | 'careful';
+
 function Diff({ file }: { file: PhoneFile }) {
   return (
-    <div class="diff">
-      <div class="diff__head">
-        <span class="diff__path">{file.path}</span>
-        <span class="diff__stat">
-          {file.isNew ? <span class="diff__new">new </span> : null}
+    <div class="preview">
+      <div class="preview__head">
+        <span class="mono preview__path">{file.path}</span>
+        <span class="mono">
+          {file.isNew ? <span class="muted">new </span> : null}
           <span class="add">+{file.added}</span> <span class="del">−{file.removed}</span>
         </span>
       </div>
       {file.lines.length ? (
-        <pre class="diff__body">
+        <pre class="preview__body">
           {file.lines.map((l, i) => (
-            <span key={i} class={l.op === '+' ? 'add' : l.op === '-' ? 'del' : ''}>
-              {l.op}
+            <span key={i} class={`dl${l.op === '+' ? ' dl--add' : l.op === '-' ? ' dl--del' : ''}`}>
+              <span class="dl__op">{l.op === ' ' ? '' : l.op === '-' ? '−' : '+'}</span>
               {l.text}
               {'\n'}
             </span>
           ))}
-          {file.more ? <span class="diff__more">{`… ${file.more} more line${file.more === 1 ? '' : 's'}\n`}</span> : null}
+          {file.more ? <span class="muted">{`… ${file.more} more line${file.more === 1 ? '' : 's'}`}</span> : null}
         </pre>
       ) : null}
     </div>
   );
 }
 
-function Card({ title, children, done }: { title: string; children?: preact.ComponentChildren; done?: string }) {
+function Chip({ tone, label }: { tone: Tone; label: string }) {
+  return <span class={`chip chip--${tone}`}>{tone === 'careful' ? <LockIcon /> : null}{label}</span>;
+}
+
+function LockIcon() {
   return (
-    <section class={`card${done ? ' card--done' : ''}`}>
-      <p class="card__title">{title}</p>
-      {children}
-      {done ? <p class="card__done">{done}</p> : null}
+    <svg class="lock" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+      <path d="M4.5 7V5.5a3.5 3.5 0 0 1 7 0V7M3.5 7h9v6.5h-9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+/** "Run npm test", the agent, and the risk chip: who wants what, on one line. */
+function AskHead({ agent, verb, target, tone, label }: { agent?: AgentKey; verb: string; target?: string; tone: Tone; label: string }) {
+  return (
+    <header class="ask__head">
+      {agent ? <Avatar agent={agent} small /> : null}
+      <span class="ask__what">
+        <span class="ask__verb">{verb}</span>
+        {target ? <span class="mono ask__target">{target}</span> : null}
+      </span>
+      <Chip tone={tone} label={label} />
+    </header>
+  );
+}
+
+const SCOPE_NAMES: Record<Scope, string> = { once: 'Once', chat: 'This chat', always: 'Always' };
+
+/** Press and hold for 600 ms (Enter or Space held from a keyboard): a careful allow is never a reflex tap. */
+function HoldButton({ label, onDone }: { label: string; onDone(): void }) {
+  const [holding, setHolding] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const start = () => {
+    if (timer.current) return;
+    setHolding(true);
+    timer.current = setTimeout(() => {
+      timer.current = undefined;
+      setHolding(false);
+      onDone();
+    }, 600);
+  };
+  const stop = () => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    setHolding(false);
+  };
+  return (
+    <button
+      class={`primary primary--careful${holding ? ' primary--holding' : ''}`}
+      aria-label={`${label}: press and hold`}
+      onPointerDown={(e) => (e.preventDefault(), start())}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !e.repeat && (e.preventDefault(), start())}
+      onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && stop()}
+    >
+      <span class="primary__fill" aria-hidden="true" />
+      <span class="primary__label">{holding ? 'Keep holding…' : `Hold to ${label.toLowerCase()}`}</span>
+    </button>
+  );
+}
+
+interface AskProps {
+  agent?: AgentKey;
+  verb: string;
+  target?: string;
+  tone: Tone;
+  label: string;
+  /** What each scope does; absent scopes show disabled. Careful requests get none but once. */
+  scopes: Partial<Record<Scope, { rule: string; run(): void; choices?: { label: string; run(): void }[] }>>;
+  /** "Allow", or "Run" for a command. */
+  allowWord?: string;
+  deny?: { label: string; run(): void };
+  consequences?: string[];
+  onMac?: string;
+  extra?: { label: string; run(): void }[];
+  children?: preact.ComponentChildren;
+}
+
+function Ask(p: AskProps) {
+  const [scope, setScope] = useState<Scope>('once');
+  const [pick, setPick] = useState(0);
+  const careful = p.tone === 'careful';
+  const word = p.allowWord ?? 'Allow';
+  const chosen = p.scopes[scope];
+  const primary = scope === 'once' ? `${word} once` : scope === 'chat' ? `${word} for this chat` : `Always ${word.toLowerCase()}`;
+  const run = () => (chosen?.choices ? chosen.choices[pick]?.run() : chosen?.run());
+  return (
+    <section class={`ask ask--${p.tone}`}>
+      <AskHead agent={p.agent} verb={p.verb} target={p.target} tone={p.tone} label={p.label} />
+      {p.children}
+      {careful && p.consequences?.length ? (
+        <ul class="ask__why">
+          {p.consequences.map((c) => (
+            <li key={c}>{c}</li>
+          ))}
+        </ul>
+      ) : null}
+      {p.onMac ? <p class="ask__note ask__note--warn">{p.onMac}</p> : null}
+      <div class="ask__bar">
+        {careful ? (
+          <p class="ask__note">
+            <LockIcon /> Once only
+          </p>
+        ) : p.scopes.once ? (
+          <div class="seg" role="radiogroup" aria-label="How long">
+            {(['once', 'chat', 'always'] as Scope[]).map((s) => (
+              <button key={s} role="radio" aria-checked={scope === s} disabled={!p.scopes[s]} class={`seg__item${scope === s ? ' seg__item--on' : ''}`} onClick={() => (setScope(s), setPick(0))}>
+                {SCOPE_NAMES[s]}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {!careful && scope !== 'once' && chosen ? (
+          <div class="ask__rule">
+            {chosen.choices && chosen.choices.length > 1 ? (
+              <div class="rows" role="radiogroup">
+                {chosen.choices.map((c, i) => (
+                  <button key={c.label} role="radio" aria-checked={pick === i} class={`row-choice${pick === i ? ' row-choice--on' : ''}`} onClick={() => setPick(i)}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p class="ask__note">{chosen.rule}</p>
+            )}
+            <p class="ask__note">Confirm on Mac: it asks before this is allowed.</p>
+          </div>
+        ) : null}
+        <div class="ask__actions">
+          {p.deny ? (
+            <button class="quiet" onClick={p.deny.run}>
+              {p.deny.label}
+            </button>
+          ) : null}
+          {chosen && !p.onMac ? careful ? <HoldButton label={primary} onDone={run} /> : (
+            <button class="primary" onClick={run}>
+              {primary}
+            </button>
+          ) : null}
+        </div>
+        {p.extra?.length ? (
+          <div class="ask__more">
+            {p.extra.map((x) => (
+              <button key={x.label} class="quiet quiet--small" onClick={x.run}>
+                {x.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
 
-function Buttons({ children }: { children: preact.ComponentChildren }) {
-  return <div class="card__buttons">{children}</div>;
+/** A short one-line command reads in the header; anything longer gets its own preview. */
+const oneLine = (line: string) => !line.includes('\n') && line.length <= 80;
+
+function CommandPreview({ line, cwd }: { line: string; cwd?: string }) {
+  const where = cwd && cwd !== '.' ? <p class={oneLine(line) ? 'ask__note' : 'preview__foot'}>in {cwd}</p> : null;
+  if (oneLine(line)) return where;
+  return (
+    <div class="preview">
+      <pre class="preview__body preview__cmd">{line}</pre>
+      {where}
+    </div>
+  );
 }
 
-function Always({ choices, act, target }: { choices: { grant: Grant; label: string }[]; act: Act; target: { requestId: string } | { commandId: string } }) {
-  if (!choices.length) return null;
+/** A decided request: one line in the timeline. */
+function Resolved({ verb, target, outcome, tone = 'done' }: { verb: string; target?: string; outcome: string; tone?: 'done' | 'denied' }) {
   return (
-    <div class="card__always">
-      {choices.map((c, i) => (
-        <button key={i} class="link" onClick={() => void act({ type: 'allowAlways', ...target, grant: c.grant })}>
-          {c.label}
-        </button>
-      ))}
-      <p class="hint">Always allow asks on your Mac first.</p>
-    </div>
+    <p class={`resolved resolved--${tone}`}>
+      <span class="resolved__what">
+        {verb} {target ? <span class="mono">{target}</span> : null}
+      </span>
+      <span class="resolved__outcome"> · {outcome}</span>
+    </p>
   );
 }
 
 function QuestionCard({ item, act }: { item: Extract<PhoneItem, { k: 'question' }>; act: Act }) {
   const [values, setValues] = useState<Record<string, string | number | boolean | string[]>>({});
-  if (item.state !== 'awaiting') return <Card title={item.message} done={item.summary ?? (item.state === 'declined' ? 'Skipped' : 'Answered')} />;
+  if (item.state !== 'awaiting') return <Resolved verb="Asked" target={undefined} outcome={item.summary ?? (item.state === 'declined' ? 'skipped' : 'answered')} />;
   const one = item.fields.length === 1 && item.fields[0].type === 'choice' ? item.fields[0] : undefined;
   const set = (k: string, v: string | number | boolean | string[]) => setValues({ ...values, [k]: v });
   const field = (f: QuestionField) => {
@@ -266,23 +425,23 @@ function QuestionCard({ item, act }: { item: Extract<PhoneItem, { k: 'question' 
       case 'multi': {
         const picked = values[f.key];
         return (
-          <div class="choices" role={f.type === 'choice' ? 'radiogroup' : 'group'}>
+          <div class="rows" role={f.type === 'choice' ? 'radiogroup' : 'group'}>
             {(f.options ?? []).map((o) => {
               const on = f.type === 'choice' ? picked === o.value : Array.isArray(picked) && picked.includes(o.value);
               return (
                 <button
                   key={o.value}
-                  class={`choice${on ? ' choice--on' : ''}`}
-                  aria-pressed={on}
+                  role={f.type === 'choice' ? 'radio' : 'checkbox'}
+                  aria-checked={on}
+                  class={`row-choice${on ? ' row-choice--on' : ''}`}
                   onClick={() => {
-                    if (one) return void act({ type: 'answerQuestion', requestId: item.id, action: 'accept', values: { [f.key]: o.value } });
                     if (f.type === 'choice') return set(f.key, o.value);
                     const list = Array.isArray(picked) ? picked : [];
                     set(f.key, on ? list.filter((x) => x !== o.value) : [...list, o.value]);
                   }}
                 >
-                  <span class="choice__title">{o.title}</span>
-                  {o.description ? <span class="choice__desc">{o.description}</span> : null}
+                  <span class="row-choice__title">{o.title}</span>
+                  {o.description ? <span class="row-choice__desc">{o.description}</span> : null}
                 </button>
               );
             })}
@@ -309,30 +468,32 @@ function QuestionCard({ item, act }: { item: Extract<PhoneItem, { k: 'question' 
         );
     }
   };
+  const ready = !one || values[one.key] !== undefined;
   return (
-    <Card title={item.message}>
+    <section class="ask ask--question">
+      <p class="ask__question">{item.message}</p>
       {item.fields.map((f) => (
         <div class="field" key={f.key}>
           {item.fields.length > 1 || f.type !== 'choice' ? <p class="field__title">{f.title}</p> : null}
-          {f.description ? <p class="hint">{f.description}</p> : null}
+          {f.description ? <p class="ask__note">{f.description}</p> : null}
           {field(f)}
         </div>
       ))}
-      <Buttons>
-        {one ? null : (
-          <button class="btn btn--primary" onClick={() => void act({ type: 'answerQuestion', requestId: item.id, action: 'accept', values })}>
-            Submit
+      <div class="ask__bar">
+        <div class="ask__actions">
+          <button class="quiet" onClick={() => void act({ type: 'answerQuestion', requestId: item.id, action: 'decline' })}>
+            Skip
           </button>
-        )}
-        <button class="btn" onClick={() => void act({ type: 'answerQuestion', requestId: item.id, action: 'decline' })}>
-          Skip
-        </button>
-      </Buttons>
-    </Card>
+          <button class="primary" disabled={!ready} onClick={() => void act({ type: 'answerQuestion', requestId: item.id, action: 'accept', values })}>
+            Answer
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
-function ItemView({ item, act }: { item: PhoneItem; act: Act }) {
+function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: AgentKey }) {
   switch (item.k) {
     case 'user':
       return <div class="msg msg--you">{item.text}</div>;
@@ -363,116 +524,110 @@ function ItemView({ item, act }: { item: PhoneItem; act: Act }) {
         </section>
       );
     case 'permission': {
-      if (item.answer) return <Card title={item.title} done={item.auto ? `${item.answer} · ${item.auto}` : item.answer} />;
-      const primary = item.options.find((o) => o.kind === 'allow_once' && !o.escalates);
+      if (item.answer) return <Resolved verb={item.verb} target={item.target} outcome={`${item.answer}${item.auto ? ` · ${item.auto}` : ''}`} tone={/^no|deny|reject|cancel/i.test(item.answer) ? 'denied' : 'done'} />;
+      const answer = (optionId: string) => () => void act({ type: 'permission', requestId: item.id, optionId });
       return (
-        <Card title={item.title}>
-          {item.command ? (
-            <>
-              <pre class="code">{item.command.line}</pre>
-              {item.command.cwd ? <p class="hint">in {item.command.cwd}</p> : null}
-            </>
-          ) : null}
-          {item.url ? <p class="hint">{item.url}</p> : null}
+        <Ask
+          agent={agent}
+          verb={item.verb}
+          target={item.command && !oneLine(item.command.line) ? undefined : item.target}
+          tone={item.risk.level}
+          label={item.risk.label}
+          consequences={item.risk.consequences}
+          onMac={item.onMac ? 'Too long or hidden characters: allow this one on your Mac. You can still deny it here.' : undefined}
+          scopes={{
+            ...(item.once ? { once: { rule: '', run: answer(item.once) } } : {}),
+            ...(item.chat ? { chat: { rule: `${item.verb} ${item.target ?? ''} without asking until the chat ends.`, run: answer(item.chat) } } : {}),
+            ...(item.always.length
+              ? { always: { rule: item.always[0].label, run: () => void act({ type: 'allowAlways', requestId: item.id, grant: item.always[0].grant }), choices: item.always.map((c) => ({ label: c.label.replace(/^Always allow (\w)/, (_, ch: string) => ch.toUpperCase()), run: () => void act({ type: 'allowAlways', requestId: item.id, grant: c.grant }) })) } }
+              : {}),
+          }}
+          deny={item.deny ? { label: 'Deny', run: answer(item.deny) } : undefined}
+          extra={item.options.map((o) => ({ label: o.name, run: answer(o.id) }))}
+        >
+          {item.command ? <CommandPreview line={item.command.line} cwd={item.command.cwd} /> : null}
+          {item.url ? <p class="preview preview__foot mono">{item.url}</p> : null}
           {item.files?.map((f) => <Diff key={f.path} file={f} />)}
           {item.plan ? (
-            <div class="card__plan">
+            <div class="preview preview--plan">
               <Markdown text={item.plan} />
             </div>
           ) : null}
-          {item.text && !item.plan ? <p class="card__text">{item.text}</p> : null}
-          {item.onMac ? <p class="hint hint--warn">This command is too long or has hidden characters. Allow it on your Mac; you can still say no here.</p> : null}
-          <div class="options">
-            {item.options.filter((o) => !item.onMac || !o.kind.startsWith('allow')).map((o, i) => (
-              <button
-                key={o.id}
-                class={`option${o === primary ? ' option--primary' : ''}${o.escalates ? ' option--escalates' : ''}`}
-                onClick={() => void act({ type: 'permission', requestId: item.id, optionId: o.id })}
-              >
-                <span class="option__n">{i + 1}</span>
-                <span>{o.name}</span>
-                {o.escalates && o.kind.startsWith('allow') ? <span class="option__note">Confirm on Mac</span> : null}
-              </button>
-            ))}
-          </div>
-          <Always choices={item.always} act={act} target={{ requestId: item.id }} />
-        </Card>
+          {item.text && !item.plan ? <p class="ask__text">{item.text}</p> : null}
+        </Ask>
       );
     }
     case 'command': {
+      const first = item.line.split('\n')[0];
       if (item.state !== 'awaiting') {
         return (
           <div class={`step step--${item.state === 'denied' || (item.exitCode ?? 0) !== 0 ? 'failed' : item.state === 'running' ? 'working' : 'done'}`}>
             <span class="step__title">
               <span class="tag">Run</span>
-              <code>{item.line.split('\n')[0]}</code>
+              <span class="mono">{first}</span>
             </span>
             {item.output ? <pre class="step__out">{item.output}</pre> : null}
           </div>
         );
       }
       return (
-        <Card title={item.outside ? 'Run a command outside the workspace' : 'Run a command'}>
-          <pre class="code">{item.line}</pre>
-          <p class="hint">in {item.cwd}</p>
-          {item.onMac ? <p class="hint hint--warn">This command is too long or has hidden characters. Run it from your Mac; you can still deny it here.</p> : null}
-          <Buttons>
-            {item.onMac ? null : (
-              <button class="btn btn--primary" onClick={() => void act({ type: 'command', commandId: item.id, approve: true })}>
-                Run
-              </button>
-            )}
-            <button class="btn" onClick={() => void act({ type: 'command', commandId: item.id, approve: false })}>
-              Deny
-            </button>
-          </Buttons>
-          {item.outside || item.onMac ? null : <Always choices={[{ grant: { kind: 'exact', command: item.line }, label: 'Always allow this exact command' }]} act={act} target={{ commandId: item.id }} />}
-        </Card>
+        <Ask
+          agent={agent}
+          verb="Run"
+          target={oneLine(item.line) ? item.line : undefined}
+          tone={item.risk.level}
+          label={item.risk.label}
+          consequences={item.risk.consequences}
+          allowWord="Run"
+          onMac={item.onMac ? 'Too long or hidden characters: run this one from your Mac. You can still deny it here.' : undefined}
+          scopes={{
+            once: { rule: '', run: () => void act({ type: 'command', commandId: item.id, approve: true }) },
+            ...(item.outside || item.onMac ? {} : { always: { rule: `Always run ${first}, exactly, in every chat.`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line } }) } }),
+          }}
+          deny={{ label: 'Deny', run: () => void act({ type: 'command', commandId: item.id, approve: false }) }}
+        >
+          <CommandPreview line={item.line} cwd={item.cwd} />
+        </Ask>
       );
     }
     case 'question':
       return <QuestionCard item={item} act={act} />;
     case 'review':
-      if (item.state !== 'pending') return <Card title={`Edit ${item.file.path}`} done={`${item.state === 'accepted' ? 'Accepted' : 'Rejected'}${item.auto ? ` · ${item.auto}` : ''}`} />;
+      if (item.state !== 'pending') return <Resolved verb="Edit" target={item.file.path} outcome={`${item.state}${item.auto ? ` · ${item.auto}` : ''}`} tone={item.state === 'rejected' ? 'denied' : 'done'} />;
       return (
-        <Card title={`Review an edit to ${item.file.path}`}>
+        <Ask
+          agent={agent}
+          verb={item.file.isNew ? 'Create' : 'Edit'}
+          target={item.file.path}
+          tone="review"
+          label="Review the edit"
+          allowWord="Accept"
+          scopes={{ once: { rule: '', run: () => void act({ type: 'review', reviewId: item.id, action: 'accept' }) } }}
+          deny={{ label: 'Reject', run: () => void act({ type: 'review', reviewId: item.id, action: 'reject' }) }}
+        >
           <Diff file={item.file} />
-          <Buttons>
-            <button class="btn btn--primary" onClick={() => void act({ type: 'review', reviewId: item.id, action: 'accept' })}>
-              Accept
-            </button>
-            <button class="btn" onClick={() => void act({ type: 'review', reviewId: item.id, action: 'reject' })}>
-              Reject
-            </button>
-          </Buttons>
-        </Card>
+        </Ask>
       );
-    case 'bridge':
-      if (item.state !== 'awaiting') return <Card title={item.title} done={item.state === 'allowed' ? 'Allowed' : 'Denied'} />;
+    case 'bridge': {
+      if (item.state !== 'awaiting') return <Resolved verb={item.title} outcome={item.state} tone={item.state === 'denied' ? 'denied' : 'done'} />;
+      const answer = (a: 'allow' | 'allowChat' | 'allowAlways') => () => void act({ type: 'bridge', requestId: item.id, answer: a });
       return (
-        <Card title={item.title}>
-          {item.text ? <p class="card__text">{item.text}</p> : null}
-          <Buttons>
-            <button class="btn btn--primary" onClick={() => void act({ type: 'bridge', requestId: item.id, answer: 'allow' })}>
-              Allow
-            </button>
-            <button class="btn" onClick={() => void act({ type: 'bridge', requestId: item.id, answer: 'allowChat' })}>
-              For this chat
-            </button>
-            <button class="btn" onClick={() => void act({ type: 'bridge', requestId: item.id, answer: 'deny' })}>
-              Deny
-            </button>
-          </Buttons>
-          {item.always ? (
-            <div class="card__always">
-              <button class="link" onClick={() => void act({ type: 'bridge', requestId: item.id, answer: 'allowAlways' })}>
-                Always allow {item.always}
-              </button>
-              <p class="hint">Always allow asks on your Mac first.</p>
-            </div>
-          ) : null}
-        </Card>
+        <Ask
+          agent={item.agent}
+          verb={item.title}
+          tone="review"
+          label="Agent request"
+          scopes={{
+            once: { rule: '', run: answer('allow') },
+            chat: { rule: 'Requests like this one in that chat go ahead without asking until it ends.', run: answer('allowChat') },
+            ...(item.always ? { always: { rule: `Always allow ${item.always}.`, run: answer('allowAlways') } } : {}),
+          }}
+          deny={{ label: 'Deny', run: () => void act({ type: 'bridge', requestId: item.id, answer: 'deny' }) }}
+        >
+          {item.text ? <p class="preview preview__text">{item.text}</p> : null}
+        </Ask>
       );
+    }
     case 'notice':
       return <p class={`notice${item.tone === 'error' ? ' notice--error' : ''}`}>{item.text}</p>;
     case 'changes':
@@ -480,7 +635,7 @@ function ItemView({ item, act }: { item: PhoneItem; act: Act }) {
     case 'link':
       return (
         <div class="msg msg--link">
-          <p class="hint">{item.label}</p>
+          <p class="ask__note">{item.label}</p>
           <Markdown text={item.text} />
         </div>
       );
@@ -610,7 +765,7 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
       <main class="transcript">
         {chat.earlier ? <p class="notice">{chat.earlier} earlier items are on your Mac.</p> : null}
         {chat.items.map((item, i) => (
-          <ItemView key={`${chat.id}-${i}-${item.k}`} item={item} act={act} />
+          <ItemView key={`${chat.id}-${i}-${item.k}`} item={item} act={act} agent={chat.agent} />
         ))}
         {chat.busy ? <p class="working">Working…</p> : null}
         <div ref={end} />

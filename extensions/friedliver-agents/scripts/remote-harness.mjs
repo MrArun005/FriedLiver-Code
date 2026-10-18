@@ -40,6 +40,7 @@ const s = (id, agent, label, title, status, folder, extra = {}) => ({ id, agent,
 const chats = {
   'chat-3': s('chat-3', 'claude', 'Claude', 'Add rate limiting to the pairing endpoint', 'needs-you', 'wt-remote', { waiting: 1, ago: 0.2, approval: 'edits' }),
   'chat-7': s('chat-7', 'codex', 'Codex', 'Fix flaky checkpoint test on CI', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 1 }),
+  'chat-8': s('chat-8', 'claude', 'Claude 4', 'Push the SQLite migration branch', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 3 }),
   'chat-5': s('chat-5', 'claude', 'Claude 2', 'Profile transcript rendering at 10k items', 'working', 'FriedLiver-Code', { subagents: 3, ago: 0.1 }),
   'chat-9': s('chat-9', 'gemini', 'Gemini', 'Review the WebSocket framing code', 'working', 'wt-remote', { ago: 0.5 }),
   'chat-2': s('chat-2', 'codex', 'Codex 2', 'Bump esbuild to 0.28 and rebuild', 'error', 'FriedLiver-Code', { ago: 14 }),
@@ -47,7 +48,7 @@ const chats = {
   'chat-4': s('chat-4', 'gemini', 'Gemini 2', 'Summarise open dependabot PRs', 'done', 'FriedLiver-Code', { ago: 95 }),
 };
 const groups = [
-  ['needs-you', 'Needs you', ['chat-3', 'chat-7']],
+  ['needs-you', 'Needs you', ['chat-3', 'chat-7', 'chat-8']],
   ['working', 'Working', ['chat-5', 'chat-9']],
   ['error', 'Problem', ['chat-2']],
   ['done', 'Done', ['chat-1', 'chat-4']],
@@ -86,11 +87,13 @@ const chat3 = {
       k: 'permission',
       id: 'perm-41',
       title: 'Edit src/remote/auth.ts',
-      options: [
-        { id: 'allow', name: 'Yes', kind: 'allow_once', escalates: false },
-        { id: 'always', name: 'Yes, and don’t ask again this session', kind: 'allow_always', escalates: true },
-        { id: 'reject', name: 'No, and tell Claude what to do differently', kind: 'reject_once', escalates: false },
-      ],
+      verb: 'Edit',
+      target: 'src/remote/auth.ts',
+      risk: { level: 'review', label: 'Inside the workspace', consequences: [] },
+      once: 'allow',
+      chat: 'always',
+      deny: 'reject',
+      options: [{ id: 'abort', name: 'No, and tell Claude what to do differently', kind: 'reject_once', escalates: false }],
       files: [
         {
           path: 'src/remote/auth.ts',
@@ -112,6 +115,7 @@ const chat3 = {
       ],
       always: [
         { grant: { kind: 'folder', folder: '/Users/arun/code/wt-remote/src/remote', access: 'write' }, label: 'Always allow changing files in src/remote' },
+        { grant: { kind: 'folder', folder: '/Users/arun/code/wt-remote', access: 'write' }, label: 'Always allow changing files in wt-remote' },
       ],
     },
   ],
@@ -135,7 +139,7 @@ const chat5 = {
       { content: 'Propose fixes with expected gains', status: 'pending' },
     ] },
     { k: 'tool', id: 's4', title: 'Collect a baseline profile', status: 'completed', subagent: true },
-    { k: 'command', id: 'cmd-8', line: 'node --cpu-prof bench/render.mjs --items 10000', cwd: '.', state: 'exited', outside: false, output: 'rendered 10000 items in 1843 ms\nprofile written to CPU.20261018.093301.cpuprofile', exitCode: 0 },
+    { k: 'command', id: 'cmd-8', line: 'node --cpu-prof bench/render.mjs --items 10000', cwd: '.', state: 'exited', outside: false, output: 'rendered 10000 items in 1843 ms\nprofile written to CPU.20261018.093301.cpuprofile', exitCode: 0, risk: { level: 'review', label: 'Runs a command', consequences: [] } },
     { k: 'agent', text: 'Baseline: **1.84 s** for 10k items. `Markdown` parses every reply on each render; `parseDoc` caching should cut that by about a third. Three subagents are measuring the rest.' },
     { k: 'tool', id: 's1', title: 'Measure render time per 1k items', status: 'in_progress', subagent: true },
   ],
@@ -148,14 +152,40 @@ const chat7 = {
   items: [
     { k: 'user', text: 'The checkpoints test fails about one run in ten on CI. Find out why and fix it.' },
     { k: 'agent', text: 'It races the git index lock when two checkpoints start in the same tick. I want to run the test 50 times to confirm.' },
-    { k: 'command', id: 'cmd-12', line: 'for i in $(seq 50); do npx vitest run test/checkpoints.test.ts || break; done', cwd: 'extensions/friedliver-agents', state: 'awaiting', outside: false, output: '' },
+    { k: 'command', id: 'cmd-12', line: 'for i in $(seq 50); do npx vitest run test/checkpoints.test.ts || break; done', cwd: 'extensions/friedliver-agents', state: 'awaiting', outside: false, output: '', risk: { level: 'review', label: 'Runs a command', consequences: [] } },
     { k: 'question', id: 'q-3', message: 'Which fix do you prefer?', state: 'awaiting', fields: [{ key: 'fix', title: 'Fix', type: 'choice', options: [
       { value: 'lock', title: 'Serialise checkpoints per repo', description: 'One queue per repository; simplest, slightly slower' },
       { value: 'retry', title: 'Retry on index.lock', description: 'Up to 3 retries with 50 ms backoff' },
     ] }] },
   ],
 };
-const views = { 'chat-3': chat3, 'chat-5': chat5, 'chat-7': chat7 };
+const chat8 = {
+  ...chats['chat-8'],
+  earlier: 0,
+  queued: 0,
+  subagentList: [],
+  items: [
+    { k: 'user', text: 'Rebase the SQLite migration branch on main and push it so CI runs.' },
+    { k: 'tool', id: 'r1', title: 'git rebase origin/main', status: 'completed' },
+    { k: 'agent', text: 'Rebased cleanly. The remote branch has the old commits, so a normal push is rejected.' },
+    {
+      k: 'permission',
+      id: 'perm-77',
+      title: 'Run git push --force origin main',
+      verb: 'Run',
+      target: 'git push --force origin main',
+      risk: { level: 'careful', label: 'Rewrites shared history', consequences: ['Replaces commits on the remote that are not in your branch', 'Other people’s work there could be lost'] },
+      once: 'allow',
+      deny: 'reject',
+      options: [],
+      command: { line: 'git push --force origin main', cwd: '.' },
+      always: [],
+    },
+    { k: 'bridge', id: 'br-4', agent: 'claude', title: 'Wants to ask Gemini', text: 'Does the reports page already have a CSV helper I should reuse, or should I add one under src/lib?', state: 'awaiting', always: 'Claude asking Gemini, in any chat' },
+    { k: 'permission', id: 'perm-70', title: 'Read package.json', verb: 'Read', target: 'package.json', risk: { level: 'routine', label: 'Routine', consequences: [] }, options: [], always: [], answer: 'Yes', auto: 'Always allowed: wt-remote' },
+  ],
+};
+const views = { 'chat-3': chat3, 'chat-5': chat5, 'chat-7': chat7, 'chat-8': chat8 };
 
 // ---- The server, as the editor would run it ----
 
@@ -225,8 +255,13 @@ for (const scheme of ['dark', 'light']) {
   await phone(scheme, 'chat-approval', undefined, { open: 'chat-3' });
   await phone(scheme, 'chat-command', undefined, { open: 'chat-7' });
   await phone(scheme, 'subagents', (p) => p.click('.subs__head'), { open: 'chat-5' });
+  await phone(scheme, 'chat-careful', (p) => p.evaluate(() => document.querySelector('.ask--careful')?.scrollIntoView({ block: 'center' })), { open: 'chat-8' });
 }
 await phone('dark', 'new-chat', (p) => p.click('[aria-label="New chat"]'));
+await phone('dark', 'scope-always', async (p) => {
+  await p.click('.seg__item:nth-child(3)');
+  await p.evaluate(() => document.querySelector('.ask__bar')?.scrollIntoView({ block: 'end' }));
+}, { open: 'chat-3' });
 const code = pairing.start().code;
 const fpB64 = Buffer.from(fp.replace(/:/g, ''), 'hex').toString('base64url');
 await phone('dark', 'pairing', undefined, { paired: false, hash: `#c=${code}&f=${fpB64}` });

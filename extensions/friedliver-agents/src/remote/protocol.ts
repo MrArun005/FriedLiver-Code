@@ -7,6 +7,7 @@ import { LIMITS, parseWebviewMessage } from '../shared/messages';
 import type { AgentKey, ChatStatus } from '../shared/model';
 import { isAgentKey } from '../shared/model';
 import type { Grant } from '../shared/permissions';
+import type { Risk } from './risk';
 import type { QuestionField, QuestionValue } from '../shared/questions';
 import type { ApprovalLevel } from '../shared/session';
 import type { Subagent } from '../shared/view';
@@ -55,6 +56,15 @@ export type PhoneItem =
       k: 'permission';
       id: string;
       title: string;
+      /** The header: "Run", "Edit", "Fetch"; the mono target; and how careful to be. */
+      verb: string;
+      target?: string;
+      risk: Risk;
+      /** The scope control: the agent's plain one-time yes, its "for this session" answer, and its no. */
+      once?: string;
+      chat?: string;
+      deny?: string;
+      /** The agent's other answers (a plan's "and auto-accept edits", "tell Claude what to do differently"). */
       options: { id: string; name: string; kind: string; escalates: boolean }[];
       answer?: string;
       auto?: string;
@@ -68,10 +78,10 @@ export type PhoneItem =
       /** "Always allow" choices: what the card offers, each confirmed on the Mac. */
       always: { grant: Grant; label: string }[];
     }
-  | { k: 'command'; id: string; line: string; cwd: string; state: string; outside: boolean; output: string; exitCode?: number | null; auto?: string; onMac?: boolean }
+  | { k: 'command'; id: string; line: string; cwd: string; state: string; outside: boolean; output: string; exitCode?: number | null; auto?: string; onMac?: boolean; risk: Risk }
   | { k: 'question'; id: string; message: string; fields: QuestionField[]; state: string; summary?: string }
   | { k: 'review'; id: string; file: PhoneFile; state: string; auto?: string }
-  | { k: 'bridge'; id: string; title: string; text: string; state: string; always?: string }
+  | { k: 'bridge'; id: string; title: string; text: string; state: string; always?: string; agent: AgentKey }
   | { k: 'notice'; text: string; tone: 'info' | 'error' }
   | { k: 'changes'; files: number; undone?: boolean }
   | { k: 'link'; label: string; text: string; role: string };

@@ -174,6 +174,31 @@ describe('phone actions, the strict cases', () => {
     expect(calls).toEqual(['permission perm-1 no', 'permission perm-1 yes']);
   });
 
+  it('allow a careful request only once, whatever the Mac would say', async () => {
+    const perm: Item = {
+      kind: 'permission',
+      requestId: 'perm-2',
+      title: 'Run git push --force origin main',
+      toolKind: 'execute',
+      detail: { command: { line: 'git push --force origin main', cwd: '/w' } },
+      options: [
+        { optionId: 'yes', name: 'Yes', kind: 'allow_once' },
+        { optionId: 'always', name: 'Yes, and don’t ask again', kind: 'allow_always' },
+        { optionId: 'no', name: 'No', kind: 'reject_once' },
+      ],
+    };
+    const { actions, calls, confirms } = fakeActions([perm], true);
+    expect(await actions.run({ type: 'permission', requestId: 'perm-2', optionId: 'always' }, PHONE)).toEqual({ ok: false, error: 'This one can only be allowed once.' });
+    expect(await actions.run({ type: 'allowAlways', requestId: 'perm-2', grant: { kind: 'exact', command: 'git push --force origin main' } }, PHONE)).toEqual({ ok: false, error: 'This one can only be allowed once.' });
+    expect(confirms).toEqual([]);
+    const view = phoneChat({ chats: [] }, { id: 'c', agent: 'claude', label: 'Claude', title: 't', cwd: '/w', createdAt: 0, busy: true, changedFiles: 0, items: [perm], depth: 0, files: [], lastActivity: 0, turns: 0 }).items[0];
+    expect(view).toMatchObject({ k: 'permission', verb: 'Run', target: 'git push --force origin main', risk: { level: 'careful', label: 'Rewrites shared history' }, once: 'yes', deny: 'no', always: [] });
+    expect(view.k === 'permission' && view.chat).toBeUndefined();
+    expect(view.k === 'permission' && view.options).toEqual([]);
+    expect(await actions.run({ type: 'permission', requestId: 'perm-2', optionId: 'yes' }, PHONE)).toEqual({ ok: true });
+    expect(calls).toEqual(['permission perm-2 yes']);
+  });
+
   it('confirm “For this chat” on an agent’s request too, since it keeps allowing', async () => {
     const bridge: Item = { kind: 'bridge', requestId: 'br-1', tool: 'browser_open', target: { browser: true }, text: 'https://example.com', state: 'awaiting' };
     const { actions, calls, confirms } = fakeActions([bridge], false);
@@ -228,7 +253,8 @@ describe('what the phone sees', () => {
     await waitFor(() => !!open(core, chat.id));
     const item = phoneChat(core.snapshot, core.chat(chat.id)!).items.find((i) => i.k === 'permission');
     expect(item).toMatchObject({ command: { line: 'node --version' }, always: [{ grant: { kind: 'exact', command: 'node --version' } }] });
-    expect(item?.k === 'permission' && item.options.find((o) => o.kind === 'allow_always')?.escalates).toBe(true);
+    // The agent's "don't ask again for this session" is the This chat scope; its plain yes and no are Once and Deny.
+    expect(item).toMatchObject({ once: 'allow', chat: 'always', deny: 'reject', options: [], risk: { level: 'routine' } });
     core.answerPermission(open(core, chat.id)!.requestId, null);
     await turn;
   });

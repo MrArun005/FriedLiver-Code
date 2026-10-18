@@ -5,6 +5,7 @@
 import type { AgentCore } from '../host/core';
 import { parseMention, waitingItems, type AgentKey, type ChatView, type Item } from '../shared/model';
 import { primaryOption } from '../shared/tools';
+import { commandRisk, requestRisk } from './risk';
 import { phoneChats } from './phoneView';
 import type { RemoteAction } from './protocol';
 
@@ -113,6 +114,7 @@ export class RemoteActions {
         const allows = option?.kind.startsWith('allow');
         const line = found.item.detail?.command?.line;
         if (allows && line !== undefined && !plainCommand(line)) return refused(ON_MAC);
+        if (allows && option !== primaryOption(found.item.options) && requestRisk(found.item.detail).level === 'careful') return refused('This one can only be allowed once.');
         // Only the plain one-time yes goes ahead: every other allow keeps allowing or changes how the agent asks.
         if (option && allows && option !== primaryOption(found.item.options)) {
           const ok = await confirm({
@@ -162,6 +164,8 @@ export class RemoteActions {
         if (!found) return refused('That request is no longer waiting.');
         const line = found.item.kind === 'command' ? found.item.commandLine : found.item.kind === 'permission' ? found.item.detail?.command?.line : undefined;
         if (line !== undefined && !plainCommand(line)) return refused(ON_MAC);
+        const risk = found.item.kind === 'command' ? commandRisk(found.item.commandLine) : found.item.kind === 'permission' ? requestRisk(found.item.detail) : undefined;
+        if (risk?.level === 'careful') return refused('This one can only be allowed once.');
         await core.allowAlways(a.requestId ? { requestId: a.requestId } : { commandId: a.commandId! }, a.grant, via);
         return { ok: true };
       }
