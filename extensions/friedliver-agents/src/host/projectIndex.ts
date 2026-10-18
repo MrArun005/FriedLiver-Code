@@ -6,7 +6,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { isMark, type Journal, type JournalMark } from './changeJournal';
 import { MerkleTree } from './merkle';
@@ -27,6 +27,7 @@ export const INDEX_LIMITS = {
 };
 
 const GIT_OID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+const HASH = /^[0-9a-f]{64}$/;
 
 /** Files whose stat checks run at once. */
 export const STAT_BATCH = 256;
@@ -142,12 +143,19 @@ export function imports(file: string, text: string): string[] {
   return [...out].slice(0, 200);
 }
 
-interface Doc {
-  rel: string;
+/** An indexed file as the Merkle tree and the quick check see it. Light: loads first, before any doc. */
+interface Leaf {
+  size: number;
   /** The file's mtime in nanoseconds, with its size the quick check before any read. */
   mtimeNs: string;
-  size: number;
   /** SHA-256 of the content: the file's leaf in the Merkle tree. */
+  hash: string;
+}
+
+/** What search, symbols, outline and related answer from. */
+interface Doc {
+  rel: string;
+  /** The content hash this doc was made from: a saved doc is used only while its leaf still has it. */
   hash: string;
   len: number;
   tokens: Map<string, number>;
@@ -172,6 +180,10 @@ export interface IndexOptions {
 /** The index of one workspace folder. */
 export class ProjectIndex {
   private readonly docs = new Map<string, Doc>();
+  /** Every indexed file. Equal to the docs' keys, except while saved docs stream in (loadDocs). */
+  private readonly leaves = new Map<string, Leaf>();
+  /** Saved docs are still streaming in: a leaf without its doc is not read for that alone. */
+  private docsPending = false;
   private readonly postings = new Map<string, Map<string, number>>();
   private totalLen = 0;
   private bytes = 0;
@@ -197,8 +209,14 @@ export class ProjectIndex {
     this.exclude = (options.exclude ?? []).map(globToRegex);
   }
 
+  /** Indexed files (the tree's leaves). */
   get size(): number {
-    return this.docs.size;
+    return this.leaves.size;
+  }
+
+  /** Whether saved docs are still loading: search, symbols and the like may be missing some files. */
+  get loading(): boolean {
+    return this.docsPending;
   }
 
   /** Whether a folder-relative path may be indexed at all, by name alone. */
@@ -342,18 +360,20 @@ export class ProjectIndex {
     rel = rel.split(path.sep).join('/');
     const st = checked === undefined ? await this.check(rel) : checked;
     if (!st) return this.remove(rel), true;
-    const old = this.docs.get(rel);
-    if (old && old.mtimeNs === st.mtimeNs && old.size === st.size) return true;
+    const leaf = this.leaves.get(rel);
+    // A doc that is still streaming in counts as there.
+    const hasDoc = this.docs.has(rel) || this.docsPending;
+    if (leaf && hasDoc && leaf.mtimeNs === st.mtimeNs && leaf.size === st.size) return true;
     const key = `${st.size}:${st.mtimeNs}`;
-    if (!old && this.unreadable.get(rel) === key) return true;
-    if (!old && this.docs.size >= this.options.maxFiles) return (this.capped = true), false;
+    if (!leaf && this.unreadable.get(rel) === key) return true;
+    if (!leaf && this.leaves.size >= this.options.maxFiles) return (this.capped = true), false;
     const got = await this.readChecked(rel);
     if (got === null) return this.unreadable.set(rel, key), true;
     this.unreadable.delete(rel);
     // Stat changed, content did not (a checkout, a touch): keep the entry, note the new stat.
-    if (old && old.hash === got.hash) {
-      old.mtimeNs = st.mtimeNs;
-      old.size = st.size;
+    if (leaf && hasDoc && leaf.hash === got.hash) {
+      leaf.mtimeNs = st.mtimeNs;
+      leaf.size = st.size;
       return true;
     }
     this.counts.reindex++;
@@ -366,18 +386,24 @@ export class ProjectIndex {
       else if (tokens.size < INDEX_LIMITS.tokensPerFile) tokens.set(t, 1);
     }
     for (const t of tokenize(rel)) tokens.set(t, (tokens.get(t) ?? 0) + 1);
-    const doc: Doc = { rel, mtimeNs: st.mtimeNs, size: st.size, hash: got.hash, len, tokens, symbols: outline(rel, text), imports: imports(rel, text) };
+    const doc: Doc = { rel, hash: got.hash, len, tokens, symbols: outline(rel, text), imports: imports(rel, text) };
     this.remove(rel);
     if (this.bytes + cost(doc) > this.options.maxBytes) return (this.capped = true), false;
+    this.leaves.set(rel, { size: st.size, mtimeNs: st.mtimeNs, hash: got.hash });
+    this.tree.set(rel, got.hash);
     this.add(doc);
     return true;
   }
 
   remove(rel: string): void {
+    if (this.leaves.delete(rel)) this.tree.delete(rel);
+    this.dropDoc(rel);
+  }
+
+  private dropDoc(rel: string): void {
     const doc = this.docs.get(rel);
     if (!doc) return;
     this.docs.delete(rel);
-    this.tree.delete(rel);
     this.totalLen -= doc.len;
     this.bytes -= cost(doc);
     for (const t of doc.tokens.keys()) {
@@ -387,9 +413,9 @@ export class ProjectIndex {
     }
   }
 
+  /** A doc for a leaf already in place (the tree is the leaves' business). */
   private add(doc: Doc): void {
     this.docs.set(doc.rel, doc);
-    this.tree.set(doc.rel, doc.hash);
     this.totalLen += doc.len;
     this.bytes += cost(doc);
     for (const [t, tf] of doc.tokens) {
@@ -426,7 +452,7 @@ export class ProjectIndex {
     const under = (r: string) => dirs.some((d) => r.startsWith(d + '/'));
     const files = (await this.list()).filter(under);
     const keep = new Set(files);
-    for (const rel of [...this.docs.keys()]) if (under(rel) && !keep.has(rel)) this.remove(rel);
+    for (const rel of [...this.leaves.keys()]) if (under(rel) && !keep.has(rel)) this.remove(rel);
     for (let i = 0; i < files.length; i += STAT_BATCH) {
       if (!(await this.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
       if (onBatch && !(await onBatch())) return false;
@@ -498,7 +524,7 @@ export class ProjectIndex {
 
   /** Drops files that are no longer listed. */
   prune(keep: Set<string>): void {
-    for (const rel of [...this.docs.keys()]) if (!keep.has(rel)) this.remove(rel);
+    for (const rel of [...this.leaves.keys()]) if (!keep.has(rel)) this.remove(rel);
     for (const rel of [...this.unreadable.keys()]) if (!keep.has(rel)) this.unreadable.delete(rel);
   }
 
@@ -594,11 +620,11 @@ export class ProjectIndex {
     return undefined;
   }
 
-  /** The index as plain JSON, to keep between sessions: the docs (the tree's leaves) and the tree's kept roots. */
-  toJSON(): object {
+  /** The light half of a save, loaded first: the leaves, the tree's kept roots, the journal mark, git's HEAD. */
+  treeJSON(): object {
     return {
-      v: 2,
-      docs: [...this.docs.values()].map((d) => ({ ...d, tokens: [...d.tokens] })),
+      v: 3,
+      leaves: [...this.leaves].map(([rel, l]) => [rel, l.size, l.mtimeNs, l.hash]),
       unreadable: [...this.unreadable],
       merkle: this.tree,
       mark: this.mark,
@@ -606,41 +632,93 @@ export class ProjectIndex {
     };
   }
 
+  /** The heavy half of a save, one JSON doc per line, streamed in after the tree. */
+  *docLines(): Generator<string> {
+    for (const d of this.docs.values()) yield JSON.stringify({ ...d, tokens: [...d.tokens] });
+  }
+
   /**
-   * Takes back a saved index; files that changed since are refreshed by the next update(). Anything
-   * not version 2 or not well formed is left out, so the next build reads those files again. The
-   * last saved root becomes the tree's base: what "changed since the last open" compares with.
+   * Takes back a saved tree (treeJSON), at once: no file system, name rules only, so the tree, the
+   * status and index_changes are ready now. loadDocs() then streams the docs in, and catchUp() checks
+   * the files; until then every read still re-checks its file. Anything not version 3 or not well
+   * formed is left out (those files are read again). The last saved root becomes the tree's base:
+   * what "changed since the last open" compares with.
    */
-  async load(saved: unknown): Promise<void> {
-    const docs = (saved as { v?: number; docs?: unknown[] })?.v === 2 ? (saved as { docs: unknown[] }).docs : [];
-    const ok = (Array.isArray(docs) ? docs : []).filter((raw): raw is Doc & { tokens: [string, number][] } => {
-      const d = raw as Doc & { tokens: unknown };
-      return (
-        typeof d?.rel === 'string' &&
-        Array.isArray(d.tokens) &&
-        Array.isArray(d.symbols) &&
-        Array.isArray(d.imports) &&
-        typeof d.hash === 'string' &&
-        /^[0-9a-f]{64}$/.test(d.hash) &&
-        typeof d.mtimeNs === 'string' &&
-        /^\d+$/.test(d.mtimeNs) &&
-        typeof d.size === 'number'
-      );
-    });
-    // Name rules only, no file system: the saved index answers at once. catchUp() then checks the
-    // files; until then every read (snippets) still re-checks its file and drops what fails.
-    for (const d of ok) {
-      if (this.docs.size >= this.options.maxFiles) break;
-      if (this.allowed(d.rel) && !this.docs.has(d.rel)) this.add({ ...d, tokens: new Map(d.tokens) });
+  load(saved: unknown): void {
+    const s = saved as { v?: unknown; leaves?: unknown; unreadable?: unknown; merkle?: unknown; mark?: unknown; gitHead?: unknown } | null;
+    if (!s || s.v !== 3 || !Array.isArray(s.leaves)) return;
+    for (const l of s.leaves as unknown[]) {
+      if (this.leaves.size >= this.options.maxFiles) break;
+      if (!Array.isArray(l) || l.length !== 4) continue;
+      const [rel, size, mtimeNs, hash] = l as unknown[];
+      if (typeof rel !== 'string' || typeof size !== 'number' || typeof mtimeNs !== 'string' || !/^\d+$/.test(mtimeNs) || typeof hash !== 'string' || !HASH.test(hash)) continue;
+      if (!this.allowed(rel) || this.leaves.has(rel)) continue;
+      this.leaves.set(rel, { size, mtimeNs, hash });
+      this.tree.set(rel, hash);
     }
-    const extra = saved as { mark?: unknown; gitHead?: unknown };
-    if (docs.length && isMark(extra.mark)) this.mark = extra.mark;
-    if (docs.length && typeof extra.gitHead === 'string' && GIT_OID.test(extra.gitHead)) this.gitHead = extra.gitHead;
-    const unreadable = (saved as { unreadable?: unknown })?.unreadable;
-    if (Array.isArray(docs) && Array.isArray(unreadable)) {
-      for (const u of unreadable) if (Array.isArray(u) && typeof u[0] === 'string' && typeof u[1] === 'string' && /^\d+:\d+$/.test(u[1])) this.unreadable.set(u[0], u[1]);
+    if (!this.leaves.size) return;
+    this.docsPending = true;
+    if (isMark(s.mark)) this.mark = s.mark;
+    if (typeof s.gitHead === 'string' && GIT_OID.test(s.gitHead)) this.gitHead = s.gitHead;
+    if (Array.isArray(s.unreadable)) {
+      for (const u of s.unreadable) if (Array.isArray(u) && typeof u[0] === 'string' && typeof u[1] === 'string' && /^\d+:\d+$/.test(u[1])) this.unreadable.set(u[0], u[1]);
     }
-    if (docs.length && this.tree.load((saved as { merkle?: unknown }).merkle)) this.tree.base = this.tree.history.at(-1);
+    if (this.tree.load(s.merkle)) this.tree.base = this.tree.history.at(-1);
+  }
+
+  /**
+   * Streams saved docs in (docLines' format), a chunk at a time, yielding between chunks so the editor
+   * stays responsive. A doc is used only while its leaf still has the same content hash (catchUp may
+   * have moved on meanwhile). Leaves left without a doc are then read. Returns the docs taken.
+   */
+  async loadDocs(file: string, onChunk?: () => Promise<boolean>): Promise<number> {
+    let taken = 0;
+    if (this.docsPending) {
+      let fh: FileHandle | undefined;
+      try {
+        fh = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        let n = 0;
+        for await (const line of fh.readLines({ encoding: 'utf8' })) {
+          if (!this.docsPending) break;
+          if (this.addSaved(line)) taken++;
+          if (++n % 1000 === 0) {
+            await new Promise((r) => setImmediate(r));
+            if (onChunk && !(await onChunk())) return taken;
+          }
+        }
+      } catch {
+        // Missing or unreadable: the leaves without docs are read below.
+      } finally {
+        await fh?.close().catch(() => {});
+      }
+    }
+    this.docsPending = false;
+    const missing = [...this.leaves.keys()].filter((rel) => !this.docs.has(rel));
+    for (let i = 0; i < missing.length; i += STAT_BATCH) {
+      if (!(await this.updateBatch(missing.slice(i, i + STAT_BATCH)))) break;
+      if (onChunk && !(await onChunk())) break;
+    }
+    return taken;
+  }
+
+  private addSaved(line: string): boolean {
+    let d: Doc & { tokens: unknown };
+    try {
+      d = JSON.parse(line);
+    } catch {
+      return false;
+    }
+    if (typeof d?.rel !== 'string' || typeof d.hash !== 'string' || typeof d.len !== 'number' || !Array.isArray(d.tokens) || !Array.isArray(d.symbols) || !Array.isArray(d.imports)) return false;
+    if (this.docs.has(d.rel) || this.leaves.get(d.rel)?.hash !== d.hash) return false;
+    const doc: Doc = { ...d, tokens: new Map(d.tokens as [string, number][]) };
+    // Over the memory cap: the file leaves the tree too (the tree holds exactly what is indexed).
+    if (this.bytes + cost(doc) > this.options.maxBytes) {
+      this.capped = true;
+      this.remove(d.rel);
+      return false;
+    }
+    this.add(doc);
+    return true;
   }
 
   /**
@@ -702,13 +780,37 @@ export async function saveIndexFile(file: string, ix: ProjectIndex): Promise<voi
   const dir = path.dirname(file);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
-  const tmp = `${file}.${process.pid}.tmp`;
-  await rm(tmp, { force: true });
-  await writeFile(tmp, JSON.stringify(ix), { mode: 0o600, flag: 'wx' });
-  await rename(tmp, file);
+  const put = async (to: string, write: (fh: FileHandle) => Promise<void>) => {
+    const tmp = `${to}.${process.pid}.tmp`;
+    await rm(tmp, { force: true });
+    const fh = await open(tmp, 'wx', 0o600);
+    try {
+      await write(fh);
+    } finally {
+      await fh.close();
+    }
+    await rename(tmp, to);
+  };
+  // Docs first: a crash between the two leaves new docs with an old tree, and a doc is used only
+  // while its hash matches its leaf.
+  await put(docsFileOf(file), async (fh) => {
+    let chunk = '';
+    for (const line of ix.docLines()) {
+      chunk += line + '\n';
+      if (chunk.length > 1 << 20) {
+        await fh.write(chunk);
+        chunk = '';
+      }
+    }
+    await fh.write(chunk);
+  });
+  await put(file, (fh) => fh.write(JSON.stringify(ix.treeJSON())).then(() => {}));
 }
 
-/** A saved index as parsed JSON, or undefined when it is missing or not JSON; load() checks the rest. */
+/** Where saveIndexFile puts the docs that go with a saved tree. */
+export const docsFileOf = (file: string): string => file.replace(/\.json$/, '') + '.docs.ndjson';
+
+/** A saved tree as parsed JSON, or undefined when it is missing or not JSON; load() checks the rest. */
 export const readIndexFile = (file: string): Promise<unknown> =>
   readFile(file, 'utf8')
     .then((text) => JSON.parse(text) as unknown)
@@ -750,7 +852,7 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
   const note =
     building === 'verifying'
-      ? '(Checking files changed since the last session; results may be a moment out of date.)\n'
+      ? '(Loading the saved index and checking files changed since the last session; results may be incomplete or out of date for a moment.)\n'
       : building
         ? '(The index is still being built; results may be incomplete.)\n'
         : '';

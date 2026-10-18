@@ -43,6 +43,8 @@ jobs:
         run: git clone --depth 1 --quiet --branch v6.0.3 https://github.com/microsoft/TypeScript.git "$RUNNER_TEMP/TypeScript"
       - name: Bench
         working-directory: extensions/friedliver-agents
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           npm ci
           if [ "$RUNNER_OS" = macOS ]; then

@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { fseventsJournal, journalHelper, type Journal, type JournalMark } from './changeJournal';
-import { answerIndex, ProjectIndex, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
+import { answerIndex, docsFileOf, ProjectIndex, readIndexFile, saveIndexFile, type IndexCall } from './projectIndex';
 
 /** git files that move on a checkout, pull or branch switch: re-check every file's stat then. */
 const HEAD_MOVED = /[/\\]\.git[/\\](HEAD|ORIG_HEAD|FETCH_HEAD)$/;
@@ -99,14 +99,17 @@ export class ProjectIndexHost implements vscode.Disposable {
   private async build(gen: number, fresh: boolean): Promise<void> {
     this.item.show();
     this.pending.clear();
-    // Every saved index loads at once, without touching the files: answers start now.
-    // A missing, corrupt or older saved index loads nothing: that folder gets a full build.
-    if (!fresh) for (const ix of this.indexes) await ix.load(await readIndexFile(this.file(ix)));
+    // Every saved tree loads at once, without touching the files: the tree, the status and
+    // index_changes are ready now. A missing, corrupt or older save loads nothing: a full build.
+    if (!fresh) for (const ix of this.indexes) ix.load(await readIndexFile(this.file(ix)));
     if (gen !== this.generation) return;
     this.building = this.indexes.every((ix) => ix.size > 0) ? 'verifying' : true;
     this.status(this.building === 'verifying' ? `${this.summary()} · checking changes` : `$(sync~spin) Index · ${this.count().toLocaleString()} files`);
     try {
-      for (const ix of this.indexes) if (!(await ix.catchUp(this.journal, () => this.tick(gen)))) return;
+      // The saved docs stream in while the files are checked; a doc whose file changed meanwhile is skipped.
+      const tick = () => this.tick(gen);
+      const done = await Promise.all(this.indexes.map((ix) => Promise.all([ix.loadDocs(docsFileOf(this.file(ix)), tick), ix.catchUp(this.journal, tick)])));
+      if (done.some(([, mode]) => !mode)) return;
     } finally {
       if (gen === this.generation) {
         this.building = false;
@@ -160,6 +163,8 @@ export class ProjectIndexHost implements vscode.Disposable {
 
   private async save(): Promise<void> {
     for (const ix of this.indexes) {
+      // Half-loaded docs would save half an index.
+      if (ix.loading) continue;
       if (!this.building) {
         // The mark saved is the one taken at the previous save (or at open): the watcher has delivered
         // everything before it by now, so the next open replays the journal from there.
