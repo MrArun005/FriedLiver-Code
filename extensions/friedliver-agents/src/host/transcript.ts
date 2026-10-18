@@ -83,10 +83,12 @@ const MAX_LAST_REPLY = 1500;
  * (`hashes`, relative path → hash). The whole conversation stays a read_chat away. Sent once, in
  * front of the user's first message in the new chat, so it costs no turn.
  */
-export function handoffContext(chat: ChatView, hashes: Record<string, string> = {}): string {
+export function handoffContext(chat: ChatView, hashes: Record<string, string> = {}, again = false): string {
   const parts = [
     [
-      `[FriedLiver] You are taking over a task from another coding agent, ${chat.label}, in this same folder (${chat.cwd}).`,
+      again
+        ? `[FriedLiver] The task is back with you from ${chat.label}, which worked on it after you, in this same folder (${chat.cwd}). Here is where it is now.`
+        : `[FriedLiver] You are taking over a task from another coding agent, ${chat.label}, in this same folder (${chat.cwd}).`,
       "The files on disk already include the changes the user accepted. Continue from where it stopped. The user's message follows this context.",
       '',
       `Task: ${chat.title}`,

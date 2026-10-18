@@ -7,6 +7,7 @@ import {
   chatStatus,
   decisions,
   fileConflicts,
+  formatDuration,
   stateLine,
   type AgentKey,
   type AppState,
@@ -42,6 +43,40 @@ export function excerpt(text: string, max: number): string {
     .replace(/[`*_#>]+/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
   return clip(plain, max);
+}
+
+/** When a message was sent (and a reply's last words came): your messages, replies and messages between chats only. */
+export interface MessageStamp {
+  at: number;
+  end?: number;
+}
+
+/** The time an item shows on hover, or none: steps, thinking, plans, cards that wait for you, and messages saved before times were kept. */
+export function messageStamp(item: Item): MessageStamp | undefined {
+  if (item.kind !== 'user' && item.kind !== 'agent' && item.kind !== 'link') return undefined;
+  if (!isTime(item.at)) return undefined;
+  const end = item.kind === 'agent' ? item.end : undefined;
+  return isTime(end) ? { at: item.at, end } : { at: item.at };
+}
+
+/** A number a Date can hold (saved files can say anything). */
+const isTime = (v: unknown): v is number => typeof v === 'number' && !Number.isNaN(new Date(v).getTime());
+
+/** "2:41 PM" today, "Oct 18, 2:41 PM" before, "Oct 18, 2025, 2:41 PM" in another year. */
+export function messageTime(at: number, now: number, locale?: string): string {
+  const d = new Date(at);
+  const n = new Date(now);
+  const today = d.toDateString() === n.toDateString();
+  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  if (!today) Object.assign(opts, { month: 'short', day: 'numeric' }, d.getFullYear() === n.getFullYear() ? {} : { year: 'numeric' });
+  // ICU puts a narrow no-break space before AM/PM; the element never wraps, so a plain space reads the same.
+  return d.toLocaleString(locale, opts).replace(/\s/g, ' ');
+}
+
+/** The tooltip: the exact time, and for a reply how long its words took to come. */
+export function messageTimeTitle(s: MessageStamp): string {
+  const iso = new Date(s.at).toISOString();
+  return s.end !== undefined && s.end > s.at ? `${iso} · took ${formatDuration(s.end - s.at)}` : iso;
 }
 
 /** "3s ago"; nothing yet reads "—". */
