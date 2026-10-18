@@ -73,7 +73,10 @@ export function symbolRange(file: string, lines: string[], syms: Sym[], sym: Sym
     for (let i = i0; i <= bound; i++) {
       const c = code(lines[i]);
       for (const ch of c) {
-        if (ch === '{' || ch === '(' || ch === '[') (depth++, (bracket = true));
+        if (ch === '{' || ch === '(' || ch === '[') {
+          depth++;
+          bracket = true;
+        }
         else if (ch === '}' || ch === ')' || ch === ']') depth--;
       }
       if (depth > 0) continue;
@@ -178,7 +181,10 @@ export class SeenFiles {
     this.chats.set(chatId, c);
     if (this.chats.size > SeenFiles.MAX_CHATS) this.chats.delete(this.chats.keys().next().value!);
     const old = c.files.get(abs);
-    if (old) (c.bytes -= old.text.length, c.files.delete(abs));
+    if (old) {
+      c.bytes -= old.text.length;
+      c.files.delete(abs);
+    }
     c.files.set(abs, { hash, text });
     c.bytes += text.length;
     while (c.files.size > SeenFiles.MAX_FILES || c.bytes > SeenFiles.MAX_BYTES) {

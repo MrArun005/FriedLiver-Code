@@ -100,7 +100,7 @@ describe('index_read', () => {
     expect(sym).toContain('return this.items.pop();');
     expect(sym).not.toContain('this.items.push');
     expect(sym).toMatch(/^src\/big\.ts · \d+ lines/);
-    expect(sym).toMatch(/\n\d+\t  take\(\): string \| undefined \{/);
+    expect(sym).toMatch(/\n\d+\t {2}take\(\): string \| undefined \{/);
 
     expect(await answerIndex([ix], { tool: 'index_read', path: 'src/big.ts', symbol: 'Box.take' }, false)).toContain('return this.items.pop();');
 

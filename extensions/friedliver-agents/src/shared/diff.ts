@@ -124,7 +124,10 @@ export function unifiedDiff(before: string, after: string, context = 3, maxEdits
     for (let k = -d; k <= d; k += 2) {
       let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
       let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) x++, y++;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
       v[off + k] = x;
       if (x >= n && y >= m) {
         done = true;
@@ -143,7 +146,10 @@ export function unifiedDiff(before: string, after: string, context = 3, maxEdits
     const prevK = k === -d || (k !== d && t[off + k - 1] < t[off + k + 1]) ? k + 1 : k - 1;
     const px = d === 0 ? 0 : t[off + prevK];
     const py = px - prevK;
-    while (x > px && y > py) ops.push({ op: ' ', text: a[--x] }), y--;
+    while (x > px && y > py) {
+      ops.push({ op: ' ', text: a[--x] });
+      y--;
+    }
     if (d > 0) ops.push(x === px ? { op: '+', text: b[--y] } : { op: '-', text: a[--x] });
   }
   ops.reverse();
