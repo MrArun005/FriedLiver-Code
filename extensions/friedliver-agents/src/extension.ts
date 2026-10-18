@@ -231,6 +231,10 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       autoAllowLinkedReads: () => userSetting(vscode.workspace.getConfiguration('friedliver.chat').inspect<unknown>('autoAllowLinkedReads')).value === true,
       browserPage: (selector) => this.browser.inspect(selector),
+      discussSettings: () => {
+        const c = vscode.workspace.getConfiguration('friedliver.discuss');
+        return { maxRounds: c.get<number>('maxRounds'), tokenBudget: c.get<number>('tokenBudget') };
+      },
       index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
       indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),
       indexTurnEnded: (chatId) => this.projectIndex?.turnEnded(chatId),
@@ -803,6 +807,14 @@ export class Controller {
         }
         case 'consult':
           void this.core.consult(m.chatId, m.agent, m.text).catch((err: unknown) => this.error(err));
+          return;
+        case 'discuss':
+          void this.core.discuss(m.chatId, m.agents, m.text).catch((err: unknown) => this.error(err));
+          return;
+        case 'discussion':
+          void (m.act === 'stop' ? this.core.discussions.stop(m.id) : m.act === 'continue' ? this.core.discussions.continue(m.id) : this.core.discussions.carryOut(m.id, m.agent!)).catch((err: unknown) =>
+            this.error(err),
+          );
           return;
         case 'pipe':
           this.core.pipe(m.from, m.to);

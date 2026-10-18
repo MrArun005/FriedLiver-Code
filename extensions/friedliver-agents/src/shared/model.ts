@@ -7,6 +7,7 @@ import type { DroppedCommits } from './risk';
 import { appendOutput, claudeMeta, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
 import { stepFacts, withRawOutput, type StepFacts } from './steps';
 import { isSystemTool, SYSTEM_VERBS, type SystemTool } from './system';
+import type { DiscussionItem } from './discuss';
 
 export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'demo'] as const;
 export type AgentKey = (typeof AGENT_KEYS)[number];
@@ -209,7 +210,8 @@ export type Item =
   | { kind: 'changes'; turnId: string; files: string[]; undone?: boolean }
   | LinkItem
   | BridgeItem
-  | QuestionItem;
+  | QuestionItem
+  | DiscussionItem;
 
 /** A question the agent asks as a small form (ACP elicitation), e.g. Claude's AskUserQuestion. */
 export interface QuestionItem {
@@ -343,6 +345,8 @@ export type Action =
   | { t: 'unlink'; linkId: string }
   | { t: 'bridge'; requestId: string; state: BridgeItem['state'] }
   | { t: 'question'; requestId: string; state: QuestionItem['state']; summary?: string }
+  /** A /discuss card changed (shared/discuss.ts). */
+  | { t: 'discussion'; id: string; patch: Partial<Omit<DiscussionItem, 'kind' | 'id'>> }
   /** Files a turn proposed or changed, relative to the chat's cwd; merged into `files`. */
   | { t: 'files'; chatId: string; files: string[] }
   | { t: 'archive'; chatId: string; archived: boolean }
@@ -477,6 +481,8 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, links: state.links.filter((l) => l.id !== action.linkId) };
     case 'bridge':
       return editItems(state, (i) => (i.kind === 'bridge' && i.requestId === action.requestId ? { ...i, state: action.state } : i));
+    case 'discussion':
+      return editItems(state, (i) => (i.kind === 'discussion' && i.id === action.id ? { ...i, ...action.patch } : i));
     case 'question':
       return editItems(state, (i) => (i.kind === 'question' && i.requestId === action.requestId ? { ...i, state: action.state, ...(action.summary ? { summary: action.summary } : {}) } : i));
     case 'files':

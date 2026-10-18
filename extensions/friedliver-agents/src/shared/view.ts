@@ -27,6 +27,7 @@ import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
 
 import { agentName, chatTip } from './names';
+import { parseDiscuss } from './discuss';
 export { agentName };
 
 /** Shortens to `max` characters with an ellipsis. */
@@ -736,6 +737,7 @@ export function applyMention(text: string, option: MentionOption): { text: strin
 export const FRIEDLIVER_COMMANDS: SlashCommand[] = [
   { name: 'handoff', description: 'Continue this chat with another agent', hint: 'agent' },
   { name: 'ask', description: 'Ask another agent; the reply comes back here', hint: 'agent and question' },
+  { name: 'discuss', description: 'Let agents talk a question through and agree on a next step (read-only)', hint: '@agents and question' },
   { name: 'pipe', description: "Pipe each reply to that agent's latest chat", hint: 'agent' },
   { name: 'review', description: "Review this chat's changes" },
   { name: 'new', description: 'Start a new chat', hint: 'agent (optional)' },
@@ -756,6 +758,10 @@ export const commandLabel = (c: SlashCommand): string => `/${c.name}${c.hint ? `
 export function slashAction(text: string, chat: ChatView, chats: ChatView[], agentCommands: SlashCommand[]): WebviewMessage | 'incomplete' | null {
   const m = /^\/([a-z]+)(?:\s+([a-z]+))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
   if (!m || !FRIEDLIVER_COMMANDS.some((c) => c.name === m[1]) || agentCommands.some((c) => c.name === m[1])) return null;
+  if (m[1] === 'discuss') {
+    const d = parseDiscuss(text, chat.agent);
+    return d && d !== 'incomplete' ? { type: 'discuss', chatId: chat.id, agents: d.agents, text: d.question } : 'incomplete';
+  }
   const agent: AgentKey | undefined = m[2] ? MENTIONS[m[2].toLowerCase()] : undefined;
   const rest = m[3].trim();
   switch (m[1]) {

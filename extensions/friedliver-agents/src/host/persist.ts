@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AGENT_FACES, EMPTY_STATE, isAgentKey, MAX_USAGE_LOG, type TurnUsage, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
 import type { ChatSession, SessionOption } from '../shared/session';
+import { savedDiscussion } from '../shared/discuss';
 
 /** What the next window needs to bring a chat back. Never API keys or bridge tokens. */
 export interface SavedChat {
@@ -163,7 +164,7 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const ID = /^[\w.:-]{1,128}$/;
 const str = (v: unknown): v is string => typeof v === 'string';
-const ITEM_KINDS = new Set(['user', 'agent', 'thought', 'tool', 'plan', 'permission', 'review', 'command', 'notice', 'changes', 'link', 'bridge', 'question']);
+const ITEM_KINDS = new Set(['user', 'agent', 'thought', 'tool', 'plan', 'permission', 'review', 'command', 'notice', 'changes', 'link', 'bridge', 'question', 'discussion']);
 
 /** A saved file read back, or null when it isn't one. Chats that don't make sense are left out. */
 export function parseSaved(raw: unknown): SavedState | null {
@@ -190,7 +191,7 @@ export function parseSaved(raw: unknown): SavedState | null {
       createdAt,
       busy: c.busy === true,
       changedFiles: num(c.changedFiles, 0),
-      items: (c.items as unknown[]).filter((i): i is Item => isObj(i) && ITEM_KINDS.has(i.kind as string)),
+      items: savedItems(c.items as unknown[]),
       origin: isObj(c.origin) && (c.origin.kind === 'handoff' || c.origin.kind === 'consult') && str(c.origin.chatId) && (c.origin.by === 'user' || c.origin.by === 'agent')
         ? { kind: c.origin.kind, chatId: c.origin.chatId, by: c.origin.by }
         : undefined,
@@ -223,6 +224,12 @@ export function parseSaved(raw: unknown): SavedState | null {
   const count: SavedState['chatCount'] = {};
   if (isObj(raw.chatCount)) for (const [k, v] of Object.entries(raw.chatCount)) if (isAgentKey(k)) count[k] = num(v, 0);
   return { version: 1, state: { ...EMPTY_STATE, chats, links }, chats: saved, nextId: num(raw.nextId, 1), chatCount: count };
+}
+
+/** Items of the kinds there are; a discussion is checked field by field, and one still going ends there. */
+function savedItems(raw: unknown[]): Item[] {
+  const items = raw.filter((i): i is Obj => isObj(i) && ITEM_KINDS.has(i.kind as string));
+  return items.flatMap((i, n) => (i.kind === 'discussion' ? (savedDiscussion(i, items.length - n - 1) ?? []) : [i as unknown as Item]));
 }
 
 function savedChoices(v: unknown): Record<string, string | boolean> | undefined {

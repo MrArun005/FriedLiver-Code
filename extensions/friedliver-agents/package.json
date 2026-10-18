@@ -637,6 +637,20 @@
     "configuration": {
       "title": "FriedLiver Agents",
       "properties": {
+        "friedliver.discuss.maxRounds": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 5,
+          "markdownDescription": "Rounds a `/discuss` runs at most before it is summed up. It ends sooner when everyone agrees."
+        },
+        "friedliver.discuss.tokenBudget": {
+          "type": "integer",
+          "default": 60000,
+          "minimum": 5000,
+          "maximum": 500000,
+          "markdownDescription": "Tokens (estimated, sent and received) a `/discuss` may use; past it the discussion stops and is summed up."
+        },
         "friedliver.chat.autoAllowLinkedReads": {
           "scope": "machine",
           "type": "boolean",

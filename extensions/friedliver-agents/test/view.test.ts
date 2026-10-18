@@ -522,9 +522,9 @@ describe('"/" commands', () => {
   const agentCmds = [{ name: 'review', description: 'Agent review' }, { name: 'help', description: 'Help' }];
 
   it('lists FriedLiver’s own commands first, then the agent’s; the agent’s win a shared name', () => {
-    expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'review', 'new']);
+    expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'discuss', 'pipe', 'review', 'new']);
     const menu = slashMenu(agentCmds);
-    expect(menu.map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'new', 'review', 'help']);
+    expect(menu.map((c) => c.name)).toEqual(['handoff', 'ask', 'discuss', 'pipe', 'new', 'review', 'help']);
     expect(menu.find((c) => c.name === 'review')?.description).toBe('Agent review');
   });
 

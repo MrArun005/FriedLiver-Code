@@ -68,6 +68,10 @@ export type WebviewMessage =
   | { type: 'handoff'; chatId: string; agent: AgentKey }
   /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. */
   | { type: 'consult'; chatId: string; agent: AgentKey; text: string }
+  /** /discuss: this chat's agent and `agents` talk `text` through, then sum it up (host/discuss.ts). */
+  | { type: 'discuss'; chatId: string; agents: AgentKey[]; text: string }
+  /** A discussion card's buttons: Stop, Continue discussing, Carry out with `agent`. */
+  | { type: 'discussion'; id: string; act: 'stop' | 'continue' | 'carry'; agent?: AgentKey }
   /** Forward each finished turn of `from` to the chat `to`. */
   | { type: 'pipe'; from: string; to: string }
   | { type: 'unlink'; linkId: string }
@@ -378,6 +382,14 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.chatId) && isAgentKey(m.agent) && str(m.text, LIMITS.text) && m.text.trim()
         ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text }
         : null;
+    case 'discuss':
+      return id(m.chatId) && Array.isArray(m.agents) && m.agents.length >= 1 && m.agents.length <= LIMITS.fanout && m.agents.every(isAgentKey) && str(m.text, LIMITS.text) && m.text.trim()
+        ? { type: 'discuss', chatId: m.chatId, agents: [...new Set(m.agents as AgentKey[])], text: m.text }
+        : null;
+    case 'discussion':
+      if (!id(m.id) || (m.act !== 'stop' && m.act !== 'continue' && m.act !== 'carry')) return null;
+      if (m.act === 'carry') return isAgentKey(m.agent) ? { type: 'discussion', id: m.id, act: 'carry', agent: m.agent } : null;
+      return { type: 'discussion', id: m.id, act: m.act };
     case 'pipe':
       return id(m.from) && id(m.to) && m.from !== m.to ? { type: 'pipe', from: m.from, to: m.to } : null;
     case 'unlink':
