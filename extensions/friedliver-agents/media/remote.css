@@ -885,36 +885,70 @@ pre {
   padding-top: 2px;
 }
 
-.seg {
-  display: flex;
-  padding: 3px;
-  gap: 2px;
-  border-radius: var(--r-8);
-  background: var(--input-bg);
-}
 
-.seg__item {
-  flex: 1;
-  min-height: 36px;
-  border-radius: 6px;
-  font-size: 0.87em;
-  color: var(--fg-2);
-}
 
-.seg__item--on {
-  background: var(--sel-bg);
-  color: var(--sel-fg);
-  font-weight: 600;
-}
 
-.seg__item:disabled {
-  opacity: 0.35;
-}
 
-.ask__rule {
-  display: flex;
-  flex-direction: column;
+
+.ask--routine {
   gap: 6px;
+  padding: 8px 12px;
+}
+
+.ask__bar--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.split {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.split__main {
+  border-radius: var(--r-6) 0 0 var(--r-6);
+}
+
+.split__main:only-child {
+  border-radius: var(--r-6);
+}
+
+.split__more {
+  width: var(--tap);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 0 var(--r-6) var(--r-6) 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--send-fg) 25%, transparent);
+}
+
+.row-choice--scope {
+  min-height: 56px;
+}
+
+.row-choice__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tag-mac {
+  flex: none;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-size: 0.72em;
+  line-height: 20px;
+  color: var(--fg-2);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.sheet__head h2 .mono {
+  font-weight: 400;
+  color: var(--fg);
 }
 
 .ask__actions {

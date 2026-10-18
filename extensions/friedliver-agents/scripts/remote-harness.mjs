@@ -40,7 +40,7 @@ const s = (id, agent, label, title, status, folder, extra = {}) => ({ id, agent,
 const chats = {
   'chat-3': s('chat-3', 'claude', 'Claude', 'Add rate limiting to the pairing endpoint', 'needs-you', 'wt-remote', { waiting: 1, ago: 0.2, approval: 'edits' }),
   'chat-7': s('chat-7', 'codex', 'Codex', 'Fix flaky checkpoint test on CI', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 1 }),
-  'chat-8': s('chat-8', 'claude', 'Claude', 'Push the SQLite migration branch', 'needs-you', 'FriedLiver-Code', { waiting: 2, ago: 3 }),
+  'chat-8': s('chat-8', 'claude', 'Claude', 'Push the SQLite migration branch', 'needs-you', 'FriedLiver-Code', { waiting: 3, ago: 3 }),
   'chat-5': s('chat-5', 'claude', 'Claude', 'Profile transcript rendering at 10k items', 'working', 'FriedLiver-Code', { subagents: 3, ago: 0.1 }),
   'chat-9': s('chat-9', 'gemini', 'Gemini', 'Review the WebSocket framing code', 'working', 'wt-remote', { ago: 0.5 }),
   'chat-2': s('chat-2', 'codex', 'Codex', 'Bump esbuild to 0.28 and rebuild', 'error', 'FriedLiver-Code', { ago: 14 }),
@@ -181,6 +181,7 @@ const chat8 = {
       command: { line: 'git push --force origin main', cwd: '.' },
       always: [],
     },
+    { k: 'permission', id: 'perm-72', title: 'Run npm test', verb: 'Run', target: 'npm test', risk: { level: 'routine', label: 'Routine', consequences: [] }, once: 'allow', chat: 'always', deny: 'reject', options: [], command: { line: 'npm test', cwd: '.' }, always: [{ grant: { kind: 'exact', command: 'npm test' }, label: 'Always allow npm test' }] },
     { k: 'bridge', id: 'br-4', agent: 'claude', title: 'Wants to ask Gemini', text: 'Does the reports page already have a CSV helper I should reuse, or should I add one under src/lib?', state: 'awaiting', always: 'Claude asking Gemini, in any chat' },
     { k: 'permission', id: 'perm-70', title: 'Read package.json', verb: 'Read', target: 'package.json', risk: { level: 'routine', label: 'Routine', consequences: [] }, options: [], always: [], answer: 'Yes', auto: 'Always allowed: wt-remote' },
   ],
@@ -258,10 +259,8 @@ for (const scheme of ['dark', 'light']) {
   await phone(scheme, 'chat-careful', (p) => p.evaluate(() => document.querySelector('.ask--careful')?.scrollIntoView({ block: 'center' })), { open: 'chat-8' });
 }
 await phone('dark', 'new-chat', (p) => p.click('[aria-label="New chat"]'));
-await phone('dark', 'scope-always', async (p) => {
-  await p.click('.seg__item:nth-child(3)');
-  await p.evaluate(() => document.querySelector('.ask__bar')?.scrollIntoView({ block: 'end' }));
-}, { open: 'chat-3' });
+await phone('dark', 'scope-menu', (p) => p.click('.split__more'), { open: 'chat-3' });
+await phone('light', 'scope-menu', (p) => p.click('.split__more'), { open: 'chat-3' });
 const code = pairing.start().code;
 const fpB64 = Buffer.from(fp.replace(/:/g, ''), 'hex').toString('base64url');
 await phone('dark', 'pairing', undefined, { paired: false, hash: `#c=${code}&f=${fpB64}` });
