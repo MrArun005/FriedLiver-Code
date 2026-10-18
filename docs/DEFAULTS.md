@@ -191,7 +191,9 @@ field from `IProductService` and passes it to
 | `extensions.autoUpdate` | `false` | application (`extensions.contribution.ts:139`) | same |
 | `workbench.welcomePage.walkthroughs.openOnInstall` | `false` | machine (`contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts:311`) | patch default |
 | `window.titleBarStyle` | `custom` | application (`desktop.contribution.ts:243`) | already the upstream default |
-| `window.menuStyle` | leave | application (`desktop.contribution.ts:270`) | none |
+| `window.menuStyle` | `inherit` (custom menus on macOS too) | application (`desktop.contribution.ts:270`) | patch 0110 |
+| `window.dialogStyle` | `custom` | application (`desktop.contribution.ts:291`) | patch 0110 |
+| `workbench.modernUIFrostedGlassOpacity` | `84` (the spec's glass alpha) | application (`workbench.contribution.ts:853`) | patch 0110 |
 | `gulp.autoDetect`, `grunt.autoDetect`, `jake.autoDetect` | `off` | application (`extensions/{gulp,grunt,jake}/package.json`) | already `off` upstream |
 
 ## Security-relevant defaults

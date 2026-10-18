@@ -169,6 +169,42 @@ jobs:
   # For tags only: the installers and portable apps of this run, with their SHA-256 sums,
   # attached to a GitHub release. The Agents extension checks for it every 4 hours and installs
   # the DMG only when its SHA-256 in SHA256SUMS.txt matches.
+  # The workbench visual harness on this run's macOS app, for manual builds (a branch's look):
+  # every workbench surface in three themes at 1440x900, and the approved composer checked
+  # against its computed-style baseline (scripts/workbench-shots.mjs, artifact workbench-shots).
+  shots:
+    needs: build
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      # Playwright comes from the Agents extension's lockfile; only its library is used (no browsers).
+      - name: Playwright
+        working-directory: extensions/friedliver-agents
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: friedliver-fork-macos-arm64
+          path: build
+      - name: Unpack the app
+        run: |
+          ditto -x -k build/friedliver-fork-macos-arm64.zip build/app
+          echo "APP=$(ls -d "$PWD"/build/app/*.app | head -1)" >> "$GITHUB_ENV"
+      - name: Screenshots
+        run: node scripts/workbench-shots.mjs --app "$APP" --out shots
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: workbench-shots
+          path: shots/
+          if-no-files-found: warn
+
   release:
     needs: build
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')

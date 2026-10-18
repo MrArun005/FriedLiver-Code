@@ -1,0 +1,626 @@
+/*---------------------------------------------------------------------------------------------
+ *  FriedLiver: the workbench, built from the design system's components (COMPONENTS.md).
+ *
+ *  - Every size, radius, shadow, duration and colour is a design-system token (--fl-*, generated
+ *    from extensions/friedliver-agents/media/tokens.css into friedliver-tokens.css) or a theme
+ *    colour (--vscode-*). No raw values: test/workbench-css.test.ts enforces it.
+ *  - Each block names the spec component it renders. Upstream widgets paint their colours inline
+ *    from --vscode-* variables, so a block re-points those variables on the widget itself rather
+ *    than fighting the inline style.
+ *  - High contrast is untouched: every rule is scoped to .monaco-workbench:not(.hc-black):not(.hc-light).
+ *  - Builds on upstream's Modern UI (on by default) and must not tie with it on specificity: the
+ *    bundle may order its modules before or after this sheet.
+ *  - No :has(), no class-substring selectors (contrib/modernUI/CSS_PERFORMANCE.md), and no
+ *    transitions on virtualized rows. Hover is instant (spec §1.11).
+ *  - The chat composer lives in a webview and is frozen; nothing here reaches it.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ---- Elevation: upstream's overlay shadows are the spec's ------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) {
+	--vscode-shadow-lg: var(--fl-elev-3);
+	--vscode-shadow-xl: var(--fl-elev-4);
+}
+
+/* ---- Glass (spec §1.9): 20px blur, saturate 140%, on every frosted surface ------------- */
+
+@media (prefers-reduced-transparency: no-preference) and (forced-colors: none) {
+	.monaco-workbench.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .quick-input-widget::before,
+	.monaco-workbench.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .action-widget::before,
+	.monaco-workbench.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .monaco-hover::before,
+	.monaco-workbench.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .monaco-dialog-box::before,
+	.monaco-workbench.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .notifications-center::before,
+	.monaco-workbench.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .notification-toast::before {
+		backdrop-filter: var(--fl-glass-blur);
+	}
+}
+
+/* ---- Button §2.1: md 26 / sm 22, r5; primary = the inverted neutral, secondary = pill fill */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button {
+	--vscode-button-background: var(--fl-primary-bg);
+	--vscode-button-foreground: var(--fl-primary-fg);
+	--vscode-button-hoverBackground: color-mix(in srgb, var(--fl-primary-bg) 88%, var(--fl-primary-fg));
+	--vscode-button-border: transparent;
+	--vscode-button-separator: color-mix(in srgb, var(--fl-primary-fg) 25%, transparent);
+	--vscode-button-secondaryBackground: var(--fl-pill-bg);
+	--vscode-button-secondaryForeground: var(--fl-fg);
+	--vscode-button-secondaryHoverBackground: var(--fl-pill-hover);
+	--vscode-button-secondaryBorder: transparent;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button {
+	min-height: var(--fl-h-md);
+	padding: 0 var(--fl-sp-3);
+	gap: var(--fl-sp-1);
+	border-radius: var(--fl-r-ctl);
+	font-size: var(--fl-t-100);
+	font-weight: var(--fl-w-medium);
+	line-height: 1;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button.secondary {
+	font-weight: var(--fl-w-regular);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button.small {
+	min-height: var(--fl-h-sm);
+	padding: 0 var(--fl-sp-2);
+	font-size: var(--fl-t-90);
+}
+
+/* Split button: one r5 outline, the ▾ half square. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button.monaco-text-button {
+	border-radius: var(--fl-r-ctl) 0 0 var(--fl-r-ctl);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button.monaco-dropdown-button {
+	min-width: var(--fl-h-md);
+	justify-content: center;
+	border-radius: 0 var(--fl-r-ctl) var(--fl-r-ctl) 0;
+}
+
+/* ---- Focus (spec §1.12): a 2px ring 1px off every control, keyboard only ---------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button:focus-visible,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle:focus-visible {
+	outline: var(--fl-focus-w) solid var(--fl-focus) !important;
+	outline-offset: var(--fl-focus-off) !important;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button:focus:not(:focus-visible) {
+	outline: none !important;
+}
+
+/* ---- Input / Search §2.11: 26 tall, r5, the theme's input fill; focus = ring + 3px halo -- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox {
+	--vscode-input-border: var(--fl-field-border);
+	--vscode-settings-textInputBorder: var(--fl-field-border);
+	--vscode-settings-numberInputBorder: var(--fl-field-border);
+	border-radius: var(--fl-r-ctl);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox:hover {
+	--vscode-input-border: var(--fl-border);
+	--vscode-settings-textInputBorder: var(--fl-border);
+	--vscode-settings-numberInputBorder: var(--fl-border);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox > .ibwrapper > .input,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox > .ibwrapper > .mirror {
+	padding: var(--fl-sp-1) var(--fl-sp-2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox.synthetic-focus {
+	border-color: var(--fl-focus) !important;
+	outline: none !important;
+	box-shadow: var(--fl-focus-halo);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox ::placeholder {
+	color: var(--fl-placeholder);
+}
+
+/* The find widget's field and its option toggles. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-findInput,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-findInput .monaco-inputbox {
+	border-radius: var(--fl-r-ctl);
+}
+
+/* Option toggles (Aa, ab, .*): IconButton, the "on" state of a pressed quiet button. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle:not(.monaco-checkbox):not(.setting-value-checkbox) {
+	--vscode-inputOption-activeBackground: color-mix(in srgb, var(--fl-focus) 24%, transparent);
+	--vscode-inputOption-activeBorder: transparent;
+	--vscode-inputOption-activeForeground: var(--fl-sel-fg);
+	--vscode-inputOption-hoverBackground: var(--fl-ghost-hover);
+	border-radius: var(--fl-r-row);
+}
+
+/* ---- Select §2.12: the field's look, a chevron at the end ------------------------------ */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box {
+	--vscode-dropdown-background: var(--fl-input-bg);
+	--vscode-dropdown-border: var(--fl-field-border);
+	--vscode-settings-dropdownBackground: var(--fl-input-bg);
+	--vscode-settings-dropdownBorder: var(--fl-field-border);
+	height: var(--fl-h-md);
+	padding: 0 var(--fl-sp-2);
+	border-radius: var(--fl-r-ctl);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box:hover {
+	--vscode-dropdown-border: var(--fl-border);
+	--vscode-settings-dropdownBorder: var(--fl-border);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box:focus-visible {
+	outline: none !important;
+	border-color: var(--fl-focus) !important;
+	box-shadow: var(--fl-focus-halo);
+}
+
+/* Its list: Menu §2.13 (r8, elevation 3, rows r4). */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box-dropdown-container {
+	border: var(--fl-line) solid var(--fl-border) !important;
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+	overflow: hidden;
+}
+
+/* ---- Checkbox §2.9: 14 square, r3; checked = the button colour with a check ------------- */
+
+/* The settings editor's boolean is a plain toggle (.setting-value-checkbox), not .monaco-checkbox.
+   Doubled class: above the settings editor's own 18px rule (0,5,0). */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox,
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.setting-value-checkbox {
+	--vscode-checkbox-background: var(--fl-input-bg);
+	--vscode-checkbox-border: color-mix(in srgb, var(--fl-fg-2) 70%, transparent);
+	--vscode-checkbox-foreground: var(--fl-button-fg);
+	--vscode-settings-checkboxBackground: var(--fl-input-bg);
+	--vscode-settings-checkboxBorder: color-mix(in srgb, var(--fl-fg-2) 70%, transparent);
+	--vscode-settings-checkboxForeground: var(--fl-button-fg);
+	width: var(--fl-i-sm);
+	height: var(--fl-i-sm);
+	margin-right: var(--fl-sp-2);
+	border-radius: var(--fl-r-3);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: var(--fl-i-xs) !important;
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.monaco-checkbox.checked,
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-custom-toggle.setting-value-checkbox.checked {
+	--vscode-checkbox-background: var(--fl-button-bg);
+	--vscode-checkbox-border: var(--fl-button-bg);
+	--vscode-settings-checkboxBackground: var(--fl-button-bg);
+	--vscode-settings-checkboxBorder: var(--fl-button-bg);
+}
+
+/* ---- Count / Badge §2.6: 16 tall, pill --------------------------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-count-badge,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-count-badge.long {
+	--vscode-badge-background: var(--fl-pill-bg);
+	--vscode-badge-foreground: var(--fl-fg);
+	min-width: var(--fl-h-2xs);
+	min-height: var(--fl-h-2xs);
+	height: var(--fl-h-2xs);
+	padding: 0 var(--fl-sp-1);
+	border-radius: var(--fl-r-pill);
+	font-size: var(--fl-t-75);
+	font-weight: var(--fl-w-strong);
+	font-variant-numeric: tabular-nums;
+	line-height: var(--fl-h-2xs);
+}
+
+/* ---- Kbd §2.25: 18 tall, r3, the code tone, fg-2 ----------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-keybinding {
+	--vscode-keybindingLabel-background: var(--fl-code-bg);
+	--vscode-keybindingLabel-foreground: var(--fl-fg-2);
+	--vscode-keybindingLabel-border: var(--fl-border);
+	--vscode-keybindingLabel-bottomBorder: var(--fl-border);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-keybinding > .monaco-keybinding-key {
+	box-sizing: border-box;
+	min-width: var(--fl-h-xs);
+	padding: 0 var(--fl-sp-1);
+	border-radius: var(--fl-r-3);
+	box-shadow: none !important;
+	font-size: var(--fl-t-85);
+	line-height: var(--fl-h-2xs);
+}
+
+/* ---- Progress §2.24: the working colour ------------------------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-progress-container {
+	--vscode-progressBar-background: var(--fl-status-working);
+}
+
+/* ---- Menu §2.13: context menus, menubar menus (elevation 2 in the workbench, spec §1.8) ---
+   Menus render in a shadow root (menu.ts); only variables cross it, so the host re-points the
+   theme's menu colours and shadow, and patch 0110 points menu.ts's sizes at the tokens. */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .shadow-root-host,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-menu-container {
+	--vscode-menu-border: var(--fl-border);
+	--vscode-menu-selectionBackground: var(--fl-hover-bg);
+	--vscode-menu-selectionForeground: var(--fl-fg);
+	--vscode-menu-selectionBorder: transparent;
+	--vscode-menu-separatorBackground: var(--fl-border);
+	--vscode-shadow-lg: var(--fl-elev-2);
+}
+
+/* ---- Menu §2.13, palette variant: command palette and quick open --------------------------
+   Rows stay 22 where the workbench virtualises them (spec §2.13): padding 2 8, radius 4; the
+   keyboard-active row takes the hover fill. */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget {
+	--vscode-quickInputList-focusBackground: var(--fl-hover-bg);
+	--vscode-quickInputList-focusForeground: var(--fl-fg);
+	--vscode-quickInputList-focusIconForeground: var(--fl-fg);
+	--vscode-list-focusOutline: transparent;
+	--vscode-list-focusAndSelectionOutline: transparent;
+	--vscode-pickerGroup-foreground: var(--fl-fg-50);
+	--vscode-pickerGroup-border: var(--fl-border);
+	border: var(--fl-line) solid var(--fl-border);
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+	padding-bottom: var(--fl-sp-1);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox {
+	border-radius: var(--fl-r-ctl);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .monaco-list-row {
+	border-radius: var(--fl-r-row);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .quick-input-list-entry {
+	padding: 0 var(--fl-sp-2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .quick-input-list-separator {
+	color: var(--fl-fg-50);
+	font-size: var(--fl-t-85);
+}
+
+/* ---- Tooltip §2.14 (simple hovers) and Popover §2.13 (rich hovers) ---------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-hover {
+	--vscode-editorHoverWidget-border: var(--fl-border);
+	border-radius: var(--fl-r-box);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-hover.workbench-hover.compact {
+	border-radius: var(--fl-r-6);
+	box-shadow: var(--fl-shadow-tip);
+	font-size: var(--fl-t-85);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-hover.workbench-hover.compact .hover-contents {
+	padding: var(--fl-sp-1) var(--fl-sp-2);
+}
+
+/* Suggest and its details: Menu §2.13. Rows follow the editor's line height. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-widget,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-details-container {
+	--vscode-editorSuggestWidget-border: var(--fl-border);
+	--vscode-editorSuggestWidget-selectedBackground: var(--fl-sel-bg);
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+	overflow: hidden;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-details-container .suggest-details {
+	border-radius: var(--fl-r-box);
+}
+
+/* The find widget: a Popover. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .find-widget {
+	border-radius: 0 0 var(--fl-r-box) var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+}
+
+/* ---- Toast §2.15: glass r8, elevation 3; 400 wide, rows 38 (patch 0110) -----------------
+   The message is the toast's title (600); the source is its text (.9em fg-2). */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts,
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-center {
+	--vscode-notifications-border: var(--fl-border);
+	--vscode-notificationToast-border: var(--fl-border);
+	--vscode-notificationCenter-border: var(--fl-border);
+	--vscode-notificationLink-foreground: var(--fl-link);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts:not(.bottom-left) {
+	right: calc(var(--fl-sp-4) - var(--fl-sp-1)); /* the toasts keep a 4px shadow gutter */
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts .notification-toast-container > .notification-toast {
+	border: var(--fl-line) solid var(--fl-border);
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+	overflow: hidden;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts .notification-toast-container:not(:last-child) > .notification-toast {
+	margin-bottom: var(--fl-sp-2);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item {
+	padding: var(--fl-sp-2) var(--fl-sp-2) var(--fl-sp-2) var(--fl-sp-3);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-icon {
+	flex: 0 0 var(--fl-i-md);
+	margin: 0 var(--fl-sp-2) 0 0;
+	font-size: var(--fl-i-md);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-message {
+	font-weight: var(--fl-w-strong);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-source {
+	margin-left: calc(var(--fl-i-md) + var(--fl-sp-2));
+	color: var(--fl-fg-2);
+	font-size: var(--fl-t-90);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item > .notification-list-item-details-row {
+	padding-left: 0;
+}
+
+/* Its actions: Button §2.1 sm (22), gap 4. */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-buttons-container {
+	gap: var(--fl-sp-1);
+	/* Room for the focus ring inside the row's overflow clip, with no net shift. */
+	margin: calc(-1 * var(--fl-sp-1));
+	padding: var(--fl-sp-1);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button-dropdown,
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button {
+	margin: 0;
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-text-button {
+	min-height: var(--fl-h-sm);
+	padding: 0 var(--fl-sp-2);
+	font-size: var(--fl-t-90);
+	line-height: var(--fl-h-sm);
+}
+
+/* Close, settings, expand: IconButton sm, quiet. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-label {
+	border-radius: var(--fl-r-ctl);
+	color: var(--fl-fg-2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-label:hover {
+	background-color: var(--fl-ghost-hover);
+	color: var(--fl-fg);
+}
+
+/* The notification center: Menu §2.13, panel variant. */
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-center {
+	border: var(--fl-line) solid var(--fl-border);
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-3);
+	overflow: hidden;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-center > .notifications-center-header {
+	color: var(--fl-fg-50);
+	font-size: var(--fl-t-85);
+}
+
+/* ---- Dialog §2.17: glass r8 on a 75% overlay, elevation 4 -------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-modal-block.dimmed {
+	background: var(--fl-overlay);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-modal-block .dialog-shadow {
+	border-radius: var(--fl-r-box);
+	box-shadow: var(--fl-elev-4) !important;
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box {
+	border: var(--fl-line) solid var(--fl-dialog-border) !important;
+	border-radius: var(--fl-r-box);
+	padding: var(--fl-sp-4);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box .dialog-message-row {
+	padding: 0;
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box .dialog-message-row .dialog-message-container .dialog-message {
+	margin: 0 0 var(--fl-sp-1);
+	color: var(--fl-sel-fg);
+	font-size: var(--fl-t-title);
+	font-weight: var(--fl-w-strong);
+	line-height: var(--fl-lh-tight);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box .dialog-message-row .dialog-message-container .dialog-message-detail {
+	color: var(--fl-fg-2);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box > .dialog-buttons-row {
+	padding: var(--fl-sp-3) 0 0;
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons {
+	gap: var(--fl-sp-2);
+	/* Room for the focus ring inside the row's overflow clip, with no net shift. */
+	margin: calc(-1 * var(--fl-sp-1));
+	padding: var(--fl-sp-1);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons > .monaco-button {
+	margin: 0;
+}
+
+/* Foot: the primary last; the others quiet (Cancel first). */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons > .monaco-button.secondary {
+	--vscode-button-secondaryBackground: transparent;
+	--vscode-button-secondaryHoverBackground: var(--fl-ghost-hover);
+	--vscode-button-secondaryForeground: var(--fl-fg-2);
+}
+
+/* ---- Splitters: invisible until hovered, still grabbable --------------------------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-sash::before {
+	border-radius: var(--fl-r-pill);
+}
+
+/* ---- Title bar: the command center is a pill (§2.28 Command center) -- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
+	height: var(--fl-h-md);
+	border-radius: var(--fl-r-pill);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-icon {
+	margin: auto calc(var(--fl-sp-1) + var(--fl-sp-half)) auto 0;
+}
+
+/* ---- Activity bar (§2.28 Nav rail item, P2): a short pill instead of the stripe --------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked:not(:focus) .active-item-indicator::before {
+	border-left-color: transparent !important;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator {
+	overflow: visible;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	content: '';
+	position: absolute;
+	top: 50%;
+	left: 0;
+	width: var(--fl-sp-1);
+	height: var(--fl-sp-4);
+	border-radius: var(--fl-r-pill);
+	background-color: var(--vscode-activityBar-activeBorder, var(--vscode-activityBar-foreground));
+	transform: translateY(-50%);
+	pointer-events: none;
+}
+
+/* Upstream Modern UI insets the item background from the bar edge (the bar's padding plus the
+   indicator's own inset); keep the pill on the edge. */
+.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	left: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + var(--fl-sp-1)) / 2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	left: auto;
+	right: 0;
+}
+
+.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
+	right: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + var(--fl-sp-1)) / 2);
+}
+
+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item .action-label {
+	border-radius: var(--fl-r-ctl);
+}
+
+/* ---- Editor tabs without Modern UI: a rounded top -------------------------------------- */
+
+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
+	border-top-left-radius: var(--fl-r-ctl);
+	border-top-right-radius: var(--fl-r-ctl);
+}
+
+/* ---- List / tree row §2.19: r4 ------------------------------------------------------------
+   Specificity (0,5,0) on purpose: above Modern UI's generic row radius, below its special cases
+   (suggest boundary rows, notification rows), whichever order the bundle puts them in. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-list .monaco-list-row:where(:not(.separator)) {
+	border-radius: var(--fl-r-row);
+}
+
+/* Upstream Modern UI insets rows in side bar views by 4px; do the same without it. */
+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .monaco-pane-view .pane-body:not(.chat-viewpane) .monaco-list-row {
+	left: var(--fl-sp-1);
+	right: var(--fl-sp-1);
+	width: auto;
+}
+
+/* ---- Scrollbars (§2.28 Scrollbar): thin pill thumbs inside the usual hit area ------------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar > .slider {
+	box-sizing: border-box;
+	border: 0 solid transparent;
+	background-clip: padding-box;
+	border-radius: var(--fl-r-pill);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider {
+	border-left-width: var(--fl-sp-half);
+	border-right-width: var(--fl-sp-half);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider {
+	border-top-width: var(--fl-sp-half);
+	border-bottom-width: var(--fl-sp-half);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider {
+	border-left-width: var(--fl-sp-1);
+	border-right-width: var(--fl-sp-1);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider {
+	border-top-width: var(--fl-sp-1);
+	border-bottom-width: var(--fl-sp-1);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
+	border-left-width: var(--fl-line);
+	border-right-width: var(--fl-line);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
+	border-top-width: var(--fl-line);
+	border-bottom-width: var(--fl-line);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
+	border-left-width: calc(var(--fl-sp-1) - var(--fl-line));
+	border-right-width: calc(var(--fl-sp-1) - var(--fl-line));
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
+	border-top-width: var(--fl-sp-half);
+	border-bottom-width: var(--fl-sp-half);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
+	box-sizing: border-box;
+	left: 0;
+	width: 100%;
+	border: 0 solid transparent;
+	border-left-width: var(--fl-sp-1);
+	border-right-width: var(--fl-sp-1);
+	background-clip: padding-box;
+	border-radius: var(--fl-r-pill);
+}
+
+/* ---- Status bar (§2.28 Status bar item, P2): rounded item fills --------------------------------
+   Compact item pairs keep upstream's square seams. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.statusbar > .items-container > .statusbar-item:not(.compact-left):not(.compact-right) > .statusbar-item-label {
+	border-radius: var(--fl-r-ctl);
+}
