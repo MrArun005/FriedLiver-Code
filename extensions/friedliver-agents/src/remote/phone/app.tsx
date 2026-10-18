@@ -6,7 +6,7 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { parseMarkdown, type Block, type Inline, type ListBlock } from '../../shared/markdown';
 import type { AgentKey } from '../../shared/model';
-import type { QuestionField } from '../../shared/questions';
+import type { QuestionField, QuestionValue } from '../../shared/questions';
 import type { ApprovalLevel } from '../../shared/session';
 import type { PhoneChat, PhoneEvent, PhoneFile, PhoneItem, PhoneList, PhoneSummary, RemoteAction } from '../protocol';
 
@@ -52,6 +52,7 @@ async function api<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pro
 // ---- Small pieces ----
 
 const AGENT_LETTER: Record<AgentKey, string> = { claude: 'C', codex: 'X', gemini: 'G', demo: 'D' };
+const AGENT_NAMES: Record<AgentKey, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
 const LEVELS: { level: ApprovalLevel; name: string }[] = [
   { level: 'ask', name: 'Manual' },
   { level: 'edits', name: 'Edits' },
@@ -200,7 +201,9 @@ function Markdown({ text }: { text: string }) {
 
 type Act = (a: RemoteAction) => Promise<boolean>;
 
-// ---- Approvals: one compact card, scope as a visible segmented control, one primary (RESEARCH.md §3–4) ----
+// ---- Approvals, mobile-native: a pending request is one compact row (✕ / ✓, or a swipe); the row
+// opens a sheet with the details, the scope (Once / For this chat / Always) and one primary at the
+// bottom. Careful requests have no quick allow: their sheet lists what happens and needs a hold. ----
 
 type Scope = 'once' | 'chat' | 'always';
 type Tone = 'routine' | 'review' | 'careful';
@@ -231,10 +234,6 @@ function Diff({ file }: { file: PhoneFile }) {
   );
 }
 
-function Chip({ tone, label }: { tone: Tone; label: string }) {
-  return <span class={`chip chip--${tone}`}>{tone === 'careful' ? <LockIcon /> : null}{label}</span>;
-}
-
 function LockIcon() {
   return (
     <svg class="lock" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
@@ -243,30 +242,276 @@ function LockIcon() {
   );
 }
 
-/** "Run npm test", the agent, and the risk chip: who wants what, on one line. */
-function AskHead({ agent, verb, target, tone, label }: { agent?: AgentKey; verb: string; target?: string; tone: Tone; label: string }) {
+function Chip({ tone, label }: { tone: Tone; label: string }) {
   return (
-    <header class="ask__head">
-      {agent ? <Avatar agent={agent} small /> : null}
-      <span class="ask__what">
-        <span class="ask__verb">{verb}</span>
-        {target ? <span class="mono ask__target">{target}</span> : null}
-      </span>
-      <Chip tone={tone} label={label} />
-    </header>
+    <span class={`chip chip--${tone}`}>
+      {tone === 'careful' ? <LockIcon /> : null}
+      {label}
+    </span>
   );
 }
 
-/** Press and hold for 600 ms (Enter or Space held from a keyboard): a careful allow is never a reflex tap. */
-function HoldButton({ label, onDone }: { label: string; onDone(): void }) {
+function Glyph({ name }: { name: 'check' | 'x' }) {
+  return (
+    <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
+      <path d={name === 'check' ? 'm3.5 8.5 3 3 6-7' : 'm4.5 4.5 7 7m0-7-7 7'} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+function CommandPreview({ line, cwd }: { line: string; cwd?: string }) {
+  return (
+    <div class="preview">
+      <pre class="preview__body preview__cmd">{line}</pre>
+      {cwd && cwd !== '.' ? <p class="preview__foot">in {cwd}</p> : null}
+    </div>
+  );
+}
+
+/** One pending request, as the row and the sheet both read it. */
+interface Req {
+  id: string;
+  agent: AgentKey;
+  verb: string;
+  target?: string;
+  /** The target is prose (a question), not machine text. */
+  prose?: boolean;
+  tone: Tone;
+  chip: string;
+  consequences: string[];
+  onMac?: string;
+  allowWord: string;
+  denyWord: string;
+  scopes: Partial<Record<Scope, { rule: string; run(): void }[]>>;
+  deny?(): void;
+  extra: { label: string; run(): void }[];
+  body?: preact.ComponentChildren;
+  question?: Extract<PhoneItem, { k: 'question' }>;
+  /** A question's answer. */
+  answer?(values: Record<string, QuestionValue>): void;
+}
+
+/** The quick ✓ and swipe-right: the plain one-time yes, never for careful requests, questions or what the phone can't show. */
+const quickAllow = (r: Req) => (r.tone !== 'careful' && !r.onMac && !r.question ? r.scopes.once?.[0]?.run : undefined);
+
+/** A pending item as a request; undefined for anything already decided or not a request. */
+function requestOf(item: PhoneItem, agent: AgentKey, act: Act): Req | undefined {
+  switch (item.k) {
+    case 'permission': {
+      if (item.answer) return undefined;
+      const answer = (optionId: string) => () => void act({ type: 'permission', requestId: item.id, optionId });
+      return {
+        id: item.id,
+        agent,
+        verb: item.verb,
+        target: item.target,
+        tone: item.risk.level,
+        chip: item.risk.label,
+        consequences: item.risk.consequences,
+        onMac: item.onMac ? 'Too long or hidden characters: allow it on your Mac. You can still deny it here.' : undefined,
+        allowWord: 'Allow',
+        denyWord: 'Deny',
+        scopes: {
+          ...(item.once ? { once: [{ rule: 'Just this request', run: answer(item.once) }] } : {}),
+          ...(item.chat ? { chat: [{ rule: `${item.verb}${item.target ? ` ${item.target}` : ''} again, until this chat ends`, run: answer(item.chat) }] } : {}),
+          ...(item.always.length ? { always: item.always.map((c) => ({ rule: c.label.replace(/^Always allow (\w)/, (_, ch: string) => ch.toUpperCase()), run: () => void act({ type: 'allowAlways', requestId: item.id, grant: c.grant }) })) } : {}),
+        },
+        ...(item.deny ? { deny: answer(item.deny) } : {}),
+        extra: item.options.map((o) => ({ label: o.name, run: answer(o.id) })),
+        body: (
+          <>
+            {item.command ? <CommandPreview line={item.command.line} cwd={item.command.cwd} /> : null}
+            {item.url ? <p class="preview preview__text mono">{item.url}</p> : null}
+            {item.files?.map((f) => <Diff key={f.path} file={f} />)}
+            {item.plan ? (
+              <div class="preview preview--plan">
+                <Markdown text={item.plan} />
+              </div>
+            ) : null}
+            {item.text && !item.plan ? <p class="sheet__text">{item.text}</p> : null}
+          </>
+        ),
+      };
+    }
+    case 'command': {
+      if (item.state !== 'awaiting') return undefined;
+      const first = item.line.split('\n')[0];
+      return {
+        id: item.id,
+        agent,
+        verb: 'Run',
+        target: first,
+        tone: item.risk.level,
+        chip: item.risk.label,
+        consequences: item.risk.consequences,
+        onMac: item.onMac ? 'Too long or hidden characters: run it from your Mac. You can still deny it here.' : undefined,
+        allowWord: 'Run',
+        denyWord: 'Deny',
+        scopes: {
+          once: [{ rule: 'Just this command', run: () => void act({ type: 'command', commandId: item.id, approve: true }) }],
+          ...(item.outside || item.onMac ? {} : { always: [{ rule: `${first}, exactly, in every chat`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line } }) }] }),
+        },
+        deny: () => void act({ type: 'command', commandId: item.id, approve: false }),
+        extra: [],
+        body: <CommandPreview line={item.line} cwd={item.cwd} />,
+      };
+    }
+    case 'review':
+      if (item.state !== 'pending') return undefined;
+      return {
+        id: item.id,
+        agent,
+        verb: item.file.isNew ? 'Create' : 'Edit',
+        target: item.file.path,
+        tone: 'review',
+        chip: `+${item.file.added} −${item.file.removed}`,
+        consequences: [],
+        allowWord: 'Accept',
+        denyWord: 'Reject',
+        scopes: { once: [{ rule: 'Write this edit', run: () => void act({ type: 'review', reviewId: item.id, action: 'accept' }) }] },
+        deny: () => void act({ type: 'review', reviewId: item.id, action: 'reject' }),
+        extra: [],
+        body: <Diff file={item.file} />,
+      };
+    case 'bridge': {
+      if (item.state !== 'awaiting') return undefined;
+      const answer = (a: 'allow' | 'allowChat' | 'allowAlways') => () => void act({ type: 'bridge', requestId: item.id, answer: a });
+      return {
+        id: item.id,
+        agent: item.agent,
+        verb: item.title,
+        tone: 'review',
+        chip: 'Agent',
+        consequences: [],
+        allowWord: 'Allow',
+        denyWord: 'Deny',
+        scopes: {
+          once: [{ rule: 'Just this request', run: answer('allow') }],
+          chat: [{ rule: 'Requests like this one in this chat, until it ends', run: answer('allowChat') }],
+          ...(item.always ? { always: [{ rule: item.always, run: answer('allowAlways') }] } : {}),
+        },
+        deny: () => void act({ type: 'bridge', requestId: item.id, answer: 'deny' }),
+        extra: [],
+        body: item.text ? <p class="preview preview__text">{item.text}</p> : undefined,
+      };
+    }
+    case 'question':
+      if (item.state !== 'awaiting') return undefined;
+      return {
+        id: item.id,
+        agent,
+        verb: 'Asks',
+        target: item.message,
+        prose: true,
+        tone: 'review',
+        chip: 'Question',
+        consequences: [],
+        allowWord: 'Answer',
+        denyWord: 'Skip',
+        scopes: {},
+        deny: () => void act({ type: 'answerQuestion', requestId: item.id, action: 'decline' }),
+        extra: [],
+        question: item,
+        answer: (values) => void act({ type: 'answerQuestion', requestId: item.id, action: 'accept', values }),
+      };
+    default:
+      return undefined;
+  }
+}
+
+/** A pending request in the transcript: one row; ✕ / ✓ on the right; swipe right allows once, left denies. */
+function PendingRow({ req, open, swiped }: { req: Req; open(): void; swiped(dir: 'allow' | 'deny'): void }) {
+  const allow = quickAllow(req);
+  const [dx, setDx] = useState(0);
+  const drag = useRef<{ x: number; y: number; id: number; moving: boolean; armed: boolean } | undefined>(undefined);
+  const LIMIT = 96;
+  const onDown = (e: PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    drag.current = { x: e.clientX, y: e.clientY, id: e.pointerId, moving: false, armed: false };
+  };
+  const onMove = (e: PointerEvent) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const mx = e.clientX - d.x;
+    if (!d.moving) {
+      if (Math.abs(mx) < 10 || Math.abs(mx) < Math.abs(e.clientY - d.y)) return;
+      d.moving = true;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    }
+    const next = Math.max(req.deny ? -140 : 0, Math.min(allow ? 140 : 0, mx));
+    const armed = Math.abs(next) >= LIMIT;
+    if (armed !== d.armed) {
+      d.armed = armed;
+      if (armed) navigator.vibrate?.(8);
+    }
+    setDx(next);
+  };
+  const onUp = () => {
+    const d = drag.current;
+    drag.current = undefined;
+    if (!d) return;
+    if (!d.moving) return open();
+    if (dx >= LIMIT && allow) swiped('allow');
+    else if (dx <= -LIMIT && req.deny) swiped('deny');
+    setDx(0);
+  };
+  return (
+    <div class={`req req--${req.tone}`}>
+      <div class="req__under" aria-hidden="true">
+        <span class={`req__hint req__hint--allow${dx >= LIMIT ? ' req__hint--armed' : ''}`}>
+          <Glyph name="check" /> {req.allowWord} once
+        </span>
+        <span class={`req__hint req__hint--deny${dx <= -LIMIT ? ' req__hint--armed' : ''}`}>
+          {req.denyWord} <Glyph name="x" />
+        </span>
+      </div>
+      <div
+        class={`req__row${dx ? ' req__row--dragging' : ''}`}
+        style={dx ? { transform: `translateX(${dx}px)` } : undefined}
+        role="button"
+        tabIndex={0}
+        aria-label={`${req.verb} ${req.target ?? ''}: open the request`}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={() => ((drag.current = undefined), setDx(0))}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), open())}
+      >
+        <Avatar agent={req.agent} small />
+        <span class="req__text">
+          <span class="req__line">
+            <span class="req__verb">{req.verb}</span>
+            {req.target ? <span class={req.prose ? 'req__prose' : 'mono req__target'}>{req.target}</span> : null}
+          </span>
+          <Chip tone={req.tone} label={req.chip} />
+        </span>
+        {req.deny ? (
+          <button class="round" aria-label={req.denyWord} onClick={req.deny}>
+            <Glyph name="x" />
+          </button>
+        ) : null}
+        {allow ? (
+          <button class="round round--yes" aria-label={`${req.allowWord} once`} onClick={allow}>
+            <Glyph name="check" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Press and hold for 600 ms (or hold Enter / Space): a careful allow is never a reflex tap. */
+function HoldBar({ label, onDone }: { label: string; onDone(): void }) {
   const [holding, setHolding] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const start = () => {
     if (timer.current) return;
     setHolding(true);
+    navigator.vibrate?.(8);
     timer.current = setTimeout(() => {
       timer.current = undefined;
       setHolding(false);
+      navigator.vibrate?.(20);
       onDone();
     }, 600);
   };
@@ -277,7 +522,7 @@ function HoldButton({ label, onDone }: { label: string; onDone(): void }) {
   };
   return (
     <button
-      class={`primary primary--careful${holding ? ' primary--holding' : ''}`}
+      class={`btn-lg btn-lg--hold${holding ? ' btn-lg--holding' : ''}`}
       aria-label={`${label}: press and hold`}
       onPointerDown={(e) => (e.preventDefault(), start())}
       onPointerUp={stop}
@@ -287,159 +532,203 @@ function HoldButton({ label, onDone }: { label: string; onDone(): void }) {
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !e.repeat && (e.preventDefault(), start())}
       onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && stop()}
     >
-      <span class="primary__fill" aria-hidden="true" />
-      <span class="primary__label">{holding ? 'Keep holding…' : `Hold to ${label.toLowerCase()}`}</span>
+      <span class="btn-lg__fill" aria-hidden="true" />
+      <span class="btn-lg__label">
+        <LockIcon /> {holding ? 'Keep holding…' : `Hold to ${label.toLowerCase()}`}
+      </span>
     </button>
   );
 }
 
-interface AskProps {
-  agent?: AgentKey;
-  verb: string;
-  target?: string;
-  tone: Tone;
-  label: string;
-  /** What each scope does; absent scopes show disabled. Careful requests get none but once. */
-  scopes: Partial<Record<Scope, { rule: string; run(): void; choices?: { label: string; run(): void }[] }>>;
-  /** "Allow", or "Run" for a command. */
-  allowWord?: string;
-  deny?: { label: string; run(): void };
-  consequences?: string[];
-  onMac?: string;
-  extra?: { label: string; run(): void }[];
-  children?: preact.ComponentChildren;
+function QuestionFields({ q, values, set }: { q: Extract<PhoneItem, { k: 'question' }>; values: Record<string, QuestionValue>; set(k: string, v: QuestionValue): void }) {
+  return (
+    <>
+      {q.fields.map((f: QuestionField) => (
+        <div class="field" key={f.key}>
+          {q.fields.length > 1 || f.type !== 'choice' ? <p class="field__title">{f.title}</p> : null}
+          {f.description ? <p class="meta">{f.description}</p> : null}
+          {f.type === 'choice' || f.type === 'multi' ? (
+            <div class="rows" role={f.type === 'choice' ? 'radiogroup' : 'group'}>
+              {(f.options ?? []).map((o) => {
+                const picked = values[f.key];
+                const on = f.type === 'choice' ? picked === o.value : Array.isArray(picked) && picked.includes(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    role={f.type === 'choice' ? 'radio' : 'checkbox'}
+                    aria-checked={on}
+                    class={`choice${on ? ' choice--on' : ''}`}
+                    onClick={() => {
+                      if (f.type === 'choice') return set(f.key, o.value);
+                      const list = Array.isArray(picked) ? picked : [];
+                      set(f.key, on ? list.filter((x) => x !== o.value) : [...list, o.value]);
+                    }}
+                  >
+                    <span class="choice__title">{o.title}</span>
+                    {o.description ? <span class="choice__desc">{o.description}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : f.type === 'boolean' ? (
+            <label class="check">
+              <input type="checkbox" checked={values[f.key] === true} onChange={(e) => set(f.key, (e.target as HTMLInputElement).checked)} /> {f.title}
+            </label>
+          ) : (
+            <input
+              class="input"
+              inputMode={f.type === 'number' ? 'decimal' : 'text'}
+              value={String(values[f.key] ?? '')}
+              onInput={(e) => {
+                const v = (e.target as HTMLInputElement).value;
+                set(f.key, f.type === 'number' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v);
+              }}
+            />
+          )}
+        </div>
+      ))}
+    </>
+  );
 }
 
-function Ask(p: AskProps) {
-  // The chosen answer: a scope, and for Always which of its rules.
-  const [scope, setScope] = useState<Scope>('once');
-  const [pick, setPick] = useState(0);
-  const [menu, setMenu] = useState(false);
-  const careful = p.tone === 'careful';
-  const routine = p.tone === 'routine';
-  const word = p.allowWord ?? 'Allow';
-  const chosen = p.scopes[scope];
-  const primary = scope === 'once' ? `${word} once` : scope === 'chat' ? `${word} for this chat` : `Always ${word.toLowerCase()}`;
-  const run = () => (chosen?.choices ? chosen.choices[pick]?.run() : chosen?.run());
-  const more = !careful && (p.scopes.chat || p.scopes.always);
-  // The scope menu's rows: each names the exact rule; anything beyond once is confirmed on the Mac.
-  const rows: { scope: Scope; pick: number; title: string; rule: string }[] = [
-    ...(p.scopes.once ? [{ scope: 'once' as Scope, pick: 0, title: 'Once', rule: 'Just this request' }] : []),
-    ...(p.scopes.chat ? [{ scope: 'chat' as Scope, pick: 0, title: 'For this chat', rule: p.scopes.chat.rule }] : []),
-    ...(p.scopes.always ? (p.scopes.always.choices ?? [{ label: p.scopes.always.rule }]).map((c, i) => ({ scope: 'always' as Scope, pick: i, title: 'Always', rule: c.label })) : []),
-  ];
-  const actions = (
-    <div class="ask__actions">
-      {p.deny ? (
-        <button class="quiet" onClick={p.deny.run}>
-          {p.deny.label}
-        </button>
-      ) : null}
-      {chosen && !p.onMac ? (
-        careful ? (
-          <HoldButton label={primary} onDone={run} />
-        ) : (
-          <span class="split">
-            <button class="primary split__main" onClick={run}>
-              {primary}
-            </button>
-            {more ? (
-              <button class="primary split__more" aria-label="More ways to allow" aria-haspopup="dialog" onClick={() => setMenu(true)}>
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                  <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </button>
-            ) : null}
-          </span>
-        )
-      ) : null}
-    </div>
-  );
+const SCOPE_TITLES: Record<Scope, string> = { once: 'Once', chat: 'For this chat', always: 'Always' };
+
+/** One request in full: details, scope, and the primary in the thumb zone. */
+function RequestPanel({ req, done }: { req: Req; done(): void }) {
+  const [choice, setChoice] = useState<{ scope: Scope; i: number }>({ scope: 'once', i: 0 });
+  const [values, setValues] = useState<Record<string, QuestionValue>>({});
+  const careful = req.tone === 'careful';
+  const rows = careful ? [] : (['once', 'chat', 'always'] as Scope[]).flatMap((s) => (req.scopes[s] ?? []).map((x, i) => ({ scope: s, i, rule: x.rule })));
+  const chosen = req.scopes[choice.scope]?.[choice.i];
+  const primary = req.question ? 'Answer' : choice.scope === 'once' ? `${req.allowWord} once` : choice.scope === 'chat' ? `${req.allowWord} for this chat` : `Always ${req.allowWord.toLowerCase()}`;
+  const q = req.question;
+  const ready = !q || (q.fields.every((f) => !f.required || values[f.key] !== undefined) && (q.fields.length !== 1 || values[q.fields[0].key] !== undefined));
+  const go = () => {
+    chosen?.run();
+    done();
+  };
   return (
-    <section class={`ask ask--${p.tone}`}>
-      <AskHead agent={p.agent} verb={p.verb} target={p.target} tone={p.tone} label={p.label} />
-      {p.children}
-      {careful && p.consequences?.length ? (
-        <ul class="ask__why">
-          {p.consequences.map((c) => (
-            <li key={c}>{c}</li>
-          ))}
-        </ul>
-      ) : null}
-      {p.onMac ? <p class="ask__note ask__note--warn">{p.onMac}</p> : null}
-      <div class={`ask__bar${routine ? ' ask__bar--row' : ''}`}>
+    <>
+      <div class="sheet__scroll">
+        <header class="sheet__req">
+          <Avatar agent={req.agent} small />
+          <div class="sheet__req-text">
+            <p class="sheet__req-title">
+              {req.verb} {req.target && !req.prose ? <span class="mono">{req.target}</span> : null}
+            </p>
+            {req.prose && req.target ? <p class="sheet__text">{req.target}</p> : null}
+            <Chip tone={req.tone} label={req.chip} />
+          </div>
+        </header>
+        {req.body}
+        {q ? <QuestionFields q={q} values={values} set={(k, v) => setValues({ ...values, [k]: v })} /> : null}
+        {careful && req.consequences.length ? (
+          <ul class="sheet__why">
+            {req.consequences.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        ) : null}
+        {req.onMac ? <p class="meta meta--warn">{req.onMac}</p> : null}
+        {rows.length > 1 && !req.onMac ? (
+          <div class="rows" role="radiogroup" aria-label="How long">
+            {rows.map((r) => {
+              const on = r.scope === choice.scope && r.i === choice.i;
+              return (
+                <button key={`${r.scope}${r.i}`} role="radio" aria-checked={on} class={`choice${on ? ' choice--on' : ''}`} onClick={() => setChoice({ scope: r.scope, i: r.i })}>
+                  <span class="choice__top">
+                    <span class="choice__title">{SCOPE_TITLES[r.scope]}</span>
+                    {r.scope === 'once' ? null : <span class="tag-mac">Confirm on Mac</span>}
+                  </span>
+                  <span class="choice__desc">{r.rule}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         {careful ? (
-          <p class="ask__note">
-            <LockIcon /> Once only
-          </p>
-        ) : scope !== 'once' ? (
-          <p class="ask__note">
-            {rows.find((r) => r.scope === scope && r.pick === pick)?.rule} · Confirm on Mac
+          <p class="meta">
+            <LockIcon /> Allowed once only
           </p>
         ) : null}
-        {actions}
-        {p.extra?.length ? (
-          <div class="ask__more">
-            {p.extra.map((x) => (
-              <button key={x.label} class="quiet quiet--small" onClick={x.run}>
+        {req.extra.length ? (
+          <div class="sheet__extra">
+            <p class="meta">Other answers from {AGENT_NAMES[req.agent]}</p>
+            {req.extra.map((x) => (
+              <button key={x.label} class="btn-text btn-text--sm btn-text--left" onClick={() => (x.run(), done())}>
                 {x.label}
               </button>
             ))}
           </div>
         ) : null}
       </div>
-      {menu ? (
-        <div class="sheet" role="dialog" aria-modal="true" aria-label="How long to allow" onClick={(e) => e.target === e.currentTarget && setMenu(false)}>
-          <div class="sheet__panel">
-            <header class="sheet__head">
-              <h2>
-                {p.verb} {p.target ? <span class="mono">{p.target}</span> : null}
-              </h2>
-              <button class="link" onClick={() => setMenu(false)}>
-                Cancel
-              </button>
-            </header>
-            <div class="rows" role="radiogroup">
-              {rows.map((r) => {
-                const on = r.scope === scope && r.pick === pick;
-                return (
-                  <button
-                    key={`${r.scope}${r.pick}`}
-                    role="radio"
-                    aria-checked={on}
-                    class={`row-choice row-choice--scope${on ? ' row-choice--on' : ''}`}
-                    onClick={() => {
-                      setScope(r.scope);
-                      setPick(r.pick);
-                      setMenu(false);
-                    }}
-                  >
-                    <span class="row-choice__top">
-                      <span class="row-choice__title">{r.title}</span>
-                      {r.scope === 'once' ? null : <span class="tag-mac">Confirm on Mac</span>}
-                    </span>
-                    <span class="row-choice__desc">{r.rule}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </section>
+      <footer class="sheet__actions">
+        {q ? (
+          <button class="btn-lg" disabled={!ready} onClick={() => (req.answer?.(values), done())}>
+            Answer
+          </button>
+        ) : chosen && !req.onMac ? (
+          careful ? (
+            <HoldBar label={primary} onDone={go} />
+          ) : (
+            <button class="btn-lg" onClick={go}>
+              {primary}
+            </button>
+          )
+        ) : null}
+        {req.deny ? (
+          <button class="btn-text" onClick={() => (req.deny!(), done())}>
+            {req.denyWord}
+          </button>
+        ) : null}
+      </footer>
+    </>
   );
 }
 
-/** A short one-line command reads in the header; anything longer gets its own preview. */
-const oneLine = (line: string) => !line.includes('\n') && line.length <= 80;
-
-function CommandPreview({ line, cwd }: { line: string; cwd?: string }) {
-  const where = cwd && cwd !== '.' ? <p class={oneLine(line) ? 'ask__note' : 'preview__foot'}>in {cwd}</p> : null;
-  if (oneLine(line)) return where;
+/** The request sheet: one request, or the queue of them, swiped or paged with ‹ ›. */
+function RequestSheet({ reqs, index, setIndex, close }: { reqs: Req[]; index: number; setIndex(i: number): void; close(): void }) {
+  const req = reqs[Math.min(index, reqs.length - 1)];
+  const start = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!req) close();
+  }, [req]);
+  if (!req) return null;
+  const at = reqs.indexOf(req);
+  const next = () => (reqs.length > 1 ? setIndex(Math.min(at, reqs.length - 2)) : close());
   return (
-    <div class="preview">
-      <pre class="preview__body preview__cmd">{line}</pre>
-      {where}
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Request" onClick={(e) => e.target === e.currentTarget && close()}>
+      <div
+        class="sheet__panel sheet__panel--req"
+        onTouchStart={(e) => (start.current = e.touches[0]?.clientX)}
+        onTouchEnd={(e) => {
+          const dx = (e.changedTouches[0]?.clientX ?? 0) - (start.current ?? 0);
+          if (reqs.length > 1 && Math.abs(dx) > 80 && !(e.target as HTMLElement).closest('pre, .preview')) setIndex((at + (dx < 0 ? 1 : reqs.length - 1)) % reqs.length);
+        }}
+      >
+        <div class="sheet__grab" aria-hidden="true" />
+        <header class="sheet__nav">
+          {reqs.length > 1 ? (
+            <>
+              <button class="round round--quiet" aria-label="Previous request" onClick={() => setIndex((at + reqs.length - 1) % reqs.length)}>
+                <Icon name="back" />
+              </button>
+              <span class="meta">
+                {at + 1} of {reqs.length} waiting
+              </span>
+              <button class="round round--quiet round--flip" aria-label="Next request" onClick={() => setIndex((at + 1) % reqs.length)}>
+                <Icon name="back" />
+              </button>
+            </>
+          ) : (
+            <span class="meta">Waiting for you</span>
+          )}
+          <button class="btn-text btn-text--sm" onClick={close}>
+            Close
+          </button>
+        </header>
+        <RequestPanel key={req.id} req={req} done={next} />
+      </div>
     </div>
   );
 }
@@ -456,86 +745,8 @@ function Resolved({ verb, target, outcome, tone = 'done' }: { verb: string; targ
   );
 }
 
-function QuestionCard({ item, act }: { item: Extract<PhoneItem, { k: 'question' }>; act: Act }) {
-  const [values, setValues] = useState<Record<string, string | number | boolean | string[]>>({});
-  if (item.state !== 'awaiting') return <Resolved verb="Asked" target={undefined} outcome={item.summary ?? (item.state === 'declined' ? 'skipped' : 'answered')} />;
-  const one = item.fields.length === 1 && item.fields[0].type === 'choice' ? item.fields[0] : undefined;
-  const set = (k: string, v: string | number | boolean | string[]) => setValues({ ...values, [k]: v });
-  const field = (f: QuestionField) => {
-    switch (f.type) {
-      case 'choice':
-      case 'multi': {
-        const picked = values[f.key];
-        return (
-          <div class="rows" role={f.type === 'choice' ? 'radiogroup' : 'group'}>
-            {(f.options ?? []).map((o) => {
-              const on = f.type === 'choice' ? picked === o.value : Array.isArray(picked) && picked.includes(o.value);
-              return (
-                <button
-                  key={o.value}
-                  role={f.type === 'choice' ? 'radio' : 'checkbox'}
-                  aria-checked={on}
-                  class={`row-choice${on ? ' row-choice--on' : ''}`}
-                  onClick={() => {
-                    if (f.type === 'choice') return set(f.key, o.value);
-                    const list = Array.isArray(picked) ? picked : [];
-                    set(f.key, on ? list.filter((x) => x !== o.value) : [...list, o.value]);
-                  }}
-                >
-                  <span class="row-choice__title">{o.title}</span>
-                  {o.description ? <span class="row-choice__desc">{o.description}</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        );
-      }
-      case 'boolean':
-        return (
-          <label class="check">
-            <input type="checkbox" checked={values[f.key] === true} onChange={(e) => set(f.key, (e.target as HTMLInputElement).checked)} /> {f.title}
-          </label>
-        );
-      default:
-        return (
-          <input
-            class="input"
-            inputMode={f.type === 'number' ? 'decimal' : 'text'}
-            value={String(values[f.key] ?? '')}
-            onInput={(e) => {
-              const v = (e.target as HTMLInputElement).value;
-              set(f.key, f.type === 'number' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v);
-            }}
-          />
-        );
-    }
-  };
-  const ready = !one || values[one.key] !== undefined;
-  return (
-    <section class="ask ask--question">
-      <p class="ask__question">{item.message}</p>
-      {item.fields.map((f) => (
-        <div class="field" key={f.key}>
-          {item.fields.length > 1 || f.type !== 'choice' ? <p class="field__title">{f.title}</p> : null}
-          {f.description ? <p class="ask__note">{f.description}</p> : null}
-          {field(f)}
-        </div>
-      ))}
-      <div class="ask__bar">
-        <div class="ask__actions">
-          <button class="quiet" onClick={() => void act({ type: 'answerQuestion', requestId: item.id, action: 'decline' })}>
-            Skip
-          </button>
-          <button class="primary" disabled={!ready} onClick={() => void act({ type: 'answerQuestion', requestId: item.id, action: 'accept', values })}>
-            Answer
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: AgentKey }) {
+/** Everything in the transcript but pending requests, which ChatScreen draws as rows. */
+function ItemView({ item }: { item: PhoneItem }) {
   switch (item.k) {
     case 'user':
       return <div class="msg msg--you">{item.text}</div>;
@@ -565,111 +776,24 @@ function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: Agen
           ))}
         </section>
       );
-    case 'permission': {
-      if (item.answer) return <Resolved verb={item.verb} target={item.target} outcome={`${item.answer}${item.auto ? ` · ${item.auto}` : ''}`} tone={/^no|deny|reject|cancel/i.test(item.answer) ? 'denied' : 'done'} />;
-      const answer = (optionId: string) => () => void act({ type: 'permission', requestId: item.id, optionId });
+    case 'permission':
+      return <Resolved verb={item.verb} target={item.target} outcome={`${item.answer ?? ''}${item.auto ? ` · ${item.auto}` : ''}`} tone={/^no|deny|reject|cancel/i.test(item.answer ?? '') ? 'denied' : 'done'} />;
+    case 'command':
       return (
-        <Ask
-          agent={agent}
-          verb={item.verb}
-          target={item.command && !oneLine(item.command.line) ? undefined : item.target}
-          tone={item.risk.level}
-          label={item.risk.label}
-          consequences={item.risk.consequences}
-          onMac={item.onMac ? 'Too long or hidden characters: allow this one on your Mac. You can still deny it here.' : undefined}
-          scopes={{
-            ...(item.once ? { once: { rule: '', run: answer(item.once) } } : {}),
-            ...(item.chat ? { chat: { rule: `${item.verb}${item.target ? ` ${item.target}` : ''} again without asking, until this chat ends`, run: answer(item.chat) } } : {}),
-            ...(item.always.length
-              ? { always: { rule: item.always[0].label, run: () => void act({ type: 'allowAlways', requestId: item.id, grant: item.always[0].grant }), choices: item.always.map((c) => ({ label: c.label.replace(/^Always allow (\w)/, (_, ch: string) => ch.toUpperCase()), run: () => void act({ type: 'allowAlways', requestId: item.id, grant: c.grant }) })) } }
-              : {}),
-          }}
-          deny={item.deny ? { label: 'Deny', run: answer(item.deny) } : undefined}
-          extra={item.options.map((o) => ({ label: o.name, run: answer(o.id) }))}
-        >
-          {item.command ? <CommandPreview line={item.command.line} cwd={item.command.cwd} /> : null}
-          {item.url ? <p class="preview preview__foot mono">{item.url}</p> : null}
-          {item.files?.map((f) => <Diff key={f.path} file={f} />)}
-          {item.plan ? (
-            <div class="preview preview--plan">
-              <Markdown text={item.plan} />
-            </div>
-          ) : null}
-          {item.text && !item.plan ? <p class="ask__text">{item.text}</p> : null}
-        </Ask>
+        <div class={`step step--${item.state === 'denied' || (item.exitCode ?? 0) !== 0 ? 'failed' : item.state === 'running' ? 'working' : 'done'}`}>
+          <span class="step__title">
+            <span class="tag">Run</span>
+            <span class="mono">{item.line.split('\n')[0]}</span>
+          </span>
+          {item.output ? <pre class="step__out">{item.output}</pre> : null}
+        </div>
       );
-    }
-    case 'command': {
-      const first = item.line.split('\n')[0];
-      if (item.state !== 'awaiting') {
-        return (
-          <div class={`step step--${item.state === 'denied' || (item.exitCode ?? 0) !== 0 ? 'failed' : item.state === 'running' ? 'working' : 'done'}`}>
-            <span class="step__title">
-              <span class="tag">Run</span>
-              <span class="mono">{first}</span>
-            </span>
-            {item.output ? <pre class="step__out">{item.output}</pre> : null}
-          </div>
-        );
-      }
-      return (
-        <Ask
-          agent={agent}
-          verb="Run"
-          target={oneLine(item.line) ? item.line : undefined}
-          tone={item.risk.level}
-          label={item.risk.label}
-          consequences={item.risk.consequences}
-          allowWord="Run"
-          onMac={item.onMac ? 'Too long or hidden characters: run this one from your Mac. You can still deny it here.' : undefined}
-          scopes={{
-            once: { rule: '', run: () => void act({ type: 'command', commandId: item.id, approve: true }) },
-            ...(item.outside || item.onMac ? {} : { always: { rule: `${first}, exactly, in every chat`, run: () => void act({ type: 'allowAlways', commandId: item.id, grant: { kind: 'exact', command: item.line } }) } }),
-          }}
-          deny={{ label: 'Deny', run: () => void act({ type: 'command', commandId: item.id, approve: false }) }}
-        >
-          <CommandPreview line={item.line} cwd={item.cwd} />
-        </Ask>
-      );
-    }
     case 'question':
-      return <QuestionCard item={item} act={act} />;
+      return <Resolved verb="Asked" outcome={item.summary ?? (item.state === 'declined' ? 'skipped' : 'answered')} />;
     case 'review':
-      if (item.state !== 'pending') return <Resolved verb="Edit" target={item.file.path} outcome={`${item.state}${item.auto ? ` · ${item.auto}` : ''}`} tone={item.state === 'rejected' ? 'denied' : 'done'} />;
-      return (
-        <Ask
-          agent={agent}
-          verb={item.file.isNew ? 'Create' : 'Edit'}
-          target={item.file.path}
-          tone="review"
-          label="Review the edit"
-          allowWord="Accept"
-          scopes={{ once: { rule: '', run: () => void act({ type: 'review', reviewId: item.id, action: 'accept' }) } }}
-          deny={{ label: 'Reject', run: () => void act({ type: 'review', reviewId: item.id, action: 'reject' }) }}
-        >
-          <Diff file={item.file} />
-        </Ask>
-      );
-    case 'bridge': {
-      if (item.state !== 'awaiting') return <Resolved verb={item.title} outcome={item.state} tone={item.state === 'denied' ? 'denied' : 'done'} />;
-      const answer = (a: 'allow' | 'allowChat' | 'allowAlways') => () => void act({ type: 'bridge', requestId: item.id, answer: a });
-      return (
-        <Ask
-          agent={item.agent}
-          verb={item.title}
-          tone="review"
-          label="Agent request"
-          scopes={{
-            once: { rule: '', run: answer('allow') },
-            chat: { rule: 'Requests like this one in this chat, without asking, until it ends', run: answer('allowChat') },
-            ...(item.always ? { always: { rule: `${item.always}`, run: answer('allowAlways') } } : {}),
-          }}
-          deny={{ label: 'Deny', run: () => void act({ type: 'bridge', requestId: item.id, answer: 'deny' }) }}
-        >
-          {item.text ? <p class="preview preview__text">{item.text}</p> : null}
-        </Ask>
-      );
-    }
+      return <Resolved verb="Edit" target={item.file.path} outcome={`${item.state}${item.auto ? ` · ${item.auto}` : ''}`} tone={item.state === 'rejected' ? 'denied' : 'done'} />;
+    case 'bridge':
+      return <Resolved verb={item.title} outcome={item.state} tone={item.state === 'denied' ? 'denied' : 'done'} />;
     case 'notice':
       return <p class={`notice${item.tone === 'error' ? ' notice--error' : ''}`}>{item.text}</p>;
     case 'changes':
@@ -677,7 +801,7 @@ function ItemView({ item, act, agent }: { item: PhoneItem; act: Act; agent: Agen
     case 'link':
       return (
         <div class="msg msg--link">
-          <p class="ask__note">{item.label}</p>
+          <p class="meta">{item.label}</p>
           <Markdown text={item.text} />
         </div>
       );
@@ -739,7 +863,12 @@ function ListScreen({ list, live, open, newChat, settings }: { list: PhoneList |
 function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act; back(): void }) {
   const [text, setText] = useState('');
   const [subsOpen, setSubsOpen] = useState(false);
+  const [sheet, setSheet] = useState<number | undefined>(undefined);
+  const flushUndo = useRef<(() => void) | undefined>(undefined);
+  /** A swiped answer waits 3 s before it is sent, so Undo really undoes: the agent hasn't seen it. */
+  const [undo, setUndo] = useState<{ id: string; text: string; timer: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const end = useRef<HTMLDivElement>(null);
+  useEffect(() => () => clearTimeout(undo?.timer), [undo]);
   const count = chat?.items.length ?? 0;
   useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [count, chat?.id]);
   if (!chat) {
@@ -759,6 +888,26 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
     if (await act({ type: 'send', chatId: chat.id, text })) setText('');
   };
   const live = chat.subagentList.filter((s) => s.state === 'working');
+  const reqs = chat.items.flatMap((item) => {
+    const r = requestOf(item, chat.agent, act);
+    return r && r.id !== undo?.id ? [r] : [];
+  });
+  const swiped = (r: Req, dir: 'allow' | 'deny') => {
+    const run = dir === 'allow' ? quickAllow(r) : r.deny;
+    if (!run) return;
+    if (undo) {
+      // The earlier one goes now.
+      clearTimeout(undo.timer);
+      flushUndo.current?.();
+    }
+    const timer = setTimeout(() => {
+      flushUndo.current = undefined;
+      setUndo(undefined);
+      run();
+    }, 3000);
+    flushUndo.current = run;
+    setUndo({ id: r.id, text: `${dir === 'allow' ? `${r.allowWord === 'Run' ? 'Run' : 'Allowed'} once` : ({ Deny: 'Denied', Reject: 'Rejected', Skip: 'Skipped' } as Record<string, string>)[r.denyWord] ?? r.denyWord}: ${r.verb}${r.target && !r.prose ? ` ${r.target}` : ''}`, timer });
+  };
   return (
     <div class="screen screen--chat">
       <header class="bar bar--chat">
@@ -806,12 +955,35 @@ function ChatScreen({ chat, act, back }: { chat: PhoneChat | undefined; act: Act
       ) : null}
       <main class="transcript">
         {chat.earlier ? <p class="notice">{chat.earlier} earlier items are on your Mac.</p> : null}
-        {chat.items.map((item, i) => (
-          <ItemView key={`${chat.id}-${i}-${item.k}`} item={item} act={act} agent={chat.agent} />
-        ))}
+        {chat.items.map((item, i) => {
+          const r = requestOf(item, chat.agent, act);
+          if (r) return r.id === undo?.id ? null : <PendingRow key={r.id} req={r} open={() => setSheet(reqs.findIndex((x) => x.id === r.id))} swiped={(dir) => swiped(r, dir)} />;
+          return <ItemView key={`${chat.id}-${i}-${item.k}`} item={item} />;
+        })}
         {chat.busy ? <p class="working">Working…</p> : null}
         <div ref={end} />
       </main>
+      {undo ? (
+        <div class="undo" role="status">
+          <span class="undo__text">{undo.text}</span>
+          <button
+            class="btn-text btn-text--sm"
+            onClick={() => {
+              clearTimeout(undo.timer);
+              flushUndo.current = undefined;
+              setUndo(undefined);
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      ) : reqs.length > 1 ? (
+        <button class="waiting" onClick={() => setSheet(0)}>
+          <span class="waiting__dot" aria-hidden="true" />
+          {reqs.length} waiting<span class="waiting__go">Review</span>
+        </button>
+      ) : null}
+      {sheet !== undefined && reqs.length ? <RequestSheet reqs={reqs} index={sheet} setIndex={setSheet} close={() => setSheet(undefined)} /> : null}
       <footer class="composer">
         <textarea
           class="composer__input"
