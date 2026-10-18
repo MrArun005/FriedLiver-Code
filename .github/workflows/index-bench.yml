@@ -1,8 +1,9 @@
 name: Index bench
 
-# Re-open of the agents extension's project index on microsoft/TypeScript after
-# touching 10 files: time until it answers and until it is verified, against a
-# full build (test/indexBench.test.ts). macOS uses the FSEvents change journal
+# The agents extension's project index on microsoft/TypeScript
+# (test/indexBench.test.ts): at the default maxMemoryMB it stops early with a
+# partial-index notice; at 400 it indexes in full, and the re-open after touching
+# 10 files is timed (until it answers and until it is verified) against a full build. macOS uses the FSEvents change journal
 # (the helper built here); Linux has no journal and checks every file. Also the
 # token bench (test/tokenBench.test.ts): scripted agent tasks with and without the
 # index_* tools, tokens counted with js-tiktoken's cl100k_base. Numbers go to the

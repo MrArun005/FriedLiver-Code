@@ -15,10 +15,11 @@ import { unifiedDiff } from '../shared/diff';
 import { estimateTokens } from '../shared/tokens';
 
 /**
- * The friedliver.index.maxFiles / maxMemoryMB defaults: a 150k-file repository indexes fully.
- * microsoft/TypeScript v6.0.3 (81k files) estimates 200 MB and holds ~775 MB of heap (index-bench).
+ * The friedliver.index.maxFiles / maxMemoryMB defaults. The memory cap binds first on big repositories:
+ * microsoft/TypeScript v6.0.3 (81k files) estimates 200 MB and holds ~775 MB of heap in full (index-bench),
+ * so at 150 MB it stops early and the status bar says "Partial index" with a link to the setting.
  */
-export const INDEX_DEFAULTS = { maxFiles: 200_000, maxMemoryMB: 400 };
+export const INDEX_DEFAULTS = { maxFiles: 200_000, maxMemoryMB: 150 };
 
 export const INDEX_LIMITS = {
   /** Files larger than this are not indexed. */
@@ -202,8 +203,10 @@ export class ProjectIndex {
     return this.bytes;
   }
   private readonly exclude: RegExp[];
-  /** Set once a cap stopped files from being indexed. */
-  capped = false;
+  /** Which cap stopped files from being indexed, if one did. Cleared by the next full check that fits. */
+  capped: false | 'files' | 'memory' = false;
+  /** Files the last full check listed (what a complete index would hold, give or take unreadable ones). */
+  listed?: number;
   private rootReal?: string;
   /** The Merkle tree of the indexed files: always exactly the docs, by content hash. */
   readonly tree = new MerkleTree();
@@ -401,7 +404,7 @@ export class ProjectIndex {
     if (leaf && hasDoc && leaf.mtimeNs === st.mtimeNs && leaf.size === st.size) return true;
     const key = `${st.size}:${st.mtimeNs}`;
     if (!leaf && this.unreadable.get(rel) === key) return true;
-    if (!leaf && this.leaves.size >= this.options.maxFiles) return (this.capped = true), false;
+    if (!leaf && this.leaves.size >= this.options.maxFiles) return (this.capped = 'files'), false;
     const got = await this.readChecked(rel);
     if (got === null) return this.unreadable.set(rel, key), true;
     this.unreadable.delete(rel);
@@ -423,7 +426,7 @@ export class ProjectIndex {
     for (const t of tokenize(rel)) tokens.set(t, (tokens.get(t) ?? 0) + 1);
     const doc: Doc = { rel, hash: got.hash, len, tokens: [...tokens], symbols: outline(rel, text), imports: imports(rel, text) };
     this.remove(rel);
-    if (this.bytes + cost(doc) > this.options.maxBytes) return (this.capped = true), false;
+    if (this.bytes + cost(doc) > this.options.maxBytes) return (this.capped = 'memory'), false;
     this.leaves.set(rel, { size: st.size, mtimeNs: st.mtimeNs, hash: got.hash });
     this.tree.set(rel, got.hash);
     this.add(doc);
@@ -473,6 +476,8 @@ export class ProjectIndex {
   /** Every listed file through update(): a stat each, a read only where it changed. `onBatch` returning false stops it (and this returns false). */
   async syncAll(onBatch?: () => Promise<boolean>): Promise<boolean> {
     const files = await this.list();
+    this.listed = files.length;
+    this.capped = false;
     this.prune(new Set(files));
     for (let i = 0; i < files.length; i += STAT_BATCH) {
       if (!(await this.updateBatch(files.slice(i, i + STAT_BATCH)))) break;
@@ -539,7 +544,8 @@ export class ProjectIndex {
     };
     // git status walks the whole tree: it runs while the journal is read.
     const hinting = this.gitHint();
-    const got = this.mark && journal ? await journal.since(this.root, this.mark) : null;
+    // A capped index checks every file: the journal names only what changed, not what a raised cap now lets in.
+    const got = this.mark && journal && !this.capped ? await journal.since(this.root, this.mark) : null;
     lap('journal');
     /** Directories to rescan for a .gitignore or .git/info/exclude among `paths`. */
     const ignoreDirs = (paths: string[]) => [
@@ -698,6 +704,8 @@ export class ProjectIndex {
       merkle: this.tree,
       mark: this.mark,
       gitHead: this.gitHead,
+      capped: this.capped,
+      listed: this.listed,
     };
   }
 
@@ -720,7 +728,7 @@ export class ProjectIndex {
   }
 
   private loadTree(saved: unknown): void {
-    const s = saved as { v?: unknown; leaves?: unknown; unreadable?: unknown; merkle?: unknown; mark?: unknown; gitHead?: unknown } | null;
+    const s = saved as { v?: unknown; leaves?: unknown; unreadable?: unknown; merkle?: unknown; mark?: unknown; gitHead?: unknown; capped?: unknown; listed?: unknown } | null;
     if (!s || s.v !== 3 || !Array.isArray(s.leaves)) return;
     // Saved under today's name rules (same denylists, same files.exclude): its paths passed them already.
     // Every read still checks them again.
@@ -737,6 +745,8 @@ export class ProjectIndex {
     if (!this.leaves.size) return;
     this.docsPending = true;
     if (isMark(s.mark)) this.mark = s.mark;
+    if (s.capped === 'files' || s.capped === 'memory') this.capped = s.capped;
+    if (typeof s.listed === 'number' && Number.isSafeInteger(s.listed) && s.listed >= 0) this.listed = s.listed;
     if (typeof s.gitHead === 'string' && GIT_OID.test(s.gitHead)) this.gitHead = s.gitHead;
     if (Array.isArray(s.unreadable)) {
       for (const u of s.unreadable) if (Array.isArray(u) && typeof u[0] === 'string' && typeof u[1] === 'string' && /^\d+:\d+$/.test(u[1])) this.unreadable.set(u[0], u[1]);
@@ -794,7 +804,7 @@ export class ProjectIndex {
     const doc = d as Doc;
     // Over the memory cap: the file leaves the tree too (the tree holds exactly what is indexed).
     if (this.bytes + cost(doc) > this.options.maxBytes) {
-      this.capped = true;
+      this.capped = 'memory';
       this.remove(d.rel);
       return false;
     }
@@ -939,17 +949,30 @@ export async function answerIndex(indexes: ProjectIndex[], call: IndexCall, buil
   return out;
 }
 
+/** `Partial index: 3,000 of 81,000 files (memory limit)` when a cap stopped any folder's index short; else undefined. */
+export function partialIndex(indexes: ProjectIndex[]): string | undefined {
+  const capped = indexes.filter((ix) => ix.capped);
+  if (!capped.length) return undefined;
+  const held = indexes.reduce((n, ix) => n + ix.size, 0);
+  const all = indexes.reduce((n, ix) => n + Math.max(ix.listed ?? 0, ix.size), 0);
+  const limit = capped.some((ix) => ix.capped === 'memory') ? 'memory limit' : 'file limit';
+  return `Partial index: ${held.toLocaleString('en-US')} of ${all.toLocaleString('en-US')} files (${limit})`;
+}
+
 /** answerIndex's work; `meter.naive` gets the tokens of the whole files the answer stands in for. */
 async function answer(indexes: ProjectIndex[], call: IndexCall, building: boolean | 'verifying', ctx: IndexContext | undefined, meter: { naive: number }): Promise<string> {
   if (!indexes.length) return 'No project index: no trusted workspace folder is open, or friedliver.index.enabled is off. Search the files another way.';
   const multi = indexes.length > 1;
   const shown = (ix: ProjectIndex, rel: string) => (multi ? `${path.basename(ix.root)}/${rel}` : rel);
+  const partial = partialIndex(indexes);
   const note =
     building === 'verifying'
       ? '(Loading the saved index and checking files changed since the last session; results may be incomplete or out of date for a moment.)\n'
       : building
         ? '(The index is still being built; results may be incomplete.)\n'
-        : '';
+        : partial
+          ? `(${partial}; files outside it are missing from these results.)\n`
+          : '';
   const find = (p: string): [ProjectIndex, string] | undefined => {
     const rel = p.replace(/\\/g, '/').replace(/^\.\//, '');
     if (!multi) return indexes[0].has(rel) ? [indexes[0], rel] : undefined;
