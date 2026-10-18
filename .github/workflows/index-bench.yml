@@ -27,8 +27,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # A fixed tag, so runs compare: v6.0.3 is the last release written in TypeScript (main is the Go port).
       - name: A throwaway TypeScript checkout (the bench edits files in it)
-        run: git clone --depth 1 --quiet https://github.com/microsoft/TypeScript.git "$RUNNER_TEMP/TypeScript"
+        run: git clone --depth 1 --quiet --branch v6.0.3 https://github.com/microsoft/TypeScript.git "$RUNNER_TEMP/TypeScript"
       - name: Bench
         working-directory: extensions/friedliver-agents
         run: |
