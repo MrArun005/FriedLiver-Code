@@ -238,7 +238,8 @@ downloads (and GitHub's asset hosts, every redirect checked), and refuses a DMG
 whose size or SHA-256 doesn't match the release's `SHA256SUMS.txt`. It runs only in the FriedLiver app. There is no telemetry. Agents talk
 to their own vendors. The Agents extension listens on one port, on 127.0.0.1
 only, for agents that reach the FriedLiver tools over HTTP ("The HTTP
-endpoint" below).
+endpoint" below). FriedLiver Remote, when you turn it on, listens on the LAN
+and optionally Tailscale addresses ("FriedLiver Remote" above).
 
 ### Builds
 
@@ -324,6 +325,132 @@ checks (`parseCall`, `src/host/bridgeRequests.ts`).
   same path checks, `.git` refusal, notification text handling and update
   compaction as any other.
 
+### FriedLiver Remote
+
+FriedLiver Remote (docs/REMOTE.md, `src/remote/`) lets a paired phone control
+agents over the network. That is the most exposed thing FriedLiver does, so it
+is off by default (`friedliver.remote.enabled`, `application` scope, which a
+workspace can't set) and starts only from the command.
+
+**What it exposes, and where.**
+
+- An HTTPS server in the extension host.
+- It listens on these addresses and no others:
+  - the Mac's private IPv4 addresses on Wi-Fi or Ethernet (RFC 1918);
+  - with `friedliver.remote.tailscale`, the Tailscale 100.64/10 address.
+- It never listens on `0.0.0.0`, `::`, loopback or a public address
+  (`checkBindHost`). It skips VPN tunnels, VM, container and Apple
+  peer-to-peer interfaces.
+- It stops when the Mac's addresses change.
+- There is no port forwarding, no UPnP, and no relay.
+- TLS 1.2+. Certificates:
+  - On the LAN: a per-install self-signed ECDSA P-256 certificate whose key
+    lives in the editor's secret storage (the OS keychain).
+  - On Tailscale: a real `tailscale cert` certificate when the tailnet allows
+    it.
+
+**Who may use it.**
+
+- **Pairing.**
+  - The QR carries the address plus `#c=<code>&f=<fingerprint>`. The fragment
+    is never sent to a server.
+  - The code is 128 random bits, valid for 2 minutes, used once, and
+    replaced when the panel shows a new one.
+  - A correct code then needs the Mac's OK, in a modal naming the phone and
+    its address.
+  - Only then does the phone get its own 256-bit token.
+- **Tokens.**
+  - The Mac keeps only the token's SHA-256 (globalState) and compares it in
+    constant time against every stored hash.
+  - Revocation is an append-only tombstone list (by id and hash). Every check
+    reads it fresh, so a revoke holds in every window. A window holding a
+    stale device list can't bring a device back, and `lastSeen` writes re-read
+    the list and touch only that device.
+  - Devices unused for 30 days expire.
+- **Requests.** Every route except the app shell and pairing needs
+  `Authorization: Bearer`. There are no cookies, so there is no CSRF.
+- **WebSocket.**
+  - It opens with a single-use, 30-second ticket from an authenticated
+    request, so the token is never in a URL.
+  - It only pushes "these chats changed"; data frames from the phone close
+    it.
+  - Revoking closes the device's sockets. Sockets of devices revoked in
+    another window close within 25 seconds.
+
+**What it may do.** Phone actions are parsed against a short list
+(`parseRemoteAction`): send, stop, answer a permission, command, question,
+review or agent request, Always allow, approval level, and new chat. Each goes
+through the same core call the desktop makes, with these extra rules:
+
+- **Only visible chats.** Only chats the phone may see (not inline edits, not
+  read-only, not archived) and only requests still waiting in them.
+- **Loosening needs the Mac.** Anything that loosens review or keeps allowing
+  waits for a notification on the Mac naming the phone (`CoreUi.confirmRemote`).
+  No answer in 2 minutes means no. That covers:
+  - the Edits and Auto levels, every time, whatever the desktop confirmed
+    earlier;
+  - every Always allow, including command rules (instead of the desktop rule
+    dialog);
+  - any agent option other than the plain one-time yes;
+  - "For this chat" on agent requests.
+- **Revocation cancels pending OKs.** An OK that arrives after the phone was
+  revoked does nothing, and a revoke answers every pending question no.
+- **No defaults.** Levels set from a phone never become defaults for new
+  chats, and a new chat from the phone can't start in Auto.
+- **Slash commands.** A message starting with `/` (after any `@mention`)
+  runs the agent's own command. Information-only ones go through. Ones that
+  change permissions, approvals, modes or settings (`/permissions`,
+  `/allowed-tools`, `/config`, `/approvals`, `/mode`, `/yolo`, `/settings`,
+  `/plan`, `dangerously…`, `bypass…`) are refused. Every other command, listed
+  or not, needs the Mac's OK naming the command.
+- **Commands the phone can't show whole and plainly** (over 4,000 characters,
+  or with control, bidi or zero-width characters) can only be denied there.
+  The phone spells those characters out.
+
+**Browser hardening.**
+
+- Host must name the server exactly (DNS rebinding) and is checked before it
+  goes into any header.
+- Origin must be the page's own when present, and is required for pairing and
+  the WebSocket.
+- `Sec-Fetch-Site: cross-site` is refused.
+- No CORS headers, ever.
+- Strict CSP (`default-src 'none'`, scripts and styles only from the server,
+  no third-party assets), plus `nosniff`, `no-referrer`, `DENY` framing,
+  COOP/CORP and `no-store`.
+- The phone renders untrusted text as text or as elements from the Markdown
+  parser, never HTML, and links only to https.
+
+**Denial of service.**
+
+- 64 connections in all, 16 per address, and a 10-second TLS handshake limit.
+- An address with five bad codes or tokens in a minute is locked out for five
+  minutes, dropped before TLS. Requests without any token don't count, so a
+  web page can't lock the phone out.
+- The code burns after 30 bad guesses from anywhere.
+- Bodies are limited to 256 KB.
+- WebSocket frames from the phone are limited to 125 bytes; a phone that
+  doesn't read is dropped past 256 KB buffered.
+
+Threats considered:
+
+| Threat | What stops it | What doesn't |
+|---|---|---|
+| **Stolen phone or token** | Revoke (or Revoke all) on the Mac kills the token in every window and closes its sockets. Loosening review still needs the Mac. The Mac is told the first time each phone is used in a session. | Until revoked, the token can read chats and do everything the phone can, including allowing one-time requests. Tokens live in the browser's localStorage for that origin. |
+| **LAN attacker without a token** | Every route needs a token. Codes are 128-bit, single-use and live 2 minutes, and lockout follows failures. Pairing needs the Mac's OK. | Seeing that a server listens on a port. |
+| **LAN man-in-the-middle at pairing** | The phone's browser warns about the certificate. The fingerprint in the QR and on the panel lets the user check the browser's certificate details before continuing. After that, the browser's exception is for that certificate only, so an interceptor's certificate warns again. | A browser can't pin a certificate from page script: the in-page fingerprint display proves nothing if the user continued past an interceptor's warning (its script would see the code and later the token). This is why REMOTE.md says to check before continuing, to stop on any later warning, and to use LAN mode only on trusted networks. Tailscale with `tailscale cert` (real certificate over WireGuard) avoids the problem. |
+| **CSRF from a site the phone visits** | No cookies: the token is sent only by the app's own script, in a header. Cross-site requests are refused, and no CORS headers are sent. | |
+| **DNS rebinding** | Exact Host check on every request and the WebSocket upgrade. Origin check. | |
+| **Replay** | TLS. WebSocket tickets are single-use and expire in 30 s. Pairing codes are single-use. Actions name a request id that must still be waiting, so a replayed answer finds nothing. | A captured bearer token is reusable until revoked or 30 days unused (it is only ever sent over TLS). |
+| **QR shoulder-surfing or a screenshot of the QR** | The code works once, for 2 minutes, and closing the panel cancels it. The Mac must approve the phone that redeems it. | Someone who scans it first and whom you then allow. |
+| **A workspace turning Remote on** | `application` scope, read through `userSetting`, which ignores workspace values. | |
+| **A planted `tailscale` binary** | Only fixed install paths, never PATH or the workspace, run with a fixed small environment. | `/opt/homebrew/bin` and `/usr/local/bin` are writable by the user. That isn't a privilege boundary, but anything that can write there already runs as you. |
+
+Not verified on a real phone yet: camera scanning, the certificate warning and
+fingerprint view on iOS and Android, Add to Home Screen, the keyboard over the
+composer, reconnecting after sleep, and `tailscale cert` on the Mac App Store
+build of Tailscale.
+
 ### Review of the bridge
 
 The agent-to-agent bridge was built after the audit below and reviewed when it
@@ -376,3 +503,9 @@ for a typical single-user desktop.
 | FL-27 | Low | Setup | The install lines pointed at the deprecated `@zed-industries/*` adapters, frozen at old versions (Claude's lists "Yes, and bypass permissions" first after a plan). | Fixed. `@agentclientprotocol/claude-agent-acp` and `@agentclientprotocol/codex-acp`; Accounts shows the adapter version and says when to update. |
 | FL-28 | Low | Agents & Accounts | The new accounts page takes messages from a webview that can sign in, sign out, save keys, type lines into terminals and change defaults. A page could have been made to name another agent's method, run its own command line, read a stored key, or set a mode as a default. | Contained. Every message is checked (`parseAccountsMessage`): an agent from the fixed list (Demo only when shown), a method id the agent itself offered at its last check, a key setup that agent has, a terminal line by name only (FriedLiver's own install, sign-in and sign-out constants, plain characters only, run when you press Run in terminal), and only a model or effort its last session offered. Keys are asked for in the editor's own password boxes and stored in SecretStorage; the page gets only "set"/"not set". An agent's `_auth/status_update` is reduced to a known kind and short one-line texts and only shown. `friedliver.showDemoAgent` and the agent commands stay `machine` scope, read from user settings only. |
 | FL-29 | Low | Links | Links you click in FriedLiver now open in its own browser (or the system's), and an external URI opener takes http/https links from the rest of the editor. A page or an agent's text could have carried `javascript:`, `data:`, `vscode:`/`command:` links, credentials in a URL, or a very long URL. | Contained. Webviews hand the host only http/https links (`linkTarget`: no user:password, 2,048 characters at most), and the host checks them again before opening; `file:` links go through the same workspace check as any opened file; everything else opens nothing. Opening is a user click, so it needs no agent approval, and links never open in the agents' own browser tab (the page an agent drives), always a new tab. Sign-in pages always use the system browser. `friedliver.links.openIn` is `application` scope, so a workspace can't change it, and the editor's own per-site `workbench.externalUriOpeners` choices still come first. |
+| FL-30 | Medium | Remote | A phone could switch a chat to Edits (auto-accept) without the Mac's OK; only Auto was gated, and a phone's level could become the default. | Fixed before merge. Edits and Auto from a phone confirm on the Mac every time, naming the phone. Phone levels never save defaults. |
+| FL-31 | Medium | Remote | Paired devices were held in memory per window, so a revoke in one window didn't reach another, and a stale `lastSeen` write could bring a revoked device back. | Fixed before merge. The list is read fresh on every check, with append-only tombstones by id and hash. `lastSeen` re-reads the list before writing. Sockets of devices revoked elsewhere close at the next check. |
+| FL-32 | Medium | Remote | "For this chat" on agent requests, and agent options named like "Yes, for this session" (one-time allow by kind), kept allowing without the Mac's OK. | Fixed before merge. Only the plain one-time yes skips the Mac; every other allow confirms. |
+| FL-33 | Medium | Remote | The server bound every private interface, including VPN tunnels and VM or container bridges, and kept listening after a network change. | Fixed before merge. Those interfaces are skipped, and the server stops when the addresses change. |
+| FL-34 | Low | Remote | Unauthenticated sockets had no cap or handshake timeout. Tokenless requests (a web page's `<img>`) counted toward lockout. There was no WebSocket backpressure. | Fixed before merge. 64/16 connection caps, a 10 s handshake limit, lockout before TLS, tokenless and cross-site requests refused without counting, and a 256 KB write buffer. |
+| FL-35 | Low | Remote | The phone could approve commands it showed clipped or with hidden characters. An OK given on the Mac after a revoke still applied. Pairing needed no OK on the Mac. Use over HTTP alone went unnoticed. | Fixed before merge. Approve such commands on the Mac. OKs check the device is still paired, and revoking refuses pending ones. Each pairing needs a modal OK, and the Mac is told on each phone's first use. |

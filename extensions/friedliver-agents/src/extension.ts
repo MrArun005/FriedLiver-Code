@@ -26,6 +26,7 @@ import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
 import { ReviewUi } from './host/review';
+import { RemoteControl } from './remote/host';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
@@ -156,6 +157,8 @@ export class Controller {
   private replay: { message: HostMessage; until: number }[] = [];
   /** What the status item and the badge show now, so a batch that changes nothing there costs no update. */
   private shownDecisions?: { key: string; view?: vscode.WebviewView };
+  /** FriedLiver Remote: phones paired over the LAN or Tailscale (remote/host.ts). */
+  private remote?: RemoteControl;
   /** The composer's mic on macOS (host/dictation.ts). */
   private readonly dictation = new Dictation<Surface>({
     helper: () => helperPath(this.context.extensionUri.fsPath),
@@ -266,6 +269,7 @@ export class Controller {
             },
             'Always allow',
           )) === 'Always allow',
+        confirmRemote: (ask) => this.remote?.confirm(ask) ?? Promise.resolve(false),
         signInUrl: (agent, url) => void this.offerSignInUrl(agent, url),
         unsavedText: (file) => vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === file && d.isDirty)?.getText(),
       },
@@ -313,7 +317,17 @@ export class Controller {
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
       registerBeforeProvider(() => this.core),
     );
+    this.remote = new RemoteControl(context, {
+      core: this.core,
+      folders: () => this.folders(),
+      agents: () => shownAgents(this.showDemo()),
+      reviews: { accept: (id) => this.reviews.accept(id), reject: (id) => this.reviews.reject(id) },
+      hidden: (chatId) => this.inlineChats.has(chatId),
+      log: (line) => this.log.info(line),
+    });
+    context.subscriptions.push(this.remote);
     const unsubscribe = this.core.onAction((action) => {
+      this.remote?.onAction(action);
       this.batcher.push(action);
       this.stateFile?.schedule();
     });
