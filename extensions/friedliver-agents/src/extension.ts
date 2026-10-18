@@ -1237,12 +1237,12 @@ export class Controller {
   /** On every approval toast: the remembered "Always allow" answers, to look over or revoke. */
   private readonly manageButton = { title: 'Manage', run: () => this.managePermissions() };
 
-  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string }): void {
+  private askBridge(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; once?: boolean }): void {
     if (isExternal(ask.chatId)) {
       // No chat holds this request, so it always gets its own popup, whatever else is waiting.
       const buttons: Record<string, BridgeAnswer | 'manage'> = {
         Allow: 'allow',
-        'Allow for this session': 'allowChat',
+        ...(ask.once ? {} : { 'Allow for this session': 'allowChat' as const }),
         ...(ask.always ? { [`Always allow ${plainText(ask.always)}`]: 'allowAlways' as const } : {}),
         Deny: 'deny',
         Manage: 'manage',
@@ -1255,10 +1255,11 @@ export class Controller {
       });
       return;
     }
-    const always = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId)?.always;
+    const item = this.core.chat(ask.chatId)?.items.find((i): i is Extract<Item, { kind: 'bridge' }> => i.kind === 'bridge' && i.requestId === ask.requestId);
+    const always = item?.always;
     this.notifyDecision(ask.requestId, ask.chatId, plainText(ask.title), [
       { title: 'Allow', run: () => this.core.answerBridge(ask.requestId, 'allow') },
-      { title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') },
+      ...(item?.once ? [] : [{ title: 'Allow for this chat', run: () => this.core.answerBridge(ask.requestId, 'allowChat') }]),
       ...(always ? [{ title: 'Always allow', run: () => this.core.answerBridge(ask.requestId, 'allowAlways') }] : []),
       { title: 'Deny', run: () => this.core.answerBridge(ask.requestId, 'deny') },
       { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },

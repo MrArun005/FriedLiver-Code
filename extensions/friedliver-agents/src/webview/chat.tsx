@@ -1178,6 +1178,15 @@ const BRIDGE_TOOL: Record<BridgeItem['tool'], string> = {
   browser_type: 'Type',
   browser_back: 'Back',
   browser_reload: 'Reload',
+  system_open: 'Open',
+  system_apps: 'List',
+  system_focus: 'Bring to front',
+  system_shortcut: 'Shortcut',
+  system_clipboard_read: 'Clipboard',
+  system_clipboard_write: 'Copy to the clipboard',
+  system_notify: 'Notification',
+  system_volume: 'Volume',
+  system_screenshot_window: 'Window',
 };
 
 /** An agent asks to reach another agent or chat through the FriedLiver tools: a decision. */
@@ -1226,12 +1235,16 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
         <button class="decide sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allow' })}>
           <span class="opt-num">1.</span>Allow
         </button>
-        <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
-          <span class="opt-num">2.</span>Allow for this chat
-        </button>
+        {/* The clipboard, screenshots and terminal-like apps: asked for every time. */}
+        {!item.once && (
+          <button class="sm" title="Allow this and later requests from this chat" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'allowChat' })}>
+            <span class="opt-num">2.</span>Allow for this chat
+          </button>
+        )}
         <button class="ghost danger sm" onClick={() => send({ type: 'bridge', requestId: item.requestId, answer: 'deny' })}>
-          <span class="opt-num">3.</span>Deny
+          <span class="opt-num">{item.once ? 2 : 3}.</span>Deny
         </button>
+        {item.once && <span class="hint">Asked every time</span>}
         {/* Last and a link, as on a permission card: not one more numbered choice. */}
         {item.always && (
           <button
@@ -1243,7 +1256,7 @@ function BridgeView({ item, chat, state, onSelect }: { item: BridgeItem; chat: C
           </button>
         )}
       </div>
-      <KeyHint chat={chat} id={item.requestId} n={3} />
+      <KeyHint chat={chat} id={item.requestId} n={item.once ? 2 : 3} />
     </section>
   );
 }

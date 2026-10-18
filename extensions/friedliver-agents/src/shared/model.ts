@@ -5,6 +5,7 @@ import { applySessionUpdate, isSessionUpdate, type ApprovalLevel, type ChatSessi
 import type { QuestionField } from './questions';
 import { appendOutput, claudeMeta, streamedOutput, toolInput, toolOut, type PermissionDetail, type ToolOut } from './tools';
 import { stepFacts, withRawOutput, type StepFacts } from './steps';
+import { isSystemTool, SYSTEM_VERBS, type SystemTool } from './system';
 
 export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'demo'] as const;
 export type AgentKey = (typeof AGENT_KEYS)[number];
@@ -107,14 +108,14 @@ export interface ChatLink {
 export const MAX_LINK_DEPTH = 2;
 
 /** What an agent asked to do with another chat or agent through the FriedLiver tools. */
-export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'remember' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload';
+export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'remember' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload' | SystemTool;
 
 export interface BridgeItem {
   kind: 'bridge';
   requestId: string;
   tool: BridgeTool;
-  /** Another agent (a new consultation), an existing chat, or FriedLiver's browser. */
-  target: { agent: AgentKey } | { chatId: string } | { browser: true } | { memory: true };
+  /** Another agent (a new consultation), an existing chat, FriedLiver's browser, or the computer (system_*). */
+  target: { agent: AgentKey } | { chatId: string } | { browser: true } | { memory: true } | { system: string };
   /** The question or message; empty for read_chat. For the browser: the URL, the element, or what to type. */
   text: string;
   state: 'awaiting' | 'allowed' | 'denied';
@@ -122,6 +123,8 @@ export interface BridgeItem {
   always?: string;
   /** Why it went ahead without asking: a remembered rule. */
   auto?: string;
+  /** Only "Allow" (once) and "Deny" are offered: not for this chat, never always (clipboard, screenshots, terminals). */
+  once?: true;
 }
 
 /**
@@ -659,6 +662,11 @@ export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item
   const wants = self ? 'Wants to' : `${topic(chat.title)} wants to`;
   if ('memory' in item.target) return `${wants} remember a fact for every agent`;
   if ('browser' in item.target) return `${wants} ${BROWSER_VERBS[item.tool] ?? 'use'} in the browser`;
+  if ('system' in item.target) {
+    const what = item.target.system;
+    const verb = isSystemTool(item.tool) ? SYSTEM_VERBS[item.tool] : 'use your computer';
+    return `${wants} ${verb}${what && (item.tool === 'system_open' || item.tool === 'system_focus' || item.tool === 'system_shortcut') ? ` ${what.length > 60 ? `${what.slice(0, 59)}…` : what}` : ''}`;
+  }
   const other = 'chatId' in item.target ? state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId) : undefined;
   const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : other ? topic(other.title) : 'another chat';
   const verb = item.tool === 'ask_agent' ? 'ask' : item.tool === 'send_to_chat' ? 'message' : 'read';

@@ -4,12 +4,21 @@
 // FriedLiver) gets the same answers. Pure, so the webviews use it too; matching folders on disk
 // is in host/permissions.ts.
 import { describeRule, isRule, type CommandRule } from './rules';
+import { alwaysAllowable, describeTarget, isSystemTool, SYSTEM_WORDS, type SystemTool } from './system';
 
 export type Access = 'read' | 'write';
 export const TOOL_GRANTS = ['ask_agent', 'send_to_chat', 'read_chat', 'remember'] as const;
 export type ToolGrant = (typeof TOOL_GRANTS)[number];
 
-export type Grant = CommandRule | { kind: 'site'; origin: string } | { kind: 'folder'; folder: string; access: Access } | { kind: 'tool'; tool: ToolGrant };
+/** An OS action (shared/system.ts) on one target: `app:Spotify`, `url:<origin>`, `file:<path>`, a Shortcut's name, or '' for any. */
+export type SystemGrant = { kind: 'system'; tool: SystemTool; target: string };
+
+export type Grant =
+  | CommandRule
+  | { kind: 'site'; origin: string }
+  | { kind: 'folder'; folder: string; access: Access }
+  | { kind: 'tool'; tool: ToolGrant }
+  | SystemGrant;
 
 /** A remembered grant, with when and from which agent's request; `scope` says where it is kept. */
 export interface Remembered {
@@ -59,6 +68,16 @@ export function isGrant(v: unknown): v is Grant {
       );
     case 'tool':
       return (TOOL_GRANTS as readonly unknown[]).includes(g.tool);
+    case 'system':
+      // A stored or posted grant for something never always allowed (the clipboard, a terminal) is no grant.
+      return (
+        isSystemTool(g.tool) &&
+        typeof g.target === 'string' &&
+        g.target.length <= 4096 &&
+        // eslint-disable-next-line no-control-regex
+        !/[\u0000-\u001f\u007f]/.test(g.target) &&
+        alwaysAllowable(g.tool, g.target)
+      );
     default:
       return false;
   }
@@ -73,6 +92,8 @@ export function cleanGrant(g: Grant): Grant {
       return { kind: 'folder', folder: g.folder, access: g.access };
     case 'tool':
       return { kind: 'tool', tool: g.tool };
+    case 'system':
+      return { kind: 'system', tool: g.tool, target: g.target };
     default:
       return { kind: g.kind, command: g.command };
   }
@@ -86,6 +107,8 @@ export function grantId(g: Grant): string {
       return `folder-${g.access} ${g.folder}`;
     case 'tool':
       return `tool ${g.tool}`;
+    case 'system':
+      return `system ${g.tool} ${g.target}`;
     default:
       return `command-${g.kind} ${g.command}`;
   }
@@ -102,6 +125,8 @@ export function describeGrant(g: Grant): { what: string; scope: string } {
       return { what: g.access === 'read' ? 'Read files in this folder' : 'Change files in this folder', scope: g.folder };
     case 'tool':
       return { what: TOOL_WORDS[g.tool], scope: 'any chat' };
+    case 'system':
+      return { what: SYSTEM_WORDS[g.tool], scope: describeTarget(g.target) };
     default:
       return { what: g.kind === 'exact' ? 'Run this exact command' : 'Run this command and anything after it', scope: describeRule(g) };
   }
