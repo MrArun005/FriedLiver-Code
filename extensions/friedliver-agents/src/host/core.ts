@@ -35,7 +35,7 @@ import {
   CLAUDE_READ_ONLY_META,
 } from '../shared/session';
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
-import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
+import { ESCALATING, claudeMeta, commandOf, planOf, type PermissionDetail } from '../shared/tools';
 import { approvalOf, type Approvable } from '../shared/approval';
 import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
 import { chatRef } from '../shared/names';
@@ -293,7 +293,8 @@ export class AgentCore {
   private readonly links: Connections;
   /** /discuss (discuss.ts); chats taking part in one are read-only (`discussing`) until it ends. */
   readonly discussions: Discussions;
-  private readonly discussing = new Set<string>();
+  /** Discussions each chat is in now: read-only while above 0. */
+  private readonly discussing = new Map<string, number>();
   /** A discussing chat's mode before it went read-only, put back after. */
   private readonly modeBefore = new Map<string, string>();
   private readonly requests: BridgeRequests;
@@ -910,13 +911,25 @@ export class AgentCore {
     return this.discussions.start(chatId, agents, question);
   }
 
-  /** Read-only for a chat in a discussion: FriedLiver refuses writes, commands and acting tools, and the agent goes to its read-only mode. */
+  /**
+   * Read-only for a chat in a discussion: FriedLiver refuses writes, commands and acting tools, and the agent goes
+   * to its read-only mode. Counted per chat, so a chat in two discussions stays read-only until both have ended;
+   * the mode is saved on the first and put back on the last. An extra "off" does nothing.
+   */
   private async guardDiscussion(chatId: string, on: boolean): Promise<void> {
+    const n = this.discussing.get(chatId) ?? 0;
     if (on) {
-      this.discussing.add(chatId);
-      const mode = modeOption(this.chat(chatId)?.session);
-      if (mode && typeof mode.current === 'string' && !this.modeBefore.has(chatId)) this.modeBefore.set(chatId, mode.current);
+      this.discussing.set(chatId, n + 1);
+      if (n === 0) {
+        const mode = modeOption(this.chat(chatId)?.session);
+        if (mode && typeof mode.current === 'string') this.modeBefore.set(chatId, mode.current);
+      }
       await this.restrictMode(chatId);
+      return;
+    }
+    if (n === 0) return;
+    if (n > 1) {
+      this.discussing.set(chatId, n - 1);
       return;
     }
     this.discussing.delete(chatId);
@@ -926,6 +939,15 @@ export class AgentCore {
     if (mode && before !== undefined && mode.current !== before) await this.applyOption(chatId, mode, before);
     else if (before === undefined) await this.applyLevel(chatId, true);
   }
+
+  /** The tool's real name, as the agent's adapter reports it (Claude's _meta), on the request or its tool call: never the title. */
+  private toolName(chatId: string, call: acp.ToolCallUpdate): string | undefined {
+    const own = claudeMeta(call._meta).tool;
+    if (own) return own;
+    const step = this.chat(chatId)?.items.find((i) => i.kind === 'tool' && i.id === call.toolCallId);
+    return step?.kind === 'tool' ? step.tool : undefined;
+  }
+
 
   /** Forwards each finished turn of `from` to `to` as a message. */
   pipe(from: string, to: string, by: 'user' | 'agent' = 'user'): ChatLink {
@@ -1909,7 +1931,7 @@ export class AgentCore {
     const tool = this.mergedTool(chatId, req.toolCall);
     const proposals = await this.proposalsFor(tool).catch(() => [] as Proposal[]);
     if (signal.aborted) return { outcome: { outcome: 'cancelled' } };
-    if (this.discussing.has(chatId) && !discussionAllows({ kind: tool.kind, title: tool.title, command: !!commandOf(tool.rawInput) || !!planOf(tool.rawInput), diffs: proposals.length > 0 })) {
+    if (this.discussing.has(chatId) && !discussionAllows({ kind: tool.kind, toolName: this.toolName(chatId, req.toolCall), command: !!commandOf(tool.rawInput) || !!planOf(tool.rawInput), diffs: proposals.length > 0 })) {
       const reject = req.options.find((o) => o.kind === 'reject_once') ?? req.options.find((o) => o.kind.startsWith('reject'));
       const title = tool.title?.trim() || 'A change';
       this.items(chatId, [{ kind: 'permission', requestId, toolCallId: req.toolCall.toolCallId, title, options: req.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })), answer: reject?.name ?? 'Refused', auto: 'Read-only during the discussion', ...(tool.kind ? { toolKind: tool.kind } : {}) }]);
