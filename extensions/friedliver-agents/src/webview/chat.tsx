@@ -290,7 +290,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
       <Popover label="New chat with" title="New chat" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="plus" />}>
         {(close) => (
           <>
-            <div class="pop-title" aria-hidden="true">New chat with</div>
+            <div class="fl-menu__title" aria-hidden="true">New chat with</div>
             {agents.map((agent) => (
               <button
                 key={agent}
@@ -306,7 +306,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                 <SignInMark agent={agent} />
               </button>
             ))}
-            <div class="pop-sep" role="separator" />
+            <div class="fl-menu__sep" role="separator" />
             <button role="menuitem" onClick={() => (close(false), send({ type: 'openAccounts' }))}>
               <Icon name="key" />
               <span class="grow">Agents &amp; Accounts…</span>
@@ -478,7 +478,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
               >
                 {(close) => (
                   <>
-                    <div class="pop-title" aria-hidden="true">Shared rules this session got</div>
+                    <div class="fl-menu__title" aria-hidden="true">Shared rules this session got</div>
                     {chat.session!.rules!.map((path) => (
                       <button
                         key={path}
@@ -528,7 +528,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="ghost icon-btn" trigger={<Icon name="more" />}>
             {(close) => (
               <>
-                <div class="pop-title" aria-hidden="true">Hand off to</div>
+                <div class="fl-menu__title" aria-hidden="true">Hand off to</div>
                 {agents.map((agent) => (
                   <button
                     key={agent}
@@ -544,7 +544,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                   </button>
                 ))}
                 <PipeTargets chat={chat} close={close} />
-                <div class="pop-sep" role="separator" />
+                <div class="fl-menu__sep" role="separator" />
                 <button role="menuitem" onClick={() => (close(), send({ type: 'openRules' }))}>
                   Rules…
                 </button>
@@ -677,7 +677,7 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
       </p>
       {recent.length > 0 && (
         <section class="reopen" aria-label="Reopen a chat">
-          <h3 class="pop-title">Reopen</h3>
+          <h3 class="fl-menu__title">Reopen</h3>
           {recent.map((c) => (
             <button key={c.id} type="button" class="pick-row reopen-row" data-chat={c.id} title={`${c.title} (${c.label})`} onClick={() => onSelect(c.id)}>
               <Glyph agent={c.agent} size="sm" />

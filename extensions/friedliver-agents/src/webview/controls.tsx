@@ -182,7 +182,7 @@ export function AlwaysAllow({ line, grants = [], target }: { line?: string; gran
     <Popover label="Always allow" title="Don't ask again: in every chat, for every agent, after restarts" buttonClass="link always-allow" trigger={<>Always allow…</>}>
       {(close) => (
         <>
-          <div class="pop-title" aria-hidden="true">
+          <div class="fl-menu__title" aria-hidden="true">
             Always allow, in every chat
           </div>
           {choices.map((grant) => {

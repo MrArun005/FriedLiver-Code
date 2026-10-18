@@ -1,4 +1,4 @@
-// The design tokens (media/webview.css, between the tokens markers), resolved
+// The design tokens (media/tokens.css, between the tokens markers), resolved
 // against Dark 2026 and Light 2026 (test/fixtures/theme-*-2026.css), must keep
 // WCAG contrast: body text 7:1, secondary text and links 4.5:1 on every surface
 // text sits on, selected rows readable, and hover never the same as selected.
@@ -6,10 +6,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const css = readFileSync(path.join(__dirname, '../media/webview.css'), 'utf8');
+const media = (f: string) => readFileSync(path.join(__dirname, '../media', f), 'utf8');
+const tokens = media('tokens.css');
+// Every stylesheet a view loads, in order: the var()s they read must all be defined.
+const css = ['tokens.css', 'components.css', 'webview.css'].map(media).join('\n');
 const declarations = (text: string) => Object.fromEntries([...text.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((d) => [d[1], d[2].trim()]));
 const block = () => {
-  const m = css.match(/\/\* tokens:start \*\/([\s\S]*?)\/\* tokens:end \*\//);
+  const m = tokens.match(/\/\* tokens:start \*\/([\s\S]*?)\/\* tokens:end \*\//);
   if (!m) throw new Error('no tokens block');
   return m[1];
 };
@@ -121,7 +124,7 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
     const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
     // Components set some inline (style={{ '--at': … }}); a var() with a fallback (--fl-accent) may be unset.
     const webview = path.join(__dirname, '../src/webview');
-    const inline = new Set(readdirSync(webview).flatMap((f) => [...readFileSync(path.join(webview, f), 'utf8').matchAll(/'(--[\w-]+)':/g)].map((m) => m[1])));
+    const inline = new Set((readdirSync(webview, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f)).flatMap((f) => [...readFileSync(path.join(webview, f), 'utf8').matchAll(/'(--[\w-]+)':/g)].map((m) => m[1])));
     const read = new Set([...css.matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]).filter((n) => !n.startsWith('--vscode-')));
     expect([...read].filter((n) => !defined.has(n) && !inline.has(n))).toEqual([]);
   });
