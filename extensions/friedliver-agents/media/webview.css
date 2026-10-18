@@ -5632,6 +5632,9 @@ button.primary .acct-kind {
 }
 .inbox-who {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 .inbox-group-head .col-count {
   margin-left: auto;
