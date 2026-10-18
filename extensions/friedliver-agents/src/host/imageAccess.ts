@@ -23,7 +23,7 @@ const MAGIC: [string, (b: Buffer) => boolean][] = [
 ];
 const RASTER_EXT = /\.(png|jpe?g|gif|webp)$/i;
 
-interface Vetted {
+export interface Vetted {
   file: string;
   bytes: Buffer;
   type: string;
@@ -55,7 +55,7 @@ async function withVetted<T>(file: string, roots: readonly string[], maxBytes: n
 }
 
 /** The vetted file's bytes, when they are an image of a kind the webview shows (by its first bytes, not its name). */
-function readVetted(file: string, roots: readonly string[], maxBytes: number): Promise<Vetted | null> {
+export function readVetted(file: string, roots: readonly string[], maxBytes: number): Promise<Vetted | null> {
   return withVetted(file, roots, maxBytes, async (handle, inside, info) => {
     const bytes = await handle.readFile();
     const type = typeOf(bytes);
@@ -63,7 +63,7 @@ function readVetted(file: string, roots: readonly string[], maxBytes: number): P
   });
 }
 
-const dataUri = (type: string, bytes: Buffer) => `data:${type};base64,${bytes.toString('base64')}`;
+export const dataUri = (type: string, bytes: Buffer) => `data:${type};base64,${bytes.toString('base64')}`;
 
 /** A data: URI of the whole image (see readVetted), or null. */
 export async function imagePreview(file: string, roots: readonly string[]): Promise<string | null> {
