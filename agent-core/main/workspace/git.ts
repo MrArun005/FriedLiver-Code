@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -289,13 +289,15 @@ export async function dropCheckpointRef(root: string, ref: string): Promise<void
 }
 
 /**
- * Config that could make a read-only git command run a program, turned off: it runs before the user
- * has said yes, in a repository the agent works in. System and global config aren't read at all
- * (READ_ONLY_ENV). Residual risk: the repository's own config is still read for everything else, and
- * git may gain new program-running keys; the calls stay to rev-parse and log --format, which run
- * none of the others (no diff, no textconv, no hooks, no network).
+ * Config that could make a read-only git command run a program or reach the network, turned off: it
+ * runs before the user has said yes, in a repository the agent works in. System and global config
+ * aren't read (READ_ONLY_ENV), the repository is the workspace root's own .git folder (never one git
+ * would discover: nested, bare or planted), and no network operation is allowed. Residual risk: the
+ * repository's own config is still read for everything else, and git may gain new program-running
+ * keys; the calls stay to rev-parse and log --format, which run none of the others (no diff, no
+ * textconv, no hooks, no fetch).
  */
-const READ_ONLY_CONFIG = [
+export const READ_ONLY_CONFIG = [
   '--no-pager',
   '-c', 'core.fsmonitor=false',
   '-c', 'core.hooksPath=/dev/null',
@@ -306,31 +308,52 @@ const READ_ONLY_CONFIG = [
   '-c', 'gpg.x509.program=false',
   '-c', 'diff.external=',
   '-c', 'core.sshCommand=false',
+  '-c', 'core.gitProxy=',
+  '-c', 'credential.helper=',
+  '-c', 'protocol.allow=never',
+  '-c', 'safe.bareRepository=explicit',
+  '-c', 'uploadpack.packObjectsHook=',
 ];
-const READ_ONLY_ENV = { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_EXTERNAL_DIFF: '' };
+export const READ_ONLY_ENV: Record<string, string> = {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: os.devNull,
+  GIT_PAGER: 'cat',
+  PAGER: 'cat',
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_NO_LAZY_FETCH: '1',
+  GIT_EXTERNAL_DIFF: '',
+  GIT_ASKPASS: '',
+  SSH_ASKPASS: '',
+};
 
 /**
  * What a force push of `local` to `remote`/`branch` would drop: the commits the remote-tracking
- * branch has that `local` doesn't, newest first, as of the last fetch (nothing is fetched). `branch`
- * undefined: the current branch's name. Null when there is no such tracking branch. The names are
+ * branch has that `local` doesn't, newest first, as of the last fetch (nothing is fetched). `root` is
+ * a workspace root: its own .git must be a real folder (not a file, as in a worktree, nor a link), and
+ * git is pointed at exactly that (GIT_DIR, GIT_CEILING_DIRECTORIES). `branch` undefined: the current
+ * branch's name. Null when any of that doesn't hold or there is no such tracking branch. Names are
  * passed as single arguments after checks, never through a shell, and never as options; git runs
- * with READ_ONLY_CONFIG, without system or global config, and a timeout.
+ * with READ_ONLY_CONFIG and READ_ONLY_ENV, and a timeout.
  */
 export async function remoteOnlyCommits(
-  cwd: string,
+  root: string,
   remote: string,
   branch: string | undefined,
   local = 'HEAD',
   max = 10,
 ): Promise<{ ref: string; commits: { hash: string; subject: string; author: string }[]; more: number } | null> {
   const ok = (r: string) => /^[A-Za-z0-9._/-]+$/.test(r) && !r.startsWith('-') && !r.includes('..') && r.length <= 200;
-  const run = (args: string[]) => git(cwd, [...READ_ONLY_CONFIG, ...args], READ_ONLY_ENV, 5000);
-  if (![remote, local].every(ok)) return null;
+  if (![remote, local].every(ok) || !path.isAbsolute(root)) return null;
+  const gitDir = path.join(root, '.git');
+  const info = await lstat(gitDir).catch(() => null);
+  if (!info?.isDirectory()) return null;
+  const env = { ...READ_ONLY_ENV, GIT_DIR: gitDir, GIT_WORK_TREE: root, GIT_CEILING_DIRECTORIES: path.dirname(root) };
+  const run = (args: string[]) => git(root, [...READ_ONLY_CONFIG, ...args], env, 5000);
   const name = branch ?? (await run(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim();
   if (!name || name === 'HEAD' || !ok(name)) return null;
   const tracking = `refs/remotes/${remote}/${name}`;
   if (!(await run(['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`]).catch(() => ''))) return null;
-  const out = await run(['log', '--no-color', '--no-show-signature', '--format=%h%x1f%s%x1f%an', tracking, '--not', local, '--']).catch(() => null);
+  const out = await run(['log', '--no-color', '--no-show-signature', '--no-ext-diff', '--format=%h%x1f%s%x1f%an', tracking, '--not', local, '--']).catch(() => null);
   if (out === null) return null;
   const lines = out.split('\n').filter(Boolean);
   const commits = lines.slice(0, max).map((l) => {

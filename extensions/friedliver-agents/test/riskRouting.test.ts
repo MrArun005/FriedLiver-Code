@@ -6,7 +6,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { remoteOnlyCommits } from '@friedliver/main/workspace/git';
+import { READ_ONLY_CONFIG, READ_ONLY_ENV, remoteOnlyCommits } from '@friedliver/main/workspace/git';
 import type { Item } from '../src/shared/model';
 import { disposeCores, gitRepo, makeCore, memoryPermissions, waitFor } from './helpers';
 
@@ -84,6 +84,14 @@ describe('a force push lists what it would drop', () => {
       ['fix(reports): CSV escaping', 'Priya'],
     ]);
     expect(dropped?.more).toBe(0);
+    // Through the core: a force push from the workspace root (named relatively) lists them on its card.
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main', cwd: '.' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.detail?.dropped?.commits.map((c) => c.subject)).toEqual(['feat(checkout): order note', 'fix(reports): CSV escaping']);
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
     // Odd names are never passed to git, and a branch with no tracking ref gives nothing.
     expect(await remoteOnlyCommits(dir, '--upload-pack=x', 'main')).toBeNull();
     expect(await remoteOnlyCommits(dir, 'origin', 'nope')).toBeNull();
@@ -124,6 +132,57 @@ describe('listing the dropped commits never runs a program the repository names'
     const dropped = await remoteOnlyCommits(dir, 'origin', 'main');
     expect(dropped?.commits.map((c) => c.subject)).toEqual(['signed']);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it('runs git with every program-running and network key off, and no system or global config', () => {
+    const c = READ_ONLY_CONFIG.join(' ');
+    for (const k of ['--no-pager', 'core.fsmonitor=false', 'core.hooksPath=/dev/null', 'core.pager=cat', 'log.showSignature=false', 'gpg.program=false', 'diff.external=', 'core.sshCommand=false', 'core.gitProxy=', 'credential.helper=', 'protocol.allow=never', 'safe.bareRepository=explicit', 'uploadpack.packObjectsHook='])
+      expect(c, k).toContain(k);
+    expect(READ_ONLY_ENV).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_ASKPASS: '', SSH_ASKPASS: '' });
+  });
+
+  it('reads only a root whose .git is a real folder: not a worktree’s .git file, not a link', async () => {
+    const dir = await gitRepo();
+    const wt = path.join(dir, '..', `${path.basename(dir)}-wt`);
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'side', wt], { cwd: dir });
+    expect(await remoteOnlyCommits(wt, 'origin', 'main')).toBeNull();
+    const linked = await mkdtemp(path.join(os.tmpdir(), 'fl-linked-'));
+    const { symlinkSync } = await import('node:fs');
+    symlinkSync(path.join(dir, '.git'), path.join(linked, '.git'));
+    expect(await remoteOnlyCommits(linked, 'origin', 'main')).toBeNull();
+    expect(await remoteOnlyCommits('relative/root', 'origin', 'main')).toBeNull();
+  });
+
+  it('uses the workspace root’s own repository, never a nested one the agent points at', async () => {
+    const dir = await gitRepo();
+    // A nested repository inside the workspace, with a remote whose branch has a commit the nested one lacks.
+    const nested = path.join(dir, 'vendor', 'nested');
+    const remote = await mkdtemp(path.join(os.tmpdir(), 'fl-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote });
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(nested, { recursive: true });
+    const g = (...args: string[]) => execFileSync('git', args, { cwd: nested });
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 't@example.com');
+    g('config', 'user.name', 'T');
+    await writeFile(path.join(nested, 'a.txt'), 'a');
+    g('add', '.');
+    g('commit', '-qm', 'one');
+    g('remote', 'add', 'origin', remote);
+    g('push', '-q', 'origin', 'main');
+    await writeFile(path.join(nested, 'b.txt'), 'b');
+    g('add', '.');
+    g('commit', '-qm', 'two');
+    g('push', '-q', 'origin', 'main');
+    g('reset', '-q', '--hard', 'HEAD~1');
+    expect((await remoteOnlyCommits(nested, 'origin', 'main'))?.commits).toHaveLength(1);
+    const core = makeCore(dir);
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push --force origin main', cwd: nested })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.detail?.dropped).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
   });
 
   it('is not asked for at all outside the workspace', async () => {
