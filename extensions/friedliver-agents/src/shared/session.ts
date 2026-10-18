@@ -72,6 +72,8 @@ export interface ChatSession {
   agent?: { name: string; version: string };
   /** The shared rules files this session got when it started (sharedRules.ts). */
   rules?: string[];
+  /** Models the agent lists but won't run here, left out of every model picker (hiddenModels). */
+  hiddenModels?: string[];
 }
 
 const MAX_OPTIONS = 32;
@@ -155,6 +157,41 @@ function commandsOf(list: acp.AvailableCommand[]): SlashCommand[] {
     .map((c) => ({ name: c.name.replace(/^\//, ''), description: text(c.description) ?? '', hint: text(c.input?.hint) }));
 }
 
+/** A model id without the "[effort]" suffix Codex adds: "some-model[high]" is "some-model". */
+export const baseModel = (id: string): string => id.replace(/\[[^\]]*\]$/, '');
+
+/** Which models the account may use, from the agent's own records (Codex's ~/.codex/models_cache.json). */
+export interface ModelVisibility {
+  listed: string[];
+  hidden: string[];
+}
+
+/**
+ * The model choices to leave out: ones the agent's own list of available
+ * models (`models`, besides a `model` config option) doesn't have, and ones
+ * its records mark hidden or don't list. Never all of them: an agent whose
+ * list no record knows (an old adapter) keeps its list.
+ */
+export function hiddenModels(setup: SessionSetupLike, options: SessionOption[], records?: ModelVisibility): string[] {
+  const model = options.find((o) => o.category === 'model' && o.type === 'select' && o.via === 'option');
+  if (!model) return [];
+  const ids = [...new Set(model.choices.map((c) => baseModel(c.value)))];
+  const drop = new Set<string>();
+  const available = setup.models?.availableModels?.map((m) => baseModel(String(m.modelId)));
+  if (available?.length) for (const id of ids) if (!available.includes(id)) drop.add(id);
+  if (records) {
+    for (const id of ids) if (records.hidden.includes(id)) drop.add(id);
+    if (ids.some((id) => records.listed.includes(id))) for (const id of ids) if (!records.listed.includes(id)) drop.add(id);
+  }
+  return ids.every((id) => drop.has(id)) ? [] : [...drop];
+}
+
+/** The options without the hidden model choices. */
+export function withoutModels(options: SessionOption[], hidden: readonly string[] | undefined): SessionOption[] {
+  if (!hidden?.length) return options;
+  return options.map((o) => (o.category === 'model' && o.type === 'select' ? { ...o, choices: o.choices.filter((c) => !hidden.includes(baseModel(c.value))) } : o));
+}
+
 const SESSION_UPDATES = new Set(['config_option_update', 'current_mode_update', 'available_commands_update', 'usage_update']);
 
 /** Updates that change the session, not the transcript. */
@@ -169,7 +206,7 @@ export function applySessionUpdate(session: ChatSession | undefined, update: acp
   const s = session ?? EMPTY_SESSION;
   switch (update.sessionUpdate) {
     case 'config_option_update': {
-      const options = sessionOptions({ configOptions: update.configOptions });
+      const options = withoutModels(sessionOptions({ configOptions: update.configOptions }), s.hiddenModels);
       // Settings FriedLiver made from modes or models stay unless the options now cover them.
       const kept = s.options.filter((o) => o.via !== 'option' && !options.some((n) => n.category === o.category));
       return { ...s, options: [...kept, ...options].slice(0, MAX_OPTIONS) };
