@@ -176,6 +176,10 @@
      the composer), the tab strip's height, and the extra space above a message that starts a new turn. */
   --gutter: 20px;
   --tab-h: 30px;
+  /* A chat tab's widths (§2.18 Fit; TAB_MIN in src/shared/view.ts): most, least with its title, least squeezed. */
+  --tab-max: 220px;
+  --tab-min: 112px;
+  --tab-min-compact: 88px;
   --turn-gap: 8px;
 
   /* Elevation: inline things are flat; only floating surfaces lift. */

@@ -9,7 +9,7 @@ import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/
 import type { HostMessage, WebviewMessage } from '../shared/messages';
 import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
-import { settleOrder, type Settled } from '../shared/view';
+import { settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -585,23 +585,45 @@ export function Kbd({ children }: { children: ComponentChildren }) {
 
 export { Popover } from './ui/menu';
 
-/** A strip of tabs: with more than fit it scrolls sideways (true: its edges fade), and the open tab stays in view. */
-export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): boolean {
+/**
+ * A strip of tabs: crowded, its tabs shrink (`fit`, tabFit()); with more than fit even then it scrolls sideways
+ * (`over`: its edges fade), a mouse wheel scrolls it too, and the open tab stays in view.
+ */
+export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): { over: boolean; fit: TabFit } {
   const [over, setOver] = useState(false);
+  const [fit, setFit] = useState<TabFit>('full');
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
+    const measure = () => {
+      setFit(tabFit(el.clientWidth, count));
+      setOver(el.scrollWidth > el.clientWidth + 1);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    // A plain (vertical) wheel scrolls the strip sideways; a trackpad's sideways swipe already does.
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener('wheel', onWheel);
+    };
   }, [count]);
+  // The tabs' widths changed with the fit: is it still too wide?
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el) setOver(el.scrollWidth > el.clientWidth + 1);
+  }, [fit, active]);
   // After the tab is in the strip: a chat opened from the list or a notification gets its new tab shown (QA F04).
   useEffect(() => {
     box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [active, count]);
-  return over;
+  }, [active, count, fit]);
+  return { over, fit };
 }
 
 // ---- Images from files: the host hands out a data: URI per path, once it has checked the file. ----
