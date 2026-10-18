@@ -283,9 +283,9 @@ async function measure(page, state, width) {
     row(`Composer ${c}`, 'pill padding', 8, px(await css('.cc-model', 'padding-left')));
     row(`Composer ${c}`, 'pill margin-left', 6, px(await css('.cc-model', 'margin-left')));
     row(`Composer ${c}`, 'pill fill', '#2a2b2b', await P('bg', '.cc-model'));
-    row(`Composer ${c}`, 'agents dot', 6, (await box('.cc-agents .dot')).width);
+    row(`Composer ${c}`, 'agents dot', 6, (await box('.cc-agents .fl-dot')).width);
     // One status palette (QA F06, owner decision 2026-10-17): working is the theme's blue, not the spec's green.
-    row(`Composer ${c}`, 'agents dot colour (running)', '#57a3f8', await P('color', '.cc-agents .dot', 'background-color'));
+    row(`Composer ${c}`, 'agents dot colour (running)', '#57a3f8', await P('color', '.cc-agents .fl-dot', 'background-color'));
     row(`Composer ${c}`, 'mode button height', 26, (await box('.cc-mode')).height);
     const sendBox = await box('.send-btn');
     row(`Composer ${c}`, 'send size', 26, sendBox.width);
@@ -400,8 +400,8 @@ async function measure(page, state, width) {
     row(name, 'row fill', '#202122', await P('bg', '.cc-map-children .cc-map-node'));
     const kids = await page.evaluate(() => [...document.querySelectorAll('.cc-map-children .cc-map-node')].slice(0, 2).map((e) => e.getBoundingClientRect()));
     row(name, 'row gap', 8, kids[1].top - kids[0].bottom);
-    row(name, 'running dot (status palette, QA F06)', '#57a3f8', await P('color', '.cc-map-children .dot[data-state="working"]', 'background-color'));
-    row(name, 'dot size', 8, (await box('.cc-map-children .dot')).width);
+    row(name, 'running dot (status palette, QA F06)', '#57a3f8', await P('color', '.cc-map-children .fl-dot[data-state="working"]', 'background-color'));
+    row(name, 'dot size', 8, (await box('.cc-map-children .fl-dot')).width);
     row(name, 'meta size', 11.05, px(await css('.cc-map-meta', 'font-size')));
     row(name, 'main row weight', '600', await css('.cc-map-main .cc-map-name', 'font-weight'));
     row(name, 'no footer button', 0, await page.locator('.cc-map-foot').count());

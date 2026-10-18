@@ -269,7 +269,7 @@ function Choice({ card, option, k, label }: { card: AccountCard; option: Session
           groups.map((g) => (
             <Fragment key={g ?? ''}>
               {g && (
-                <div class="pop-title" aria-hidden="true">
+                <div class="fl-menu__title" aria-hidden="true">
                   {g}
                 </div>
               )}
