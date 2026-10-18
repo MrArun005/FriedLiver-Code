@@ -112,8 +112,15 @@ export function forcePush(line: string): ForcePush | undefined {
   return undefined;
 }
 
-const READ_ONLY = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'ag', 'which', 'echo', 'file', 'stat', 'du', 'df', 'tree', 'less', 'whoami', 'date', 'diff', 'type', 'printenv', 'uname', 'sort', 'uniq', 'cut', 'jq']);
-const GIT_READ = new Set(['status', 'diff', 'log', 'show', 'blame', 'rev-parse', 'ls-files', 'grep', 'describe', 'shortlog', 'reflog', 'remote', 'branch', 'tag', 'fetch', 'config']);
+const READ_ONLY = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'ag', 'which', 'echo', 'file', 'stat', 'du', 'df', 'tree', 'whoami', 'diff', 'type', 'printenv', 'uname', 'sort', 'cut', 'jq']);
+const GIT_READ = new Set(['status', 'diff', 'log', 'show', 'blame', 'rev-parse', 'ls-files', 'grep', 'describe', 'shortlog', 'reflog', 'remote', 'branch', 'tag']);
+/**
+ * Shell syntax that runs more than one command, substitutes, redirects or expands (globs, ~, $VAR):
+ * a line with any of it is never routine, whatever its words look like.
+ */
+const SHELL_SYNTAX = /[$`&;|<>*?[\]{}~!\\()\n\r]/;
+/** Options that run another program or write a file, for any program (git -c is caught before). */
+const RUNS_OR_WRITES = /^--(output|upload-pack|receive-pack|exec|ext-diff|config-env|pre|pre-glob|compress-program|search-zip|files0-from)(=|$)/;
 const RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const SCRIPTS = /^(test|t|lint|build|typecheck|check|format:check|tsc|vitest|jest)(:|$)/;
 const TOOLS = new Set(['vitest', 'jest', 'tsc', 'eslint', 'pytest', 'mocha', 'ruff', 'mypy']);
@@ -122,17 +129,19 @@ const TOOLS = new Set(['vitest', 'jest', 'tsc', 'eslint', 'pytest', 'mocha', 'ru
 function routine(words: string[]): 'Read-only' | 'Runs project scripts' | undefined {
   const [p, a = '', b = ''] = words;
   const f = flags(words);
+  if (words.some((w) => RUNS_OR_WRITES.test(w)) || f.short.includes('o')) return undefined;
+  if (p === 'rg' && f.short.includes('z')) return undefined;
   if (READ_ONLY.has(p)) return 'Read-only';
-  if (p === 'find') return words.some((w) => /^-(delete|exec|execdir|ok|fprint)/.test(w)) ? undefined : 'Read-only';
+  if (p === 'find') return words.some((w) => /^-(delete|exec|execdir|ok|okdir|fls|fprint)/.test(w)) ? undefined : 'Read-only';
   if (p === 'git') {
     const { sub, args } = gitSub(words);
-    if (!GIT_READ.has(sub)) return undefined;
+    // No global options (-c, -C, --git-dir…): they change what git runs.
+    if (words[1] !== sub || !GIT_READ.has(sub)) return undefined;
     const g = flags(args);
     // branch/tag/remote/config only when listing.
     if ((sub === 'branch' || sub === 'tag') && args.some((x) => !x.startsWith('-'))) return undefined;
     if (sub === 'branch' && /[dDmMcC]/.test(g.short)) return undefined;
     if (sub === 'remote' && args.some((x) => !x.startsWith('-'))) return undefined;
-    if (sub === 'config' && !(g.long.includes('get') || g.long.includes('list') || g.short.includes('l'))) return undefined;
     return 'Read-only';
   }
   if (RUNNERS.has(p)) return SCRIPTS.test(a) || (a === 'run' && SCRIPTS.test(b)) ? 'Runs project scripts' : undefined;
@@ -201,12 +210,12 @@ export function commandRisk(line: string): Risk {
     return { tone: 'careful', ...hit, lock: CAREFUL_LOCK, ...(push ? { push } : {}) };
   }
   const segs = segments(line);
-  // Writing a file through a redirect is never routine (2>&1 and >/dev/null are only plumbing).
+  // Writing a file through a redirect changes files.
   const writes = /(^|[^0-9&>])>{1,2}(?!\s*&|\s*\/dev\/null)/.test(line.replace(/\d?>&\d/g, ''));
-  const kinds = segs.map((s) => routine(program(s).words));
-  if (segs.length && !writes && !line.includes('<<') && kinds.every(Boolean)) {
-    return { tone: 'routine', label: kinds.includes('Runs project scripts') ? 'Runs project scripts' : 'Read-only', consequences: [] };
-  }
+  // Routine: one plain command, no shell syntax at all, no wrapper (sudo, env…), that only looks or runs the project's checks.
+  const only = segs.length === 1 && !SHELL_SYNTAX.test(line) ? program(segs[0]) : undefined;
+  const kind = only && only.words.length === segs[0].length ? routine(only.words) : undefined;
+  if (kind) return { tone: 'routine', label: kind, consequences: [] };
   const words = program(segs[0] ?? []).words;
   const p = words[0];
   const label =
@@ -218,6 +227,16 @@ export function commandRisk(line: string): Risk {
           ? 'Changes files'
           : 'Runs a command';
   return { tone: 'review', label, consequences: [] };
+}
+
+/**
+ * The few commands that may allow themselves after a countdown (friedliver.approvals.autoRoutineSeconds):
+ * exactly these words, nothing added. Anything else, however harmless it looks, waits for you.
+ */
+const AUTO_ROUTINE = new Set(['npm test', 'npm run test', 'pnpm test', 'pnpm run test', 'yarn test', 'bun test', 'npm run lint', 'npm run typecheck', 'git status', 'git diff', 'git log', 'node --version']);
+
+export function autoRoutineCommand(line: string): boolean {
+  return AUTO_ROUTINE.has(line.trim().replace(/[ \t]+/g, ' '));
 }
 
 // ---- Files ----

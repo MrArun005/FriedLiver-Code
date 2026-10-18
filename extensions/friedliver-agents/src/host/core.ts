@@ -37,7 +37,7 @@ import {
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
 import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
 import { approvalOf, type Approvable } from '../shared/approval';
-import { commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
+import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
 import {
   AGENT_FACES,
   EMPTY_STATE,
@@ -1796,7 +1796,7 @@ export class AgentCore {
       // Routine, with a plain one-time yes, and not a plan: it may count down (off unless the user set it).
       const autoAt =
         allow && !detail.plan && kind !== 'switch_mode'
-          ? this.autoRoutine(requestId, risk.tone === 'routine', () => {
+          ? this.autoRoutine(requestId, detail.command ? autoRoutineCommand(detail.command.line) : risk.tone === 'routine', () => {
               autoFired = true;
               this.answerPermission(requestId, allow.optionId);
             })
@@ -1998,7 +1998,7 @@ export class AgentCore {
         }
         const dropped = await this.droppedBy(info.commandLine, info.cwd);
         let autoFired = false;
-        const autoAt = outside || !chatId ? undefined : this.autoRoutine(commandId, risk.tone === 'routine', () => ((autoFired = true), this.decideCommand(commandId, true)));
+        const autoAt = outside || !chatId ? undefined : this.autoRoutine(commandId, autoRoutineCommand(info.commandLine), () => ((autoFired = true), this.decideCommand(commandId, true)));
         if (chatId)
           this.items(chatId, [
             { kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'awaiting', output: '', ...(dropped ? { dropped } : {}), ...(autoAt ? { autoAt } : {}) },

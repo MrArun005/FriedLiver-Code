@@ -99,6 +99,22 @@ describe('routine countdown', () => {
     expect(perm(core, chat.id)).toMatchObject({ answer: 'Yes', auto: 'Routine, allowed after the countdown' });
   });
 
+  it('counts down only the exact allowlist: a routine-looking command with any extra word waits', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
+    const chat = await core.createChat('demo');
+    for (const command of ['ls -la', 'npm test; rm -rf ~', 'git -c core.pager=sh log']) {
+      const turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command })}`);
+      await waitFor(() => core.decisions().length === 1);
+      const p = core.chat(chat.id)!.items.filter((i): i is Extract<Item, { kind: 'permission' }> => i.kind === 'permission').at(-1)!;
+      expect(p.autoAt, command).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(core.decisions(), command).toHaveLength(1);
+      core.answerPermission(p.requestId, 'reject');
+      await turn;
+    }
+  });
+
   it('never counts down a review or careful request', async () => {
     const dir = await gitRepo();
     const core = makeCore(dir, { autoRoutineSeconds: () => 0.05 });
