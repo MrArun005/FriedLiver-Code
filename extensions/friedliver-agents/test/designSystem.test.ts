@@ -10,7 +10,8 @@
 // ratchet: a count above it fails, and so does one below it until the baseline is lowered to
 // match, so the improvement can't be lost. Lower it with:
 //   DS_BASELINE=write npx vitest run test/designSystem.test.ts
-// which refuses to raise anything.
+// which refuses to raise anything. Merging a branch written before this rule: record its counts once,
+// in the merge commit, with DS_BASELINE=write DS_BASELINE_INIT=1, then ratchet them down.
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
