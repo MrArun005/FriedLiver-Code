@@ -23,6 +23,7 @@ if (!opts['no-build']) {
 }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-remote-harness-'));
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }));
 const { build } = await import('esbuild');
 const entry = path.join(tmp, 'entry.ts');
 fs.writeFileSync(

@@ -332,7 +332,7 @@
       },
       {
         "command": "friedliver.index.rebuild",
-        "title": "Rebuild Project Index",
+        "title": "Rebuild Project Index (full)",
         "category": "FriedLiver"
       },
       {
@@ -637,6 +637,12 @@
     "configuration": {
       "title": "FriedLiver Agents",
       "properties": {
+        "friedliver.chat.autoAllowLinkedReads": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Lets an agent read the chat that handed it its task, or that consulted it, without asking each time. Off by default: reading another chat waits for your OK. Read from your user settings only."
+        },
         "friedliver.chat.fontFamily": {
           "type": "string",
           "default": "",
@@ -998,7 +1004,7 @@
         },
         "friedliver.index.maxFiles": {
           "type": "number",
-          "default": 50000,
+          "default": 200000,
           "minimum": 100,
           "markdownDescription": "Most files the project index holds per workspace folder."
         },
@@ -1006,7 +1012,12 @@
           "type": "number",
           "default": 150,
           "minimum": 10,
-          "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files."
+          "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files. A stopped index shows *Partial index* in the status bar; raise this to index a large repository in full (about 400 for 80,000 files, at roughly 1 GB of memory)."
+        },
+        "friedliver.index.primer": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start each new chat with a compact project map from the index: top-level folders with file counts and the files most likely relevant to the first message (at most 1,500 tokens, sharing the shared rules' 8 KB cap). Saves the agent exploring to find its way."
         }
       }
     },

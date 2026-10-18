@@ -257,6 +257,8 @@ function noticeAction(v: unknown): NoticeAction | null {
   switch (v.do) {
     case 'retry':
       return { label, do: 'retry' };
+    case 'compact':
+      return { label, do: 'compact' };
     case 'signIn':
       return isAgentKey(v.agent) && id(v.methodId) ? { label, do: 'signIn', agent: v.agent, methodId: v.methodId } : null;
     case 'apiKey':

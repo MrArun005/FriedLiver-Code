@@ -448,7 +448,8 @@ async function spacing(page, width, P, box, css) {
   const gutter = width <= 720 ? 16 : 20;
   const tab = await box('.tabs [role="tab"]');
   row(name, 'tab height (6.png: 30)', 30, tab.height);
-  row(name, 'tab padding left', 8, px(await css('.tabs [role="tab"]', 'padding-left')));
+  // A full tab (the open one): COMPONENTS.md §tabs pads it 0 8; mark-only tabs (icon fit, narrow strips) pad 0 4 by spec.
+  row(name, 'tab padding left', 8, px(await css('.tabs [role="tab"][aria-selected="true"]', 'padding-left')));
   row(name, 'gap between tabs', 4, px(await css('.tabs', 'column-gap')));
   row(name, 'header side padding = gutter', gutter, px(await css('.chat-head', 'padding-left')));
   row(name, 'header padding top/bottom', 8, px(await css('.chat-head', 'padding-top')));

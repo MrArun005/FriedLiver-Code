@@ -42,6 +42,7 @@
 //                     file read now and then. Never asks for anything. "stamp" ends each
 //                     sentence and the plan's current step with `t=<ms since epoch>`.
 //   "/help", "/compact" slash commands (advertised in available_commands_update)
+//   "fill <tokens>"   sets the context usage the turn reports (a nearly full context)
 //   anything else     echoes the text back in two chunks, with the model and effort when they
 //                     aren't the defaults: "You said: hi (demo-small · low)"
 // Only the last text block is read as one of these, so context a client puts
@@ -1276,7 +1277,11 @@ acp
       await say(client, sessionId, links.length ? `Linked: ${links.join(', ')}` : 'No files linked.');
     }
     else if (command === '/help') await say(client, sessionId, HELP);
-    else if (command === '/compact') {
+    else if (command.startsWith('fill ')) {
+      // Sets the context usage, to test what a nearly full context does.
+      stateOf(sessionId).used = Math.min(200_000, Number(command.slice(5)) || 0);
+      await say(client, sessionId, `Context at ${stateOf(sessionId).used} tokens.`);
+    } else if (command === '/compact') {
       stateOf(sessionId).used = 0;
       await say(client, sessionId, 'Context cleared.');
     } else if (command.startsWith('/review')) await say(client, sessionId, `Reviewed ${command.slice(7).trim() || 'nothing'}: looks fine.`);
@@ -1301,7 +1306,8 @@ acp
       await say(client, sessionId, `${text}${imageCount ? ` (+${imageCount} image)` : ''}${chosen}`);
     }
     if (choices.has(sessionId)) await reportUsage(client, sessionId, stateOf(sessionId), text);
-    return { stopReason: 'end_turn' };
+    // The turn's own token counts, as Claude's adapter reports them (fixed, so tests can check them).
+    return { stopReason: 'end_turn', usage: { inputTokens: 1200, outputTokens: 300, cachedReadTokens: 800, cachedWriteTokens: 100, totalTokens: 2400 } };
   })
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 

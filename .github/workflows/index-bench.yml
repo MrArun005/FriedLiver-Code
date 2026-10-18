@@ -1,0 +1,72 @@
+name: Index bench
+
+# The agents extension's project index on microsoft/TypeScript
+# (test/indexBench.test.ts): at the default maxMemoryMB it stops early with a
+# partial-index notice; at 400 it indexes in full, and the re-open after touching
+# 10 files is timed (until it answers and until it is verified) against a full build. macOS uses the FSEvents change journal
+# (the helper built here); Linux has no journal and checks every file. Also the
+# token bench (test/tokenBench.test.ts): scripted agent tasks with and without the
+# index_* tools, tokens counted with js-tiktoken's cl100k_base. Numbers go to the
+# run's summary. Runs on demand and when the index code changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - extensions/friedliver-agents/src/host/projectIndex.ts
+      - extensions/friedliver-agents/src/host/merkle.ts
+      - extensions/friedliver-agents/src/host/changeJournal.ts
+      - extensions/friedliver-agents/native/friedliver-fsevents.swift
+      - extensions/friedliver-agents/src/host/indexReads.ts
+      - extensions/friedliver-agents/src/shared/tokens.ts
+      - extensions/friedliver-agents/src/host/pageText.ts
+      - extensions/friedliver-agents/test/indexBench.test.ts
+      - extensions/friedliver-agents/test/tokenBench.test.ts
+      - .github/workflows/index-bench.yml
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: The FSEvents helper (macOS)
+        if: runner.os == 'macOS'
+        run: extensions/friedliver-agents/native/build.sh "$RUNNER_TEMP/helpers/friedliver-dictate"
+      # A fixed tag, so runs compare: v6.0.3 is the last release written in TypeScript (main is the Go port).
+      - name: A throwaway TypeScript checkout (the bench edits files in it)
+        run: git clone --depth 1 --quiet --branch v6.0.3 https://github.com/microsoft/TypeScript.git "$RUNNER_TEMP/TypeScript"
+      - name: Bench
+        working-directory: extensions/friedliver-agents
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          npm ci
+          if [ "$RUNNER_OS" = macOS ]; then
+            export FL_INDEX_BENCH_JOURNAL="$RUNNER_TEMP/helpers/friedliver-fsevents"
+            FL_FSEVENTS_HELPER="$FL_INDEX_BENCH_JOURNAL" npx vitest run test/changeJournal.test.ts
+          fi
+          FL_INDEX_BENCH_REPO="$RUNNER_TEMP/TypeScript" npx vitest run test/indexBench.test.ts
+      # The re-open bench appended a comment to 10 files; the token bench restores what it edits itself.
+      - name: Token bench
+        working-directory: extensions/friedliver-agents
+        run: |
+          npm install --no-save js-tiktoken@1.0.21
+          # Pinned web.archive.org captures (id_: the page as served), for the browser rows.
+          mkdir -p "$RUNNER_TEMP/pages"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/mdn-429.html" "https://web.archive.org/web/20250530112150id_/https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/wikipedia-merkle-tree.html" "https://web.archive.org/web/20250602014058id_/https://en.wikipedia.org/wiki/Merkle_tree"
+          curl -sfL --compressed -o "$RUNNER_TEMP/pages/github-typescript.html" "https://web.archive.org/web/20250601105140id_/https://github.com/microsoft/TypeScript"
+          FL_TOKEN_BENCH_PAGES="$RUNNER_TEMP/pages" FL_TOKEN_BENCH_REPO="$RUNNER_TEMP/TypeScript" FL_TOKEN_BENCH_OUT="$RUNNER_TEMP/token-bench.md" npx vitest run test/tokenBench.test.ts
