@@ -287,10 +287,13 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.fl-btn--text.fl-btn--truncate {
+/* Truncate (the `truncate` prop): a title or a link longer than its box keeps one line and ends in an ellipsis. */
+.fl-btn--truncate:is(.fl-btn--text, .fl-btn--link) {
   display: block;
   max-width: 100%;
   overflow: hidden;
+  line-height: inherit;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
