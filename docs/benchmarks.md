@@ -71,7 +71,11 @@ How it runs: a fresh profile and folder. The script opens N Demo chats from the
 chat view and sends each `busy <seconds> stamp`: four markdown chunks a second
 (paragraphs, lists, code blocks), a tool call with two updates every 2.5 s, a
 six-step plan, and a file read through the editor every 5 s. As real agents do,
-each session starts its FriedLiver tools server when it starts. The Agent
+each session starts its FriedLiver tools server when it starts (since
+["Cutting memory at the app level"](#cutting-memory-at-the-app-level), an
+agent that takes MCP over HTTP, the Demo agent among them, connects to the
+tools in the extension host instead, and these numbers are the older
+build's). The Agent
 Manager opens beside `notes.txt`, shows the board for 25 s and then the map
 for 25 s, while the script types into the editor every 300 ms. All 15 agents
 were working through both phases.
@@ -206,3 +210,145 @@ Caveats:
   changes, gave the same picture (Agent Manager 50 → 8 % on the board, 412 →
   280 MB of tools servers) with a lighter baseline; CPU moves by 2–3 points
   between runs, and more when the container is busy.
+
+## Cutting memory at the app level
+
+Measured on 2026-10-16 with `scripts/stress-demo.mjs` on packaged Linux builds
+in the same container (4 cores, no GPU, Xvfb at 1920×1080). "Before" is
+`main` at 6df14f2; "after" adds patch 0050 (no JSON language server until a
+JSON file opens) and the FriedLiver tools over HTTP (no tools server process
+per chat for agents that take MCP over HTTP; the Demo agent now does, as
+Claude's, Codex's and Gemini's adapters do). The other candidates were
+measured on the same builds by switching one thing at a time
+(`--arg`, `--setting` and `FAKE_AGENT_MCP_HTTP=0`) and are listed under
+"Tried and not kept". Another session ran UI tests on the machine during some
+runs, so CPU and latency moved more than memory did; the flag comparisons
+below alternate the two arms to even that out.
+
+### Before and after
+
+At rest (`--scenario idle`, the same four steps as above), total PSS in MB,
+and the lines that moved:
+
+| | Before | After | JSON server | Tools server | Demo agent | Extension host |
+|---|---|---|---|---|---|---|
+| Folder open, no chat | 686 | 629 | 32 → – | – | – | 88 → 79 |
+| One finished chat | 659 | 609 | 30 → – | 23 → – | 33 → 43 | 76 → 73 |
+| Agent Manager open | 670 | 614 | 30 → – | 23 → – | 29 → 37 | 75 → 72 |
+| Agent Manager closed | 705 | 607 | 30 → – | 23 → – | 29 → 37 | 75 → 72 |
+
+The workbench (214 → 202 at the first step, 218 → 161 at the last) and the
+shared process (80 → 72) move by as much between runs of the same build, so
+read the totals as about 50–60 MB lower at rest, of which the JSON server is
+30 MB and the tools server 23 MB, less the demo agent's 8–10 MB.
+
+15 agents (the default scenario). After: three runs, one from the final
+build and two from a build that also had the V8 flag below, turned off with
+`--no-optimize-for-size`. At rest the final build's own run is shown; the
+other build's agreed within 10 MB per step.
+
+| | Before | After (three runs) |
+|---|---|---|
+| Memory, average / peak / settled | 1067 / 1340 / 1057 MB | 787–825 / 1061–1086 / 782–786 MB |
+| Processes | 28 | 12 |
+| FriedLiver tools servers (one per chat) | 283 MB | none |
+| JSON language server | 26 MB | none |
+| Demo agent (one process for all 15 chats) | 29 MB | 42 MB |
+| Extension host, average / settled | 83 / 107 MB | 84–93 / 108–111 MB |
+| Workbench, average / peak | 260 / 498 MB | 238–271 / 465–482 MB |
+| Typing, median / p95 (board; map) | 31 / 47 ms; 29 / 51 ms | 32–35 / 49–58 ms; 29–35 / 47–57 ms |
+| Chat view behind the agent, median / p95 | 21 / 45 ms | 5–49 / 53–83 ms |
+| CPU, extension host (board / map) | 8.1 / 8.4 % | 8.0–8.4 / 7.3–8.2 % |
+
+- **The tools servers were the biggest line**: 19 MB each, 283 MB for 15
+  chats. Over HTTP the extension host serves the same tools itself; with 15
+  sessions connected it held about 5 MB more on average and the same once
+  settled (74 → 79 average, 79 → 79 settled, measured with the flag on in both
+  runs). The Demo agent grew by 14 MB because it now loads Node's `fetch` for
+  its MCP client; real agents already have an HTTP client loaded.
+- **The JSON language server started in every window of a folder with a
+  `package.json`**, about 5 s after startup, with no JSON file open: the debug
+  adapter manager collects task labels for launch.json's schema, npm's task
+  provider opens `package.json` as a text document for that, and the
+  `onLanguage:json` that follows starts `json-language-features`,
+  `configuration-editing` and `extension-editing`. Patch 0050 collects the
+  labels when the first JSON or JSONC editor opens instead. The extension
+  host's activation log no longer lists those three at startup.
+- Chat-view lag swings from run to run (6 and 49 ms medians for two runs of
+  the same build); typing latency and extension-host CPU didn't move.
+
+### Per change
+
+| Change | Kept | At rest | 15 agents | What it costs |
+|---|---|---|---|---|
+| JSON server only once JSON is open (patch 0050) | yes | −30 MB (the server) and about 1 MB of extension-host heap | −26 MB | nothing seen: `preLaunchTask` completions in launch.json arrive when the JSON editor opens, and the schema updates in place |
+| FriedLiver tools over HTTP for agents that advertise it | yes | −23 MB once a chat has run (its tools server), +8–10 MB in the Demo agent | 959 / 992 / 952 → 724–726 / 742–743 / 698–706 MB (−235 average, −250 settled; both with the flag on) | a new transport, with the same tools, checks, token and caps (SECURITY.md, "The HTTP endpoint"); agents that only take stdio still get `dist/bridge.js` |
+
+### Tried and not kept
+
+| Change | Effect | Why not |
+|---|---|---|
+| `editor.cursorBlinking: blink` (upstream's default) instead of FriedLiver's `smooth` (CORE-PERF C6) | idle with a `.ts` editor focused: 5.97 % of a core against 2.56 % with `smooth` (+3.41 points: renderer +2.29, GPU +1.29, run 7); perf build 7.10 → 2.38 % with `smooth` restored; worse beyond noise in runs 2–5 and 7 (2026-10-17). Confirm run 8 with `smooth` back: perf build 1.93 % vs release 2.04 % vs VS Code 4.91 % | the plan had it backwards: `blink`'s 500 ms timer runs as long as an editor has focus, `smooth`'s CSS animation stops 10 s after the last caret move. See DEFAULTS.md |
+| V8 `--js-flags=--optimize-for-size` (as a patch to `getJSFlags`, so the renderers and Node utility processes get it) | 15 agents, two alternating runs each: 724–726 / 742–743 / 698–706 MB against 787–825 / 1061–1074 / 782–783 MB without it, mostly the workbench's peak (465–476 → 217–222) and the extension host (88–93 → 79 average). At rest: 562 against 620 MB in the first minute, then the same (605–617 against 607–616) | Startup, six alternating launches each: the window showed after 2.17 s against 2.01 s (+8 %), the Agents view after 3.74 s against 3.35 s (+12 %): the view was slower in 6 of 6 rounds, the window in 5. The workbench used 3 points more CPU under load and typing was about 2 ms slower at the median (same p95). And because upstream hands `js-flags` to utility processes in `execArgv`, an extension's `child_process.fork()` without its own `execArgv` then fails with "bad option: --js-flags" (it does upstream too, for anyone who sets `js-flags` in argv.json) |
+| V8 `--max-semi-space-size=2` | 15 agents: 873 / 992 / 740 MB; startup unchanged | no clear change: a lower peak and settle but a higher average |
+| `--disable-features=SpareRendererForSitePerProcess` | no change | the app never keeps a spare renderer |
+| `github` built-in off | the extension host held 1.1 MB less heap after GC, the same PSS | loses GitHub sign-in for HTTPS pushes, Publish and Clone from GitHub, permalinks, branch protection, pull-request links |
+| `merge-conflict`, `debug-auto-launch`, `ms-vscode.js-debug-companion`, `ms-vscode.vscode-js-profile-table` off | 0.9 MB less extension-host heap together, the same PSS | the last two never activate at startup (2.5 MB of disk); the first two cost under a megabyte; each removes a feature |
+
+What's left at rest is upstream's: the workbench renderer (160–200 MB, of
+which 57 MB JavaScript heap), the main process (about 100), the extension
+host (72–79), the shared process (45–71, dropping after the first minute),
+the file watcher (35–41), the network service and zygotes (about 45 together)
+and the GPU process (30–38). The Agents chat view adds 47 MB.
+
+## Core performance work (branch `perf/core`)
+
+The plan, with the reasoning and estimates behind each change, is
+`FriedLiver-Code-design/CORE-PERF-PLAN.md` (C1–C10); the measurements are in
+`FriedLiver-Code-design/PERF-RESULTS.md` (editor-bench, macOS CI, 2026-10-17
+runs 2–7: VS Code 1.142 vs FriedLiver v1.142.0-5 vs the perf build). A change
+is kept as a win only if it is beyond noise in two separate CI runs with no
+other metric regressing (the plan's section 4.4); neutral ones are kept as
+"unmeasured" when their target scenario isn't in the bench yet.
+
+| Change | Where | Metric to check | Estimate | Status |
+|---|---|---|---|---|
+| C8 `workbench.startupEditor: none` | theme | `restore_ms`, renderer footprint at `idle` | −5–15 MB, up to −25 ms restore | kept, neutral: no change beyond noise in CPU, memory or restore time |
+| C10 tool caches out of the watcher | theme | watcher + extension-host CPU while 20k files are written into `fixture/.venv` | most of that CPU | kept, unmeasured: neutral at idle; the churn scenario isn't in the bench yet |
+| C5 one tsserver (`useSyntaxServer: never`) | theme | `files20` footprint, process count; time until the outline fills | −40–80 MB, −1 process | **kept, win**: −67 / −79 / −81 MB with 20 files open (runs 3, 4, 8), −82 MB and −1 process with a TS file focused (run 7) |
+| C7 time-sliced `onStartupFinished` | theme | typing p95 in the first 5 s, with extensions | −10–40 ms | kept, unmeasured: neutral here; the bench has no extensions yet |
+| C2 extension host doesn't wait for the login shell (`friedliver.fastShellEnv`) | patch 0200 | `code/willLoadMainBundle-code/extHost/ready` in a "heavy shell" scenario (`.zshrc` with `sleep 0.8`), second launch on; Quick Open first result at ready + 0.5 s | 0 in the current bench (its throwaway `HOME` has no `.zshrc`); −0.3–2 s on real shells | **kept, win** (keep rule met, runs 4 and 8): with a 3 s `.zshrc`, extension host ready 4,082 → 1,964 and 3,910 → 1,444 ms, first file-search result 4,472 → 2,402 and 4,254 → 1,795 ms; the release pays +1.6–2.3 s for that shell, the perf build nothing. Hidden with a 1 s shell (run 3) |
+| C1 Node compile cache for extension host, shared process, pty host (macOS/Linux) | patch 0210 | `code/willLoadMainBundle-code/extHost/ready` and first activations, runs 2–6 (run 1 writes the cache); exthost log says `status: enabled`; `CachedData/<commit>/node/*` fills | −40–120 ms to extension host ready; main process not covered | kept, works, no measured win: status `enabled`, the folder fills (4.4 MB after launch 1); extension host ready within noise in both runs (the bench has no extensions) |
+| C4 Chromium locale packs except English | `build.mjs` (`trimPackagedApp`, `FRIEDLIVER_KEEP_LOCALES`) | editor-bench install size; DMG size | −45 MB installed on macOS (47 MB of `.lproj` measured on the installed app) | **win**: 563 → 518 MB installed, deterministic (runs 3, 4) |
+
+Checked for C4 and not done:
+
+- **The Agents window (`out/vs/sessions`, 23 MB) and the agent host
+  (`out/vs/platform/agentHost` + the Copilot SDK runtime).** Neither patch 0010
+  nor 0020 disables them; 0020 only defaults `chat.disableAIFeatures` to true,
+  which a user can turn back. Both are still referenced: `windowImpl.ts:1290`
+  loads `vs/sessions/electron-browser/sessions.html` for any sessions window,
+  which the `--agents` command-line flag (`argv.ts:111`) and the agent-sessions
+  workspace open (`windowsMainService.ts:1599`); `app.ts` starts the agent host
+  when AI features are on. Removing the files would turn those into a blank
+  window or a crashed process. They need a patch that removes the entry points
+  first.
+- **Mermaid dedupe (`mermaid-markdown-features`, 46 MB).** Not trivially safe:
+  `chat-webview-out` also backs "open diagram in editor"
+  (`src/editorManager.ts:172-208`), not only chat output; `notebook-out` and
+  `markdown-preview-out` are separate esbuild runs with code splitting, so the
+  identical chunks are imported by relative, hashed names from each entry, and
+  sharing them needs a build change in the extension (or symlinks, which the
+  Windows zip and asar packing don't keep).
+- **C3, gating the built-in chat stack when AI is off.** Measurement first, no
+  build needed: with `--prof-duration-markers` on
+  `code/willCreateWorkbenchContributions/1-code/didCreateWorkbenchContributions/2`
+  and `code/willLoadWorkbenchMain-code/didLoadWorkbenchMain`, plus the renderer
+  log's "Creation of workbench contribution '…' took N ms" lines and the
+  per-contribution marks `code/willCreateWorkbenchContribution/<phase>/<id>`,
+  for FriedLiver and stock VS Code 1.142 in the same editor-bench run (5 cold
+  runs each). The contributions to sum: `chat.shared.contribution`,
+  `agentSessions`, `agentHost.contribution`, `chatSubagentOpenChat`,
+  `welcomeAgentSessions`, `onboardingTryout`. Gate them (step 2) only if they
+  add up to ≥ 30 ms or the renderer heap snapshot shows ≥ 10 MB of chat
+  objects; `browserView` must stay (the Agents extension uses it).

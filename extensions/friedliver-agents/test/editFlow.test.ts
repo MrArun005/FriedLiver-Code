@@ -62,7 +62,7 @@ describe('Edit with Agent through the core, with the Demo agent', () => {
     // The chat is ordinary: named after the instruction, with the code as a chip.
     const view = core.chat(chat.id)!;
     expect(view.title).toBe('uppercase');
-    expect(view.items.find((i) => i.kind === 'user')).toEqual({ kind: 'user', text: 'uppercase', images: [], refs: [{ path: file, startLine: 2, endLine: 3 }] });
+    expect(view.items.find((i) => i.kind === 'user')).toMatchObject({ kind: 'user', text: 'uppercase', images: [], refs: [{ path: file, startLine: 2, endLine: 3 }] });
     expect(view.files).toEqual(['src/format.ts']);
   });
 
@@ -141,11 +141,11 @@ describe('Ask About Selection and Review My Changes through the core', () => {
     const context = referencesContext([referenceBlock(chat.cwd, ref, SOURCE.split('\n').slice(1, 3).join('\n'), 'typescript')]);
     await core.send(chat.id, 'Why a template string?', [], { context, refs: [ref] });
     const view = core.chat(chat.id)!;
-    expect(view.items[0]).toEqual({ kind: 'user', text: 'Why a template string?', images: [], refs: [ref] });
+    expect(view.items[0]).toMatchObject({ kind: 'user', text: 'Why a template string?', images: [], refs: [ref] });
     // The demo agent echoes all it got: the reference first, then the question.
     const reply = view.items.find((i) => i.kind === 'agent');
     expect(reply?.kind === 'agent' && reply.text).toMatch(/src\/format\.ts:2-3\n```typescript\n {2}const greeting[\s\S]*Why a template string\?/);
-    expect(view.title).toBe('Why a template string?');
+    expect(view.title).toBe('Why template string');
   });
 
   it('gets a review of the working tree in a chat named after the branch', async () => {

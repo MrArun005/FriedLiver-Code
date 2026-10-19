@@ -68,8 +68,21 @@
       "workbench.tips.enabled": false,
       "extensions.ignoreRecommendations": true,
       "typescript.disableAutomaticTypeAcquisition": true,
+      "typescript.tsserver.useSyntaxServer": "never",
+      "workbench.startupEditor": "none",
+      "extensions.experimental.deferredStartupFinishedActivation": true,
       "files.watcherExclude": {
-        "**/node_modules/*/**": true
+        "**/node_modules/*/**": true,
+        "**/.venv/**": true,
+        "**/venv/**": true,
+        "**/__pycache__/**": true,
+        "**/.mypy_cache/**": true,
+        "**/.pytest_cache/**": true,
+        "**/.next/**": true,
+        "**/.nuxt/**": true,
+        "**/.turbo/**": true,
+        "**/.parcel-cache/**": true,
+        "**/.gradle/**": true
       }
     }
   }

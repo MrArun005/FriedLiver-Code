@@ -1,0 +1,56 @@
+diff --git a/src/vs/workbench/contrib/debug/browser/debugAdapterManager.ts b/src/vs/workbench/contrib/debug/browser/debugAdapterManager.ts
+index 0b9ced32..df7d94ff 100644
+--- a/src/vs/workbench/contrib/debug/browser/debugAdapterManager.ts
++++ b/src/vs/workbench/contrib/debug/browser/debugAdapterManager.ts
+@@ -13,6 +13,7 @@ import { isCodeEditor } from '../../../../editor/browser/editorBrowser.js';
+ import { IEditorModel } from '../../../../editor/common/editorCommon.js';
+ import { ILanguageService } from '../../../../editor/common/languages/language.js';
+ import { ITextModel } from '../../../../editor/common/model.js';
++import { IModelService } from '../../../../editor/common/services/model.js';
+ import * as nls from '../../../../nls.js';
+ import { IMenuService, MenuId, MenuItemAction } from '../../../../platform/actions/common/actions.js';
+ import { ICommandService } from '../../../../platform/commands/common/commands.js';
+@@ -74,6 +75,7 @@ export class AdapterManager extends Disposable implements IAdapterManager {
+ 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
+ 		@ITaskService private readonly tasksService: ITaskService,
+ 		@IMenuService private readonly menuService: IMenuService,
++		@IModelService modelService: IModelService,
+ 	) {
+ 		super();
+ 		this.adapterDescriptorFactories = [];
+@@ -96,7 +98,24 @@ export class AdapterManager extends Disposable implements IAdapterManager {
+ 		// generous debounce since this will end up calling `resolveTask` internally
+ 		const updateTaskScheduler = this._register(new RunOnceScheduler(() => this.updateTaskLabels(), 5000));
+ 
++		// FriedLiver: the task labels only go into launch.json's schema (preLaunchTask, postDebugTask), which
++		// is used once a JSON editor is open. Collecting them asks every task provider for its tasks, and the
++		// npm extension's provider opens package.json as a JSON document, which started the JSON language
++		// server (and two more extensions) in every window of a JavaScript project. Collect them when JSON is
++		// first needed instead.
++		const isJson = (languageId: string) => languageId === 'json' || languageId === 'jsonc';
++		let jsonNeeded = modelService.getModels().some(model => isJson(model.getLanguageId()));
++		if (!jsonNeeded) {
++			this._register(Event.once(Event.filter(this.languageService.onDidRequestRichLanguageFeatures, isJson))(() => {
++				jsonNeeded = true;
++				updateTaskScheduler.schedule(0);
++			}));
++		}
++
+ 		this._register(Event.any(tasksService.onDidChangeTaskConfig, tasksService.onDidChangeTaskProviders)(() => {
++			if (!jsonNeeded) {
++				return;
++			}
+ 			updateTaskScheduler.cancel();
+ 			updateTaskScheduler.schedule();
+ 		}));
+@@ -107,7 +126,9 @@ export class AdapterManager extends Disposable implements IAdapterManager {
+ 			this.usedDebugTypes.add(s.configuration.type);
+ 		}));
+ 
+-		updateTaskScheduler.schedule();
++		if (jsonNeeded) {
++			updateTaskScheduler.schedule();
++		}
+ 	}
+ 
+ 	private registerListeners(): void {

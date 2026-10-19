@@ -1,312 +1,149 @@
-diff --git a/src/vs/workbench/browser/media/friedliver.css b/src/vs/workbench/browser/media/friedliver.css
-new file mode 100644
-index 00000000..c10f9b64
---- /dev/null
-+++ b/src/vs/workbench/browser/media/friedliver.css
-@@ -0,0 +1,294 @@
-+/*---------------------------------------------------------------------------------------------
-+ *  FriedLiver: the workbench look. Quiet chrome, loud decisions.
-+ *
-+ *  - Tone, not lines: regions separate by surface tone (the themes make the borders between
-+ *    them transparent), a splitter is invisible until hovered, overlays float on soft shadows.
-+ *  - Colors only through theme variables (--vscode-*), sizes through the registered size
-+ *    tokens, so every theme keeps working.
-+ *  - High contrast themes are untouched: every rule is scoped to
-+ *    .monaco-workbench:not(.hc-black):not(.hc-light).
-+ *  - Builds on upstream's Modern UI (workbench.experimental.modernUI, on by default) and still
-+ *    reads well with it off.
-+ *  - No :has() and no class-substring selectors (see contrib/modernUI/CSS_PERFORMANCE.md), and
-+ *    no transitions on virtualized list rows.
-+ *  - The bundled build may order this sheet before or after upstream's Modern UI modules, so no
-+ *    rule here ties with one of theirs on specificity.
-+ *--------------------------------------------------------------------------------------------*/
-+
-+/* ---- Tokens ---------------------------------------------------------------------------- */
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) {
-+	--friedliver-radius-control: var(--vscode-cornerRadius-medium);	/* rows, inputs, buttons: 6px */
-+	--friedliver-radius-overlay: var(--vscode-cornerRadius-large);	/* menus, hovers, suggest: 8px */
-+	--friedliver-radius-surface: var(--vscode-cornerRadius-xLarge);	/* palette, dialogs: 12px */
-+	--friedliver-shadow-color: var(--vscode-widget-shadow, transparent);
-+	--friedliver-shadow-soft: color-mix(in srgb, var(--friedliver-shadow-color) 45%, transparent);
-+
-+	/* Every overlay (hover, find, peek, rename, notifications, palette, dialogs) reads these. */
-+	--vscode-shadow-lg: 0 10px 28px -8px var(--friedliver-shadow-color), 0 2px 6px -2px var(--friedliver-shadow-soft);
-+	--vscode-shadow-xl: 0 22px 56px -16px var(--friedliver-shadow-color), 0 4px 14px -6px var(--friedliver-shadow-soft);
-+}
-+
-+/* ---- Overlays: rounded, softly shadowed ------------------------------------------------ */
-+
-+/* Command palette and quick open (its shadow is --vscode-shadow-xl) */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget {
-+	border-radius: var(--friedliver-radius-surface);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox {
-+	border-radius: var(--friedliver-radius-overlay);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .monaco-list-row {
-+	border-radius: var(--friedliver-radius-control);
-+}
-+
-+/* Hovers, editor and workbench (their shadow is --vscode-shadow-lg) */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-hover {
-+	border-radius: var(--friedliver-radius-overlay);
-+}
-+
-+/* Suggest widget and its details pane: upstream gives them a fixed small shadow */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-widget {
-+	border-radius: var(--friedliver-radius-overlay);
-+	box-shadow: var(--vscode-shadow-lg);
-+	overflow: hidden;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-details-container {
-+	border-radius: var(--friedliver-radius-overlay);
-+	box-shadow: var(--vscode-shadow-lg);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .suggest-details-container .suggest-details {
-+	border-radius: var(--friedliver-radius-overlay);
-+}
-+
-+/* Context menus and menubar menus: the menu stylesheet reads its shadow from this variable. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .context-view.monaco-menu-container {
-+	--vscode-context-view-menu-motion-shadow: var(--vscode-shadow-lg);
-+	border-radius: var(--friedliver-radius-overlay);
-+}
-+
-+/* Notifications (toasts and the center), the find widget, peek and rename already read
-+   --vscode-shadow-lg and get Modern UI's radius. */
-+
-+/* Dialogs: the box carries the shadow, not the square wrapper behind it. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-modal-block .dialog-shadow {
-+	border-radius: var(--friedliver-radius-surface);
-+	box-shadow: var(--vscode-shadow-xl) !important;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-box {
-+	border-radius: var(--friedliver-radius-surface);
-+}
-+
-+/* ---- Splitters: invisible until hovered, still grabbable -------------------------------- */
-+
-+/* The themes set no resting grip (modernSash.gripForeground); this keeps the hover line a
-+   rounded bar and the hit area at its usual size. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-sash::before {
-+	border-radius: var(--vscode-cornerRadius-circle);
-+}
-+
-+/* ---- Title bar and command center ----------------------------------------------------- */
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
-+	height: 24px;
-+	border-radius: var(--vscode-cornerRadius-circle);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-icon {
-+	margin: auto var(--vscode-spacing-size60) auto 0;
-+}
-+
-+/* ---- Activity bar: rounded item background, a short pill instead of the stripe --------- */
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked:not(:focus) .active-item-indicator::before {
-+	border-left-color: transparent !important;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator {
-+	overflow: visible;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
-+	content: '';
-+	position: absolute;
-+	top: 50%;
-+	left: 0;
-+	width: 4px;
-+	height: 16px;
-+	border-radius: var(--vscode-cornerRadius-circle);
-+	background-color: var(--vscode-activityBar-activeBorder, var(--vscode-activityBar-foreground));
-+	transform: translateY(-50%);
-+	pointer-events: none;
-+}
-+
-+/* Upstream Modern UI insets the item background from the bar edge (the bar's 4px padding
-+   plus the indicator's own inset); keep the pill on the edge. */
-+.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
-+	left: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + 4px) / 2);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
-+	left: auto;
-+	right: 0;
-+}
-+
-+.monaco-workbench.modern-ui:not(.hc-black):not(.hc-light) .activitybar.right > .content :not(.monaco-menu) > .monaco-action-bar .action-item.checked .active-item-indicator::after {
-+	right: calc(-1 * var(--vscode-spacing-size40) - (var(--activity-bar-width, 36px) - var(--activity-bar-action-height, 36px) + 4px) / 2);
-+}
-+
-+/* Without Modern UI, round the item background the same way. */
-+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item .action-label {
-+	border-radius: var(--friedliver-radius-overlay);
-+}
-+
-+/* ---- Editor tabs ---------------------------------------------------------------------- */
-+
-+/* Without Modern UI's connected tabs, give tabs a rounded top so the active one reads as
-+   part of the editor by tone alone. */
-+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
-+	border-top-left-radius: var(--friedliver-radius-overlay);
-+	border-top-right-radius: var(--friedliver-radius-overlay);
-+}
-+
-+/* ---- Lists and trees ------------------------------------------------------------------ */
-+
-+/* Specificity (0,5,0) on purpose: above Modern UI's generic 4px row radius, below its special
-+   cases (suggest boundary rows, notification rows), whichever order the bundle puts them in. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-list .monaco-list-row:where(:not(.separator)) {
-+	border-radius: var(--friedliver-radius-control);
-+}
-+
-+/* Upstream Modern UI insets rows in side bar views by 4px; do the same without it. */
-+.monaco-workbench:not(.modern-ui):not(.hc-black):not(.hc-light) .monaco-pane-view .pane-body:not(.chat-viewpane) .monaco-list-row {
-+	left: 4px;
-+	right: 4px;
-+	width: auto;
-+}
-+
-+/* ---- Controls ------------------------------------------------------------------------- */
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button {
-+	border-radius: var(--friedliver-radius-control);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button.monaco-text-button {
-+	border-radius: var(--friedliver-radius-control) 0 0 var(--friedliver-radius-control);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button.monaco-dropdown-button {
-+	border-radius: 0 var(--friedliver-radius-control) var(--friedliver-radius-control) 0;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-inputbox,
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-select-box {
-+	border-radius: var(--friedliver-radius-control);
-+}
-+
-+/* Count badges are quiet pills. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-count-badge.long {
-+	border-radius: var(--vscode-cornerRadius-circle);
-+}
-+
-+/* ---- Scrollbars: thin rounded sliders inside the usual hit area ------------------------- */
-+
-+/* The slider keeps its size, so it is as easy to grab as before; a transparent border across
-+   it narrows the painted part (about 6px), which widens a little while hovered or dragged.
-+   Lists use 10px scrollbars, the editor 14px vertical and 12px horizontal ones. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar > .slider {
-+	box-sizing: border-box;
-+	border: 0 solid transparent;
-+	background-clip: padding-box;
-+	border-radius: var(--vscode-cornerRadius-circle);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider {
-+	border-left-width: var(--vscode-spacing-size20);
-+	border-right-width: var(--vscode-spacing-size20);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider {
-+	border-top-width: var(--vscode-spacing-size20);
-+	border-bottom-width: var(--vscode-spacing-size20);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider {
-+	border-left-width: var(--vscode-spacing-size40);
-+	border-right-width: var(--vscode-spacing-size40);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider {
-+	border-top-width: var(--vscode-spacing-size40);
-+	border-bottom-width: var(--vscode-spacing-size40);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
-+	border-left-width: 1px;
-+	border-right-width: 1px;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
-+	border-top-width: 1px;
-+	border-bottom-width: 1px;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical:hover > .slider,
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
-+	border-left-width: 3px;
-+	border-right-width: 3px;
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal:hover > .slider,
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal > .slider.active {
-+	border-top-width: var(--vscode-spacing-size20);
-+	border-bottom-width: var(--vscode-spacing-size20);
-+}
-+
-+.monaco-workbench:not(.hc-black):not(.hc-light) .xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider {
-+	box-sizing: border-box;
-+	left: 0;
-+	width: 100%;
-+	border: 0 solid transparent;
-+	border-left-width: var(--vscode-spacing-size40);
-+	border-right-width: var(--vscode-spacing-size40);
-+	background-clip: padding-box;
-+	border-radius: var(--vscode-cornerRadius-circle);
-+}
-+
-+/* ---- Status bar: quiet (muted text from the themes) ------------------------------------ */
-+
-+/* Compact item pairs keep upstream's square seams. */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .part.statusbar > .items-container > .statusbar-item:not(.compact-left):not(.compact-right) > .statusbar-item-label {
-+	border-radius: var(--friedliver-radius-control);
-+}
-+
-+/* ---- Focus: always visible for the keyboard ------------------------------------------- */
-+
-+/* Buttons get a 2px ring that clears their own fill; inputs, list rows and tabs keep
-+   upstream's outline (focusBorder / list.focusOutline, at least 3:1 against every surface
-+   in the FriedLiver themes, see test/themes.test.ts). */
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button:focus-visible,
-+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button-dropdown > .monaco-button:focus-visible {
-+	outline: 2px solid var(--vscode-focusBorder);
-+	outline-offset: 2px;
-+}
-+
-+/* ---- Motion: short fades on hover-only chrome, never with reduced motion -------------- */
-+
-+.monaco-workbench.monaco-enable-motion:not(.hc-black):not(.hc-light) .monaco-text-button,
-+.monaco-workbench.monaco-enable-motion:not(.hc-black):not(.hc-light) .part.titlebar .command-center .action-item.command-center-center {
-+	transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
-+}
-+
-+@media (prefers-reduced-motion: reduce) {
-+	.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-text-button,
-+	.monaco-workbench:not(.hc-black):not(.hc-light) .part.titlebar .command-center .action-item.command-center-center {
-+		transition: none;
-+	}
-+}
+diff --git a/src/vs/base/browser/ui/menu/menu.ts b/src/vs/base/browser/ui/menu/menu.ts
+index f6b4122a..0d5c0172 100644
+--- a/src/vs/base/browser/ui/menu/menu.ts
++++ b/src/vs/base/browser/ui/menu/menu.ts
+@@ -1163,11 +1163,11 @@ ${formatRule(Codicon.menuSubmenu)}
+ .monaco-menu .monaco-action-bar.vertical .action-menu-item {
+ 	flex: 1 1 auto;
+ 	display: flex;
+-	height: 24px;
++	height: var(--fl-h-md, 24px);
+ 	align-items: center;
+ 	position: relative;
+ 	margin: 0 4px;
+-	border-radius: var(--vscode-cornerRadius-medium);
++	border-radius: var(--fl-r-row, var(--vscode-cornerRadius-medium)); /* FriedLiver: Menu §2.13 rows */
+ }
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-menu-item:hover .keybinding,
+@@ -1346,7 +1346,7 @@ ${formatRule(Codicon.menuSubmenu)}
+ 			pointer-events: none;
+ 			transform-origin: inherit;
+ 			background-color: color-mix(in srgb, var(--modern-ui-solid-menu-background) var(${CONTEXT_VIEW_MENU_MOTION_BACKDROP_OPACITY_VARIABLE}, 0%), var(--modern-ui-glass-menu-background));
+-			backdrop-filter: blur(12px);
++			backdrop-filter: var(--fl-glass-blur, blur(12px)); /* FriedLiver: spec glass */
+ 		}
+ 	}
+ }
+@@ -1399,7 +1399,7 @@ ${formatRule(Codicon.menuSubmenu)}
+ }
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-menu-item {
+-	height: 24px;
++	height: var(--fl-h-md, 24px); /* FriedLiver: Menu §2.13 rows are 26 */
+ }
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-label:not(.separator),
+@@ -1416,7 +1416,7 @@ ${formatRule(Codicon.menuSubmenu)}
+ 
+ .monaco-menu .monaco-action-bar.vertical .action-label.separator {
+ 	font-size: inherit;
+-	margin: 5px 0 !important;
++	margin: var(--fl-sp-1, 5px) 0 !important; /* FriedLiver: Divider §2.26 */
+ 	padding: 0;
+ 	border-radius: 0;
+ }
+diff --git a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
+index 38e72282..cb47599b 100644
+--- a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
++++ b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
+@@ -39,7 +39,7 @@ import { logNotificationInteraction } from '../../../common/notificationTelemetr
+ 
+ export class NotificationsCenter extends Themable implements INotificationsCenterController {
+ 
+-	private static readonly MAX_DIMENSIONS = new Dimension(450, 400);
++	private static readonly MAX_DIMENSIONS = new Dimension(400, 400); // FriedLiver: Toast §2.15 width
+ 
+ 	private static readonly MAX_NOTIFICATION_SOURCES = 10; // maximum number of notification sources to show in configure dropdown
+ 
+diff --git a/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts b/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
+index 0b62b580..3c7821e2 100644
+--- a/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
++++ b/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts
+@@ -47,7 +47,7 @@ enum ToastVisibility {
+ 
+ export class NotificationsToasts extends Themable implements INotificationsToastController {
+ 
+-	private static readonly MAX_WIDTH = 450;
++	private static readonly MAX_WIDTH = 400; // FriedLiver: Toast §2.15
+ 	private static readonly MAX_NOTIFICATIONS = 3;
+ 
+ 	private static readonly PURGE_TIMEOUT: { [severity: number]: number } = {
+diff --git a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
+index ebb6b6f9..9e7f6de6 100644
+--- a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
++++ b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
+@@ -39,7 +39,7 @@ import { logNotificationInteraction, NotificationTelemetrySurface } from '../../
+ import { NotificationActionRunner } from './notificationsCommands.js';
+ 
+ /** Default height (px) of a single notification row. */
+-export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 42;
++export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 38; // FriedLiver: Toast §2.15 (8 + 22 + 8)
+ 
+ /** Compact height (px) of a single notification row. */
+ export const COMPACT_NOTIFICATION_ROW_HEIGHT = 34;
+@@ -117,7 +117,7 @@ export class NotificationsListDelegate implements IListVirtualDelegate<INotifica
+ 		if (isNonEmptyArray(notification.actions?.secondary)) {
+ 			actions++; // secondary actions
+ 		}
+-		this.offsetHelper.style.width = `${450 /* notifications container width */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
++		this.offsetHelper.style.width = `${400 /* notifications container width (FriedLiver: Toast §2.15) */ - (10 /* padding */ + 30 /* severity icon */ + (actions * 30) /* actions */ - (Math.max(actions - 1, 0) * 4) /* less padding for actions > 1 */)}px`;
+ 
+ 		// Render message into offset helper
+ 		const renderedMessage = NotificationMessageRenderer.render(notification.message);
 diff --git a/src/vs/workbench/browser/style.ts b/src/vs/workbench/browser/style.ts
-index 9250ef3f..d700a770 100644
+index 9250ef3f..b3e411a0 100644
 --- a/src/vs/workbench/browser/style.ts
 +++ b/src/vs/workbench/browser/style.ts
-@@ -4,6 +4,7 @@
+@@ -4,6 +4,8 @@
   *--------------------------------------------------------------------------------------------*/
  
  import './media/style.css';
-+import './media/friedliver.css'; // FriedLiver: the workbench look, after upstream's base styles
++import './media/friedliver-tokens.css'; // FriedLiver: the design system's tokens (generated by prepare.mjs)
++import './media/friedliver.css'; // FriedLiver: the workbench look, after upstream's base styles (copied by prepare.mjs)
  import { registerThemingParticipant } from '../../platform/theme/common/themeService.js';
  import { WORKBENCH_BACKGROUND, TITLE_BAR_ACTIVE_BACKGROUND } from '../common/theme.js';
  import { isWeb, isIOS } from '../../base/common/platform.js';
+diff --git a/src/vs/workbench/electron-browser/desktop.contribution.ts b/src/vs/workbench/electron-browser/desktop.contribution.ts
+index 41250d7b..a609834a 100644
+--- a/src/vs/workbench/electron-browser/desktop.contribution.ts
++++ b/src/vs/workbench/electron-browser/desktop.contribution.ts
+@@ -28,7 +28,6 @@ import { NativeWindow } from './window.js';
+ import { ModifierKeyEmitter } from '../../base/browser/dom.js';
+ import { applicationConfigurationNodeBase, securityConfigurationNodeBase } from '../common/configuration.js';
+ import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from '../../platform/window/electron-browser/window.js';
+-import product from '../../platform/product/common/product.js';
+ 
+ // Actions
+ (function registerActions(): void {
+@@ -281,7 +280,7 @@ import product from '../../platform/product/common/product.js';
+ 						localize(`window.menuStyle.native`, "Use the native menu. This is ignored when {0} is set to {1}.", '`#window.titleBarStyle#`', '`custom`'),
+ 						localize(`window.menuStyle.inherit`, "Matches the menu style to the title bar style defined in {0}.", '`#window.titleBarStyle#`'),
+ 					],
+-				'default': product.quality !== 'stable' ? 'inherit' : (isMacintosh ? 'native' : 'inherit'), // TODO@bpasero figure out the default
++				'default': 'inherit', // FriedLiver: custom menus on macOS too (they follow the custom title bar)
+ 				'scope': ConfigurationScope.APPLICATION,
+ 				'markdownDescription': isMacintosh ?
+ 					localize('window.menuStyle.mac', "Adjust the context menu appearances to either be native by the OS, custom, or inherited from the title bar style defined in {0}.", '`#window.titleBarStyle#`') :
+@@ -291,7 +290,7 @@ import product from '../../platform/product/common/product.js';
+ 			'window.dialogStyle': {
+ 				'type': 'string',
+ 				'enum': ['native', 'custom'],
+-				'default': 'native',
++				'default': 'custom', // FriedLiver: dialogs FriedLiver styles
+ 				'scope': ConfigurationScope.APPLICATION,
+ 				'description': localize('dialogStyle', "Adjust the appearance of dialogs to be native by the OS or custom."),
+ 				agentsWindow: { default: 'custom' },
+diff --git a/src/vs/workbench/services/layout/browser/layoutService.ts b/src/vs/workbench/services/layout/browser/layoutService.ts
+index 6851c3b5..cb87551d 100644
+--- a/src/vs/workbench/services/layout/browser/layoutService.ts
++++ b/src/vs/workbench/services/layout/browser/layoutService.ts
+@@ -62,7 +62,7 @@ export const enum LayoutSettings {
+ export const enum ModernUIFrostedGlassOpacity {
+ 	Minimum = 50,
+ 	Maximum = 100,
+-	Default = 80
++	Default = 84 // FriedLiver: the spec's glass alpha
+ }
+ 
+ export const enum ModernUIEditorTabStyle {

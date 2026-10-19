@@ -24,8 +24,11 @@ describe('the FriedLiver tools, used by the demo agent', () => {
 
     await waitFor(() => core.decisions().length > 0);
     const [decision] = core.decisions();
-    expect(decision).toMatchObject({ kind: 'bridge', chatId: a.id, title: 'Demo wants to ask Demo' });
-    expect(asked).toEqual(['Demo wants to ask Demo']);
+    // The chat by its topic (titled from its first message), not its label.
+    const named = `“${core.chat(a.id)!.title}” wants to ask Demo`;
+    expect(named).toBe('“Ask demo hello” wants to ask Demo');
+    expect(decision).toMatchObject({ kind: 'bridge', chatId: a.id, title: named });
+    expect(asked).toEqual([named]);
     expect(core.snapshot.chats).toHaveLength(1);
     core.answerBridge(decision.id, 'allow');
     await turn;
@@ -102,8 +105,8 @@ describe('the FriedLiver tools, used by the demo agent', () => {
     await core.cancel(a.id);
     await turn;
     await waitFor(() => !core.snapshot.chats[1].busy);
-    expect(core.snapshot.chats[1].items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped (cancelled).' });
-    expect(core.chat(a.id)!.items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Stopped (cancelled).' }));
+    expect(core.snapshot.chats[1].items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped.' });
+    expect(core.chat(a.id)!.items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Stopped.' }));
   });
 
   it('refuses the caller itself, busy chats and unknown ones, and messages idle ones', async () => {
@@ -124,7 +127,7 @@ describe('the FriedLiver tools, used by the demo agent', () => {
     await core.cancel(b.id);
     await busy;
 
-    expect(await call({ tool: 'send_to_chat', chatId: b.id, message: 'from a' })).toMatch(/^Sent to Gemini/);
+    expect(await call({ tool: 'send_to_chat', chatId: b.id, message: 'from a' })).toMatch(/^Sent to “wait” \(chat-/);
     await waitFor(() => core.chat(b.id)!.turns === 2);
     expect(core.chat(b.id)!.items.find((i) => i.kind === 'link')).toMatchObject({ role: 'piped-in', chatId: a.id, by: 'agent', text: 'from a' });
     expect(await call({ tool: 'read_chat', chatId: b.id, last: 1 })).toContain('From Demo');

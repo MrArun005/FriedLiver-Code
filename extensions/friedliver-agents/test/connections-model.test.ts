@@ -57,10 +57,11 @@ describe('links between chats', () => {
 
   it('lists an agent asking to reach another chat as a decision until answered', () => {
     let s = run([
-      { t: 'created', chat: chat('chat-1', { label: 'Claude 2', agent: 'claude' }) },
+      { t: 'created', chat: chat('chat-1', { label: 'Claude 2', title: 'Review the payments module', agent: 'claude' }) },
       { t: 'items', chatId: 'chat-1', items: [{ kind: 'bridge', requestId: 'bridge-1', tool: 'ask_agent', target: { agent: 'gemini' }, text: 'Review it', state: 'awaiting' }] },
     ]);
-    expect(decisions(s)).toEqual([{ chatId: 'chat-1', kind: 'bridge', id: 'bridge-1', title: 'Claude 2 wants to ask Gemini' }]);
+    // Across chats the subject is the chat's topic, never its label.
+    expect(decisions(s)).toEqual([{ chatId: 'chat-1', kind: 'bridge', id: 'bridge-1', title: '“Review the payments module” wants to ask Gemini' }]);
     s = reduce(s, { t: 'bridge', requestId: 'bridge-1', state: 'allowed' });
     expect(decisions(s)).toEqual([]);
   });

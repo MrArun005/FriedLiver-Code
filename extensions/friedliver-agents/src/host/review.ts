@@ -116,6 +116,9 @@ export interface ReviewPlacement {
 export class ReviewUi implements vscode.Disposable {
   readonly fs = new ProposedFs();
   private readonly disposables: vscode.Disposable[] = [];
+  /** The review diff each chat last opened by itself, and its last read-only proposal. */
+  private readonly chatTabs = new Map<string, string>();
+  private readonly proposalTabs = new Map<string, string>();
 
   constructor(private readonly core: () => AgentCore) {
     this.disposables.push(
@@ -132,11 +135,41 @@ export class ReviewUi implements vscode.Disposable {
    * Registers the proposal and opens the diff. By default it doesn't take focus
    * from the chat; an edit asked for from the editor passes where the user is
    * looking, so the diff opens there, focused, ready for Accept or Reject.
+   * Diffs that open by themselves reuse one tab per chat: the chat's previous
+   * one closes unless you changed it (its card still opens it again).
    */
   async show(review: PendingReview, placement?: ReviewPlacement): Promise<void> {
     this.fs.set(proposedUri(review.reviewId, review.path), review.proposed, false);
     if (review.before === null) this.fs.set(originalUri(review), '', true);
+    if (review.auto && review.chatId && !placement?.focus) {
+      const previous = this.chatTabs.get(review.chatId);
+      this.chatTabs.set(review.chatId, review.reviewId);
+      if (previous && previous !== review.reviewId) await this.closeTab(previous);
+    }
     await this.open(review.reviewId, !placement?.focus, placement?.viewColumn);
+  }
+
+  /** What a permission request would write, read-only, against the file on disk. One tab per chat. */
+  async showProposal(p: { id: string; path: string; before: string | null; after: string; agentLabel: string; chatId: string }): Promise<void> {
+    const id = `ask-${p.id}`;
+    const right = proposedUri(id, p.path);
+    this.fs.set(right, p.after, true);
+    const left = p.before === null ? vscode.Uri.from({ scheme: PROPOSED_SCHEME, path: `/${id}/original/${path.basename(p.path)}` }) : vscode.Uri.file(p.path);
+    if (p.before === null) this.fs.set(left, '', true);
+    const previous = this.proposalTabs.get(p.chatId);
+    this.proposalTabs.set(p.chatId, id);
+    if (previous && previous !== id) {
+      await vscode.window.tabGroups.close(this.tabs((r) => r === previous)).then(undefined, () => false);
+      this.fs.removeReview(previous);
+    }
+    const title = `${path.basename(p.path)} (${p.agentLabel} asks to change it, read-only)`;
+    await vscode.commands.executeCommand('vscode.diff', left, right, title, { preview: true, preserveFocus: false } satisfies vscode.TextDocumentShowOptions);
+  }
+
+  /** Closes a review's tab if its proposal wasn't edited; the review itself still waits. */
+  private async closeTab(reviewId: string): Promise<void> {
+    const dirty = vscode.workspace.textDocuments.some((d) => reviewIdOf(d.uri) === reviewId && d.isDirty);
+    if (!dirty) await vscode.window.tabGroups.close(this.tabs((id) => id === reviewId)).then(undefined, () => false);
   }
 
   async open(reviewId: string, preserveFocus = false, viewColumn?: vscode.ViewColumn): Promise<void> {

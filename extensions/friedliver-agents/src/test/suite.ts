@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import type { Controller } from '../extension';
 import type { EditOutcome } from '../host/editFlow';
 import type { Surface } from '../host/webviews';
+import type { HostMessage } from '../shared/messages';
 import { lastReply, type ChatView } from '../shared/model';
 
 const shots = process.env.FRIEDLIVER_SCREENSHOTS;
@@ -24,7 +25,7 @@ export async function run(): Promise<void> {
   const c = await ext.activate();
   const step = (text: string) => console.log(`[suite] ${text}`);
   // Webview messages go through the same handler the views use.
-  const fake: Surface = { kind: 'chat', webview: undefined as never, ready: false, visible: () => true, reveal: () => {} };
+  const fake: Surface = { kind: 'chat', webview: undefined as never, ready: false, visible: () => true };
 
   await vscode.commands.executeCommand('friedliver.agents.focus');
   // Startup toasts ("running as root", "extensions disabled") would cover the view.
@@ -71,11 +72,48 @@ export async function run(): Promise<void> {
   await c.handle(fake, { type: 'undo', chatId, turnId: changes.turnId });
   await waitFor(() => !existsSync(notes), 'NOTES.md removed by undo');
 
+  step('session controls: options before the first message, model, approval level');
+  const controls = await c.newChat('demo');
+  if (!controls) throw new Error('No chat');
+  await waitFor(() => c.core.chat(controls)?.session?.live === true && (c.core.chat(controls)?.session?.commands.length ?? 0) > 0, 'the session to start before any message');
+  await c.handle(fake, { type: 'setOption', chatId: controls, optionId: 'model', value: 'demo-small' });
+  await c.handle(fake, { type: 'approval', chatId: controls, level: 'edits' });
+  await waitFor(() => c.core.chat(controls)!.session!.options.find((o) => o.id === 'mode')?.current === 'acceptEdits', "the agent's mode to follow the level");
+  await c.handle(fake, { type: 'send', chatId: controls, text: 'hi', images: [] });
+  await waitFor(() => lastReply(c.core.chat(controls)!) === 'You said: hi (demo-small · medium)', 'the reply with the chosen model');
+  await pause(800);
+  await screenshot('11-session-controls');
+
+  step('a permission request is the review, for an agent that writes files itself');
+  await c.handle(fake, { type: 'approval', chatId: controls, level: 'ask' });
+  const readme = path.join(workspace, 'README.md');
+  const before = await readFile(readme, 'utf8');
+  await c.handle(fake, { type: 'send', chatId: controls, text: 'perm-edit README.md', images: [] });
+  await waitFor(() => c.core.decisions()[0]?.kind === 'permission', 'the edit request');
+  const ask = c.core.chat(controls)!.items.find((i) => i.kind === 'permission' && !i.answer);
+  if (ask?.kind !== 'permission' || !ask.detail?.files?.[0]?.full) throw new Error(`No diff on the request: ${JSON.stringify(ask)}`);
+  await c.handle(fake, { type: 'permissionDiff', requestId: ask.requestId, path: readme });
+  await waitFor(() => {
+    const t = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    return t instanceof vscode.TabInputTextDiff && t.modified.scheme === 'friedliver-proposed';
+  }, 'the read-only diff of the request');
+  await pause(800);
+  await screenshot('12-permission-diff');
+  await c.handle(fake, { type: 'permission', requestId: ask.requestId, optionId: 'approved' });
+  await waitFor(() => !c.core.chat(controls)!.busy, 'the edit turn to end');
+  if ((await readFile(readme, 'utf8')) === before) throw new Error('The agent did not write README.md');
+  const card = c.core.chat(controls)!.items.filter((i) => i.kind === 'changes').at(-1);
+  if (card?.kind !== 'changes' || !card.files.includes(readme)) throw new Error(`No changes card for the agent's own write: ${JSON.stringify(card)}`);
+  await c.handle(fake, { type: 'undo', chatId: controls, turnId: card.turnId });
+  await waitFor(() => existsSync(readme), 'README.md');
+  if ((await readFile(readme, 'utf8')) !== before) throw new Error('Undo did not restore README.md');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
   step('task in its own worktree');
   c.openTasks();
   await c.handle(fake, { type: 'createTask', agent: 'demo', prompt: 'tour', worktree: true });
-  await waitFor(() => c.core.snapshot.chats.length === 2, 'the task chat');
-  const task = c.core.snapshot.chats[1];
+  await waitFor(() => c.core.snapshot.chats.length === 3, 'the task chat');
+  const task = c.core.snapshot.chats[2];
   if (!task.branch) throw new Error('Task has no branch');
   await waitFor(() => c.core.decisions()[0]?.kind === 'review', 'the task review');
   c.openTasks();
@@ -124,6 +162,43 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('friedliver.images.focus');
   await pause(1200);
   await screenshot('08-images');
+
+  step('Open on a notification or in the Agent Manager: the chat tab, opened when there is none');
+  // The Agents view in a closed side bar, as the fork starts it; Open used to show the chat there instead.
+  await vscode.commands.executeCommand('workbench.action.closeSidebar');
+  await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+  await pause(500);
+  const host = c as unknown as { chatPanel?: vscode.WebviewPanel; surfaces: Set<Surface>; replay: { message: HostMessage }[]; turnEnded(t: object): void };
+  if (host.chatPanel) throw new Error('The chat tab is still open');
+  const manager: Surface = { kind: 'tasks', webview: undefined as never, ready: false, visible: () => true };
+  await c.handle(manager, { type: 'openChat', chatId, item: command.commandId });
+  const tabShows = (id: string) => {
+    const tab = [...host.surfaces].find((s) => s.webview === host.chatPanel?.webview);
+    return !!host.chatPanel?.visible && !!tab?.ready && tab.selected === id;
+  };
+  await waitFor(() => tabShows(chatId), 'the chat tab to open with the chat');
+  // The tab loaded after Open posted to it, so the item goes again once it's ready.
+  if (!host.replay.some((r) => r.message.type === 'reveal' && r.message.id === command.commandId)) throw new Error('The item to reveal is not kept for a view that loads');
+  host.chatPanel!.dispose();
+  await vscode.commands.executeCommand('notifications.clearAll');
+  host.turnEnded({ chatId: controls, label: 'Demo 2', title: 'done', stopReason: 'end_turn', files: 0, byUser: true });
+  await pause(500);
+  await vscode.commands.executeCommand('notifications.focusToasts');
+  await vscode.commands.executeCommand('notification.acceptPrimaryAction');
+  await waitFor(() => tabShows(controls), "the notification's Open to show the chat in the chat tab");
+
+  step('Agents & Accounts: Demo hidden until turned on, a check that caches models, the page');
+  const settings = vscode.workspace.getConfiguration('friedliver');
+  if (c.accountsPage.view().cards.some((card) => card.agent === 'demo')) throw new Error('Demo shows while friedliver.showDemoAgent is off');
+  await settings.update('showDemoAgent', true, vscode.ConfigurationTarget.Global);
+  await waitFor(() => c.accountsPage.view().cards.some((card) => card.agent === 'demo'), 'Demo to show once turned on');
+  const demo = await c.accounts.check('demo');
+  if (demo?.status !== 'signed-in') throw new Error(`The Demo check said ${demo?.status}`);
+  if (!c.accountsPage.view().cards.find((card) => card.agent === 'demo')?.model) throw new Error("The check didn't keep Demo's models");
+  await vscode.commands.executeCommand('friedliver.accounts', 'demo');
+  await pause(1500);
+  await screenshot('13-accounts');
+  await settings.update('showDemoAgent', undefined, vscode.ConfigurationTarget.Global);
   step('all passed');
 }
 
@@ -180,12 +255,16 @@ async function editorCommands(c: Controller, fake: Surface, askChat: string, ste
   problems.set(doc.uri, [problem]);
   await vscode.window.showTextDocument(doc);
   const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>('vscode.executeCodeActionProvider', doc.uri, new vscode.Range(1, 3, 1, 3));
-  const fix = actions.find((a) => a.title === 'Fix with Agent');
+  // With TypeScript's own problems on the line too, each action names its problem.
+  const fix = actions.find((a) => a.title === 'Fix with Agent' || a.title === 'Fix with Agent: Unexpected const.');
   if (!fix?.command?.arguments) throw new Error(`No Fix with Agent: ${actions.map((a) => a.title).join(', ')}`);
   const fixing = vscode.commands.executeCommand<EditOutcome | undefined>(fix.command.command, ...fix.command.arguments);
   await waitFor(() => c.core.decisions()[0]?.kind === 'review', 'the fix to review');
-  const proposed = c.core.review(c.core.decisions()[0].id)!.proposed;
+  const fixId = c.core.decisions()[0].id;
+  const proposed = c.core.review(fixId)!.proposed;
   if (!proposed.includes('  // Fix this error: Unexpected const.')) throw new Error(`Wrong fix: ${proposed}`);
+  // Reject works on the diff in front of you, so wait until it is.
+  await waitFor(() => c.reviews.activeReviewId() === fixId, 'the fix diff where the user is looking');
   await vscode.commands.executeCommand('friedliver.review.reject');
   if ((await fixing)?.reviews[0]?.state !== 'rejected') throw new Error('Fix not rejected');
   problems.dispose();
