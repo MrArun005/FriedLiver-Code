@@ -42,7 +42,7 @@ import {
   CLAUDE_READ_ONLY_META,
 } from '../shared/session';
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
-import { ESCALATING, commandOf, planOf, type PermissionDetail } from '../shared/tools';
+import { ESCALATING, claudeMeta, commandOf, planOf, type PermissionDetail } from '../shared/tools';
 import { approvalOf, type Approvable } from '../shared/approval';
 import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
 import { chatRef } from '../shared/names';
@@ -83,6 +83,7 @@ import { loginExtras } from './signin';
 import { mergeOffered, type AccountRecord } from '../shared/accounts';
 import { relativeFile, rewoundHistory } from './transcript';
 import { RULES_CAP, type Rules } from './sharedRules';
+import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge } from './discuss';
 
 const READ_ONLY = 'This chat only proposes text: FriedLiver refuses file access, commands and tools in it.';
 
@@ -168,6 +169,8 @@ export interface CoreOptions {
   browser?: ToolHost['browser'];
   /** Whether read_chat between linked chats skips the user's OK (friedliver.chat.autoAllowLinkedReads). */
   autoAllowLinkedReads?: () => boolean;
+  /** friedliver.discuss.maxRounds and .tokenBudget; the defaults when unset. */
+  discussSettings?: () => { maxRounds?: number; tokenBudget?: number };
   /** Whether the external client's browser actions skip the user's OK (friedliver.browser.externalAutoApprove). */
   externalAutoApprove?: () => boolean;
   /** The browser page's origin and whether a selector there is a password field (browser.ts). */
@@ -301,6 +304,12 @@ export class AgentCore {
   /** New tasks whose first message is on its way: their turn, not the warm start, reports a failure to start. */
   private readonly turnComing = new Set<string>();
   private readonly links: Connections;
+  /** /discuss (discuss.ts); chats taking part in one are read-only (`discussing`) until it ends. */
+  readonly discussions: Discussions;
+  /** Discussions each chat is in now: read-only while above 0. */
+  private readonly discussing = new Map<string, number>();
+  /** A discussing chat's mode before it went read-only, put back after. */
+  private readonly modeBefore = new Map<string, string>();
   private readonly requests: BridgeRequests;
   private bridge?: BridgeServer;
   private bridgeStarting?: Promise<void>;
@@ -371,6 +380,32 @@ export class AgentCore {
       createChat: (agent, opts) => this.createChat(agent, opts),
       prompt: (chatId, blocks) => this.promptBlocks(chatId, blocks),
       preamble: (chatId, text) => this.preambles.set(chatId, text),
+    });
+    this.discussions = new Discussions({
+      get state() {
+        return live();
+      },
+      dispatch: (action) => this.dispatch(action),
+      id: (prefix) => this.id(prefix),
+      settings: () => this.options.discussSettings?.() ?? {},
+      participant: async (sourceId, agent) => {
+        const source = this.requireChat(sourceId);
+        const known = this.links.consultation(sourceId, agent);
+        if (known) return known.id;
+        const chat = await this.createChat(agent, { shareWorktreeOf: sourceId, title: 'Discussion', origin: { kind: 'consult', chatId: sourceId, by: 'user' }, depth: source.depth + 1 });
+        return chat.id;
+      },
+      prompt: (chatId, text) => {
+        const chat = this.requireChat(chatId);
+        // What the agent was given, so its reply is read from here on (folded into the card in the chat).
+        this.items(chatId, [{ kind: 'link', linkId: 'discussion', role: 'piped-in', chatId, agent: chat.agent, label: 'Discussion', text, by: 'user' }]);
+        return this.promptBlocks(chatId, [{ type: 'text', text }]);
+      },
+      ask: (sourceId, chatId, agent, text) => this.links.consult(sourceId, agent, text, 'user', { chatId }),
+      cancel: (chatId) => this.cancel(chatId),
+      guard: (chatId, on) => this.guardDiscussion(chatId, on),
+      send: (chatId, text) => this.send(chatId, text),
+      message: (from, to, text) => this.links.message(from, to, text, 'user'),
     });
     this.requests = new BridgeRequests({
       get state() {
@@ -527,6 +562,8 @@ export class AgentCore {
    * starts with an @mention ("@gemini review this") asks that agent instead.
    */
   async send(chatId: string, text: string, images: Attachment[] = [], options: SendOptions = {}): Promise<void> {
+    // During a discussion a message is said in it, heard from the next turn on.
+    if (this.discussions.runningIn(chatId)) return this.discussions.interject(chatId, text);
     const mention = parseMention(text);
     if (mention) {
       await this.consult(chatId, mention.agent, options.context ? `${mention.text}\n\n${options.context}` : mention.text, 'user', images);
@@ -863,7 +900,7 @@ export class AgentCore {
       const value = wanted[key];
       if (option && option.category !== 'mode' && offers(option, value) && option.current !== value) await this.applyOption(chatId, option, value, { by: 'auto' });
     }
-    if (chat.readOnly) await this.restrictMode(chatId);
+    if (chat.readOnly || this.discussing.has(chatId)) await this.restrictMode(chatId);
     else await this.applyLevel(chatId, false);
     this.updateKnown(chatId);
   }
@@ -919,6 +956,50 @@ export class AgentCore {
     if (by === 'user' && !chat.titlePinned && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link')) this.retitle(chat, text);
     return this.links.consult(chatId, agent, text, by, { images, fresh });
   }
+
+  /** /discuss: this chat's agent and `agents` talk `question` through; resolves with the conclusion on the card. */
+  discuss(chatId: string, agents: AgentKey[], question: string): Promise<void> {
+    this.retitle(this.requireChat(chatId), question);
+    return this.discussions.start(chatId, agents, question);
+  }
+
+  /**
+   * Read-only for a chat in a discussion: FriedLiver refuses writes, commands and acting tools, and the agent goes
+   * to its read-only mode. Counted per chat, so a chat in two discussions stays read-only until both have ended;
+   * the mode is saved on the first and put back on the last. An extra "off" does nothing.
+   */
+  private async guardDiscussion(chatId: string, on: boolean): Promise<void> {
+    const n = this.discussing.get(chatId) ?? 0;
+    if (on) {
+      this.discussing.set(chatId, n + 1);
+      if (n === 0) {
+        const mode = modeOption(this.chat(chatId)?.session);
+        if (mode && typeof mode.current === 'string') this.modeBefore.set(chatId, mode.current);
+      }
+      await this.restrictMode(chatId);
+      return;
+    }
+    if (n === 0) return;
+    if (n > 1) {
+      this.discussing.set(chatId, n - 1);
+      return;
+    }
+    this.discussing.delete(chatId);
+    const before = this.modeBefore.get(chatId);
+    this.modeBefore.delete(chatId);
+    const mode = modeOption(this.chat(chatId)?.session);
+    if (mode && before !== undefined && mode.current !== before) await this.applyOption(chatId, mode, before);
+    else if (before === undefined) await this.applyLevel(chatId, true);
+  }
+
+  /** The tool's real name, as the agent's adapter reports it (Claude's _meta), on the request or its tool call: never the title. */
+  private toolName(chatId: string, call: acp.ToolCallUpdate): string | undefined {
+    const own = claudeMeta(call._meta).tool;
+    if (own) return own;
+    const step = this.chat(chatId)?.items.find((i) => i.kind === 'tool' && i.id === call.toolCallId);
+    return step?.kind === 'tool' ? step.tool : undefined;
+  }
+
 
   /** Forwards each finished turn of `from` to `to` as a message. */
   pipe(from: string, to: string, by: 'user' | 'agent' = 'user'): ChatLink {
@@ -1024,6 +1105,7 @@ export class AgentCore {
   }
 
   bridgeCall(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {
+    if (this.discussing.has(chatId) && !discussionAllowsBridge(call)) return Promise.reject(new Error(DISCUSS_READ_ONLY));
     return this.requests.call(chatId, call, signal);
   }
 
@@ -1950,6 +2032,12 @@ export class AgentCore {
     const tool = this.mergedTool(chatId, req.toolCall);
     const proposals = await this.proposalsFor(tool).catch(() => [] as Proposal[]);
     if (signal.aborted) return { outcome: { outcome: 'cancelled' } };
+    if (this.discussing.has(chatId) && !discussionAllows({ kind: tool.kind, toolName: this.toolName(chatId, req.toolCall), command: !!commandOf(tool.rawInput) || !!planOf(tool.rawInput), diffs: proposals.length > 0 })) {
+      const reject = req.options.find((o) => o.kind === 'reject_once') ?? req.options.find((o) => o.kind.startsWith('reject'));
+      const title = tool.title?.trim() || 'A change';
+      this.items(chatId, [{ kind: 'permission', requestId, toolCallId: req.toolCall.toolCallId, title, options: req.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })), answer: reject?.name ?? 'Refused', auto: 'Read-only during the discussion', ...(tool.kind ? { toolKind: tool.kind } : {}) }]);
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } };
+    }
     const chat = this.chat(chatId);
     const kind = tool.kind ?? undefined;
     const detail = this.permissionDetail(tool, proposals, chat);
@@ -2143,6 +2231,7 @@ export class AgentCore {
    */
   private async reviewWrite(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void> {
     if (this.readOnlyChat(chatId)) throw new Error(READ_ONLY);
+    if (chatId && this.discussing.has(chatId)) throw new Error(DISCUSS_READ_ONLY);
     const file = this.checkWrite(req.path);
     const before = await readIfExists(file);
     const reviewId = this.id('review');
@@ -2211,7 +2300,7 @@ export class AgentCore {
       approve: async (info) => {
         const commandId = this.id('cmd');
         const chatId = this.hub.chatIdForSession(info.sessionId, agentId);
-        if (this.readOnlyChat(chatId)) return Promise.resolve(false);
+        if (this.readOnlyChat(chatId) || (chatId && this.discussing.has(chatId))) return Promise.resolve(false);
         known.set(info.terminalId, { commandId });
         const outside = insideRoots(info.cwd, this.roots()) === null;
         // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.

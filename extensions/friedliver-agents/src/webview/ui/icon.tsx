@@ -27,6 +27,7 @@ export const ICONS = {
   unarchive: 'M2.5 3.5h11v2.75h-11zM3.5 6.25v6.25h9V6.25M8 11.5V8.25M6.5 9.75 8 8.25l1.5 1.5',
   handoff: 'M2.5 8h7.5M7.5 5l3 3-3 3M13.25 3.5v9',
   ask: 'M2.75 3.5h10.5v6.75H8L5 12.75v-2.5H2.75z',
+  discuss: 'M2.25 2.75h7.5v5H6l-2.25 2v-2h-1.5zM11.75 6.25h2v5h-1.25v2l-2.25-2H7v-1.75',
   pipe: 'M2.5 6.5h7.5M2.5 9.5h7.5M9.5 4.5 13 8l-3.5 3.5',
   chevron: 'M5 6.5l3 3 3-3',
   chevronDown: 'M4 6l4 4 4-4',
@@ -63,6 +64,9 @@ export const ICONS = {
   lock: 'M4.25 7.25h7.5v6h-7.5zM5.75 7.25V5.5a2.25 2.25 0 0 1 4.5 0v1.75',
   pointer: 'M4 3l8 4.25-3.5 1.1L7.25 12z',
   layers: 'M8 2.75l5.25 2.75L8 8.25 2.75 5.5zM2.75 8.25 8 11l5.25-2.75',
+  split: 'M8 2v12M3 5h3M3 8h3M3 11h3M10 5h3M10 8h3M10 11h3',
+  reply: 'M6.5 4 2.5 8l4 4M2.5 8h7a4 4 0 0 1 4 4v1',
+  arrowLeft: 'M13 8H4M7.5 4.5 4 8l3.5 3.5',
 };
 export type IconName = keyof typeof ICONS;
 
