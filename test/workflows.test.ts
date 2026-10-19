@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 const dir = path.resolve(__dirname, '..', '.github', 'workflows');
 const workflows = fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
-const read = (f: string) => fs.readFileSync(path.join(dir, f), 'utf8');
+// Windows checkouts may turn LF into CRLF; the checks are about content.
+const read = (f: string) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n');
 
 /** The script text of every `run:` step (single line or block). */
 function runScripts(text: string): string[] {
@@ -28,7 +29,7 @@ function runScripts(text: string): string[] {
 
 describe('GitHub workflows', () => {
   it('exist', () => {
-    expect(workflows.sort()).toEqual(['build.yml', 'ci.yml', 'upstream.yml']);
+    expect(workflows.sort()).toEqual(['build.yml', 'ci.yml', 'index-bench.yml', 'release.yml', 'update-prs.yml', 'upstream.yml', 'workbench-shots.yml']);
   });
 
   for (const file of workflows) {
@@ -41,8 +42,10 @@ describe('GitHub workflows', () => {
 
       it('pin every action to a full commit', () => {
         const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
-        expect(uses.length).toBeGreaterThan(0);
-        for (const u of uses) expect(u, u).toMatch(/^[\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40}$/);
+        // update-prs.yml only calls the API; it checks nothing out.
+        if (file !== 'update-prs.yml') expect(uses.length).toBeGreaterThan(0);
+        // A workflow of this repository (release.yml calls build.yml) is pinned by being here.
+        for (const u of uses) expect(u, u).toMatch(/^([\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40}|\.\/\.github\/workflows\/[\w.-]+\.yml)$/);
       });
 
       it('keep untrusted ${{ }} values out of scripts', () => {
@@ -72,8 +75,31 @@ describe('GitHub workflows', () => {
     expect(writes).toHaveLength(1);
     const release = build.slice(build.indexOf('\n  release:'));
     expect(release).toMatch(/permissions:\n\s+contents: write/);
-    expect(release).toContain("if: github.ref_type == 'tag'");
+    expect(release).toContain("if: inputs.version || github.ref_type == 'tag'");
     expect(build).toMatch(/tags: \['v\*'\]/);
     expect(build).toMatch(/branches: \[main\]/);
+    expect(build).toMatch(/^ {2}workflow_call:$/m);
+  });
+
+  it('releases only from main after CI passed, then checks the published Mac app', () => {
+    const release = read('release.yml');
+    expect(release).toMatch(/^on:\n {2}workflow_dispatch:\n\n/m);
+    expect(release).toContain('refs/heads/main');
+    expect(release).toContain('completed/success');
+    expect(release).toContain('uses: ./.github/workflows/build.yml');
+    const verify = release.slice(release.indexOf('\n  verify:'));
+    expect(verify).toContain('runs-on: macos-latest');
+    expect(verify).toContain('shasum -a 256 -c');
+    expect(verify).toContain('codesign --verify --deep --strict');
+    expect(verify).toContain('codesign -d -r-');
+    expect(verify).toContain('CERT_ROOT: b96aa277e482e0496e8a4c1cda1b881748597643');
+  });
+
+  it('keeps pull requests up to date by merging main, never rebasing', () => {
+    const update = read('update-prs.yml');
+    expect(update).toContain('/update-branch');
+    expect(update).not.toMatch(/rebase"|update_method|--force/);
+    expect(update).toContain('gh workflow run ci.yml');
+    expect(read('ci.yml')).toMatch(/^ {2}workflow_dispatch:$/m);
   });
 });

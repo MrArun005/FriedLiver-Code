@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseMention, type AppState, type ChatLink, type ChatView, type Item } from '../src/shared/model';
+import { parseMention, reduce, type AppState, type ChatLink, type ChatView, type Item } from '../src/shared/model';
 import {
   MAP,
   MENTION_OPTIONS,
   applyMention,
   cardLine,
+  cardModel,
   clip,
   conflictText,
   conflictsOf,
@@ -14,6 +15,7 @@ import {
   filterChats,
   keepPlan,
   linkBadges,
+  mapKey,
   mapLayout,
   mentionOptions,
   mentionQuery,
@@ -21,10 +23,30 @@ import {
   nextDecision,
   planProgress,
   recentChats,
+  tabAfterClose,
+  openTab,
+  closeTab,
   relativePath,
+  rosterKey,
+  settleOrder,
+  slashAction,
+  slashMenu,
+  commandLabel,
   sortChats,
   statusOf,
+  subagents,
+  foldSubs,
+  panelTitle,
+  statusGroups,
   switcherGroups,
+  tipPlace,
+  stepsHeading,
+  shortDuration,
+  subagentAnswer,
+  transcriptGroups,
+  switcherMeta,
+  needsYou,
+  turnsOf,
 } from '../src/shared/view';
 
 const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
@@ -78,7 +100,31 @@ describe('search and sorting', () => {
   });
 
   it('counts the columns, archived chats and decisions', () => {
-    expect(counts(state([...chats, chat('x', { archived: true, items: [said, waiting] })]))).toEqual({ needsYou: 1, working: 1, done: 3, archived: 1, decisions: 1 });
+    expect(counts(state([...chats, chat('x', { archived: true, items: [said, waiting] })]))).toEqual({ needsYou: 1, working: 1, problem: 0, done: 3, archived: 1, decisions: 1 });
+  });
+
+  it('counts a failed chat as a problem, not as needing you, the same in the header, the map and the Inbox', () => {
+    const failed = chat('f', { items: [said, { kind: 'notice', tone: 'error', text: 'Claude isn’t installed.' }], turns: 1 });
+    const s = state([failed]);
+    expect(needsYou(failed)).toBe(false);
+    expect(counts(s)).toMatchObject({ needsYou: 0, problem: 1, decisions: 0 });
+    const lane = mapLayout(s).lanes[0];
+    expect(lane).toMatchObject({ needsYou: 0, problem: 1 });
+    const asks = state([chat('w', { items: [said, waiting] })]);
+    expect(counts(asks)).toMatchObject({ needsYou: 1, decisions: 1 });
+    expect(mapLayout(asks).lanes[0].needsYou).toBe(1);
+  });
+
+  it('counts the turns the agent answered, not the turns that ended', () => {
+    const reply = (text: string): Item => ({ kind: 'agent', text });
+    // A Demo that replied, whose busy flag never flipped (turns 0), and a Claude that failed to start (turns 1).
+    expect(turnsOf(chat('demo', { agent: 'demo', items: [said, reply('Done.')], turns: 0 }))).toBe(1);
+    expect(turnsOf(chat('cl', { items: [said, { kind: 'notice', tone: 'error', text: 'not installed' }], turns: 1 }))).toBe(0);
+    expect(turnsOf(chat('two', { items: [said, reply('a'), said, reply('b'), said], turns: 2 }))).toBe(2);
+    // The reply streaming now is not a turn yet.
+    expect(turnsOf(chat('busy', { busy: true, items: [said, reply('partial')] }))).toBe(0);
+    // A consult the agent answered is one.
+    expect(turnsOf(chat('c', { items: [{ kind: 'link', role: 'consulted', linkId: 'l', chatId: 'a', agent: 'codex', label: 'Codex', text: 'q', by: 'agent' }, reply('a')] }))).toBe(1);
   });
 
   it('steps through decisions and wraps around', () => {
@@ -97,7 +143,8 @@ describe('cards', () => {
   it('reads an agent asking to reach another agent as a decision with its request', () => {
     const c = chat('a', { label: 'Claude 2', items: [said, { kind: 'bridge', requestId: 'br-1', tool: 'ask_agent', target: { agent: 'gemini' }, text: 'Is this safe?', state: 'awaiting' }, waiting] });
     const line = cardLine(state([c]), c);
-    expect(line).toMatchObject({ text: 'Claude 2 wants to ask Gemini', code: 'Is this safe?', waiting: 2 });
+    // On its own card the chat is the subject: no label, no title repeated.
+    expect(line).toMatchObject({ text: 'Wants to ask Gemini', code: 'Is this safe?', waiting: 2 });
     expect(line.decision?.kind).toBe('bridge');
     expect(cardLine(state([chat('b', { busy: true, items: [said] })]), chat('b', { busy: true, items: [said] })).text).toBe('Working…');
   });
@@ -129,29 +176,30 @@ describe('cards', () => {
     expect(planProgress(chat('b'))).toBeNull();
   });
 
-  it('names links from the point of view of each chat', () => {
+  it('names links from the point of view of each chat, by the other chat\'s topic; the label only in the tooltip', () => {
     const s = state(
       [
-        chat('a', { label: 'Claude 2' }),
-        chat('b', { agent: 'gemini', label: 'Gemini 1', busy: true, origin: { kind: 'consult', chatId: 'a', by: 'agent' } }),
-        chat('c', { agent: 'codex', label: 'Codex 3', origin: { kind: 'handoff', chatId: 'a', by: 'user' } }),
-        chat('d', { agent: 'codex', label: 'Codex 4', group: 'g', createdAt: 1 }),
-        chat('e', { agent: 'gemini', label: 'Gemini 2', group: 'g', createdAt: 2 }),
+        chat('a', { label: 'Claude 2', title: 'Fix formatCents' }),
+        chat('b', { agent: 'gemini', label: 'Gemini 1', title: 'Is the minus right?', busy: true, origin: { kind: 'consult', chatId: 'a', by: 'agent' } }),
+        chat('c', { agent: 'codex', label: 'Codex 3', title: 'Make the store swappable', origin: { kind: 'handoff', chatId: 'a', by: 'user' } }),
+        chat('d', { agent: 'codex', label: 'Codex 4', title: 'Add CSV export', group: 'g', createdAt: 1 }),
+        chat('e', { agent: 'gemini', label: 'Gemini 2', title: 'Add CSV export', group: 'g', createdAt: 2 }),
       ],
       [link({ id: 'l1', from: 'a', to: 'b' }), link({ id: 'l2', kind: 'handoff', from: 'a', to: 'c' }), link({ id: 'l3', kind: 'pipe', from: 'c', to: 'd', active: true })],
     );
     const texts = (id: string) => linkBadges(s, s.chats.find((c) => c.id === id)!).map((b) => b.text);
-    expect(texts('a')).toEqual(['asking Gemini 1', 'handed to Codex 3']);
-    expect(texts('b')).toEqual(['asked by Claude 2']);
-    expect(texts('c')).toEqual(['from Claude 2', 'pipes to Codex 4']);
-    expect(texts('d')).toEqual(['piped from Codex 3', '1 of 2 · compare']);
+    expect(texts('a')).toEqual(['Asking Gemini: Is the minus right?', 'handed to Make the store swappable']);
+    expect(texts('b')).toEqual(['asked by Fix formatCents']);
+    expect(texts('c')).toEqual(['from Fix formatCents', 'pipes to Add CSV export']);
+    expect(texts('d')).toEqual(['piped from Make the store swappable', '1 of 2 · compare']);
+    expect(linkBadges(s, s.chats[0]).map((b) => b.tip)).toEqual(['Is the minus right? · Gemini', 'Make the store swappable · Codex']);
     expect(linkBadges(s, s.chats[3]).find((b) => b.kind === 'pipe')?.linkId).toBe('l3');
   });
 
   it('lists the other chats that changed the same file, and matches review paths to them', () => {
-    const s = state([chat('a', { label: 'Claude 1', files: ['src/format.ts', 'a.ts'] }), chat('b', { label: 'Codex 2', files: ['src/format.ts'] }), chat('c', { files: ['a.ts'], merged: true })]);
+    const s = state([chat('a', { label: 'Claude 1', files: ['src/format.ts', 'a.ts'] }), chat('b', { label: 'Codex 2', title: 'Add tests for formatCents', files: ['src/format.ts'] }), chat('c', { files: ['a.ts'], merged: true })]);
     const mine = conflictsOf(s, 'a');
-    expect(mine.map(conflictText)).toEqual(['also in Codex 2: src/format.ts']);
+    expect(mine.map(conflictText)).toEqual(['also in Add tests for formatCents: src/format.ts']);
     expect(conflictsOf(s, 'c')).toEqual([]);
     expect(relativePath('/w/', '/w/src/format.ts')).toBe('src/format.ts');
     expect(relativePath('C:\\w', 'c:\\w\\src\\x.ts')).toBe('src/x.ts');
@@ -182,11 +230,25 @@ describe('the chat switcher', () => {
     expect(recentChats([...chats, chat('z', { archived: true, lastActivity: 999 })], undefined, 2).map((c) => c.id)).toEqual(['c6', 'c7']);
   });
 
+  it('keeps the tabs you opened, in the order you opened them; closing one adds none, and the open one moves to its right neighbour (else the left)', () => {
+    expect(openTab(['a', 'b'], 'c')).toEqual(['a', 'b', 'c']);
+    expect(openTab(['a', 'b'], 'a')).toEqual(['a', 'b']);
+    expect(closeTab(['a', 'b', 'c'], 'b')).toEqual(['a', 'c']);
+    expect(closeTab(['a'], 'a')).toEqual([]);
+    expect(tabAfterClose(['a', 'b', 'c'], 'b', 'b')).toBe('c');
+    expect(tabAfterClose(['a', 'b', 'c'], 'c', 'c')).toBe('b');
+    expect(tabAfterClose(['a', 'b', 'c'], 'a', 'c')).toBe('c');
+    expect(tabAfterClose(['a'], 'a', 'a')).toBeUndefined();
+  });
+
   it('groups chats by where they stand, most recent first', () => {
     const groups = switcherGroups(chats, '');
     expect(groups.map((g) => g.title)).toEqual(['Needs you', 'Working', 'Done']);
+    expect(groups.map((g) => g.chats.length)).toEqual([3, 3, 2]);
     expect(groups[0].chats.map((c) => c.id)).toEqual(['c6', 'c3', 'c0']);
     expect(switcherGroups(chats, 'nothing')).toEqual([]);
+    const starred = switcherGroups(chats.map((c) => (c.id === 'c2' ? { ...c, starred: true } : c)), '');
+    expect(starred.map((g) => [g.title, g.chats.length])).toEqual([['Starred', 1], ['Needs you', 3], ['Working', 3], ['Done', 1]]);
   });
 });
 
@@ -215,6 +277,115 @@ describe('@-mentions', () => {
     expect(mentionedAgent('@gp')).toBeNull();
     expect(mentionedAgent('hi @gpt')).toBeNull();
     for (const o of MENTION_OPTIONS) for (const w of o.words) expect(parseMention(`@${w} hi`)?.agent).toBe(o.agent);
+  });
+});
+
+describe('subagents', () => {
+  const task = (id: string, status: string, tool = 'Task'): Item => ({ kind: 'tool', id, title: `Job ${id}`, status, locations: [], tool });
+  const inner = (id: string, parent: string): Item => ({ kind: 'tool', id, title: 'Read', status: 'completed', locations: [], tool: 'Read', parent });
+  const items = [said, task('t1', 'in_progress'), inner('i1', 't1'), inner('i2', 't1'), task('t2', 'completed', 'Agent'), task('t3', 'failed'), inner('i3', 't3')];
+
+  it("lists a chat's Task and Agent calls with their state and inner tool count", () => {
+    expect(subagents(chat('p', { busy: true, items }))).toEqual([
+      { id: 't1', title: 'Job t1', state: 'working', tools: 2, last: 'Read' },
+      { id: 't2', title: 'Job t2', state: 'done', tools: 0 },
+      { id: 't3', title: 'Job t3', state: 'failed', tools: 1, last: 'Read' },
+    ]);
+  });
+
+  it('stops counting a subagent as working once its chat stopped', () => {
+    expect(subagents(chat('p', { items }))[0].state).toBe('done');
+    expect(subagents(chat('p', { items: [said, inner('i1', 'x')] }))).toEqual([]);
+  });
+
+  it('lists running and failed subagents first and folds the done ones', () => {
+    const subs = subagents(chat('p', { busy: true, items }));
+    expect(foldSubs(subs)).toEqual({ live: [subs[0], subs[2]], done: [subs[1]] });
+  });
+
+  it('folds the done subagents on the map into one node with a count, until it is opened', () => {
+    const many = [said, task('t1', 'in_progress'), ...['a', 'b', 'c', 'd'].map((id) => task(id, 'completed')), task('t3', 'failed')];
+    const s = state([chat('p', { busy: true, items: many })]);
+    expect(mapLayout(s).subs.map((n) => [n.id, n.state, n.count])).toEqual([
+      ['p:t1', 'working', undefined],
+      ['p:t3', 'failed', undefined],
+      ['p:done', 'done', 4],
+    ]);
+    expect(mapLayout(s).subs.at(-1)!.title).toBe('4 done · show');
+    const open = mapLayout(s, [], 0, new Set(['p'])).subs;
+    expect(open.map((n) => n.id)).toEqual(['p:t1', 'p:t3', 'p:a', 'p:b', 'p:c', 'p:d', 'p:done']);
+    expect(open.at(-1)!.title).toBe('4 done · hide');
+  });
+
+  it('draws each subagent on the map under its chat, with an edge from the chat', () => {
+    const map = mapLayout(state([chat('p', { busy: true, items }), chat('q', { createdAt: 1 })]), [], 0, new Set(['p']));
+    expect(map.subs.map((n) => [n.id, n.chatId, n.state])).toEqual([
+      ['p:t1', 'p', 'working'],
+      ['p:t3', 'p', 'failed'],
+      ['p:t2', 'p', 'done'],
+      ['p:done', 'p', 'done'],
+    ]);
+    const p = map.nodes.find((n) => n.chat.id === 'p')!;
+    const q = map.nodes.find((n) => n.chat.id === 'q')!;
+    expect(map.subs.every((n) => n.y > p.y && n.y < q.y && n.x > p.x)).toBe(true);
+    const e = map.edges.filter((x) => x.kind === 'subagent');
+    expect(e.map((x) => [x.from, x.to])).toEqual([
+      ['p', 'p:t1'],
+      ['p', 'p:t3'],
+      ['p', 'p:t2'],
+      ['p', 'p:done'],
+    ]);
+    expect(e[0].d.startsWith(`M ${p.x + MAP.nodeW} `)).toBe(true);
+    expect(mapKey(state([chat('p', { busy: true, items })]))).not.toBe(mapKey(state([chat('p', { items })])));
+  });
+});
+
+describe('subagents inline', () => {
+  const agent = (id: string, status: string, over: Partial<Extract<Item, { kind: 'tool' }>> = {}): Item => ({ kind: 'tool', id, title: `Job ${id}`, status, locations: [], tool: 'Agent', ...over });
+  const step = (id: string, parent: string, title = 'Read a.ts', status = 'completed'): Item => ({ kind: 'tool', id, title, status, locations: [], tool: 'Read', parent });
+  const read: Item = { kind: 'tool', id: 'r', title: 'Read', status: 'completed', locations: [], tool: 'Read' };
+  const items: Item[] = [said, read, agent('a1', 'in_progress', { startedAt: 1000 }), agent('a2', 'completed', { startedAt: 1000, ms: 4000 }), step('s1', 'a1'), read, step('s2', 'a1', 'Grep foo', 'in_progress'), step('s3', 'a2')];
+
+  it('puts each subagent in the transcript where it was spawned, with its own steps, not in the step boxes', () => {
+    const g = transcriptGroups(items);
+    expect(g.map((x) => x.kind)).toEqual(['one', 'steps', 'subagent', 'subagent', 'steps']);
+    const [, first, a1, a2, last] = g;
+    expect(first.kind === 'steps' && first.items.map((t) => t.id)).toEqual(['r']);
+    expect(a1.kind === 'subagent' && [a1.item.id, a1.steps.map((t) => t.id)]).toEqual(['a1', ['s1', 's2']]);
+    expect(a2.kind === 'subagent' && a2.steps.map((t) => t.id)).toEqual(['s3']);
+    // A step of a subagent between two plain steps doesn't split their box apart either.
+    expect(last.kind === 'steps' && last.items.map((t) => t.id)).toEqual(['r']);
+  });
+
+  it('gives a subagent its last step and its timing', () => {
+    const [a1, a2] = subagents(chat('p', { busy: true, items }));
+    expect(a1).toMatchObject({ id: 'a1', state: 'working', last: 'Grep foo', startedAt: 1000, tools: 2 });
+    expect(a2).toMatchObject({ id: 'a2', state: 'done', last: 'Read a.ts', ms: 4000 });
+  });
+
+  it("reads a subagent's final answer from its result", () => {
+    expect(subagentAnswer({ kind: 'tool', id: 'a', title: 'x', locations: [], out: [{ t: 'text', text: 'Found 3 bugs.' }] })).toBe('Found 3 bugs.');
+    expect(subagentAnswer({ kind: 'tool', id: 'a', title: 'x', locations: [] })).toBeUndefined();
+  });
+
+  it("draws an outside Claude Code session's subagents under it, and leaves sessions without subagents off the map", () => {
+    const outside = [
+      { id: 'cc1', cwd: '/w', title: 'Fan out three reviewers', lastActivity: 10_000, messages: 4, subagents: [{ id: 'x1', title: 'Review A' }, { id: 'x2', title: 'Review B', end: 'done' as const }] },
+      { id: 'cc2', cwd: '/w', title: 'IDE identification question', lastActivity: 10_000, messages: 2, subagents: [] },
+    ];
+    const map = mapLayout(state([chat('p', { items: [said] })]), outside, 20_000);
+    expect(map.outside.map((n) => [n.id, n.state])).toEqual([['cc1', 'working']]);
+    expect(map.subs.filter((n) => n.outside).map((n) => [n.id, n.chatId, n.state, n.count])).toEqual([
+      ['cc:cc1:x1', 'cc:cc1', 'working', undefined],
+      ['cc:cc1:done', 'cc:cc1', 'done', 1],
+    ]);
+    expect(map.edges.filter((e) => e.kind === 'subagent').map((e) => [e.from, e.to])).toEqual([
+      ['cc:cc1', 'cc:cc1:x1'],
+      ['cc:cc1', 'cc:cc1:done'],
+    ]);
+    expect(mapLayout(state([chat('p', { items: [said] })]), outside, 20_000, new Set(['cc:cc1'])).subs.map((n) => n.id)).toEqual(['cc:cc1:x1', 'cc:cc1:x2', 'cc:cc1:done']);
+    expect(map.lanes.at(-1)).toMatchObject({ agent: 'claude', outside: true, chats: 1 });
+    expect(mapKey(state([]), outside, 20_000)).not.toBe(mapKey(state([]), [], 20_000));
   });
 });
 
@@ -302,10 +473,198 @@ describe('the agent map', () => {
   });
 });
 
+describe('what views draw again', () => {
+  const plan = (current: number): Item => ({
+    kind: 'plan',
+    entries: ['Read', 'Edit', 'Test'].map((content, i) => ({ content, status: i < current ? 'completed' : i === current ? 'in_progress' : 'pending' })),
+  });
+  const working = chat('a', { label: 'Claude 1', busy: true, items: [said, plan(0), { kind: 'agent', text: 'Looking' }], files: ['src/a.ts'] });
+  const s = state([working, chat('b', { label: 'Claude 2', files: ['src/a.ts'] })], [link({ id: 'k', from: 'a', to: 'b' })]);
+  const chunk = (st: AppState, text = ' around') => reduce(st, { t: 'update', chatId: 'a', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }, at: 99 });
+
+  it('keeps a card the same while its agent only streams text', () => {
+    const before = cardModel(s, s.chats[0], 0);
+    const after = chunk(s);
+    expect(after.chats[0]).not.toBe(s.chats[0]);
+    expect(cardModel(after, after.chats[0], 0).key).toBe(before.key);
+    expect(before).toMatchObject({ status: 'working', line: { text: 'Step 1 of 3: Read' }, conflicts: [{ file: 'src/a.ts' }], age: '0s' });
+    expect(before.badges.map((b) => b.text)).toEqual(['Asked Claude: New chat']);
+  });
+
+  it('changes the card when its step, status, age, links or another chat it names change', () => {
+    const key = (st: AppState, now = 0) => cardModel(st, st.chats[0], now).key;
+    const base = key(s);
+    const next = reduce(s, { t: 'update', chatId: 'a', update: { sessionUpdate: 'plan', entries: [{ content: 'Read', status: 'completed', priority: 'medium' }, { content: 'Edit', status: 'in_progress', priority: 'medium' }] } });
+    expect(key(next)).not.toBe(base);
+    expect(key(reduce(s, { t: 'busy', chatId: 'a', busy: false }))).not.toBe(base);
+    expect(key(s, 61_000)).not.toBe(base);
+    expect(key(reduce(s, { t: 'unlink', linkId: 'k' }))).not.toBe(base);
+    expect(key({ ...s, chats: [s.chats[0], { ...s.chats[1], label: 'Claude 9' }] })).not.toBe(base);
+  });
+
+  it('lays the map out again only when something it shows changes', () => {
+    const base = mapKey(s);
+    expect(mapKey(chunk(s))).toBe(base);
+    expect(mapKey(reduce(s, { t: 'busy', chatId: 'a', busy: false }))).not.toBe(base);
+    expect(mapKey(reduce(s, { t: 'files', chatId: 'b', files: ['src/b.ts'] }))).not.toBe(base);
+    expect(mapKey(reduce(s, { t: 'title', chatId: 'b', title: 'Other' }))).not.toBe(base);
+    expect(mapKey(reduce(s, { t: 'linkPatch', linkId: 'k', patch: { count: 2 } }))).not.toBe(base);
+    // The same drawing: nodes differ only in the chat object they carry.
+    const drawn = (st: AppState) => ({ ...mapLayout(st), nodes: mapLayout(st).nodes.map(({ chat: c, ...n }) => ({ ...n, id: c.id })) });
+    expect(drawn(chunk(s))).toEqual(drawn(s));
+  });
+
+  it('moves cards and rows at most once a second, but shows new chats and another sort at once', () => {
+    const first = settleOrder(undefined, ['a', 'b', 'c'], 'activity', 1000, 1000);
+    expect(first).toEqual({ order: { ids: ['a', 'b', 'c'], sort: 'activity', at: 1000 }, pending: false });
+    // A reorder after a quiet spell shows at once; the next one within the second waits.
+    const moved = settleOrder(first.order, ['b', 'a', 'c'], 'activity', 2500, 1000);
+    expect(moved).toEqual({ order: { ids: ['b', 'a', 'c'], sort: 'activity', at: 2500 }, pending: false });
+    const soon = settleOrder(moved.order, ['c', 'b', 'a'], 'activity', 2900, 1000);
+    expect(soon).toEqual({ order: moved.order, pending: true });
+    expect(settleOrder(moved.order, ['b', 'a', 'c'], 'activity', 2900, 1000)).toEqual({ order: moved.order, pending: false });
+    expect(settleOrder(soon.order, ['c', 'b', 'a'], 'activity', 3500, 1000).order.ids).toEqual(['c', 'b', 'a']);
+    expect(settleOrder(moved.order, ['c', 'b', 'a', 'd'], 'activity', 2600, 1000).order.ids).toEqual(['c', 'b', 'a', 'd']);
+    expect(settleOrder(moved.order, ['a', 'c'], 'activity', 2600, 1000).order.ids).toEqual(['a', 'c']);
+    expect(settleOrder(moved.order, ['c', 'b', 'a'], 'task:asc', 2600, 1000).order.ids).toEqual(['c', 'b', 'a']);
+    expect(settleOrder(moved.order, ['b', 'a', 'd'], 'activity', 2600, 1000).order.ids).toEqual(['b', 'a', 'd']);
+  });
+
+  it('names the chats in a roster that ignores what they stream', () => {
+    expect(rosterKey(chunk(s).chats)).toBe(rosterKey(s.chats));
+    expect(rosterKey(reduce(s, { t: 'title', chatId: 'a', title: 'Renamed' }).chats)).not.toBe(rosterKey(s.chats));
+  });
+});
+
 describe('text', () => {
   it('clips and strips markdown for excerpts', () => {
     expect(clip('  a   b  ', 10)).toBe('a b');
     expect(clip('abcdefghij', 5)).toBe('abcd…');
     expect(excerpt('**Done.** See [the docs](http://x) and `x`.\n```\ncode\n```', 80)).toBe('Done. See the docs and x.');
+  });
+});
+
+describe('"/" commands', () => {
+  const agentCmds = [{ name: 'review', description: 'Agent review' }, { name: 'help', description: 'Help' }];
+
+  it('lists FriedLiver’s own commands first, then the agent’s; the agent’s win a shared name', () => {
+    expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'discuss', 'pipe', 'review', 'new']);
+    const menu = slashMenu(agentCmds);
+    expect(menu.map((c) => c.name)).toEqual(['handoff', 'ask', 'discuss', 'pipe', 'new', 'review', 'help']);
+    expect(menu.find((c) => c.name === 'review')?.description).toBe('Agent review');
+  });
+
+  it('shows what a command takes as its argument, not as a trailing word', () => {
+    expect(commandLabel({ name: 'handoff', description: '', hint: 'agent' })).toBe('/handoff ‹agent›');
+    expect(commandLabel({ name: 'compact', description: '' })).toBe('/compact');
+  });
+
+  it('turns a FriedLiver command into its action, and leaves the agent’s own alone', () => {
+    const me = chat('a', { agent: 'claude' });
+    const codex = chat('b', { agent: 'codex', lastActivity: 5 });
+    const all = [me, chat('c', { agent: 'codex', lastActivity: 1 }), codex];
+    expect(slashAction('/handoff codex', me, all, [])).toEqual({ type: 'handoff', chatId: 'a', agent: 'codex' });
+    expect(slashAction('/ask gemini why?', me, all, [])).toEqual({ type: 'consult', chatId: 'a', agent: 'gemini', text: 'why?' });
+    expect(slashAction('/pipe codex', me, all, [])).toEqual({ type: 'pipe', from: 'a', to: 'b' });
+    expect(slashAction('/review', me, all, [])).toEqual({ type: 'viewChanges', chatId: 'a' });
+    expect(slashAction('/new', me, all, [])).toEqual({ type: 'newChat', agent: 'claude' });
+    expect(slashAction('/new gemini', me, all, [])).toEqual({ type: 'newChat', agent: 'gemini' });
+    // Not finished: no agent, no question, no chat to pipe to.
+    expect(slashAction('/handoff', me, all, [])).toBe('incomplete');
+    expect(slashAction('/ask codex', me, all, [])).toBe('incomplete');
+    expect(slashAction('/pipe gemini', me, all, [])).toBe('incomplete');
+    // The agent's /review, and anything else, go to the agent as typed.
+    expect(slashAction('/review', me, all, agentCmds)).toBeNull();
+    expect(slashAction('/help', me, all, agentCmds)).toBeNull();
+    expect(slashAction('hello', me, all, [])).toBeNull();
+  });
+});
+
+describe('a starting agent', () => {
+  it('says so on the card until the session is live', () => {
+    const starting = chat('a', { agent: 'codex', session: { options: [], commands: [], live: false, starting: true } });
+    expect(cardLine(state([starting]), starting).text).toBe('Starting Codex…');
+    const started = { ...starting, session: { ...starting.session!, live: true, starting: false } };
+    expect(cardLine(state([started]), started).text).not.toContain('Starting');
+  });
+});
+
+describe('status groups', () => {
+  const failed: Item = { kind: 'notice', tone: 'error', text: 'boom' };
+  const chats = [
+    chat('done-old', { items: [said], lastActivity: 1 }),
+    chat('idle', { lastActivity: 9 }),
+    chat('err', { items: [said, failed], lastActivity: 3 }),
+    chat('done-new', { items: [said], lastActivity: 7 }),
+    chat('work', { items: [said], busy: true, lastActivity: 2 }),
+    chat('wait', { items: [said, waiting], lastActivity: 4 }),
+  ];
+  it('orders Needs you, Working, Problem, Idle, Done, most recent first within each', () => {
+    const groups = statusGroups(chats);
+    expect(groups.map((g) => [g.title, g.chats.length])).toEqual([
+      ['Needs you', 1],
+      ['Working', 1],
+      ['Problem', 1],
+      ['Idle', 1],
+      ['Done', 2],
+    ]);
+    expect(groups[4].chats.map((c) => c.id)).toEqual(['done-new', 'done-old']);
+  });
+  it('leaves out empty groups unless asked to keep them', () => {
+    expect(statusGroups([chats[0]]).map((g) => g.status)).toEqual(['done']);
+    expect(statusGroups([chats[0]], true).map((g) => g.status)).toEqual(['needs-you', 'working', 'error', 'idle', 'done']);
+  });
+});
+
+describe('map hover card placement', () => {
+  const view = { w: 1000, h: 600 };
+  const tip = { w: 288, h: 160 };
+  const at = (left: number, top: number) => ({ left, top, right: left + 200, bottom: top + 44 });
+  it('sits to the right of the node when it fits', () => {
+    expect(tipPlace(at(100, 100), tip, view)).toEqual({ left: 312, top: 94, width: 288, side: 'right' });
+  });
+  it('flips to the left near the right edge', () => {
+    expect(tipPlace(at(700, 100), tip, view)).toMatchObject({ left: 400, side: 'left' });
+  });
+  it('goes above when neither side fits, and stays inside the viewport', () => {
+    const narrow = { w: 400, h: 600 };
+    expect(tipPlace(at(100, 300), tip, narrow)).toEqual({ left: 100, top: 128, width: 288, side: 'above' });
+    expect(tipPlace(at(100, 50), tip, narrow)).toEqual({ left: 100, top: 106, width: 288, side: 'below' });
+  });
+  it('never runs off the bottom or past a tiny viewport', () => {
+    expect(tipPlace(at(100, 560), tip, view).top).toBe(600 - 160 - 4);
+    expect(tipPlace(at(0, 0), tip, { w: 200, h: 100 })).toMatchObject({ left: 4, width: 192 });
+  });
+});
+
+describe('the chat transcript', () => {
+  const tool = (id: string): Item => ({ kind: 'tool', id, title: id, locations: [] });
+  it('folds each run of consecutive tools into one card, numbered from 1', () => {
+    const items: Item[] = [said, tool('a'), tool('b'), { kind: 'agent', text: 'hi' }, tool('c')];
+    const groups = transcriptGroups(items);
+    expect(groups.map((g) => (g.kind === 'steps' ? g.items.map((t) => t.id) : g.item.kind))).toEqual(['user', ['a', 'b'], 'agent', ['c']]);
+    expect(groups.map((g) => g.at)).toEqual([0, 1, 3, 4]);
+  });
+  it('reads times and durations short', () => {
+    expect(shortDuration(340)).toBe('340ms');
+    expect(shortDuration(1400)).toBe('1s');
+    expect(shortDuration(125_000)).toBe('2m 5s');
+  });
+  it('heads a step box with what the steps did, how many and how long', () => {
+    const b = (id: string, ms: number) => ({ ...(tool(id) as Extract<Item, { kind: 'tool' }>), title: `mcp__friedliver__browser_${id}`, ms });
+    expect(stepsHeading([b('open', 1200), b('click', 3100), b('click', 2000), b('screenshot', 900)])).toBe('Used the browser · 4 steps · 7s');
+    expect(stepsHeading([{ ...(tool('x') as Extract<Item, { kind: 'tool' }>), cmd: { line: 'ls' } }])).toBe('Ran commands · 1 step');
+    expect(stepsHeading([tool('a') as Extract<Item, { kind: 'tool' }>, tool('b') as Extract<Item, { kind: 'tool' }>])).toBe('Used tools · 2 steps');
+  });
+  it('says where a chat stands and when it last moved', () => {
+    expect(switcherMeta(chat('x', { items: [said, waiting], lastActivity: 1000 }), 43_000)).toBe('Needs you · 42s ago');
+  });
+});
+
+describe("the chat tab's title", () => {
+  it("is the open chat's topic with its agent's face, or New chat", () => {
+    expect(panelTitle(chat('a', { agent: 'codex', title: 'Add CSV export' }))).toEqual({ title: 'Add CSV export', agent: 'codex' });
+    expect(panelTitle(chat('a', { title: '' }))).toMatchObject({ title: 'New chat' });
+    expect(panelTitle(undefined)).toEqual({ title: 'New chat' });
   });
 });

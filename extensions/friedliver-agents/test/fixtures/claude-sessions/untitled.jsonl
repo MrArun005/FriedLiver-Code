@@ -1,0 +1,1 @@
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"Fix the flaky login test that keeps timing out on CI because the mock server starts too late and the retries are not awaited properly at all"}]},"uuid":"u1","timestamp":"2026-10-15T10:00:00.000Z","sessionId":"22222222-2222-4222-8222-222222222222"}

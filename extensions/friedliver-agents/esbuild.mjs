@@ -38,7 +38,11 @@ const builds = [
   { ...node, entryPoints: [path.join(core, 'demo/fakeAgent.mjs')], outfile: 'dist/demo-agent.js' },
   // The FriedLiver tools: an MCP server each agent session starts, which talks to the editor over a local socket.
   { ...node, entryPoints: ['src/bridge/server.ts'], outfile: 'dist/bridge.js' },
-  { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx' }, outdir: 'media/dist' },
+  // The browser tools for Claude Code outside FriedLiver: the stdio server its ~/.claude.json entry starts.
+  { ...node, entryPoints: ['src/bridge/externalStdio.ts'], outfile: 'dist/externalStdio.js' },
+  // Scales the Images view's thumbnails off the extension host's thread.
+  { ...node, entryPoints: ['src/host/thumbWorker.ts'], outfile: 'dist/thumbWorker.js' },
+  { ...web, entryPoints: { chat: 'src/webview/chat.tsx', tasks: 'src/webview/tasks.tsx', images: 'src/webview/images.tsx', permissions: 'src/webview/permissions.tsx', accounts: 'src/webview/accounts.tsx', remote: 'src/remote/phone/app.tsx' }, outdir: 'media/dist' },
   // Integration tests that run inside the editor (see src/test).
   { ...node, entryPoints: { run: 'src/test/run.ts', suite: 'src/test/suite.ts' }, outdir: 'dist/test', external: ['vscode'] },
 ];

@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1","sessionId":"x"}
+{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]},"uuid":"a1","sessionId":"x"}

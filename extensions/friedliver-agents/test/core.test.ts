@@ -87,6 +87,38 @@ describe('AgentCore with the demo agent', () => {
     expect(core.chat(chat.id)!.items.find((i) => i.kind === 'changes')).toMatchObject({ undone: true });
   });
 
+  it('works like a busy agent on "busy <seconds>": streamed markdown, tool calls, a plan and file reads, nothing to decide', async () => {
+    const dir = await gitRepo();
+    const reads: string[] = [];
+    const { core } = makeCore(dir, { unsavedText: (f) => void reads.push(f) });
+    const chat = await core.createChat('demo');
+    let actions = 0;
+    core.onAction(() => actions++);
+    await core.send(chat.id, 'busy 3 stamp');
+
+    const items = core.chat(chat.id)!.items;
+    const text = items.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('');
+    expect(text).toContain('### Part 1');
+    expect(text).toMatch(/`t=\d{13}`/);
+    expect(text).toMatch(/Done after 3 s: 1 tool calls, 1 files read\.$/);
+    expect(items.filter((i) => i.kind === 'tool')).toEqual([expect.objectContaining({ title: 'Read package.json', toolKind: 'read', status: 'completed' })]);
+    const plan = items.find((i) => i.kind === 'plan');
+    expect(plan?.kind === 'plan' && plan.entries.map((e) => e.status)).toEqual(Array(6).fill('completed'));
+    expect(reads).toEqual([path.join(dir, 'package.json')]);
+    expect(actions).toBeGreaterThan(12);
+    expect(core.decisions()).toEqual([]);
+
+    // Long enough for a code block; and Stop ends it at once.
+    const long = await core.createChat('demo');
+    const turn = core.send(long.id, 'busy 60');
+    await new Promise((r) => setTimeout(r, 9500));
+    await core.cancel(long.id);
+    await turn;
+    const after = core.chat(long.id)!.items;
+    expect(after.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('')).toContain('```ts\nexport function formatCents');
+    expect(after.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped.' });
+  }, 30_000);
+
   it('holds writes and commands until the user decides, and lists them as decisions', async () => {
     const dir = await gitRepo();
     const { core } = makeCore(dir, { showReview: () => {}, askCommand: () => {} });
