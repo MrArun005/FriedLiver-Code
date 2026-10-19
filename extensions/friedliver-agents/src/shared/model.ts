@@ -131,7 +131,7 @@ export const BRIDGE_TIMEOUT_MS = 10 * 60_000;
 export const MAX_LINK_DEPTH = 2;
 
 /** What an agent asked to do with another chat or agent through the FriedLiver tools. */
-export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'remember' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload' | SystemTool;
+export type BridgeTool = 'ask_agent' | 'send_to_chat' | 'read_chat' | 'remember' | 'browser_open' | 'browser_click' | 'browser_type' | 'browser_back' | 'browser_reload' | 'browser_download' | SystemTool;
 
 export interface BridgeItem {
   kind: 'bridge';
@@ -764,6 +764,7 @@ export const BROWSER_VERBS: Partial<Record<BridgeTool, string>> = {
   browser_type: 'type',
   browser_back: 'go back',
   browser_reload: 'reload the page',
+  browser_download: 'download a file',
 };
 
 /** A chat's topic in a sentence: quoted, cut to a phrase. */

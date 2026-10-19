@@ -928,6 +928,18 @@
           "default": false,
           "markdownDescription": "Lets Claude Code act in FriedLiver's browser (open, click, type, back, reload) without asking each time. Off by default; Full auto in a FriedLiver chat does not cover it. Read from your user settings only."
         },
+        "friedliver.browser.downloadFolder": {
+          "scope": "machine",
+          "type": "string",
+          "default": "~/Downloads",
+          "markdownDescription": "Where FriedLiver's browser saves downloads. `~` is your home folder; empty means your system's Downloads folder. A file never replaces another: a second `report.pdf` is saved as `report (1).pdf`. Nothing downloaded is opened or run by itself, and files keep the system's downloaded-from-the-internet mark (macOS quarantine, Windows Mark of the Web). Read from your user settings only."
+        },
+        "friedliver.browser.downloadAsk": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Ask where to save each download you start in FriedLiver's browser, instead of saving it to `#friedliver.browser.downloadFolder#`. Downloads an agent starts are always saved to that folder, after you allow them. Read from your user settings only."
+        },
         "friedliver.browser.relaxLocalhostCors": {
           "scope": "machine",
           "type": "boolean",

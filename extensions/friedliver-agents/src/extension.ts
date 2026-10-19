@@ -251,7 +251,7 @@ export class Controller {
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
       agentToAgent: () => this.agentToAgent(),
-      browser: (chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin, chatId),
+      browser: (chatId, call, signal, expectOrigin, askDownload) => this.browser.call(call, signal, expectOrigin, chatId, askDownload),
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       autoAllowLinkedReads: () => userSetting(vscode.workspace.getConfiguration('friedliver.chat').inspect<unknown>('autoAllowLinkedReads')).value === true,
       browserPage: (selector) => this.browser.inspect(selector),

@@ -1,0 +1,1667 @@
+diff --git a/src/vs/code/electron-main/app.ts b/src/vs/code/electron-main/app.ts
+index 41ec3495..5e28e723 100644
+--- a/src/vs/code/electron-main/app.ts
++++ b/src/vs/code/electron-main/app.ts
+@@ -41,6 +41,8 @@ import { ipcBrowserViewChannelName } from '../../platform/browserView/common/bro
+ import { ipcBrowserViewGroupChannelName } from '../../platform/browserView/common/browserViewGroup.js';
+ import { BrowserViewMainService, IBrowserViewMainService } from '../../platform/browserView/electron-main/browserViewMainService.js';
+ import { BrowserViewGroupMainService, IBrowserViewGroupMainService } from '../../platform/browserView/electron-main/browserViewGroupMainService.js';
++import { ipcBrowserDownloadsChannelName } from '../../platform/browserView/common/browserDownloads.js';
++import { BrowserDownloadsMainService, IBrowserDownloadsMainService } from '../../platform/browserView/electron-main/browserDownloadsMainService.js';
+ import { NativeParsedArgs } from '../../platform/environment/common/argv.js';
+ import { IEnvironmentMainService } from '../../platform/environment/electron-main/environmentMainService.js';
+ import { isLaunchedFromCli } from '../../platform/environment/node/argvHelper.js';
+@@ -1260,6 +1262,7 @@ export class CodeApplication extends Disposable {
+ 		// Browser View
+ 		services.set(IBrowserViewMainService, new SyncDescriptor(BrowserViewMainService, undefined, false /* proxied to other processes */));
+ 		services.set(IBrowserViewGroupMainService, new SyncDescriptor(BrowserViewGroupMainService, undefined, false /* proxied to other processes */));
++		services.set(IBrowserDownloadsMainService, new SyncDescriptor(BrowserDownloadsMainService, undefined, false /* proxied to other processes */));
+ 
+ 		// Keyboard Layout
+ 		services.set(IKeyboardLayoutMainService, new SyncDescriptor(KeyboardLayoutMainService));
+@@ -1441,6 +1444,9 @@ export class CodeApplication extends Disposable {
+ 		mainProcessElectronServer.registerChannel(ipcBrowserViewGroupChannelName, browserViewGroupChannel);
+ 		sharedProcessClient.then(client => client.registerChannel(ipcBrowserViewGroupChannelName, browserViewGroupChannel));
+ 
++		// Browser downloads (FriedLiver, patch 0300). Created here, at startup, so it listens before the first download.
++		mainProcessElectronServer.registerChannel(ipcBrowserDownloadsChannelName, ProxyChannel.fromService(accessor.get(IBrowserDownloadsMainService), disposables));
++
+ 		// Signing
+ 		const signChannel = ProxyChannel.fromService(accessor.get(ISignService), disposables);
+ 		mainProcessElectronServer.registerChannel('sign', signChannel);
+diff --git a/src/vs/platform/browserView/common/browserDownloads.ts b/src/vs/platform/browserView/common/browserDownloads.ts
+new file mode 100644
+index 00000000..60b85f7b
+--- /dev/null
++++ b/src/vs/platform/browserView/common/browserDownloads.ts
+@@ -0,0 +1,260 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0300): downloads in the integrated browser.
++ *  The rules, with no imports so FriedLiver's own tests run them as they ship:
++ *  the file name a download gets, the name that doesn't overwrite, which sources may download,
++ *  which files are never opened from the downloads list, and the state machine.
++ *--------------------------------------------------------------------------------------------*/
++
++export const ipcBrowserDownloadsChannelName = 'browserDownloads';
++
++/** Above this a download waits for the user's OK, with its size shown (500 MB). */
++export const LARGE_DOWNLOAD_BYTES = 500 * 1024 * 1024;
++
++/** How many finished downloads the list keeps. */
++export const MAX_DOWNLOADS_KEPT = 50;
++
++/**
++ * awaiting: paused before any byte is written, until the user allows it (an agent started it, or it is large).
++ * progressing: being written. completed / cancelled / failed: finished.
++ */
++export type BrowserDownloadState = 'awaiting' | 'progressing' | 'completed' | 'cancelled' | 'failed';
++
++/** Why an `awaiting` download waits. */
++export type BrowserDownloadWait = 'agent' | 'large';
++
++export type BrowserDownloadEvent = 'approve' | 'cancel' | 'complete' | 'fail';
++
++export interface IBrowserDownload {
++	readonly id: string;
++	/** Where the bytes come from (the last URL after redirects). */
++	readonly url: string;
++	/** The file's name on disk: sanitized and unique in its folder. */
++	readonly filename: string;
++	/** The full path; empty until the user picks it when FriedLiver asks where to save. */
++	readonly path: string;
++	readonly state: BrowserDownloadState;
++	readonly waitingFor?: BrowserDownloadWait;
++	/** Started while an agent was acting in the browser. */
++	readonly byAgent: boolean;
++	readonly receivedBytes: number;
++	/** 0 when the server didn't say. */
++	readonly totalBytes: number;
++	readonly bytesPerSecond: number;
++	readonly startTime: number;
++	readonly endTime?: number;
++	readonly error?: string;
++	/** Hex SHA-256 of the finished file. */
++	readonly sha256?: string;
++	/** The window whose browser started it, when known. */
++	readonly windowId?: number;
++}
++
++const TRANSITIONS: Record<BrowserDownloadState, Partial<Record<BrowserDownloadEvent, BrowserDownloadState>>> = {
++	awaiting: { approve: 'progressing', cancel: 'cancelled', fail: 'failed' },
++	progressing: { cancel: 'cancelled', complete: 'completed', fail: 'failed' },
++	completed: {},
++	cancelled: {},
++	failed: {},
++};
++
++/** The state after `event`, or undefined when the event doesn't apply (a finished download stays finished). */
++export function nextDownloadState(state: BrowserDownloadState, event: BrowserDownloadEvent): BrowserDownloadState | undefined {
++	return TRANSITIONS[state][event];
++}
++
++export function isDownloadFinished(state: BrowserDownloadState): boolean {
++	return state === 'completed' || state === 'cancelled' || state === 'failed';
++}
++
++export function canRetryDownload(state: BrowserDownloadState): boolean {
++	return state === 'cancelled' || state === 'failed';
++}
++
++export function canCancelDownload(state: BrowserDownloadState): boolean {
++	return state === 'awaiting' || state === 'progressing';
++}
++
++/** Whether a large download asks first: only when the server said how big it is. */
++export function needsSizeConfirm(totalBytes: number): boolean {
++	return totalBytes > LARGE_DOWNLOAD_BYTES;
++}
++
++/** Only web pages download: http and https, or a blob a web page made. Never file:, data: or anything else. */
++export function isAllowedDownloadUrl(url: string): boolean {
++	let u: URL;
++	try {
++		u = new URL(url);
++	} catch {
++		return false;
++	}
++	if (u.protocol === 'http:' || u.protocol === 'https:') {
++		return true;
++	}
++	if (u.protocol === 'blob:') {
++		try {
++			const inner = new URL(u.pathname);
++			return inner.protocol === 'http:' || inner.protocol === 'https:';
++		} catch {
++			return false;
++		}
++	}
++	return false;
++}
++
++// Control characters, and the invisible and direction characters that can disguise an extension ("txt.exe" shown as "exe.txt").
++// eslint-disable-next-line no-control-regex
++const INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/g;
++const RESERVED_CHARS = /[<>:"|?*]/g;
++const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
++const MAX_NAME = 200;
++const COMPOUND_EXTENSIONS = ['.tar.gz', '.tar.bz2', '.tar.xz', '.tar.zst', '.tar.lz', '.tar.z'];
++
++/**
++ * A file name that is safe to write in the downloads folder: only the last path segment, no control,
++ * invisible or direction characters, none of <>:"|?*, no leading dots (hidden files) or trailing dots
++ * and spaces, not a Windows device name, and at most 200 characters with the extension kept.
++ */
++export function sanitizeFilename(raw: string, fallback = 'download'): string {
++	let name = String(raw ?? '');
++	name = name.split(/[/\\]/).pop() ?? '';
++	name = name.replace(INVISIBLE, '').replace(RESERVED_CHARS, '_');
++	name = name.trim().replace(/^[.\s]+/, '').replace(/[.\s]+$/, '');
++	if (!name) {
++		return fallback;
++	}
++	if (WINDOWS_RESERVED.test(name)) {
++		name = `_${name}`;
++	}
++	if (name.length > MAX_NAME) {
++		const { stem, ext } = splitExtension(name);
++		const keep = ext.length <= 16 ? ext : '';
++		name = stem.slice(0, MAX_NAME - keep.length).replace(/[.\s]+$/, '') + keep;
++	}
++	return name;
++}
++
++/** "archive.tar.gz" → { stem: "archive", ext: ".tar.gz" }; "README" → { stem: "README", ext: "" }. */
++export function splitExtension(name: string): { stem: string; ext: string } {
++	const lower = name.toLowerCase();
++	for (const ext of COMPOUND_EXTENSIONS) {
++		if (lower.endsWith(ext) && lower.length > ext.length) {
++			return { stem: name.slice(0, -ext.length), ext: name.slice(-ext.length) };
++		}
++	}
++	const dot = name.lastIndexOf('.');
++	return dot > 0 ? { stem: name.slice(0, dot), ext: name.slice(dot) } : { stem: name, ext: '' };
++}
++
++/** `name`, or "name (1).ext", "name (2).ext"…: the first that `taken` says is free. Never overwrites. */
++export function uniqueFilename(name: string, taken: (candidate: string) => boolean): string {
++	if (!taken(name)) {
++		return name;
++	}
++	const { stem, ext } = splitExtension(name);
++	for (let n = 1; n < 10_000; n++) {
++		const candidate = `${stem} (${n})${ext}`;
++		if (!taken(candidate)) {
++			return candidate;
++		}
++	}
++	throw new Error(`No free name for ${name}`);
++}
++
++/**
++ * Files that run something when opened: apps, installers, scripts, shortcuts. The downloads list
++ * never opens these; it shows them in the folder instead, so running one is the user's own act.
++ */
++const EXECUTABLE_EXTENSIONS = new Set([
++	'app', 'command', 'tool', 'terminal', 'workflow', 'action', 'scpt', 'applescript', 'pkg', 'mpkg', 'dmg', 'iso', 'img',
++	'sh', 'bash', 'zsh', 'csh', 'ksh', 'fish', 'py', 'pyw', 'pl', 'rb', 'php', 'js', 'jse', 'mjs', 'cjs', 'vbs', 'vbe', 'wsf', 'wsh', 'ps1', 'psm1', 'psd1',
++	'exe', 'msi', 'msix', 'msixbundle', 'appx', 'appxbundle', 'bat', 'cmd', 'com', 'scr', 'cpl', 'msc', 'hta', 'lnk', 'url', 'reg', 'inf', 'pif', 'jar', 'appref-ms', 'application', 'gadget', 'diagcab', 'settingcontent-ms',
++	'deb', 'rpm', 'appimage', 'run', 'bin', 'desktop', 'flatpakref', 'snap', 'apk', 'xpi', 'crx', 'vsix', 'webloc', 'inetloc', 'fileloc', 'mobileconfig', 'kext', 'plugin', 'prefpane', 'saver', 'qlgenerator',
++]);
++
++export function isExecutableName(name: string): boolean {
++	const dot = name.lastIndexOf('.');
++	return dot >= 0 && EXECUTABLE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
++}
++
++/** "~" and "~/x" relative to `home`; anything else unchanged. */
++export function expandHome(path: string, home: string): string {
++	if (path === '~') {
++		return home;
++	}
++	if (path.startsWith('~/') || path.startsWith('~\\')) {
++		return home.replace(/[/\\]+$/, '') + path.slice(1);
++	}
++	return path;
++}
++
++/** 0 B, 512 B, 1.2 KB, 12.4 MB, 1.20 GB (1024-based, like browsers). */
++export function formatBytes(bytes: number): string {
++	if (!Number.isFinite(bytes) || bytes < 1024) {
++		return `${Math.max(0, Math.round(bytes || 0))} B`;
++	}
++	const units = ['KB', 'MB', 'GB', 'TB'];
++	let value = bytes / 1024;
++	let unit = 0;
++	while (value >= 1024 && unit < units.length - 1) {
++		value /= 1024;
++		unit++;
++	}
++	const digits = unit >= 2 ? 2 : 1;
++	return `${value >= 100 ? Math.round(value) : value.toFixed(value >= 10 ? 1 : digits)} ${units[unit]}`;
++}
++
++/** What a download's row says under its name. */
++export function describeDownload(d: Pick<IBrowserDownload, 'state' | 'waitingFor' | 'receivedBytes' | 'totalBytes' | 'bytesPerSecond' | 'error'>): string {
++	const size = d.totalBytes > 0 ? formatBytes(d.totalBytes) : '';
++	switch (d.state) {
++		case 'awaiting':
++			return d.waitingFor === 'large'
++				? `${size} · waiting for your OK`
++				: `${size ? `${size} · ` : ''}an agent started it · waiting for your OK`;
++		case 'progressing': {
++			const done = d.totalBytes > 0 ? `${formatBytes(d.receivedBytes)} of ${size}` : formatBytes(d.receivedBytes);
++			if (d.bytesPerSecond <= 0) {
++				return done;
++			}
++			const left = d.totalBytes > d.receivedBytes ? Math.ceil((d.totalBytes - d.receivedBytes) / d.bytesPerSecond) : 0;
++			return `${done} · ${formatBytes(d.bytesPerSecond)}/s${left > 0 ? ` · ${formatDuration(left)} left` : ''}`;
++		}
++		case 'completed':
++			return formatBytes(d.receivedBytes || d.totalBytes);
++		case 'cancelled':
++			return 'Cancelled';
++		case 'failed':
++			return d.error ? `Failed · ${d.error}` : 'Failed';
++	}
++}
++
++function formatDuration(seconds: number): string {
++	if (seconds < 60) {
++		return `${seconds} s`;
++	}
++	if (seconds < 3600) {
++		return `${Math.round(seconds / 60)} min`;
++	}
++	return `${Math.floor(seconds / 3600)} h ${Math.round((seconds % 3600) / 60)} min`;
++}
++
++/** The fraction done, 0..1, or undefined when the size is unknown. */
++export function downloadProgress(d: Pick<IBrowserDownload, 'receivedBytes' | 'totalBytes' | 'state'>): number | undefined {
++	if (d.state === 'completed') {
++		return 1;
++	}
++	return d.totalBytes > 0 ? Math.min(1, d.receivedBytes / d.totalBytes) : undefined;
++}
++
++/** The newest `max` downloads, but never dropping one that is still active. */
++export function pruneDownloads<T extends Pick<IBrowserDownload, 'state'>>(list: readonly T[], max = MAX_DOWNLOADS_KEPT): T[] {
++	const out = [...list];
++	for (let i = 0; out.length > max && i < out.length;) {
++		if (isDownloadFinished(out[i].state)) {
++			out.splice(i, 1);
++		} else {
++			i++;
++		}
++	}
++	return out;
++}
+diff --git a/src/vs/platform/browserView/common/browserDownloadsService.ts b/src/vs/platform/browserView/common/browserDownloadsService.ts
+new file mode 100644
+index 00000000..0c9f24fe
+--- /dev/null
++++ b/src/vs/platform/browserView/common/browserDownloadsService.ts
+@@ -0,0 +1,40 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0300): the integrated browser's downloads, owned by the main process
++ *  (BrowserDownloadsMainService) and read by every window over the browserDownloads channel.
++ *--------------------------------------------------------------------------------------------*/
++
++import { Event } from '../../../base/common/event.js';
++import { createDecorator } from '../../instantiation/common/instantiation.js';
++import { IBrowserDownload } from './browserDownloads.js';
++
++export const IBrowserDownloadsService = createDecorator<IBrowserDownloadsService>('browserDownloadsService');
++
++export interface IBrowserDownloadsService {
++	readonly _serviceBrand: undefined;
++
++	/** The whole list, oldest first, whenever anything in it changes (progress at most 4 times a second). */
++	readonly onDidChange: Event<readonly IBrowserDownload[]>;
++
++	getDownloads(): Promise<IBrowserDownload[]>;
++
++	/** Answers a download that waits for the user's OK: resume it, or cancel it before a byte is kept. */
++	approve(id: string, allow: boolean): Promise<void>;
++	cancel(id: string): Promise<void>;
++	/** Downloads a cancelled or failed one again from its URL; the old row goes. */
++	retry(id: string): Promise<void>;
++	/** Opens a finished file with its default app. Refused for apps, installers and scripts (isExecutableName). */
++	open(id: string): Promise<void>;
++	showInFolder(id: string): Promise<void>;
++	/** Removes every finished row; files stay on disk. */
++	clear(): Promise<void>;
++
++	/**
++	 * An agent starts (true) or ends (false) acting in the browser. Downloads that start meanwhile, or
++	 * within a few seconds after, wait for the user's OK (waitingFor 'agent').
++	 */
++	setAgentScope(active: boolean): Promise<void>;
++	/** The agent's chat takes the OK for this download; false when another caller already did. */
++	claim(id: string): Promise<boolean>;
++	/** Resolves when the download is finished, or with its state after `timeoutMs`. */
++	waitFor(id: string, timeoutMs: number): Promise<IBrowserDownload | undefined>;
++}
+diff --git a/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
+new file mode 100644
+index 00000000..fea5d7bd
+--- /dev/null
++++ b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
+@@ -0,0 +1,404 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0300): saves what the integrated browser downloads.
++ *
++ *  - Into friedliver.browser.downloadFolder (user settings; default ~/Downloads) under a sanitized,
++ *    unique name, or where the user picks when friedliver.browser.downloadAsk is on.
++ *  - Only http(s) sources (and blobs web pages make); everything else is refused before a byte is written.
++ *  - A download an agent started, or one over 500 MB, is paused until the user allows it.
++ *  - Nothing is ever opened or run automatically. Finished files keep (or get) the OS's
++ *    downloaded-from-the-internet mark: com.apple.quarantine on macOS, Zone.Identifier on Windows.
++ *--------------------------------------------------------------------------------------------*/
++
++import { app, shell } from 'electron';
++import { createHash } from 'crypto';
++import { execFile } from 'child_process';
++import * as fs from 'fs';
++import { homedir } from 'os';
++import { basename, dirname, join } from '../../../base/common/path.js';
++import { Emitter } from '../../../base/common/event.js';
++import { Disposable } from '../../../base/common/lifecycle.js';
++import { RunOnceScheduler } from '../../../base/common/async.js';
++import { generateUuid } from '../../../base/common/uuid.js';
++import { isMacintosh, isWindows } from '../../../base/common/platform.js';
++import { createDecorator } from '../../instantiation/common/instantiation.js';
++import { IConfigurationService } from '../../configuration/common/configuration.js';
++import { ILogService } from '../../log/common/log.js';
++import { IBrowserDownload, BrowserDownloadEvent, canCancelDownload, canRetryDownload, expandHome, formatBytes, isAllowedDownloadUrl, isDownloadFinished, isExecutableName, needsSizeConfirm, nextDownloadState, pruneDownloads, sanitizeFilename, uniqueFilename } from '../common/browserDownloads.js';
++import { IBrowserDownloadsService } from '../common/browserDownloadsService.js';
++import { BrowserSession } from './browserSession.js';
++import { IBrowserViewMainService } from './browserViewMainService.js';
++
++export const IBrowserDownloadsMainService = createDecorator<IBrowserDownloadsMainService>('browserDownloadsMainService');
++export interface IBrowserDownloadsMainService extends IBrowserDownloadsService { }
++
++/** Downloads that start this long after an agent's browser action still count as the agent's. */
++const AGENT_GRACE_MS = 5_000;
++
++type Mutable<T> = { -readonly [K in keyof T]: T[K] };
++
++interface Entry {
++	d: Mutable<IBrowserDownload>;
++	item?: Electron.DownloadItem;
++	session?: Electron.Session;
++	claimed: boolean;
++	waiters: (() => void)[];
++}
++
++export class BrowserDownloadsMainService extends Disposable implements IBrowserDownloadsMainService {
++	declare readonly _serviceBrand: undefined;
++
++	private readonly _onDidChange = this._register(new Emitter<readonly IBrowserDownload[]>());
++	readonly onDidChange = this._onDidChange.event;
++
++	private readonly entries = new Map<string, Entry>();
++	/** Paths handed to downloads still writing, so two at once never get the same name. */
++	private readonly reserved = new Set<string>();
++	private agentScopes = 0;
++	private agentGraceUntil = 0;
++	private readonly progress = this._register(new RunOnceScheduler(() => this.fire(), 250));
++
++	constructor(
++		@IConfigurationService private readonly configurationService: IConfigurationService,
++		@ILogService private readonly logService: ILogService,
++		@IBrowserViewMainService private readonly browserViewMainService: IBrowserViewMainService,
++	) {
++		super();
++		this._register(BrowserSession.onWillDownload(e => this.willDownload(e.event, e.item, e.webContents, e.session)));
++	}
++
++	// #region Electron
++
++	private willDownload(event: Electron.Event, item: Electron.DownloadItem, webContents: Electron.WebContents, session: Electron.Session): void {
++		const chain = item.getURLChain();
++		const url = chain.at(-1) ?? item.getURL();
++		const name = sanitizeFilename(item.getFilename());
++		const base: Mutable<IBrowserDownload> = {
++			id: generateUuid(),
++			url,
++			filename: name,
++			path: '',
++			state: 'progressing',
++			byAgent: this.agentScopes > 0 || Date.now() < this.agentGraceUntil,
++			receivedBytes: 0,
++			totalBytes: Math.max(0, item.getTotalBytes()),
++			bytesPerSecond: 0,
++			startTime: Date.now(),
++			windowId: safe(() => this.browserViewMainService.windowIdForWebContents(webContents)),
++		};
++		const entry: Entry = { d: base, session, claimed: false, waiters: [] };
++
++		if (!(chain.length ? chain : [url]).every(isAllowedDownloadUrl)) {
++			event.preventDefault();
++			this.add(entry);
++			this.transition(entry, 'fail', 'Only http and https downloads are allowed');
++			return;
++		}
++
++		const folder = this.folder();
++		const ask = !base.byAgent && this.configurationService.getValue<boolean>('friedliver.browser.downloadAsk') === true;
++		try {
++			fs.mkdirSync(folder, { recursive: true });
++		} catch (err) {
++			if (!ask) {
++				event.preventDefault();
++				this.add(entry);
++				this.transition(entry, 'fail', `Can't write to ${folder}`);
++				this.logService.error(`[browser downloads] ${folder}: ${err}`);
++				return;
++			}
++		}
++		const file = join(folder, uniqueFilename(name, candidate => this.taken(join(folder, candidate))));
++		this.reserved.add(file.toLowerCase());
++		entry.item = item;
++		if (ask) {
++			// Electron shows its Save dialog after this handler returns; the size goes in its title.
++			const size = base.totalBytes > 0 ? ` (${formatBytes(base.totalBytes)})` : '';
++			item.setSaveDialogOptions({ title: `Save ${basename(file)}${size}`, message: `Save ${basename(file)}${size} from ${hostOf(url)}`, defaultPath: file });
++		} else {
++			item.setSavePath(file);
++			base.path = file;
++			base.filename = basename(file);
++		}
++
++		// An agent's download, or a large one, writes nothing until the user allows it.
++		const wait = base.byAgent ? 'agent' : (!ask && needsSizeConfirm(base.totalBytes) ? 'large' : undefined);
++		if (wait) {
++			item.pause();
++			base.state = 'awaiting';
++			base.waitingFor = wait;
++		}
++
++		item.on('updated', () => {
++			if (entry.d.state !== 'progressing') {
++				return;
++			}
++			this.measure(entry);
++			this.progress.schedule();
++		});
++		item.once('done', (_e, state) => {
++			this.reserved.delete(file.toLowerCase());
++			this.measure(entry);
++			if (state === 'completed') {
++				void this.finish(entry);
++			} else {
++				this.transition(entry, state === 'cancelled' ? 'cancel' : 'fail', state === 'interrupted' ? 'Interrupted (network or disk error)' : undefined);
++			}
++		});
++		this.add(entry);
++	}
++
++	private measure(entry: Entry): void {
++		const item = entry.item;
++		if (!item) {
++			return;
++		}
++		entry.d.receivedBytes = item.getReceivedBytes();
++		entry.d.totalBytes = Math.max(0, item.getTotalBytes());
++		entry.d.bytesPerSecond = Math.max(0, item.getCurrentBytesPerSecond());
++		const chosen = item.getSavePath();
++		if (chosen && chosen !== entry.d.path) {
++			entry.d.path = chosen;
++			entry.d.filename = basename(chosen);
++		}
++	}
++
++	private async finish(entry: Entry): Promise<void> {
++		const file = entry.d.path;
++		try {
++			await markFromInternet(file, entry.d.url);
++			entry.d.receivedBytes = (await fs.promises.stat(file)).size;
++			entry.d.sha256 = await sha256(file);
++			this.transition(entry, 'complete');
++		} catch (err) {
++			this.logService.error(`[browser downloads] ${file}: ${err}`);
++			this.transition(entry, 'fail', `Saved, but could not check the file: ${err instanceof Error ? err.message : String(err)}`);
++		}
++	}
++
++	// #endregion
++
++	// #region State
++
++	private add(entry: Entry): void {
++		this.entries.set(entry.d.id, entry);
++		const kept = pruneDownloads([...this.entries.values()].map(e => e.d));
++		if (kept.length !== this.entries.size) {
++			const ids = new Set(kept.map(d => d.id));
++			for (const id of [...this.entries.keys()]) {
++				if (!ids.has(id)) {
++					this.entries.delete(id);
++				}
++			}
++		}
++		this.fire();
++	}
++
++	private transition(entry: Entry, event: BrowserDownloadEvent, error?: string): void {
++		const next = nextDownloadState(entry.d.state, event);
++		if (!next) {
++			return;
++		}
++		entry.d.state = next;
++		if (next !== 'awaiting') {
++			entry.d.waitingFor = undefined;
++		}
++		if (isDownloadFinished(next)) {
++			entry.d.endTime = Date.now();
++			entry.d.bytesPerSecond = 0;
++			entry.item = undefined;
++			if (error) {
++				entry.d.error = error;
++			}
++			for (const w of entry.waiters.splice(0)) {
++				w();
++			}
++		}
++		this.fire();
++	}
++
++	private fire(): void {
++		this.progress.cancel();
++		this._onDidChange.fire(this.list());
++	}
++
++	private list(): IBrowserDownload[] {
++		return [...this.entries.values()].map(e => ({ ...e.d }));
++	}
++
++	private folder(): string {
++		const setting = this.configurationService.getValue<string>('friedliver.browser.downloadFolder');
++		const raw = typeof setting === 'string' && setting.trim() ? setting.trim() : app.getPath('downloads');
++		return expandHome(raw, homedir());
++	}
++
++	private taken(path: string): boolean {
++		return this.reserved.has(path.toLowerCase()) || fs.existsSync(path) || fs.existsSync(`${path}.crdownload`);
++	}
++
++	private entry(id: string): Entry {
++		const entry = this.entries.get(id);
++		if (!entry) {
++			throw new Error(`No download ${id}`);
++		}
++		return entry;
++	}
++
++	// #endregion
++
++	// #region IBrowserDownloadsService
++
++	async getDownloads(): Promise<IBrowserDownload[]> {
++		return this.list();
++	}
++
++	async approve(id: string, allow: boolean): Promise<void> {
++		const entry = this.entry(id);
++		if (entry.d.state !== 'awaiting' || !entry.item) {
++			return;
++		}
++		if (!allow) {
++			entry.item.cancel();
++			this.transition(entry, 'cancel');
++			return;
++		}
++		this.transition(entry, 'approve');
++		entry.item.resume();
++	}
++
++	async cancel(id: string): Promise<void> {
++		const entry = this.entry(id);
++		if (!canCancelDownload(entry.d.state)) {
++			return;
++		}
++		entry.item?.cancel();
++		this.transition(entry, 'cancel');
++	}
++
++	async retry(id: string): Promise<void> {
++		const entry = this.entry(id);
++		if (!canRetryDownload(entry.d.state) || !entry.session || !isAllowedDownloadUrl(entry.d.url)) {
++			return;
++		}
++		this.entries.delete(id);
++		this.fire();
++		entry.session.downloadURL(entry.d.url);
++	}
++
++	async open(id: string): Promise<void> {
++		const entry = this.entry(id);
++		if (entry.d.state !== 'completed' || !entry.d.path) {
++			return;
++		}
++		if (isExecutableName(entry.d.filename)) {
++			throw new Error(`${entry.d.filename} could run a program, so FriedLiver doesn't open it. Show it in the folder and open it yourself if you trust it.`);
++		}
++		const error = await shell.openPath(entry.d.path);
++		if (error) {
++			throw new Error(error);
++		}
++	}
++
++	async showInFolder(id: string): Promise<void> {
++		const entry = this.entry(id);
++		if (entry.d.path && fs.existsSync(entry.d.path)) {
++			shell.showItemInFolder(entry.d.path);
++		} else if (entry.d.path) {
++			await shell.openPath(dirname(entry.d.path));
++		}
++	}
++
++	async clear(): Promise<void> {
++		for (const [id, entry] of [...this.entries]) {
++			if (isDownloadFinished(entry.d.state)) {
++				this.entries.delete(id);
++			}
++		}
++		this.fire();
++	}
++
++	async setAgentScope(active: boolean): Promise<void> {
++		if (active) {
++			this.agentScopes++;
++		} else {
++			this.agentScopes = Math.max(0, this.agentScopes - 1);
++			this.agentGraceUntil = Date.now() + AGENT_GRACE_MS;
++		}
++	}
++
++	async claim(id: string): Promise<boolean> {
++		const entry = this.entry(id);
++		if (entry.claimed || entry.d.state !== 'awaiting') {
++			return false;
++		}
++		entry.claimed = true;
++		return true;
++	}
++
++	async waitFor(id: string, timeoutMs: number): Promise<IBrowserDownload | undefined> {
++		const entry = this.entries.get(id);
++		if (!entry) {
++			return undefined;
++		}
++		if (!isDownloadFinished(entry.d.state)) {
++			await new Promise<void>(resolve => {
++				const timer = setTimeout(done, Math.max(0, Math.min(timeoutMs, 30 * 60_000)));
++				function done() {
++					clearTimeout(timer);
++					resolve();
++				}
++				entry.waiters.push(done);
++			});
++		}
++		return { ...entry.d };
++	}
++
++	// #endregion
++}
++
++function safe<T>(f: () => T): T | undefined {
++	try {
++		return f();
++	} catch {
++		return undefined;
++	}
++}
++
++function hostOf(url: string): string {
++	try {
++		return new URL(url).host || url;
++	} catch {
++		return url;
++	}
++}
++
++function sha256(file: string): Promise<string> {
++	return new Promise((resolve, reject) => {
++		const hash = createHash('sha256');
++		fs.createReadStream(file).on('error', reject).on('data', chunk => hash.update(chunk)).on('end', () => resolve(hash.digest('hex')));
++	});
++}
++
++function run(cmd: string, args: string[]): Promise<boolean> {
++	return new Promise(resolve => execFile(cmd, args, { timeout: 10_000 }, err => resolve(!err)));
++}
++
++/**
++ * Keeps the OS's "downloaded from the internet" mark on the file, adding it when Chromium didn't:
++ * Gatekeeper and SmartScreen then check the file before it first runs. Never removes it.
++ */
++async function markFromInternet(file: string, url: string): Promise<void> {
++	if (isMacintosh) {
++		if (await run('/usr/bin/xattr', ['-p', 'com.apple.quarantine', file])) {
++			return;
++		}
++		const value = `0081;${Math.floor(Date.now() / 1000).toString(16)};FriedLiver;${generateUuid().toUpperCase()}`;
++		if (!await run('/usr/bin/xattr', ['-w', 'com.apple.quarantine', value, file])) {
++			throw new Error('could not mark it as downloaded (com.apple.quarantine)');
++		}
++	} else if (isWindows) {
++		const stream = `${file}:Zone.Identifier`;
++		if (!fs.existsSync(stream)) {
++			await fs.promises.writeFile(stream, `[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=${url.startsWith('blob:') ? 'about:internet' : url}\r\n`);
++		}
++	}
++}
+diff --git a/src/vs/platform/browserView/electron-main/browserSession.ts b/src/vs/platform/browserView/electron-main/browserSession.ts
+index 99a1c114..84e1ae62 100644
+--- a/src/vs/platform/browserView/electron-main/browserSession.ts
++++ b/src/vs/platform/browserView/electron-main/browserSession.ts
+@@ -4,6 +4,7 @@
+  *--------------------------------------------------------------------------------------------*/
+ 
+ import { session } from 'electron';
++import { Emitter } from '../../../base/common/event.js';
+ import { createHash } from 'crypto';
+ import { normalize } from '../../../base/common/path.js';
+ import { isLinux } from '../../../base/common/platform.js';
+@@ -42,6 +43,14 @@ export class BrowserSession {
+ 
+ 	// #region Static registry
+ 
++	/**
++	 * FriedLiver (patch 0300): every download an integrated-browser session starts. Fired synchronously
++	 * from Electron's will-download, so a listener can still choose the save path
++	 * (BrowserDownloadsMainService). With no listener Electron falls back to its own Save dialog.
++	 */
++	private static readonly _onWillDownload = new Emitter<{ readonly event: Electron.Event; readonly item: Electron.DownloadItem; readonly webContents: Electron.WebContents; readonly session: Electron.Session }>();
++	static readonly onWillDownload = BrowserSession._onWillDownload.event;
++
+ 	/**
+ 	 * Primary store — keyed by Electron session so entries are
+ 	 * automatically removed when the Electron session is GC'd.
+@@ -349,6 +358,7 @@ export class BrowserSession {
+ 	 */
+ 	private configure(): void {
+ 		this._permissions.configure(this.electronSession);
++		this.electronSession.on('will-download', (event, item, webContents) => BrowserSession._onWillDownload.fire({ event, item, webContents, session: this.electronSession }));
+ 		this.electronSession.registerPreloadScript({
+ 			type: 'frame',
+ 			filePath: FileAccess.asFileUri('vs/platform/browserView/electron-browser/preload-browserView.js').fsPath
+diff --git a/src/vs/platform/browserView/electron-main/browserViewMainService.ts b/src/vs/platform/browserView/electron-main/browserViewMainService.ts
+index 6071bc72..b5427f0c 100644
+--- a/src/vs/platform/browserView/electron-main/browserViewMainService.ts
++++ b/src/vs/platform/browserView/electron-main/browserViewMainService.ts
+@@ -46,6 +46,9 @@ export interface IBrowserViewMainService extends IBrowserViewService {
+ 
+ 	/** Validate that a storage scope can be exposed to an agent. */
+ 	validateAgentStorageScope(storageScope: BrowserViewStorageScope): void;
++
++	/** FriedLiver (patch 0300): the window hosting the browser view that owns `contents`, for downloads. */
++	windowIdForWebContents(contents: Electron.WebContents): number | undefined;
+ }
+ 
+ export class BrowserViewMainService extends Disposable implements IBrowserViewMainService {
+@@ -105,6 +108,15 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
+ 		return this.browserViews.get(id);
+ 	}
+ 
++	windowIdForWebContents(contents: Electron.WebContents): number | undefined {
++		for (const [, view] of this.browserViews) {
++			if (view.webContents === contents) {
++				return view.host.windowId;
++			}
++		}
++		return undefined;
++	}
++
+ 	async createTarget(url: string, context: IBrowserViewCreationContext): Promise<BrowserView> {
+ 		return this.openNew(url, context, { preserveFocus: true }, 'cdpCreated');
+ 	}
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/browserView.contribution.ts b/src/vs/workbench/contrib/browserView/electron-browser/browserView.contribution.ts
+index 7a69461a..98c621be 100644
+--- a/src/vs/workbench/contrib/browserView/electron-browser/browserView.contribution.ts
++++ b/src/vs/workbench/contrib/browserView/electron-browser/browserView.contribution.ts
+@@ -40,6 +40,7 @@ import './features/browserEditorFindFeature.js';
+ import './features/browserSearchFeatures.js';
+ import './features/browserTabManagementFeatures.js';
+ import './features/browserRemoteFeatures.js';
++import './features/browserDownloadsFeature.js';
+ 
+ function getBrowserViewStateUrl(viewState: object | undefined): string | undefined {
+ 	const url = Object.entries(viewState ?? {}).find(([key]) => key === 'url')?.[1];
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
+new file mode 100644
+index 00000000..74f0da07
+--- /dev/null
++++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
+@@ -0,0 +1,466 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0300): downloads in the browser panel (COMPONENTS.md §2.33).
++ *  - Indicator: an IconButton in the browser's actions toolbar, with a progress ring and a Count of
++ *    active downloads, shown once there is any download.
++ *  - Popover: the list (name, size, progress and speed, state) with Cancel, Retry, Open, Show in
++ *    Finder/Explorer, Copy link and Clear.
++ *  - Toasts: a finished download (Show in Finder), a failed one (Retry), and an agent's download
++ *    that no chat took the OK for (Allow / Cancel). A large one asks in a dialog with its size.
++ *  - Commands the Agents extension calls (_friedliver.browser.downloads.*): agent downloads ask in
++ *    the agent's chat and report their path, size and sha256 in the tool's output.
++ *--------------------------------------------------------------------------------------------*/
++
++import '../media/browserDownloads.css';
++import { localize, localize2 } from '../../../../../nls.js';
++import { $, addDisposableListener, append, clearNode, EventType, getWindow, isAncestor } from '../../../../../base/browser/dom.js';
++import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
++import { Codicon } from '../../../../../base/common/codicons.js';
++import { KeyCode } from '../../../../../base/common/keyCodes.js';
++import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
++import { isMacintosh, isWindows } from '../../../../../base/common/platform.js';
++import { ThemeIcon } from '../../../../../base/common/themables.js';
++import { IAction } from '../../../../../base/common/actions.js';
++import { IActionViewItem } from '../../../../../base/browser/ui/actionbar/actionbar.js';
++import { IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
++import { Action2, MenuId, MenuItemAction, registerAction2 } from '../../../../../platform/actions/common/actions.js';
++import { MenuEntryActionViewItem } from '../../../../../platform/actions/browser/menuEntryActionViewItem.js';
++import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
++import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
++import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
++import { IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
++import { IContextMenuService, IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
++import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
++import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
++import { registerMainProcessRemoteService } from '../../../../../platform/ipc/electron-browser/services.js';
++import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
++import { INativeHostService } from '../../../../../platform/native/common/native.js';
++import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
++import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
++import { IEditorService } from '../../../../services/editor/common/editorService.js';
++import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../common/contributions.js';
++import { IBrowserDownload, canCancelDownload, canRetryDownload, describeDownload, downloadProgress, formatBytes, ipcBrowserDownloadsChannelName, isExecutableName } from '../../../../../platform/browserView/common/browserDownloads.js';
++import { IBrowserDownloadsService } from '../../../../../platform/browserView/common/browserDownloadsService.js';
++import { BrowserActionCategory, BrowserActionGroup, BrowserEditor, BrowserEditorContribution, BROWSER_EDITOR_ACTIVE } from '../browserEditor.js';
++
++registerMainProcessRemoteService(IBrowserDownloadsService, ipcBrowserDownloadsChannelName);
++
++const CONTEXT_BROWSER_HAS_DOWNLOADS = new RawContextKey<boolean>('browserHasDownloads', false, localize('browser.hasDownloads', "Whether the integrated browser has downloaded anything in this session"));
++const SHOW_DOWNLOADS_ID = 'workbench.action.browser.showDownloads';
++/** An agent's download no chat claimed within this time asks in a toast instead. */
++const UNCLAIMED_AFTER_MS = 3_000;
++
++const showInFolderLabel = () => isMacintosh
++	? localize('browser.downloads.showInFinder', "Show in Finder")
++	: isWindows ? localize('browser.downloads.showInExplorer', "Show in Explorer") : localize('browser.downloads.showInFolder', "Show in Folder");
++
++function hostOf(url: string): string {
++	try {
++		return new URL(url).host || url;
++	} catch {
++		return url;
++	}
++}
++
++// #region Indicator
++
++/** The toolbar button: a download icon, a ring that fills with the active downloads' progress, and their count. */
++class DownloadsIndicatorViewItem extends MenuEntryActionViewItem {
++	private readonly _list = this._register(new MutableDisposable());
++	private _ring: SVGCircleElement | undefined;
++	private _count: HTMLElement | undefined;
++
++	constructor(
++		action: MenuItemAction,
++		options: IActionViewItemOptions,
++		private readonly _feature: BrowserDownloadsFeature,
++		@IKeybindingService keybindingService: IKeybindingService,
++		@INotificationService notificationService: INotificationService,
++		@IContextKeyService contextKeyService: IContextKeyService,
++		@IThemeService themeService: IThemeService,
++		@IContextMenuService contextMenuService: IContextMenuService,
++		@IAccessibilityService accessibilityService: IAccessibilityService,
++	) {
++		super(action, { hoverDelegate: options.hoverDelegate }, keybindingService, notificationService, contextKeyService, themeService, contextMenuService, accessibilityService);
++	}
++
++	override render(container: HTMLElement): void {
++		super.render(container);
++		container.classList.add('fl-dl-indicator');
++		const ns = 'http://www.w3.org/2000/svg';
++		const svg = document.createElementNS(ns, 'svg');
++		svg.classList.add('fl-dl-indicator__ring');
++		svg.setAttribute('viewBox', '0 0 20 20');
++		svg.setAttribute('aria-hidden', 'true');
++		const track = document.createElementNS(ns, 'circle');
++		track.classList.add('fl-dl-indicator__track');
++		const ring = document.createElementNS(ns, 'circle');
++		ring.classList.add('fl-dl-indicator__fill');
++		for (const c of [track, ring]) {
++			c.setAttribute('cx', '10');
++			c.setAttribute('cy', '10');
++			c.setAttribute('r', '9');
++			c.setAttribute('pathLength', '100');
++			svg.appendChild(c);
++		}
++		this._ring = ring;
++		this._count = $('span.fl-dl-indicator__count');
++		this._count.setAttribute('aria-hidden', 'true');
++		container.append(svg, this._count);
++		this._list.value = this._feature.onDidChangeDownloads(list => this._update(list));
++		this._update(this._feature.downloads);
++		this._feature.anchor = container;
++	}
++
++	private _update(list: readonly IBrowserDownload[]): void {
++		const element = this.element;
++		if (!element || !this._ring || !this._count) {
++			return;
++		}
++		const active = list.filter(d => canCancelDownload(d.state));
++		const waiting = active.some(d => d.state === 'awaiting');
++		const sized = active.filter(d => d.totalBytes > 0);
++		const fraction = sized.length ? sized.reduce((a, d) => a + d.receivedBytes, 0) / sized.reduce((a, d) => a + d.totalBytes, 0) : undefined;
++		element.classList.toggle('fl-dl-indicator--active', active.length > 0);
++		element.classList.toggle('fl-dl-indicator--indeterminate', active.length > 0 && fraction === undefined);
++		this._ring.style.strokeDasharray = `${Math.round((fraction ?? 0.25) * 100)} 100`;
++		this._count.textContent = active.length ? String(active.length) : '';
++		this._count.classList.toggle('fl-dl-indicator__count--loud', waiting);
++		this.label?.setAttribute('aria-label', active.length
++			? localize('browser.downloads.indicatorActive', "Downloads, {0} active", active.length)
++			: localize('browser.downloads.indicator', "Downloads"));
++	}
++}
++
++// #endregion
++
++// #region Popover
++
++/** The downloads list, rendered into a context view under the indicator (Popover §2.13). */
++function renderPopover(container: HTMLElement, feature: BrowserDownloadsFeature, close: () => void): IDisposable {
++	const store = new DisposableStore();
++	const root = append(container, $('.fl-downloads'));
++	root.setAttribute('role', 'dialog');
++	root.setAttribute('aria-label', localize('browser.downloads.dialogLabel', "Downloads"));
++	const head = append(root, $('.fl-downloads__head'));
++	append(head, $('span.fl-downloads__title')).textContent = localize('browser.downloads.title', "Downloads");
++	const clear = append(head, $('button.fl-downloads__text-btn')) as HTMLButtonElement;
++	clear.textContent = localize('browser.downloads.clear', "Clear");
++	clear.title = localize('browser.downloads.clearTitle', "Remove finished downloads from the list (the files stay)");
++	store.add(addDisposableListener(clear, EventType.CLICK, () => feature.service.clear()));
++	const listEl = append(root, $('.fl-downloads__list'));
++	listEl.setAttribute('role', 'list');
++
++	const iconButton = (parent: HTMLElement, icon: ThemeIcon, label: string, run: () => unknown, cls = '') => {
++		const b = append(parent, $(`button.fl-downloads__icon-btn${cls}`)) as HTMLButtonElement;
++		b.classList.add(...ThemeIcon.asClassNameArray(icon));
++		b.setAttribute('aria-label', label);
++		b.title = label;
++		store.add(addDisposableListener(b, EventType.CLICK, e => { e.stopPropagation(); feature.run(run); }));
++		return b;
++	};
++	const textButton = (parent: HTMLElement, label: string, run: () => unknown, primary: boolean) => {
++		const b = append(parent, $(`button.fl-downloads__text-btn${primary ? '.fl-downloads__text-btn--primary' : ''}`)) as HTMLButtonElement;
++		b.textContent = label;
++		store.add(addDisposableListener(b, EventType.CLICK, e => { e.stopPropagation(); feature.run(run); }));
++		return b;
++	};
++
++	const render = (list: readonly IBrowserDownload[]) => {
++		const focused = root.ownerDocument.activeElement;
++		const refocus = focused instanceof HTMLElement && isAncestor(focused, listEl) ? focused.getAttribute('aria-label') : null;
++		clearNode(listEl);
++		clear.disabled = !list.some(d => !canCancelDownload(d.state));
++		if (!list.length) {
++			append(listEl, $('.fl-downloads__empty')).textContent = localize('browser.downloads.empty', "Files you download in the browser show here.");
++			return;
++		}
++		const s = feature.service;
++		for (const d of [...list].reverse()) {
++			const row = append(listEl, $('.fl-downloads__row'));
++			row.setAttribute('role', 'listitem');
++			row.dataset.state = d.state;
++			const icon = d.state === 'failed' ? Codicon.error : d.state === 'cancelled' ? Codicon.circleSlash : d.state === 'completed' ? Codicon.file : d.state === 'awaiting' ? Codicon.shield : Codicon.download;
++			append(row, $(`span.fl-downloads__glyph${ThemeIcon.asCSSSelector(icon)}`)).setAttribute('aria-hidden', 'true');
++			const body = append(row, $('.fl-downloads__body'));
++			const name = append(body, $('span.fl-downloads__name'));
++			name.textContent = d.filename;
++			name.title = d.path || d.filename;
++			const meta = append(body, $('span.fl-downloads__meta'));
++			meta.textContent = d.byAgent && d.state !== 'awaiting' ? `${describeDownload(d)} · ${localize('browser.downloads.byAgent', "by an agent")}` : describeDownload(d);
++			meta.title = d.url;
++			if (d.state === 'progressing') {
++				const bar = append(body, $('.fl-downloads__progress'));
++				const p = downloadProgress(d);
++				bar.setAttribute('role', 'progressbar');
++				bar.setAttribute('aria-label', localize('browser.downloads.progress', "Downloading {0}", d.filename));
++				if (p === undefined) {
++					bar.classList.add('fl-downloads__progress--indeterminate');
++				} else {
++					bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
++				}
++				append(bar, $('span.fl-downloads__progress-fill')).style.width = `${Math.round((p ?? 0.3) * 100)}%`;
++			}
++			const actions = append(row, $('.fl-downloads__actions'));
++			if (d.state === 'awaiting') {
++				textButton(actions, localize('browser.downloads.cancel', "Cancel"), () => s.approve(d.id, false), false);
++				textButton(actions, localize('browser.downloads.allow', "Download"), () => s.approve(d.id, true), true);
++				continue;
++			}
++			if (canCancelDownload(d.state)) {
++				iconButton(actions, Codicon.close, localize('browser.downloads.cancelOne', "Cancel {0}", d.filename), () => s.cancel(d.id));
++			}
++			if (canRetryDownload(d.state) && /^(https?|blob):/i.test(d.url)) {
++				iconButton(actions, Codicon.refresh, localize('browser.downloads.retry', "Retry {0}", d.filename), () => s.retry(d.id));
++			}
++			if (d.state === 'completed' && !isExecutableName(d.filename)) {
++				iconButton(actions, Codicon.goToFile, localize('browser.downloads.open', "Open {0}", d.filename), () => s.open(d.id));
++			}
++			if (d.state === 'completed') {
++				iconButton(actions, Codicon.folderOpened, showInFolderLabel(), () => s.showInFolder(d.id));
++			}
++			iconButton(actions, Codicon.link, localize('browser.downloads.copyLink', "Copy link"), () => feature.copyLink(d.url));
++		}
++		if (refocus) {
++			(listEl.querySelector(`[aria-label="${CSS.escape(refocus)}"]`) as HTMLElement | null)?.focus();
++		}
++	};
++	render(feature.downloads);
++	store.add(feature.onDidChangeDownloads(render));
++
++	// Esc closes and gives focus back; a click outside closes.
++	store.add(addDisposableListener(root, EventType.KEY_DOWN, e => {
++		if (new StandardKeyboardEvent(e).equals(KeyCode.Escape)) {
++			e.preventDefault();
++			e.stopPropagation();
++			close();
++			feature.anchor?.querySelector<HTMLElement>('.action-label')?.focus();
++		}
++	}));
++	const win = getWindow(container);
++	store.add(addDisposableListener(win, EventType.MOUSE_DOWN, e => {
++		const target = e.target as Node | null;
++		if (target && !isAncestor(target, root) && !(feature.anchor && isAncestor(target, feature.anchor))) {
++			close();
++		}
++	}, true));
++	setTimeout(() => (root.querySelector('.fl-downloads__list button, .fl-downloads__head button:not([disabled])') as HTMLElement | null)?.focus(), 0);
++	return store;
++}
++
++// #endregion
++
++// #region Per-editor feature
++
++export class BrowserDownloadsFeature extends BrowserEditorContribution {
++	/** The indicator's element in this editor's toolbar, when it is shown. */
++	anchor: HTMLElement | undefined;
++	private readonly _popover = this._register(new MutableDisposable<{ dispose(): void }>());
++
++	constructor(
++		editor: BrowserEditor,
++		@IBrowserDownloadsService readonly service: IBrowserDownloadsService,
++		@IContextViewService private readonly _contextViewService: IContextViewService,
++		@IClipboardService private readonly _clipboardService: IClipboardService,
++		@INotificationService private readonly _notificationService: INotificationService,
++	) {
++		super(editor);
++	}
++
++	get downloads(): readonly IBrowserDownload[] {
++		return BrowserDownloadsNotifier.downloads;
++	}
++
++	readonly onDidChangeDownloads = BrowserDownloadsNotifier.onDidChange;
++
++	override getActionViewItem(action: IAction, options: IActionViewItemOptions, instantiationService: IInstantiationService): IActionViewItem | undefined {
++		if (action.id === SHOW_DOWNLOADS_ID && action instanceof MenuItemAction) {
++			return instantiationService.createInstance(DownloadsIndicatorViewItem, action, options, this);
++		}
++		return undefined;
++	}
++
++	toggle(): void {
++		if (this._popover.value) {
++			this._popover.clear();
++			return;
++		}
++		const anchor = this.anchor?.isConnected ? this.anchor : undefined;
++		let open = true;
++		const view = this._contextViewService.showContextView({
++			getAnchor: () => anchor ?? { x: getWindow(undefined).innerWidth - 16, y: 64 },
++			render: container => renderPopover(container, this, () => this._popover.clear()),
++			onHide: () => {
++				open = false;
++				anchor?.classList.remove('fl-dl-indicator--open');
++				this._popover.clear();
++			},
++		});
++		anchor?.classList.add('fl-dl-indicator--open');
++		this._popover.value = { dispose: () => open && view.close() };
++	}
++
++	copyLink(url: string): void {
++		void this._clipboardService.writeText(url);
++	}
++
++	/** Runs a popover action; a refusal (Open on an installer) shows as a toast. */
++	run(action: () => unknown): void {
++		Promise.resolve().then(action).catch(err => this._notificationService.warn(err instanceof Error ? err.message : String(err)));
++	}
++
++	override dispose(): void {
++		this._popover.clear();
++		super.dispose();
++	}
++}
++
++BrowserEditor.registerContribution(BrowserDownloadsFeature);
++
++class ShowDownloadsAction extends Action2 {
++	constructor() {
++		super({
++			id: SHOW_DOWNLOADS_ID,
++			title: localize2('browser.showDownloads', "Downloads"),
++			category: BrowserActionCategory,
++			icon: Codicon.download,
++			f1: true,
++			precondition: BROWSER_EDITOR_ACTIVE,
++			menu: {
++				id: MenuId.BrowserActionsToolbar,
++				group: BrowserActionGroup.Tools,
++				order: 0,
++				when: CONTEXT_BROWSER_HAS_DOWNLOADS,
++			},
++		});
++	}
++
++	run(accessor: ServicesAccessor, browserEditor = accessor.get(IEditorService).activeEditorPane): void {
++		if (browserEditor instanceof BrowserEditor) {
++			browserEditor.getContribution(BrowserDownloadsFeature)?.toggle();
++		}
++	}
++}
++registerAction2(ShowDownloadsAction);
++
++// #endregion
++
++// #region Window-wide: list, toasts, questions, commands
++
++/** Holds the list for this window and tells the user when a download finishes, fails or needs an OK. */
++class BrowserDownloadsNotifier extends Disposable implements IWorkbenchContribution {
++	static readonly ID = 'workbench.contrib.friedliverBrowserDownloads';
++
++	static downloads: readonly IBrowserDownload[] = [];
++	private static readonly _listeners = new Set<(list: readonly IBrowserDownload[]) => void>();
++	static onDidChange(listener: (list: readonly IBrowserDownload[]) => void): IDisposable {
++		BrowserDownloadsNotifier._listeners.add(listener);
++		return toDisposable(() => BrowserDownloadsNotifier._listeners.delete(listener));
++	}
++
++	private readonly _seen = new Map<string, IBrowserDownload['state']>();
++	private readonly _asked = new Set<string>();
++
++	constructor(
++		@IBrowserDownloadsService private readonly _service: IBrowserDownloadsService,
++		@INotificationService private readonly _notificationService: INotificationService,
++		@IDialogService private readonly _dialogService: IDialogService,
++		@IContextKeyService contextKeyService: IContextKeyService,
++		@INativeHostService private readonly _nativeHostService: INativeHostService,
++	) {
++		super();
++		const hasDownloads = CONTEXT_BROWSER_HAS_DOWNLOADS.bindTo(contextKeyService);
++		const update = (list: readonly IBrowserDownload[]) => {
++			BrowserDownloadsNotifier.downloads = list;
++			hasDownloads.set(list.length > 0);
++			for (const l of [...BrowserDownloadsNotifier._listeners]) {
++				l(list);
++			}
++			this._notify(list);
++		};
++		this._register(this._service.onDidChange(update));
++		this._service.getDownloads().then(list => {
++			for (const d of list) {
++				this._seen.set(d.id, d.state);
++			}
++			update(list);
++		}, () => { });
++	}
++
++	private _mine(d: IBrowserDownload): boolean {
++		return d.windowId === undefined || d.windowId === this._nativeHostService.windowId;
++	}
++
++	private _notify(list: readonly IBrowserDownload[]): void {
++		for (const d of list) {
++			const before = this._seen.get(d.id);
++			this._seen.set(d.id, d.state);
++			if (before === d.state || !this._mine(d)) {
++				continue;
++			}
++			if (d.state === 'completed') {
++				this._notificationService.prompt(Severity.Info,
++					localize('browser.downloads.done', "Downloaded {0} ({1})", d.filename, formatBytes(d.receivedBytes)),
++					[{ label: showInFolderLabel(), run: () => this._service.showInFolder(d.id) }]);
++			} else if (d.state === 'failed') {
++				this._notificationService.prompt(Severity.Warning,
++					localize('browser.downloads.failed', "Couldn't download {0}: {1}", d.filename, d.error ?? localize('browser.downloads.unknown', "unknown error")),
++					canRetryDownload(d.state) && /^(https?|blob):/i.test(d.url) ? [{ label: localize('browser.downloads.retryShort', "Retry"), run: () => this._service.retry(d.id) }] : []);
++			} else if (d.state === 'awaiting' && !this._asked.has(d.id)) {
++				this._asked.add(d.id);
++				if (d.waitingFor === 'large') {
++					void this._askLarge(d);
++				} else {
++					setTimeout(() => void this._askUnclaimed(d.id), UNCLAIMED_AFTER_MS);
++				}
++			}
++		}
++		const ids = new Set(list.map(d => d.id));
++		for (const id of [...this._seen.keys()]) {
++			if (!ids.has(id)) {
++				this._seen.delete(id);
++				this._asked.delete(id);
++			}
++		}
++	}
++
++	private async _askLarge(d: IBrowserDownload): Promise<void> {
++		const { confirmed } = await this._dialogService.confirm({
++			type: Severity.Info,
++			message: localize('browser.downloads.largeTitle', "Download {0}?", d.filename),
++			detail: localize('browser.downloads.largeDetail', "It is {0}, from {1}. It will be saved to {2}.", formatBytes(d.totalBytes), hostOf(d.url), d.path),
++			primaryButton: localize({ key: 'browser.downloads.largeOk', comment: ['&& denotes a mnemonic'] }, "&&Download"),
++		});
++		await this._service.approve(d.id, confirmed);
++	}
++
++	/** An agent's download no chat took the OK for: ask here, so it never waits unseen. */
++	private async _askUnclaimed(id: string): Promise<void> {
++		if (!await this._service.claim(id).catch(() => false)) {
++			return;
++		}
++		const d = BrowserDownloadsNotifier.downloads.find(x => x.id === id);
++		if (!d) {
++			return;
++		}
++		const size = d.totalBytes > 0 ? ` (${formatBytes(d.totalBytes)})` : '';
++		this._notificationService.prompt(Severity.Warning,
++			localize('browser.downloads.agentAsk', "An agent started a download in the browser: {0}{1} from {2}. Download it?", d.filename, size, hostOf(d.url)),
++			[
++				{ label: localize('browser.downloads.allowAgent', "Download"), run: () => this._service.approve(id, true) },
++				{ label: localize('browser.downloads.cancelAgent', "Cancel"), run: () => this._service.approve(id, false) },
++			],
++			{ sticky: true, onCancel: () => this._service.approve(id, false) });
++	}
++}
++
++registerWorkbenchContribution2(BrowserDownloadsNotifier.ID, BrowserDownloadsNotifier, WorkbenchPhase.AfterRestored);
++
++// For the Agents extension (vscode.commands.executeCommand). Results are plain JSON.
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.list', accessor => accessor.get(IBrowserDownloadsService).getDownloads());
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.agentScope', (accessor, active: unknown) => accessor.get(IBrowserDownloadsService).setAgentScope(active === true));
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.claim', (accessor, id: unknown) => typeof id === 'string' ? accessor.get(IBrowserDownloadsService).claim(id) : false);
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.approve', (accessor, id: unknown, allow: unknown) => typeof id === 'string' ? accessor.get(IBrowserDownloadsService).approve(id, allow === true) : undefined);
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.waitFor', (accessor, id: unknown, ms: unknown) => typeof id === 'string' ? accessor.get(IBrowserDownloadsService).waitFor(id, typeof ms === 'number' ? ms : 0) : undefined);
++
++
++// #endregion
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserNavigationFeatures.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserNavigationFeatures.ts
+index 096492d9..24321e91 100644
+--- a/src/vs/workbench/contrib/browserView/electron-browser/features/browserNavigationFeatures.ts
++++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserNavigationFeatures.ts
+@@ -58,6 +58,7 @@ class BrowserNavigationBar extends Disposable {
+ 	readonly element: HTMLElement;
+ 	private readonly _urlBar: BrowserUrlBarWidget;
+ 	private readonly _navToolbar: MenuWorkbenchToolBar;
++	private readonly _actionsToolbar: MenuWorkbenchToolBar;
+ 	private readonly _contributionListeners = this._register(new DisposableStore());
+ 	private _contributions: readonly BrowserEditorContribution[] = [];
+ 
+@@ -121,13 +122,23 @@ class BrowserNavigationBar extends Disposable {
+ 		this._urlBar = this._register(instantiationService.createInstance(BrowserUrlBarWidget, urlBarHost));
+ 
+ 		const actionsContainer = $('.browser-actions-toolbar');
+-		const actionsToolbar = this._register(scopedInstantiationService.createInstance(
++		const actionsToolbar = this._actionsToolbar = this._register(scopedInstantiationService.createInstance(
+ 			MenuWorkbenchToolBar,
+ 			actionsContainer,
+ 			MenuId.BrowserActionsToolbar,
+ 			{
+ 				hoverDelegate,
+ 				highlightToggledItems: true,
++				// FriedLiver (patch 0300): contributions draw their own items here too (the downloads indicator).
++				actionViewItemProvider: (action, options) => {
++					for (const contribution of this._contributions) {
++						const viewItem = contribution.getActionViewItem(action, options, scopedInstantiationService);
++						if (viewItem) {
++							return viewItem;
++						}
++					}
++					return undefined;
++				},
+ 				toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
+ 				menuOptions: { shouldForwardArgs: true },
+ 				responsiveBehavior: {
+@@ -164,9 +175,10 @@ class BrowserNavigationBar extends Disposable {
+ 		this._contributions = contributions;
+ 		this._contributionListeners.clear();
+ 		for (const contribution of contributions) {
+-			this._contributionListeners.add(contribution.onDidChangeActionViewItems(() => this._navToolbar.refresh()));
++			this._contributionListeners.add(contribution.onDidChangeActionViewItems(() => { this._navToolbar.refresh(); this._actionsToolbar.refresh(); }));
+ 		}
+ 		this._navToolbar.refresh();
++		this._actionsToolbar.refresh();
+ 		this._urlBar.mountContributions(contributions);
+ 	}
+ 
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
+new file mode 100644
+index 00000000..9f9894e2
+--- /dev/null
++++ b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
+@@ -0,0 +1,310 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0300): browser downloads, COMPONENTS.md §2.33.
++ *  Only design-system tokens (--fl-*, generated from tokens.css into the workbench) and theme
++ *  colours: test/browserDownloads.test.ts checks it. High contrast reads the same tokens, which
++ *  the token sheet maps to the HC theme (outlines instead of fills).
++ *--------------------------------------------------------------------------------------------*/
++
++/* ---- Indicator: IconButton sm in the browser's actions toolbar, a progress ring, a Count ---- */
++
++.monaco-workbench .fl-dl-indicator {
++	position: relative;
++}
++
++.monaco-workbench .fl-dl-indicator__ring {
++	position: absolute;
++	inset: 0;
++	margin: auto;
++	width: var(--fl-i-lg);
++	height: var(--fl-i-lg);
++	pointer-events: none;
++	transform: rotate(-90deg);
++	display: none;
++}
++
++.monaco-workbench .fl-dl-indicator--active .fl-dl-indicator__ring {
++	display: block;
++}
++
++.monaco-workbench .fl-dl-indicator__ring circle {
++	fill: none;
++	stroke-width: 2;
++}
++
++.monaco-workbench .fl-dl-indicator__track {
++	stroke: var(--fl-pill-bg);
++}
++
++.monaco-workbench .fl-dl-indicator__fill {
++	stroke: var(--fl-status-working);
++	stroke-linecap: round;
++	transition: stroke-dasharray var(--fl-dur-slow) var(--fl-ease-out);
++}
++
++.monaco-workbench .fl-dl-indicator--indeterminate .fl-dl-indicator__ring {
++	animation: fl-dl-spin calc(var(--fl-dur-hold) * 2) linear infinite;
++}
++
++/* Inside the ring the arrow drops to 12 so the ring frames it. */
++.monaco-workbench .fl-dl-indicator--active .action-label.codicon {
++	font-size: var(--fl-i-xs);
++}
++
++.monaco-workbench .fl-dl-indicator--open .action-label {
++	background-color: var(--fl-pill-active);
++}
++
++/* Count §2.6: 16 tall, pill, .75em 600 tabular; loud when a download waits for the user. */
++.monaco-workbench .fl-dl-indicator__count {
++	position: absolute;
++	top: calc(var(--fl-sp-1) * -1);
++	right: calc(var(--fl-sp-1) * -1);
++	min-width: var(--fl-h-2xs);
++	height: var(--fl-h-2xs);
++	padding: 0 var(--fl-sp-1);
++	box-sizing: border-box;
++	border-radius: var(--fl-r-pill);
++	background: var(--fl-pill-bg);
++	color: var(--fl-fg);
++	font-size: var(--fl-t-75);
++	font-weight: var(--fl-w-strong);
++	font-variant-numeric: tabular-nums;
++	line-height: var(--fl-h-2xs);
++	text-align: center;
++	pointer-events: none;
++	outline: var(--fl-line) solid var(--fl-ctl-border);
++}
++
++.monaco-workbench .fl-dl-indicator__count:empty {
++	display: none;
++}
++
++.monaco-workbench .fl-dl-indicator__count--loud {
++	background: var(--fl-decision);
++	color: var(--fl-decision-fg);
++}
++
++/* ---- Popover §2.13: glass r8, elevation 3, rows are two-line menu items ---------------------- */
++
++.monaco-workbench .fl-downloads {
++	box-sizing: border-box;
++	width: min(calc(var(--fl-sp-8) * 11.25), calc(100vw - var(--fl-sp-4)));
++	padding: var(--fl-sp-1) 0;
++	border: var(--fl-line) solid var(--fl-border);
++	border-radius: var(--fl-r-box);
++	background: var(--fl-glass-bg);
++	backdrop-filter: var(--fl-glass-blur);
++	box-shadow: var(--fl-elev-3);
++	color: var(--fl-fg);
++	font-size: var(--fl-t-100);
++	margin-top: var(--fl-sp-1);
++	animation: fl-dl-rise var(--fl-dur) var(--fl-ease-out);
++}
++
++.monaco-workbench .fl-downloads__head {
++	display: flex;
++	align-items: center;
++	gap: var(--fl-sp-2);
++	padding: var(--fl-sp-1) var(--fl-sp-2) var(--fl-sp-1) var(--fl-sp-3);
++}
++
++.monaco-workbench .fl-downloads__title {
++	flex: 1;
++	font-size: var(--fl-t-85);
++	color: var(--fl-fg-2);
++	font-weight: var(--fl-w-strong);
++}
++
++.monaco-workbench .fl-downloads__list {
++	display: flex;
++	flex-direction: column;
++	gap: var(--fl-sp-half);
++	max-height: min(60vh, calc(var(--fl-h-md) * 16));
++	overflow-y: auto;
++}
++
++.monaco-workbench .fl-downloads__empty {
++	padding: var(--fl-sp-2) var(--fl-sp-3);
++	font-size: var(--fl-t-90);
++	color: var(--fl-fg-2);
++}
++
++.monaco-workbench .fl-downloads__row {
++	display: flex;
++	align-items: center;
++	gap: var(--fl-sp-2);
++	min-height: calc(var(--fl-sp-8) + var(--fl-sp-2));
++	margin: 0 var(--fl-sp-1);
++	padding: var(--fl-sp-1) var(--fl-sp-2);
++	border-radius: var(--fl-r-row);
++}
++
++.monaco-workbench .fl-downloads__row:hover,
++.monaco-workbench .fl-downloads__row:focus-within {
++	background: var(--fl-hover-bg);
++}
++
++.monaco-workbench .fl-downloads__glyph {
++	flex: none;
++	color: var(--fl-fg-2);
++	font-size: var(--fl-i-md);
++}
++
++.monaco-workbench .fl-downloads__row[data-state='failed'] .fl-downloads__glyph,
++.monaco-workbench .fl-downloads__row[data-state='failed'] .fl-downloads__meta {
++	color: var(--fl-error);
++}
++
++.monaco-workbench .fl-downloads__row[data-state='awaiting'] .fl-downloads__glyph {
++	color: var(--fl-decision);
++}
++
++.monaco-workbench .fl-downloads__body {
++	flex: 1;
++	min-width: 0;
++	display: flex;
++	flex-direction: column;
++	gap: var(--fl-sp-half);
++}
++
++.monaco-workbench .fl-downloads__name,
++.monaco-workbench .fl-downloads__meta {
++	overflow: hidden;
++	white-space: nowrap;
++	text-overflow: ellipsis;
++	line-height: var(--fl-lh-tight);
++}
++
++.monaco-workbench .fl-downloads__row[data-state='cancelled'] .fl-downloads__name {
++	color: var(--fl-fg-2);
++}
++
++.monaco-workbench .fl-downloads__meta {
++	font-size: var(--fl-t-85);
++	color: var(--fl-fg-2);
++	font-variant-numeric: tabular-nums;
++}
++
++/* Progress §2.24: 4 tall pill track, the working colour; indeterminate slides. */
++.monaco-workbench .fl-downloads__progress {
++	position: relative;
++	height: var(--fl-sp-1);
++	border-radius: var(--fl-r-pill);
++	background: var(--fl-pill-bg);
++	overflow: hidden;
++}
++
++.monaco-workbench .fl-downloads__progress-fill {
++	position: absolute;
++	inset: 0 auto 0 0;
++	border-radius: inherit;
++	background: var(--fl-status-working);
++	transition: width var(--fl-dur-slow) var(--fl-ease-out);
++}
++
++.monaco-workbench .fl-downloads__progress--indeterminate .fl-downloads__progress-fill {
++	animation: fl-dl-slide calc(var(--fl-dur-hold) * 2) linear infinite;
++}
++
++.monaco-workbench .fl-downloads__actions {
++	flex: none;
++	display: flex;
++	align-items: center;
++	gap: var(--fl-sp-half);
++}
++
++/* IconButton sm, muted: 22 square, r5, 14 icon, fg-2 → fg on the ghost fill. */
++.monaco-workbench .fl-downloads__icon-btn {
++	display: inline-flex;
++	align-items: center;
++	justify-content: center;
++	width: var(--fl-h-sm);
++	height: var(--fl-h-sm);
++	padding: 0;
++	border: var(--fl-line) solid var(--fl-ctl-border);
++	border-radius: var(--fl-r-ctl);
++	background: transparent;
++	color: var(--fl-fg-2);
++	font-size: var(--fl-i-sm);
++	cursor: pointer;
++}
++
++/* Button sm: 22 tall, min 44, padding 0 8, r5, .9em; quiet, or the one primary (inverted neutral). */
++.monaco-workbench .fl-downloads__text-btn {
++	height: var(--fl-h-sm);
++	min-width: calc(var(--fl-h-sm) * 2);
++	padding: 0 var(--fl-sp-2);
++	border: var(--fl-line) solid var(--fl-ctl-border);
++	border-radius: var(--fl-r-ctl);
++	background: transparent;
++	color: var(--fl-fg-2);
++	font: inherit;
++	font-size: var(--fl-t-90);
++	line-height: 1;
++	white-space: nowrap;
++	cursor: pointer;
++}
++
++.monaco-workbench .fl-downloads__icon-btn:hover,
++.monaco-workbench .fl-downloads__text-btn:hover:not(:disabled) {
++	background: var(--fl-ghost-hover);
++	color: var(--fl-fg);
++}
++
++.monaco-workbench .fl-downloads__icon-btn:active,
++.monaco-workbench .fl-downloads__text-btn:active:not(:disabled) {
++	background: var(--fl-pill-active);
++}
++
++.monaco-workbench .fl-downloads__text-btn--primary {
++	background: var(--fl-primary-bg);
++	color: var(--fl-primary-fg);
++	font-weight: var(--fl-w-medium);
++}
++
++.monaco-workbench .fl-downloads__text-btn--primary:hover:not(:disabled) {
++	background: color-mix(in srgb, var(--fl-primary-bg) 88%, var(--fl-primary-fg));
++	color: var(--fl-primary-fg);
++}
++
++.monaco-workbench .fl-downloads__text-btn:disabled {
++	opacity: 0.4;
++	cursor: default;
++}
++
++.monaco-workbench .fl-downloads__icon-btn:focus-visible,
++.monaco-workbench .fl-downloads__text-btn:focus-visible {
++	outline: var(--fl-focus-w) solid var(--fl-focus);
++	outline-offset: var(--fl-focus-off);
++}
++
++@keyframes fl-dl-rise {
++	from {
++		opacity: 0;
++		transform: translateY(var(--fl-rise));
++	}
++}
++
++@keyframes fl-dl-spin {
++	to {
++		transform: rotate(270deg);
++	}
++}
++
++@keyframes fl-dl-slide {
++	from {
++		left: -30%;
++	}
++	to {
++		left: 100%;
++	}
++}
++
++@media (prefers-reduced-motion: reduce) {
++	.monaco-workbench .fl-downloads,
++	.monaco-workbench .fl-dl-indicator__ring,
++	.monaco-workbench .fl-downloads__progress-fill {
++		animation: none;
++		transition: none;
++	}
++}

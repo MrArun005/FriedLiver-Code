@@ -219,8 +219,9 @@ function browserTools() {
   });
   const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'An element id from browser_snapshot with elements: true, like "e12", or a CSS selector like "#submit".' };
   const ASKS = ' The user is asked to allow it first unless the chat is in Auto mode.';
+  const DOWNLOADS = ' If it starts a download, the user is asked to allow that too; the result then gives the saved file\'s path, size and sha256.';
   return [
-    tool('browser_open', 'Open a page', 'Opens an http or https URL in FriedLiver\'s browser (opening the browser if needed) and waits for it to load. localhost:3000 works too.' + ASKS, {
+    tool('browser_open', 'Open a page', 'Opens an http or https URL in FriedLiver\'s browser (opening the browser if needed) and waits for it to load. localhost:3000 works too.' + ASKS + DOWNLOADS, {
       url: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'http://, https://, or a bare localhost:<port> address.' },
     }, ['url']),
     tool(
@@ -236,7 +237,7 @@ function browserTools() {
       [],
       true,
     ),
-    tool('browser_click', 'Click', 'Clicks an element on the open page, found by CSS selector or by its visible text (give one of the two).' + ASKS, {
+    tool('browser_click', 'Click', 'Clicks an element on the open page, found by CSS selector or by its visible text (give one of the two).' + ASKS + DOWNLOADS, {
       selector: SELECTOR,
       text: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'Visible text of a link, button or label.' },
     }),

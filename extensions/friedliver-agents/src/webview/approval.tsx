@@ -57,7 +57,7 @@ function kindIcon(item: Approvable): IconName {
   if (item.kind === 'command' || (item.kind === 'permission' && item.detail?.command)) return 'terminal';
   if (item.kind === 'review' || (item.kind === 'permission' && item.detail?.files?.length)) return 'file';
   if (item.kind === 'permission') return item.detail?.plan ? 'plan' : item.detail?.url ? 'globe' : 'shield';
-  if ('browser' in item.target) return item.tool === 'browser_click' || item.tool === 'browser_type' ? 'pointer' : 'globe';
+  if ('browser' in item.target) return item.tool === 'browser_click' || item.tool === 'browser_type' ? 'pointer' : item.tool === 'browser_download' ? 'file' : 'globe';
   return 'memory' in item.target ? 'plan' : 'handoff';
 }
 
@@ -537,7 +537,7 @@ function BridgePreview({ item, a, state }: { item: Extract<Approvable, { kind: '
         </span>
         {item.tool !== 'browser_open' && item.text && (
           <span class="mono apv-el" title={item.text}>
-            <Icon name="pointer" size={12} />
+            <Icon name={item.tool === 'browser_download' ? 'file' : 'pointer'} size={12} />
             {item.text}
           </span>
         )}
