@@ -210,6 +210,17 @@ export async function checkForUpdate(deps: CheckDeps): Promise<CheckResult> {
   return 'newer';
 }
 
+/**
+ * The version as Show Version and "You're up to date" say it: product.json's friedliverBuild when there is
+ * one (a build off a tag's commit names it, e.g. "1.142.0-7+3.gd0cca9f1ae"), else friedliverVersion, else
+ * `fallback`. Only for showing: comparisons read friedliverVersion alone (parseVersion, compareVersions).
+ */
+export function versionLabel(product: { friedliverVersion?: unknown; friedliverBuild?: unknown }, fallback: string): string {
+  const build = product.friedliverBuild;
+  if (typeof build === 'string' && /^[\w.+-]{1,80}$/.test(build)) return build;
+  return typeof product.friedliverVersion === 'string' ? product.friedliverVersion : fallback;
+}
+
 /** What a manual "Check for Updates" says; null when the toast offering the update says it instead. */
 export function manualCheckMessage(result: CheckResult, current: string): string | null {
   if (result === 'newer') return null;

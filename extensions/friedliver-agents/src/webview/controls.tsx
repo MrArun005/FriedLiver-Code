@@ -4,10 +4,11 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { batchMessages, batchable, inbox } from '../shared/inbox';
 import type { DiffLine } from '../shared/diff';
-import { AGENT_FACES, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
+import { AGENT_FACES, EXPIRED, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
 import { approvalOf, type Approvable } from '../shared/approval';
 import { ApprovalCard, cardKeys } from './approval';
 import {
+  defaultChoices,
   optionKey,
   reportedMode,
   type AgentDefaults,
@@ -154,7 +155,7 @@ export function PermissionCard({ item, chat }: { item: Permission; chat: ChatVie
     return (
       <div class="answered-block">
         <div class="answered">
-          <Icon name={/^(no|reject|deny|cancel|stopped)/i.test(item.answer) ? 'close' : 'check'} />{' '}
+          <Icon name={item.expired ? 'clock' : /^(no|reject|deny|cancel|stopped)/i.test(item.answer) ? 'close' : 'check'} />{' '}
           {longTitle(item.title) ? <StepLabel title={item.title} toolKind={item.toolKind} cmd={item.detail?.command} /> : item.title}{' '}
           <span class="hint">
             · {item.answer}
@@ -412,7 +413,7 @@ export function TaskOptions({
             {agents.length > 1 && <Glyph agent={agent} size="sm" />}
             {pick.map((o) => {
               const key = optionKey(o);
-              const value = String(choices[agent]?.[key] ?? defaults[agent]?.chosen[key] ?? o.current);
+              const value = String(choices[agent]?.[key] ?? defaultChoices(defaults[agent])[key] ?? o.current);
               return (
                 <Popover
                   key={o.id}
@@ -522,7 +523,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
   if (item.state !== 'awaiting') {
     return (
       <div class="answered q-answered">
-        <Icon name={item.state === 'answered' ? 'check' : 'close'} /> {item.state === 'answered' ? `Answered: ${item.summary ?? 'sent'}` : 'Skipped'}
+        <Icon name={item.expired ? 'clock' : item.state === 'answered' ? 'check' : 'close'} /> {item.expired ? `Question · ${EXPIRED}` : item.state === 'answered' ? `Answered: ${item.summary ?? 'sent'}` : 'Skipped'}
       </div>
     );
   }

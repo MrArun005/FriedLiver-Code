@@ -68,9 +68,11 @@ jobs:
           "Using $($tool.FullName)"
           $tool.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       # Pinned to commits; the build never pushes, so the token isn't left in .git/config.
+      # Full history with tags: a build of main stamps the newest release it contains (friedliverStamp in scripts/lib.mjs).
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22

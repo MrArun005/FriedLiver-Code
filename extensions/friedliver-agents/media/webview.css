@@ -3159,6 +3159,44 @@ button.cc-map-node:hover {
     justify-content: flex-end;
   }
 }
+/* A side bar (~200-360px): the sentence wraps instead of cutting its target, label, commits and URL short;
+   a pill keeps its one line and moves to its own. (Scoped under .apv so it outranks the rules further down; the risk pill wraps through .fl-pill--fit.) */
+@container (max-width: 360px) {
+  .apv .apv-what {
+    flex-wrap: wrap;
+    row-gap: var(--sp-half);
+  }
+  .apv .apv-tg,
+  .apv .apv-label,
+  .apv .apv-subj,
+  .apv .apv-url,
+  .apv .apv-batch-text {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .apv .apv-batch,
+  .apv .apv-act,
+  .apv .apv-dh {
+    flex-wrap: wrap;
+  }
+  .apv .apv-dh {
+    padding-block: var(--sp-half);
+  }
+  .apv .apv-batch-text {
+    flex: 1 1 100%;
+  }
+  /* A dropped commit: hash and author on one line, its subject under them. */
+  .apv .apv-commit {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 0;
+  }
+  .apv .apv-subj {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    overflow-wrap: break-word;
+  }
+}
 /* Narrow: where it runs gives way to what it is. */
 @container (max-width: 640px) {
   .apv-wh {
@@ -3991,7 +4029,8 @@ button.pick-agent {
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  padding: var(--sp-4) var(--sp-2) var(--sp-3);
+  /* Room at the bottom of every card for Demo's note, so it never sits on the name and the glyphs stay in line. */
+  padding: var(--sp-4) var(--sp-2) calc(var(--sp-2) + 1.3em);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--input-bg);
@@ -4005,7 +4044,13 @@ button.pick-agent:hover {
 }
 .pick-agent .pick-note {
   position: absolute;
-  bottom: var(--sp-1);
+  bottom: var(--sp-2);
+  left: var(--sp-1);
+  right: var(--sp-1);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* A fresh chat's first messages to pick from, over the composer. */
 .starters {

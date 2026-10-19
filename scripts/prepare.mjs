@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR, EXTENSIONS_DIR, VSCODE_DIR, copyDir, deepMerge, fail, friedliverVersion, git, log, readJson, run, upstream, writeJson } from './lib.mjs';
+import { ROOT_DIR, EXTENSIONS_DIR, VSCODE_DIR, copyDir, deepMerge, fail, friedliverStamp, git, log, readJson, run, upstream, writeJson } from './lib.mjs';
 import { readTokensSource, workbenchTokens } from './workbench-tokens.mjs';
 
 const MARKER = path.join(VSCODE_DIR, '.friedliver-prepare.json');
@@ -79,10 +79,13 @@ log('workbench: friedliver-tokens.css (from tokens.css) and friedliver.css');
 // 3. product.json.
 const productFile = path.join(VSCODE_DIR, 'product.json');
 const merged = deepMerge(readJson(productFile), readJson(path.join(ROOT_DIR, 'product.json')));
-// The update check in friedliver-agents compares this with the latest GitHub release.
-merged.friedliverVersion = friedliverVersion();
+// The update check in friedliver-agents compares friedliverVersion with the latest GitHub release; a build of main
+// carries the release it contains, and friedliverBuild says how far past it (see friedliverStamp in lib.mjs).
+const stamp = friedliverStamp();
+merged.friedliverVersion = stamp.version;
+merged.friedliverBuild = stamp.build;
 writeJson(productFile, merged);
-log(`merged product.json -> ${merged.nameLong} (${merged.applicationName}) ${merged.friedliverVersion}`);
+log(`merged product.json -> ${merged.nameLong} (${merged.applicationName}) ${merged.friedliverVersion} (build ${merged.friedliverBuild})`);
 
 // 4. Icons. Linux uses one PNG (packaging renames it to <linuxIconName>.png).
 const icon = path.join(ROOT_DIR, 'branding', 'icon.png');

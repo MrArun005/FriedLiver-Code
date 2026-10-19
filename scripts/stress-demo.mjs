@@ -579,24 +579,29 @@ await win.waitForTimeout(800);
 await win.keyboard.press('Enter');
 await win.waitForTimeout(1000);
 await palette('View: Split Editor Right');
-await palette('View: Close Primary Side Bar');
+// The chat view lives in the side bar (the FriedLiver Agents container): keep it, and make sure it shows.
+await palette('View: Show FriedLiver Agents');
 await win.keyboard.press('Control+1');
 await win.waitForTimeout(300);
 
 const chat = await surface('chat');
 await chat.evaluate(installLongTasks);
 await chat.evaluate(installLag, 'chat');
-const label = (i) => (i === 1 ? 'Demo' : `Demo ${i}`);
 const prompt = `busy ${BUSY_S} stamp`;
+/** Open chats: a tab each in the chat view's strip. */
+const openTabs = () => chat.evaluate(() => document.querySelectorAll('.switcher [role="tab"]').length).catch(() => 0);
 mark('start');
 for (let i = 1; i <= N; i++) {
   if (i === 1) {
     await chat.getByRole('button', { name: /Demo/ }).first().click();
   } else {
-    await chat.getByRole('button', { name: 'New chat' }).click();
-    await chat.getByRole('menuitem', { name: /Demo/ }).click();
+    // The header's + ("New chat"; "New chat with" in some builds) opens a menu of agents.
+    await chat.getByRole('button', { name: /^New chat/ }).first().click();
+    await chat.getByRole('menuitem', { name: /^Demo/ }).first().click();
   }
-  const box = chat.locator(`textarea[aria-label="Message ${label(i)}"]`);
+  // Every chat's message box is "Message Demo" (chats are named by topic, not numbered): wait for this chat's tab.
+  for (const end = Date.now() + 30000; (await openTabs()) < i && Date.now() < end; ) await sleep(100);
+  const box = chat.locator('textarea[aria-label="Message Demo"]');
   await box.waitFor({ timeout: 30000 });
   await box.fill(prompt);
   await box.press('Enter');
@@ -646,7 +651,7 @@ const boardRates = metricRates(boardMetrics, await rendererMetrics(), (marks['bo
 if (opts.profile) await stopProfiles('board');
 const workingBoard = await workingCount();
 await win.screenshot({ path: `${dir}/board.png` });
-await win.locator('.part.auxiliarybar').screenshot({ path: `${dir}/chat.png` }).catch(() => {});
+await win.locator('.part.sidebar, .part.auxiliarybar').filter({ has: win.locator('iframe, webview') }).first().screenshot({ path: `${dir}/chat.png` }).catch(() => {});
 
 // Map.
 await tasks.getByRole('tab', { name: /Map/ }).click();

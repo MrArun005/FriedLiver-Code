@@ -27,6 +27,7 @@
 //   --only subagent-detail  an outside Claude Code subagent's detail (working and done), Dark 2026, sheet and panel
 //                   [--shot-tag before|after]: screenshots to ~/code/FriedLiver-Code-design/review/subagent-detail/
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
+//   --only narrow   the Modes and model menus and the approval cards fit a 200 and 290 px side bar, no text cut short
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -334,7 +335,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, 'subagent-detail': subagentDetailChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
+  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -465,8 +466,8 @@ async function shoot() {
 
     await p.click('.mgr-waiting');
     check((await p.locator('.inbox').count()) === 1, 'the decisions pill opens the Inbox');
-    // Esc says no in the Inbox; the view switch (1) goes back to the board.
-    await p.keyboard.press('1');
+    // In the Inbox its digits pick answers and Esc says no: the Board tab goes back to the board.
+    await p.getByRole('tab', { name: /Board/ }).click();
     await p.locator('[data-nav="chat-c1"]').focus();
     await p.keyboard.press('j');
     check(await p.evaluate(() => document.activeElement?.getAttribute('data-nav') === 'chat-x1'), 'j moves to the next card');
@@ -1134,8 +1135,8 @@ async function shoot() {
           const s = await stripState(many);
           check(
             s.tabs === n && s.marks && s.markOnly && s.otherLabels && s.openInView && s.whole && s.noFade && s.page &&
-              (s.openLabel >= 110 || s.openTitleWhole) && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
-            `${theme} ${n} tabs at ${w}px: whole tabs only, a mark and a dot on each (a badge when mark-only), the open one titled (≥ 110) and in view [${JSON.stringify(s)}]`,
+              (s.openLabel >= 110 || s.openTitleWhole || (w <= 300 && s.openLabel >= 64)) && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
+            `${theme} ${n} tabs at ${w}px: whole tabs only, a mark and a dot on each (a badge when mark-only), the open one titled (≥ 110; ≥ 64 at 300px, so other chats' marks fit beside it) and in view [${JSON.stringify(s)}]`,
           );
           if (n === 15) {
             // A wheel notch moves the strip by whole tabs: still no partial tab.
@@ -1461,6 +1462,7 @@ async function shoot() {
   await inboxChecks({ open, check, posted });
   await labelChecks({ open, check, posted });
   await gutterChecks({ open, check, posted, save });
+  await narrowChecks({ open, check, posted });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1758,6 +1760,90 @@ async function labelChecks({ open, check }) {
     }
     check(hits.length === 0, `no numbered agent label on ${query}${hits.length ? ` [${[...new Set(hits)].slice(0, 5).join(' | ')}]` : ''}`);
     await p.close();
+  }
+}
+
+// ---- A narrow side bar: the composer's menus and the approval cards fit, and no text is cut short ----
+
+/** Boxes under `root` that spill past the viewport, and text cut with an ellipsis (or clipped) to fit. */
+async function narrowOffenders(p, root) {
+  return p.evaluate((sel) => {
+    const out = [];
+    const name = (e) => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} "${(e.textContent ?? '').trim().slice(0, 40)}"`;
+    for (const r of document.querySelectorAll(sel)) {
+      const b = r.getBoundingClientRect();
+      if (b.left < -0.5 || b.right > window.innerWidth + 0.5) out.push(`${name(r)} spans ${Math.round(b.left)}..${Math.round(b.right)} of ${window.innerWidth}`);
+      const scrolls = (e) => {
+        for (let x = e.parentElement; x && x !== r; x = x.parentElement) if (/auto|scroll/.test(window.getComputedStyle(x).overflowX)) return true;
+        return false;
+      };
+      for (const e of r.querySelectorAll('*')) {
+        const eb = e.getBoundingClientRect();
+        if (eb.width && eb.height && (eb.left < b.left - 0.5 || eb.right > b.right + 0.5) && !scrolls(e)) out.push(`${name(e)} spills past its card (${Math.round(eb.left)}..${Math.round(eb.right)} of ${Math.round(b.left)}..${Math.round(b.right)})`);
+      }
+      for (const e of [r, ...r.querySelectorAll('*')]) {
+        if (!e.childNodes.length || ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+        const cs = window.getComputedStyle(e);
+        // An inline box has no clientWidth of its own and clips nothing.
+        if (cs.display === 'none' || cs.display === 'inline' || cs.visibility === 'hidden') continue;
+        const clips = cs.textOverflow === 'ellipsis' || cs.overflowX === 'hidden' || cs.overflowX === 'clip';
+        if (clips && e.scrollWidth > e.clientWidth + 1) out.push(`${name(e)} cut (${e.scrollWidth} > ${e.clientWidth})`);
+      }
+    }
+    return out;
+  }, root);
+}
+
+async function narrowChecks({ open, check }) {
+  for (const width of [200, 290]) {
+    const p = await open('surface=chat&theme=dark-2026&side=1&select=chat-c5', width, 900);
+    await p.click('.cc-mode');
+    await p.waitForSelector('.cc-modes-menu');
+    let bad = await narrowOffenders(p, '.cc-modes-menu');
+    check(bad.length === 0, `at ${width}px the Modes menu fits the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
+    await p.keyboard.press('Escape');
+    await p.click('.cc-model');
+    await p.waitForSelector('.cc-model-menu');
+    bad = await narrowOffenders(p, '.cc-model-menu');
+    check(bad.length === 0, `at ${width}px the model menu fits the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
+    await p.close();
+    const a = await open('surface=chat&theme=dark-2026&side=1&fixture=approvals&select=chat-shop', width, 1500);
+    await a.waitForSelector('.apv');
+    bad = await narrowOffenders(a, '.apv');
+    check(bad.length === 0, `at ${width}px the approval cards fit the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
+    await a.close();
+    // The start cards: Demo's "fake, local" note sits under its name, not on it.
+    const e = await open('surface=chat&theme=dark-2026&side=1&empty=1', width, 900);
+    const overlaps = await e.evaluate(() =>
+      [...document.querySelectorAll('.pick-agent')].flatMap((b) => {
+        const note = b.querySelector('.pick-note');
+        const name = [...b.children].filter((c) => c.tagName === 'SPAN' && !c.classList.contains('pick-note')).at(-1);
+        if (!note || !name) return [];
+        const n = note.getBoundingClientRect();
+        const t = name.getBoundingClientRect();
+        const card = b.getBoundingClientRect();
+        return n.top < t.bottom - 0.5 || n.bottom > card.bottom + 0.5 ? [`${b.textContent.trim()}: note ${Math.round(n.top)}..${Math.round(n.bottom)}, name ends ${Math.round(t.bottom)}`] : [];
+      }),
+    );
+    const notes = await e.locator('.pick-agent .pick-note').count();
+    check(notes === 1 && overlaps.length === 0, `at ${width}px Demo's start card keeps its note under its name${overlaps.length ? ` [${overlaps.join(' | ')}]` : ''}`);
+    await e.close();
+    // Five open chats: the strip shows more than the open one (marks, or titles), and scrolls to the rest.
+    const t = await open('surface=chat&theme=dark-2026&side=1&tabs=5', width, 900);
+    const strip = await t.evaluate(() => {
+      const box = document.querySelector('.switcher .tabs');
+      if (!box) return { tabs: 0, seen: 0 };
+      const b = box.getBoundingClientRect();
+      const tabs = [...box.querySelectorAll('[role="tab"]')];
+      const seen = tabs.filter((x) => {
+        const r = x.getBoundingClientRect();
+        const cs = window.getComputedStyle(x);
+        return cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 8 && Math.min(r.right, b.right) - Math.max(r.left, b.left) >= Math.min(r.width, 20);
+      });
+      return { tabs: tabs.length, seen: seen.length, scrolls: box.scrollWidth > box.clientWidth + 1 };
+    });
+    check(strip.tabs === 5 && strip.seen >= (width >= 250 ? 3 : 1), `at ${width}px five open chats show in the tab strip (${strip.seen} of ${strip.tabs} on screen${strip.scrolls ? ', the rest by scrolling' : ''})`);
+    await t.close();
   }
 }
 

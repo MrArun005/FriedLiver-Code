@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AGENT_KEYS, type ChatView } from '../src/shared/model';
-import { TAB_MIN, switcherGroups, tabFit, tabForKey, tabTip } from '../src/shared/view';
+import { TAB_MIN, markWindow, switcherGroups, tabFit, tabForKey, tabTip } from '../src/shared/view';
 import { FRIEDLIVER_MARK } from '../src/webview/ui/friedliverMark';
 import { MARKS, markFor } from '../src/webview/ui/marks';
 
@@ -155,5 +155,23 @@ describe('keyboard switching', () => {
     expect(key('1', { meta: true, alt: true })).toBeUndefined();
     expect(key('1', { meta: true, shift: true })).toBeUndefined();
     expect(tabForKey([], undefined, { key: 'Tab', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false }, true)).toBeUndefined();
+  });
+});
+
+describe('a narrow side bar still shows the other open chats', () => {
+  const step = 30;
+  it('keeps the open tab at its minimum while three marks fit beside it', () => {
+    expect(markWindow(600, step, 20)).toEqual({ marks: Math.floor((600 - TAB_MIN.open) / step), openWidth: 600 - Math.floor((600 - TAB_MIN.open) / step) * step });
+    expect(markWindow(TAB_MIN.open + 3 * step, step, 5)).toEqual({ marks: 3, openWidth: TAB_MIN.open });
+  });
+
+  it('gives the open tab less in the default side bar, so five chats are not the open one alone', () => {
+    // ~290px panel: a strip about 196 wide, 26px marks 4 apart; the open tab keeps TAB_MIN.narrowOpen.
+    expect(markWindow(196, step, 5)).toEqual({ marks: 2, openWidth: 136 });
+    expect(markWindow(240, step, 5)).toEqual({ marks: 3, openWidth: 150 });
+    // ~258px: one mark beside it; ~200px: none, the others a scroll away.
+    expect(markWindow(164, step, 5)).toEqual({ marks: 1, openWidth: 134 });
+    expect(markWindow(106, step, 5)).toEqual({ marks: 0, openWidth: 106 });
+    expect(markWindow(220, step, 1)).toEqual({ marks: 0, openWidth: 220 });
   });
 });

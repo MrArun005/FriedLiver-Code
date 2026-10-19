@@ -522,7 +522,7 @@
         "command": "friedliver.moveToCenter",
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a",
-        "when": "!terminalFocus"
+        "when": "!terminalFocus && (isMac || !editorTextFocus || editorReadonly)"
       },
       {
         "command": "friedliver.review.acceptAll",
@@ -888,8 +888,8 @@
         "friedliver.browser.externalClients": {
           "scope": "machine",
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "Lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through a stdio MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` (no secret in it; it reads a token that changes every launch from FriedLiver's storage). Every action still asks you first. Read from your user settings only."
+          "default": false,
+          "markdownDescription": "Opt-in: lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through a stdio MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` (no secret in it; it reads a token that changes every launch from FriedLiver's storage). Off by default: FriedLiver writes nothing to `~/.claude.json` until you turn this on or run **FriedLiver: Connect Claude Code to the browser**; turning it off removes the entry FriedLiver added. Every action still asks you first. Read from your user settings only."
         },
         "friedliver.browser.externalAutoApprove": {
           "scope": "machine",

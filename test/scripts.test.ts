@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
 import { checkRun, parseRef } from '../scripts/fetch-build.mjs';
 import { diffStyles } from '../scripts/workbench-shots.mjs';
-import { codesignArgs, friedliverVersion, keepChromiumLocale, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
+import { codesignArgs, friedliverStamp, friedliverVersion, gitReleaseState, keepChromiumLocale, newestReleaseTag, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
 
@@ -143,9 +144,52 @@ describe('download integrity helpers', () => {
   });
 
   it('stamps a release version only in the release tag form', () => {
-    expect(friedliverVersion({ FRIEDLIVER_VERSION: 'v1.142.0-2' })).toBe('1.142.0-2');
-    expect(friedliverVersion({ FRIEDLIVER_VERSION: '1.142.1' })).toBe('1.142.1');
-    expect(friedliverVersion({})).toBe(JSON.parse(fs.readFileSync(path.join(root, 'upstream.json'), 'utf8')).tag);
+    const noGit = () => { throw new Error('a tag build must not look at git'); };
+    expect(friedliverVersion({ FRIEDLIVER_VERSION: 'v1.142.0-2' }, noGit)).toBe('1.142.0-2');
+    expect(friedliverVersion({ FRIEDLIVER_VERSION: '1.142.1' }, noGit)).toBe('1.142.1');
+    expect(friedliverStamp({ FRIEDLIVER_VERSION: 'v1.142.0-7' }, noGit)).toEqual({ version: '1.142.0-7', build: '1.142.0-7' });
+  });
+
+  it('stamps a build of main with the newest release it contains, so that release is not offered as an update', () => {
+    const state = { tag: 'v1.142.0-7', ahead: 3, sha: 'd0cca9f1ae' };
+    expect(friedliverStamp({}, () => state)).toEqual({ version: '1.142.0-7', build: '1.142.0-7+3.gd0cca9f1ae' });
+    expect(friedliverStamp({ FRIEDLIVER_VERSION: ' ' }, () => ({ ...state, ahead: 0 }))).toEqual({ version: '1.142.0-7', build: '1.142.0-7' });
+    // No tags (a shallow clone or an archive): the pinned upstream version, as before.
+    const pinned = JSON.parse(fs.readFileSync(path.join(root, 'upstream.json'), 'utf8')).tag;
+    expect(friedliverStamp({}, () => null)).toEqual({ version: pinned, build: pinned });
+    expect(friedliverVersion({}, () => null)).toBe(pinned);
+  });
+
+  it('picks the newest release tag by version, not by name', () => {
+    expect(newestReleaseTag(['v1.142.0', 'v1.142.0-10', 'v1.142.0-9', 'v1.141.3-12'])).toBe('v1.142.0-10');
+    expect(newestReleaseTag(['v1.142.0-7', 'v1.142.1'])).toBe('v1.142.1');
+    expect(newestReleaseTag(['v1.142.0', 'v1.142.0-1'])).toBe('v1.142.0-1');
+    expect(newestReleaseTag(['', 'nightly', 'v1.143.0-rc1', '1.150.0', 'v1.142.0-2; rm -rf /', 'v1.142.0-2'])).toBe('v1.142.0-2');
+    expect(newestReleaseTag([])).toBeNull();
+  });
+
+  it('reads the newest contained release tag and the commits since it from git', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-tags-'));
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).trim();
+    git('init', '-q');
+    expect(gitReleaseState(dir)).toBeNull(); // no commits
+    git('commit', '-q', '--allow-empty', '-m', 'one');
+    expect(gitReleaseState(dir)).toBeNull(); // no tags
+    git('tag', 'v1.142.0-9');
+    git('commit', '-q', '--allow-empty', '-m', 'two');
+    git('tag', 'v1.142.0-10');
+    git('tag', 'not-a-release');
+    git('commit', '-q', '--allow-empty', '-m', 'three');
+    git('commit', '-q', '--allow-empty', '-m', 'four');
+    // A newer release that HEAD doesn't contain (another branch) isn't this build's version.
+    git('checkout', '-q', '-b', 'release', 'v1.142.0-10');
+    git('commit', '-q', '--allow-empty', '-m', 'release');
+    git('tag', 'v1.142.0-11');
+    git('checkout', '-q', '-');
+    const sha = git('rev-parse', '--short=10', 'HEAD');
+    expect(gitReleaseState(dir)).toEqual({ tag: 'v1.142.0-10', ahead: 2, sha });
+    expect(friedliverStamp({}, () => gitReleaseState(dir))).toEqual({ version: '1.142.0-10', build: `1.142.0-10+2.g${sha}` });
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
