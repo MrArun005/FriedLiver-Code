@@ -36,6 +36,7 @@ import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
 import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
+import { discussLayoutOf, type DiscussLayout } from './shared/discussView';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
 import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
@@ -254,6 +255,10 @@ export class Controller {
       externalAutoApprove: () => this.browserSetting('externalAutoApprove', false),
       autoAllowLinkedReads: () => userSetting(vscode.workspace.getConfiguration('friedliver.chat').inspect<unknown>('autoAllowLinkedReads')).value === true,
       browserPage: (selector) => this.browser.inspect(selector),
+      discussSettings: () => {
+        const c = vscode.workspace.getConfiguration('friedliver.discuss');
+        return { maxRounds: c.get<number>('maxRounds'), tokenBudget: c.get<number>('tokenBudget') };
+      },
       index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
       indexEnabled: () => vscode.workspace.getConfiguration('friedliver.index').get<boolean>('enabled', true),
       indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),
@@ -760,6 +765,7 @@ export class Controller {
             now: Date.now(),
             defaults: this.core.agentDefaults(),
             roster: this.roster(),
+            discussLayout: this.discussLayout(),
           });
           if (surface.kind === 'tasks' && this.inboxWanted) {
             this.inboxWanted = false;
@@ -946,6 +952,15 @@ export class Controller {
         }
         case 'consult':
           void this.core.consult(m.chatId, m.agent, m.text, 'user', [], m.fresh).catch((err: unknown) => this.error(err));
+          return;
+        case 'discuss':
+          void this.core.discuss(m.chatId, m.agents, m.text).catch((err: unknown) => this.error(err));
+          return;
+        case 'discussion':
+          if (m.act === 'point') return this.core.discussions.addPoint(m.id, m.text!);
+          void (m.act === 'stop' ? this.core.discussions.stop(m.id) : m.act === 'continue' ? this.core.discussions.continue(m.id) : this.core.discussions.carryOut(m.id, m.agent!)).catch((err: unknown) =>
+            this.error(err),
+          );
           return;
         case 'pipe':
           this.core.pipe(m.from, m.to);
@@ -1682,6 +1697,10 @@ export class Controller {
     return rosterOf(this.showDemo(), this.accounts.records());
   }
 
+  private discussLayout(): DiscussLayout {
+    return discussLayoutOf(vscode.workspace.getConfiguration('friedliver.discuss').get<unknown>('layout'));
+  }
+
   private postRoster(): void {
     const message: HostMessage = { type: 'roster', roster: this.roster() };
     for (const s of this.surfaces) post(s, message);
@@ -1945,6 +1964,10 @@ export class Controller {
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
     if (e.affectsConfiguration('friedliver.browser.externalClients')) void this.connectClaude(false);
+    if (e.affectsConfiguration('friedliver.discuss.layout')) {
+      const message: HostMessage = { type: 'discussLayout', layout: this.discussLayout() };
+      for (const s of this.surfaces) post(s, message);
+    }
     if (e.affectsConfiguration('friedliver.images')) void this.tidyImages().finally(() => this.postImageStore());
     if (e.affectsConfiguration('friedliver.showDemoAgent')) {
       this.accounts.refresh();

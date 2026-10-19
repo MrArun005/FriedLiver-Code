@@ -128,25 +128,41 @@ export function Count({ n, loud, label }: { n: number | string; loud?: boolean; 
 
 export const Kbd = ({ children, inline }: { children: ComponentChildren; inline?: boolean }) => <kbd class={cx('fl-kbd', inline && 'fl-kbd--inline')}>{children}</kbd>;
 
-export function Avatar({ agent, size }: { agent: AgentKey; size?: 'sm' | 'md' | 'lg' }) {
+/**
+ * The agent's tile (§2.22): its letter, or with `mark` its Mark (§2.22b) in its hue. `size` 'marker' is
+ * the /discuss meter's marker (§2.30, 28).
+ */
+export function Avatar({ agent, size, mark }: { agent: AgentKey; size?: 'sm' | 'md' | 'lg' | 'marker'; mark?: boolean }) {
   const face = AGENT_FACES[agent];
   return (
-    <span class={cx('fl-avatar', size && size !== 'md' && `fl-avatar--${size}`)} data-agent={agent} title={face.name} aria-label={face.name} role="img">
-      {face.letter}
+    <span class={cx('fl-avatar', size && size !== 'md' && `fl-avatar--${size}`, mark && 'fl-avatar--mark')} data-agent={agent} title={face.name} aria-label={face.name} role="img">
+      {mark ? (
+        <span class="fl-mark" aria-hidden="true">
+          <MarkSvg agent={agent} />
+        </span>
+      ) : (
+        face.letter
+      )}
     </span>
+  );
+}
+
+function MarkSvg({ agent }: { agent: string }) {
+  const m = markFor(agent);
+  return (
+    <svg viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
+      {m.fill && <path d={m.fill} fill="currentColor" />}
+      <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
   );
 }
 
 /** An agent's mark (§2.22b): a 16px monochrome drawing in the text colour; its hue where the tab is selected or hovered. */
 export function AgentMark({ agent }: { agent: string }) {
-  const m = markFor(agent);
   const name = AGENT_FACES[agent as AgentKey]?.name ?? 'Agent';
   return (
     <span class="fl-mark" data-agent={agent} role="img" aria-label={name} title={name}>
-      <svg viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
-        {m.fill && <path d={m.fill} fill="currentColor" />}
-        <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
+      <MarkSvg agent={agent} />
     </span>
   );
 }

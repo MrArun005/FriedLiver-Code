@@ -3,6 +3,7 @@
 import type { AgentRoster } from './accounts';
 import { isAgentKey, type Action, type AgentKey, type AppState, type CodeRef, type NoticeAction } from './model';
 import type { DictationUpdate } from './dictation';
+import type { DiscussLayout } from './discussView';
 import type { ImageStoreInfo, OutsideImages } from './gallery';
 import { linkTarget } from './links';
 import { cleanGrant, isGrant, type Grant, type Remembered } from './permissions';
@@ -77,6 +78,10 @@ export type WebviewMessage =
   | { type: 'handoff'; chatId: string; agent: AgentKey; fresh?: boolean }
   /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. `fresh` asks in a new chat. */
   | { type: 'consult'; chatId: string; agent: AgentKey; text: string; fresh?: boolean }
+  /** /discuss: this chat's agent and `agents` talk `text` through, then sum it up (host/discuss.ts). */
+  | { type: 'discuss'; chatId: string; agents: AgentKey[]; text: string }
+  /** A discussion card's buttons: Stop, Continue discussing, Carry out with `agent`; `point`: the user's point, heard from the next round. */
+  | { type: 'discussion'; id: string; act: 'stop' | 'continue' | 'carry' | 'point'; agent?: AgentKey; text?: string }
   /** Forward each finished turn of `from` to the chat `to`. */
   | { type: 'pipe'; from: string; to: string }
   | { type: 'unlink'; linkId: string }
@@ -140,7 +145,7 @@ export type WebviewMessage =
 
 export type HostMessage =
   /** `defaults` (optional): each agent's last known options and the user's last choices. */
-  | { type: 'snapshot'; state: AppState; selected?: string; now: number; defaults?: Partial<Record<AgentKey, AgentDefaults>>; roster?: AgentRoster }
+  | { type: 'snapshot'; state: AppState; selected?: string; now: number; defaults?: Partial<Record<AgentKey, AgentDefaults>>; roster?: AgentRoster; discussLayout?: DiscussLayout }
   | { type: 'defaults'; defaults: Partial<Record<AgentKey, AgentDefaults>> }
   /** Manage Permissions: every remembered "Always allow". */
   | { type: 'permissions'; rules: Remembered[] }
@@ -170,6 +175,8 @@ export type HostMessage =
   | ({ type: 'dictation'; chatId: string } & DictationUpdate)
   /** Which agents pickers offer (Demo only when shown) and each one's last known sign-in. */
   | { type: 'roster'; roster: AgentRoster }
+  /** friedliver.discuss.layout changed: open discussion cards redraw in it. */
+  | { type: 'discussLayout'; layout: DiscussLayout }
   /** The Agent Manager turns to its Inbox (FriedLiver: Open Decision Inbox). */
   | { type: 'showInbox' };
 
@@ -407,6 +414,15 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.chatId) && isAgentKey(m.agent) && str(m.text, LIMITS.text) && m.text.trim()
         ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text, ...(m.fresh === true ? { fresh: true } : {}) }
         : null;
+    case 'discuss':
+      return id(m.chatId) && Array.isArray(m.agents) && m.agents.length >= 1 && m.agents.length <= LIMITS.fanout && m.agents.every(isAgentKey) && str(m.text, LIMITS.text) && m.text.trim()
+        ? { type: 'discuss', chatId: m.chatId, agents: [...new Set(m.agents as AgentKey[])], text: m.text }
+        : null;
+    case 'discussion':
+      if (!id(m.id) || (m.act !== 'stop' && m.act !== 'continue' && m.act !== 'carry' && m.act !== 'point')) return null;
+      if (m.act === 'point') return str(m.text, LIMITS.text) && m.text.trim() ? { type: 'discussion', id: m.id, act: 'point', text: m.text.trim() } : null;
+      if (m.act === 'carry') return isAgentKey(m.agent) ? { type: 'discussion', id: m.id, act: 'carry', agent: m.agent } : null;
+      return { type: 'discussion', id: m.id, act: m.act };
     case 'pipe':
       return id(m.from) && id(m.to) && m.from !== m.to ? { type: 'pipe', from: m.from, to: m.to } : null;
     case 'unlink':
