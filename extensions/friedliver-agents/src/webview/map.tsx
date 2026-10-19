@@ -488,7 +488,9 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
         <span class="spacer" />
         <IconButton icon="close" label="Close" muted size="sm" title="Close" onClick={onClose} />
       </div>
-      <div class="tip-title">{info?.title ?? sub.title}</div>
+      <div class="tip-title" title={info?.title ?? sub.title}>
+        {info?.title ?? sub.title}
+      </div>
       {session && <OutsideSubagent key={sub.item} session={session} id={sub.item} state={state_} now={now} />}
       {parent && !session && (
         <div class="tip-meta sd-parent" title={chat ? chatTip(chat) : undefined}>
@@ -498,8 +500,8 @@ function SubDetail({ sub, state, outside, now, onClose }: { sub: MapSub; state: 
       {steps.length > 0 && (
         <ol class="map-detail-steps" aria-label="Steps">
           {steps.slice(-8).map((t) => (
-            <li key={t.id} data-state={t.status}>
-              {t.title}
+            <li key={t.id} data-state={t.status} title={t.title}>
+              <span class="map-detail-step">{t.title}</span>
             </li>
           ))}
         </ol>

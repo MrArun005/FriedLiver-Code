@@ -752,10 +752,9 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
             </span>
           )}
           {conflicts.slice(0, 2).map((c) => (
-            <span key={c.file} class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${agentName(o.agent)})`).join(', ')}: they clash when merged`}>
-              <Icon name="diff" />
-              <span class="fl-pill__text">{conflictText(c)}</span>
-            </span>
+            <Pill key={c.file} tone="warn" icon="diff" class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${agentName(o.agent)})`).join(', ')}: they clash when merged`}>
+              {conflictText(c)}
+            </Pill>
           ))}
           {conflicts.length > 2 && <span class="fl-pill" data-tone="warn">+{conflicts.length - 2} more shared</span>}
           {badges.map((b) => (
