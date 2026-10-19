@@ -26,6 +26,12 @@
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
 //   --only agent-errors the agent-error notices and the hand-off/ask menus that reuse a chat (agent-errors-*.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
+//   --only manager-overflow  every way to open an agent's details in the Agent Manager (map sheet for a chat's and an
+//                   outside session's subagents, Board, List, a chat's hover card) with very long content, 480 to 1440 wide,
+//                   600 and 800 high, Dark and Light 2026: nothing wider than its box, no sideways page, the sheet fully
+//                   reachable [--shot-tag before|after]: screenshots to ~/code/FriedLiver-Code-design/review/manager-overflow/
+//        &fixture=overflow (the same chats and an outside session with very long words, paths, commands, ids; the
+//                   host answers watchSubagent with its detail)
 //   --only subagent-detail  an outside Claude Code subagent's detail (working and done), Dark 2026, sheet and panel
 //                   [--shot-tag before|after]: screenshots to ~/code/FriedLiver-Code-design/review/subagent-detail/
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
@@ -188,6 +194,8 @@ function page(params) {
               ? discussFixture(Date.now(), { before: params.get('fixture') === 'discuss-before' })
             : params.get('fixture') === 'agent-errors'
               ? agentErrorsFixture(Date.now())
+            : params.get('fixture') === 'overflow'
+              ? overflowFixture(Date.now())
             : params.get('fixture') === 'inbox' || params.get('fixture') === 'inbox-empty'
               ? inboxFixture(Date.now(), { answered: params.get('fixture') === 'inbox-empty' })
             : params.get('fixture') === 'permissions' || surface === 'permissions'
@@ -214,6 +222,7 @@ function page(params) {
     const claude = ${JSON.stringify(data.claude ?? null).replace(/</g, '\\u003c')};
     const rules = ${JSON.stringify(data.rules ?? null).replace(/</g, '\\u003c')};
     const outside = ${JSON.stringify(data.outside ?? null).replace(/</g, '\\u003c')};
+    const details = ${JSON.stringify(data.details ?? null).replace(/</g, '\\u003c')};
     window.acquireVsCodeApi = () => ({
       postMessage(m) {
         window.__posted.push(m);
@@ -239,6 +248,8 @@ function page(params) {
           });
         }
         if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
+        // An outside subagent's detail, as the host sends it while the sheet follows its transcript.
+        if (m && m.type === 'watchSubagent' && m.id && details && details[m.id]) setTimeout(() => window.postMessage({ type: 'subagentDetail', detail: details[m.id] }, '*'), 0);
         if (m && m.type === 'ready' && claude) setTimeout(() => window.postMessage({ type: 'claudeSessions', sessions: claude }, '*'), 0);
         // Manage Permissions: the host sends the remembered rules, and the list again after a revoke.
         if (m && m.type === 'ready' && rules) setTimeout(() => window.postMessage({ type: 'permissions', rules }, '*'), 0);
@@ -340,7 +351,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { discuss: discussChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
+  const only = { discuss: discussChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'manager-overflow': managerOverflowChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -1984,6 +1995,183 @@ async function subagentDetailChecks({ open, check, posted }) {
       await p.waitForFunction(() => window.__posted.some((m) => m.type === 'watchSubagent' && !m.id), null, { timeout: 2000 }).catch(() => {});
       if (after) check((await posted(p)).some((m) => m.type === 'watchSubagent' && !m.id) && !(await p.locator('.map-detail').count()), `${state} at ${width}: Esc closes it and it stops following`);
       await p.close();
+    }
+  }
+}
+
+/** The main fixture's chats and the subagents one's (a subagent with 40 more steps), the subagent-detail outside session,
+    every text with a very long word, path or URL in it; very long model and type names, very large token counts. */
+function overflowFixture(now) {
+  const LONG = 'averyveryverylongunbreakabletoken'.repeat(12);
+  const main = fixture(now);
+  const pay = subagentsFixture(now).state.chats[0];
+  const more = Array.from({ length: 40 }, (_, i) => ({ kind: 'tool', id: `s-x${i}`, title: `node scripts/check.mjs --path=/Users/dev/code/${LONG}/${i}`, toolKind: 'execute', status: 'completed', locations: [], tool: 'Bash', parent: 'a-sec' }));
+  const chats = stretched([...main.state.chats, { ...pay, items: [...pay.items, ...more] }], 'chats');
+  const fx = subagentDetailFixture(now);
+  const model = `claude-opus-5-5-${LONG.slice(0, 90)}`;
+  const agentType = `general-purpose-${LONG.slice(0, 60)}`;
+  const session = stretched(fx.session, 'session');
+  session.subagents = session.subagents.map((s) => ({ ...s, model, agentType }));
+  const details = Object.fromEntries(
+    Object.entries(fx.details).map(([id, d]) => {
+      const x = stretched(d, 'detail');
+      return [
+        id,
+        {
+          ...x,
+          prompt: `${d.prompt}\n\nSee /Users/dev/code/${LONG}/src/x.ts, \`npx vitest run --reporter=${LONG}\` and https://example.com/${LONG}`,
+          ...(d.report ? { report: `${d.report}\n\nLog: https://example.com/${LONG}\n\n\`\`\`\n${LONG}\n\`\`\`` } : {}),
+          model,
+          agentType,
+          usage: { input: 987_654_321_098, output: 123_456_789_012, cacheRead: 98_765_432_109_876, cacheWrite: 1_234_567_890_123 },
+          files: [...x.files, { path: `/Users/dev/code/${LONG}/${LONG}.ts`, edits: 12, reads: 3 }],
+          filesMore: 123_456,
+        },
+      ];
+    }),
+  );
+  return { state: { ...main.state, chats }, defaults: main.defaults, claude: [session], details };
+}
+
+/** Run in the page: what escapes its box inside each element `sel` matches, and whether the page scrolls sideways.
+    A box may scroll sideways only when that is its job (the map's canvas, code blocks, diffs, tables). */
+function overflowProbe(sel) {
+  const SCROLLERS = '.map-scroll, pre, .diff, table';
+  const vw = window.innerWidth;
+  const name = (el) => el.tagName.toLowerCase() + [...el.classList].slice(0, 2).map((c) => `.${c}`).join('');
+  const bad = [];
+  const mgr = document.querySelector('.manager');
+  const page = document.scrollingElement.scrollWidth > vw || (!!mgr && mgr.scrollWidth > mgr.clientWidth + 1);
+  for (const root of document.querySelectorAll(sel)) {
+    for (const el of [root, ...root.querySelectorAll('*')]) {
+      if (el.parentElement?.closest('svg')) continue;
+      const sc = el.parentElement?.closest(SCROLLERS);
+      if (sc && root.contains(sc)) continue;
+      const cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.display === 'contents') continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      const free = cs.position === 'fixed' || cs.position === 'absolute';
+      const par = el.parentElement;
+      if (!free && par && el !== root) {
+        const ps = window.getComputedStyle(par);
+        const pr = par.getBoundingClientRect();
+        const l = pr.left + parseFloat(ps.borderLeftWidth);
+        const rt = pr.right - parseFloat(ps.borderRightWidth);
+        if (ps.display !== 'contents' && ps.display !== 'inline' && (r.left < l - 1 || r.right > rt + 1)) bad.push(`${name(el)} outside ${name(par)} by ${Math.round(Math.max(l - r.left, r.right - rt))}px`);
+      }
+      if (r.left < -1 || r.right > vw + 1) bad.push(`${name(el)} off-screen`);
+      if (cs.display !== 'inline' && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && !el.matches(SCROLLERS)) {
+        const ox = cs.overflowX;
+        if (ox === 'auto' || ox === 'scroll') bad.push(`${name(el)} scrolls sideways ${el.scrollWidth - el.clientWidth}px`);
+        else if (ox === 'visible') bad.push(`${name(el)} spills ${el.scrollWidth - el.clientWidth}px`);
+        else if (cs.textOverflow !== 'ellipsis' && cs.webkitLineClamp === 'none') bad.push(`${name(el)} cut ${el.scrollWidth - el.clientWidth}px`);
+      }
+    }
+  }
+  return { page, bad: [...new Set(bad)] };
+}
+
+/** Run in the page: the open sheet stuck at the top and with the page scrolled to its end is inside the window,
+    its close button showing, and everything in it reachable (each region that scrolls shows its last line; nothing cut). */
+function sheetProbe() {
+  const d = document.querySelector('.map-detail');
+  const mgr = document.querySelector('.manager');
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const name = (el) => el.tagName.toLowerCase() + [...el.classList].slice(0, 2).map((c) => `.${c}`).join('');
+  const inside = (r, b) => r.top >= b.top - 1 && r.bottom <= b.bottom + 1 && r.left >= b.left - 1 && r.right <= b.right + 1;
+  const win = { top: 0, left: 0, right: vw, bottom: vh };
+  const bad = [];
+  if (!d) return ['no sheet'];
+  for (const at of ['stuck', 'end']) {
+    if (at === 'stuck') mgr.scrollTop += d.getBoundingClientRect().top - 12;
+    else mgr.scrollTop = mgr.scrollHeight;
+    const r = d.getBoundingClientRect();
+    if (!inside(r, win)) bad.push(`${at}: sheet ${Math.round(r.top)}..${Math.round(r.bottom)} of ${vh}`);
+    const close = d.querySelector('[aria-label="Close"]')?.getBoundingClientRect();
+    if (!close || !inside(close, win) || !inside(close, r)) bad.push(`${at}: close button out of view`);
+  }
+  const box = d.getBoundingClientRect();
+  for (const el of [d, ...d.querySelectorAll('*')]) {
+    const cs = window.getComputedStyle(el);
+    if (cs.display === 'none' || el.closest('pre, .sd-brief:not([data-open])')) continue;
+    const over = el.scrollHeight - el.clientHeight;
+    if (over <= 2 || el.clientHeight === 0) continue;
+    if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') {
+      // A region that scrolls inside one that scrolls (the timeline in the one-column panel) is scrolled to first, and
+      // must then fit whole in it: else its end needs two scrolls at once.
+      const outer = [...d.querySelectorAll('*')].find((o) => o !== el && o.contains(el) && /auto|scroll/.test(window.getComputedStyle(o).overflowY) && o.scrollHeight > o.clientHeight + 2);
+      if (outer) outer.scrollTop += el.getBoundingClientRect().top - outer.getBoundingClientRect().top;
+      el.scrollTop = el.scrollHeight;
+      const r = el.getBoundingClientRect();
+      if (!inside(r, outer?.getBoundingClientRect() ?? box) || !inside(r, box) || !inside(r, win)) bad.push(`${name(el)} (scrolls) not inside ${outer ? name(outer) : 'the sheet'}: ${Math.round(r.top)}..${Math.round(r.bottom)}`);
+      const last = el.lastElementChild?.getBoundingClientRect();
+      if (last && last.height && last.bottom > r.bottom + 2) bad.push(`${name(el)}: its end can't be scrolled to`);
+    } else if ((cs.overflowY === 'hidden' || cs.overflowY === 'clip') && cs.webkitLineClamp === 'none' && cs.textOverflow !== 'ellipsis') {
+      bad.push(`${name(el)} cut ${over}px at the bottom`);
+    }
+  }
+  return bad;
+}
+
+/** Every way to open an agent's details in the Agent Manager, with very long content, at each width and height, in
+    Dark and Light 2026: nothing wider than its box, no sideways page, a sheet that is all in reach. */
+async function managerOverflowChecks({ open, check }) {
+  const out = path.join(os.homedir(), 'code/FriedLiver-Code-design/review/manager-overflow');
+  fs.mkdirSync(out, { recursive: true });
+  const tag = opts['shot-tag'];
+  const fx = overflowFixture(Date.now());
+  const [working, done] = fx.claude[0].subagents;
+  const shoot = (p, name) => p.screenshot({ path: path.join(out, `${name}-${tag}.png`), animations: 'disabled', caret: 'hide' });
+  const verdict = (what, r) => check(!r.page && !r.bad.length, `${what}: ${r.page ? 'the page scrolls sideways; ' : ''}${r.bad.length ? r.bad.slice(0, 8).join('; ') : 'fits'}`);
+  for (const theme of ['dark-2026', 'light-2026']) {
+    for (const width of [480, 640, 900, 1200, 1440]) {
+      for (const height of [600, 800]) {
+        const at = `${width}×${height} ${theme}`;
+        const shot = height === 600 && [480, 900, 1440].includes(width);
+        for (const view of ['board', 'list']) {
+          const p = await open(`surface=tasks&theme=${theme}&view=${view}&fixture=overflow`, width, height);
+          await p.waitForTimeout(150);
+          verdict(`${view} ${at}`, await p.evaluate(overflowProbe, '.manager'));
+          if (shot && theme === 'dark-2026') {
+            // On a card with a shared file: its pill is the one that ran off the card.
+            await p.evaluate(() => document.querySelector('.badge.conflict')?.scrollIntoView({ block: 'center' }));
+            await shoot(p, `${view}-${width}-${theme}`);
+          }
+          await p.close();
+        }
+        const p = await open(`surface=tasks&theme=${theme}&view=map&fixture=overflow`, width, height, shot ? 2 : 1);
+        await p.waitForSelector('.map-sub');
+        verdict(`map ${at}`, await p.evaluate(overflowProbe, '.manager'));
+        // A chat's hover card.
+        await p.locator('.map-node[data-nav="chat-pay"]').hover();
+        await p.waitForSelector('.map-tip');
+        verdict(`a chat's hover card, ${at}`, await p.evaluate(overflowProbe, '.map-tip'));
+        await p.mouse.move(0, 0);
+        const sheets = [
+          ['chat-subagent', p.locator('.map-sub[aria-label^="Subagent: Security review"]')],
+          ['outside-working', p.locator(`.map-sub[aria-label^="Subagent: ${working.title.slice(0, 20)}"]`)],
+          ['outside-done', p.locator(`.map-sub[aria-label^="Subagent: ${done.title.slice(0, 20)}"]`)],
+        ];
+        for (const [kind, node] of sheets) {
+          if (kind === 'outside-done') await p.locator('.map-fold').last().click();
+          await node.click();
+          await p.waitForSelector('.map-detail');
+          if (kind !== 'chat-subagent') await p.waitForSelector('.sd-timeline .tl-step');
+          // The narrow sheet slides up: measured where it comes to rest.
+          await p.evaluate(() => Promise.all(document.querySelector('.map-detail').getAnimations().map((a) => a.finished)));
+          await p.waitForTimeout(100);
+          verdict(`${kind} sheet ${at}`, await p.evaluate(overflowProbe, '.map-detail'));
+          const reach = await p.evaluate(sheetProbe);
+          check(!reach.length, `${kind} sheet ${at} is all in reach${reach.length ? `: ${reach.slice(0, 6).join('; ')}` : ''}`);
+          if (shot) await shoot(p, `${kind}-${width}-${theme}`);
+          await p.keyboard.press('Escape');
+          await p.waitForSelector('.map-detail', { state: 'detached' });
+          await p.evaluate(() => (document.querySelector('.manager').scrollTop = 0));
+        }
+        await p.close();
+      }
     }
   }
 }
