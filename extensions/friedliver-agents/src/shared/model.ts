@@ -46,13 +46,18 @@ export type NoticeAction =
   /** Opens Agents & Accounts on the agent's card. */
   | { label: string; do: 'accounts'; agent: AgentKey }
   /** Sends the agent's own /compact. */
-  | { label: string; do: 'compact' };
+  | { label: string; do: 'compact' }
+  /** Sets one of the chat's session options to a value its agent offers (e.g. a model it can use), then sends the last message again. */
+  | { label: string; do: 'setOption'; optionId: string; value: string };
 
 export interface PermissionOption {
   optionId: string;
   name: string;
   kind: string;
 }
+
+/** What a request still waiting when the window closed says: the agent stopped, so it was neither allowed nor rejected. */
+export const EXPIRED = 'Expired — the agent stopped';
 
 export type CommandState = 'awaiting' | 'running' | 'denied' | 'exited';
 
@@ -76,6 +81,8 @@ export interface CommandItem {
   dropped?: DroppedCommits;
   /** A routine command allows itself at this time (host clock) unless stopped (friedliver.approvals.autoRoutineSeconds). */
   autoAt?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
 }
 
 export interface ReviewItem {
@@ -89,6 +96,8 @@ export interface ReviewItem {
   /** Decided without the diff editor, and why: "Auto-accept edits", "Approved above". */
   auto?: string;
   at?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
 }
 
 // ---- Connections between chats ----
@@ -138,6 +147,8 @@ export interface BridgeItem {
   /** Why it went ahead without asking: a remembered rule. */
   auto?: string;
   at?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
   /** Only "Allow" (once) and "Deny" are offered: not for this chat, never always (clipboard, screenshots, terminals). */
   once?: true;
 }
@@ -160,6 +171,8 @@ export interface LinkItem {
   label: string;
   text: string;
   by: 'user' | 'agent';
+  /** When it arrived, by the host's clock (absent in chats saved before it was kept). */
+  at?: number;
 }
 
 /**
@@ -176,8 +189,8 @@ export type Item =
   /** `refs` (optional, added with the editor commands) is the code the message points at. */
   /** `checkpoint` (optional): the turn this message started, when its files were snapshotted ("Rewind to here"). */
   | { kind: 'user'; text: string; images: string[]; refs?: CodeRef[]; at?: number; checkpoint?: string }
-  /** `at` (optional, on user and agent messages): when it was sent or began, by the host's clock. */
-  | { kind: 'agent'; text: string; at?: number }
+  /** `at` (optional, on user and agent messages): when it was sent or began, by the host's clock. `end`: when the reply's last words came. */
+  | { kind: 'agent'; text: string; at?: number; end?: number }
   | { kind: 'thought'; text: string }
   /**
    * `out` and `input` (optional): what the tool did (diffs, output) and its input, cut short.
@@ -203,10 +216,12 @@ export type Item =
       at?: number;
       /** A routine request allows itself once at this time (host clock) unless stopped. */
       autoAt?: number;
+      /** Still waiting when the window closed: nobody decided it. */
+      expired?: true;
     }
   | ReviewItem
   | CommandItem
-  | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; actions?: NoticeAction[] }
+  | { kind: 'notice'; text: string; tone: 'info' | 'error'; detail?: string; /** `code`: the detail is a command to copy (mono); otherwise prose, `backticks` as code spans. */ detailKind?: 'code'; actions?: NoticeAction[] }
   | { kind: 'changes'; turnId: string; files: string[]; undone?: boolean }
   | LinkItem
   | BridgeItem
@@ -223,6 +238,8 @@ export interface QuestionItem {
   /** The answer, in one line, once given. */
   summary?: string;
   at?: number;
+  /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
+  expired?: true;
 }
 
 export interface ChatView {
@@ -371,8 +388,8 @@ export const MAX_ITEM_TEXT = 512 * 1024;
 /** Transcript items kept per chat. Past it the oldest replies and steps go; nothing that waits for you does. */
 export const MAX_ITEMS = 2000;
 
-/** Items that keep when they arrived: your messages, and everything that waits for you. */
-const STAMPED = new Set<Item['kind']>(['user', 'permission', 'review', 'command', 'bridge', 'question']);
+/** Items that keep when they arrived: your messages, messages between chats, and everything that waits for you. */
+const STAMPED = new Set<Item['kind']>(['user', 'link', 'permission', 'review', 'command', 'bridge', 'question']);
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.t) {
@@ -587,9 +604,9 @@ export function applyUpdate(items: Item[], update: acp.SessionUpdate, at?: numbe
       const kind = update.sessionUpdate === 'agent_message_chunk' ? 'agent' : 'thought';
       if (last?.kind === kind) {
         if (last.text.length > MAX_ITEM_TEXT) return items; // Already cut off.
-        return [...items.slice(0, -1), { ...last, text: capText(last.text + update.content.text) }];
+        return [...items.slice(0, -1), { ...last, text: capText(last.text + update.content.text), ...(last.kind === 'agent' && at !== undefined ? { end: at } : {}) }];
       }
-      return [...items, { kind, text: capText(update.content.text), ...(kind === 'agent' && at !== undefined ? { at } : {}) }];
+      return [...items, { kind, text: capText(update.content.text), ...(kind === 'agent' && at !== undefined ? { at, end: at } : {}) }];
     }
     case 'tool_call': {
       const streamed = streamedOutput(update._meta);
@@ -819,6 +836,20 @@ export function parseMention(text: string): { agent: AgentKey; text: string } | 
 /** A message the chat's agent was given: one the user typed, or one that came over a link. */
 function givenToAgent(i: Item): boolean {
   return i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from'));
+}
+
+/**
+ * The newest open chat for `agent` that `chatId` consulted or handed off to:
+ * where the next question or hand-off to that agent goes, so it keeps its context.
+ */
+export function linkedChat(state: Pick<AppState, 'chats' | 'links'>, chatId: string, agent: AgentKey, kind: 'consult' | 'handoff'): ChatView | undefined {
+  let best: { chat: ChatView; at: number } | undefined;
+  for (const l of state.links) {
+    if (l.kind !== kind || l.from !== chatId) continue;
+    const c = state.chats.find((x) => x.id === l.to);
+    if (c && c.agent === agent && !c.archived && (!best || l.createdAt >= best.at)) best = { chat: c, at: l.createdAt };
+  }
+  return best?.chat;
 }
 
 export function lastReply(chat: ChatView): string {

@@ -72,6 +72,16 @@ describe('what the agent advertises', () => {
     expect(c.chat(chat.id)!.session!.usage!.used).toBeGreaterThan(0);
   });
 
+  it('keeps the commands the agent sends while FriedLiver is still reading which models the account may use', async () => {
+    const dir = await gitRepo();
+    // The Demo agent sends its commands right after the session answer; the account's models arrive later.
+    const { core: c } = core(dir, { modelVisibility: () => new Promise((r) => setTimeout(() => r(undefined), 200)) });
+    const chat = await c.createChat('demo');
+    await waitFor(() => live(c, chat.id), 5_000);
+    await waitFor(() => (c.chat(chat.id)!.session!.commands.length ?? 0) > 0, 2_000);
+    expect(c.chat(chat.id)!.session!.commands.map((x) => x.name)).toEqual(['help', 'compact', 'review']);
+  });
+
   it('sets the model and effort, and the effort levels follow the model', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);
@@ -109,26 +119,45 @@ describe('what the agent advertises', () => {
     }
   });
 
-  it('remembers the last choices per agent and applies them to new chats', async () => {
+  it('keeps a chat\'s model and effort to that chat; only the Accounts page sets new chats\' defaults', async () => {
     const dir = await gitRepo();
     const defaults = memoryDefaults();
     const { core: c } = core(dir, { defaults });
     const first = await c.createChat('demo');
     await waitFor(() => live(c, first.id));
-    await c.setOption(first.id, 'model', 'demo-small');
-    await c.setOption(first.id, 'effort', 'low');
+    await c.setOption(first.id, 'effort', 'max');
     await c.setApproval(first.id, 'edits');
-    expect(defaults.all.demo?.chosen).toEqual({ model: 'demo-small', thought_level: 'low' });
+    // Not the agent's default: the next chat (an inline edit, a consultation) starts at the agent's own.
+    expect(defaults.all.demo?.chosen ?? {}).toEqual({});
     expect(defaults.all.demo?.approval).toBe('edits');
     expect(defaults.all.demo?.options.map((o) => o.id)).toEqual(['model', 'effort', 'fast']);
+    await c.send(first.id, 'hi');
+    expect(lastReply(c.chat(first.id)!)).toBe('You said: hi (demo-smart · max)');
 
     const second = await c.createChat('demo');
     // The pickers show the remembered options before the session answers.
     expect(c.chat(second.id)!.session?.options.length).toBeGreaterThan(0);
     expect(c.chat(second.id)!.approval).toBe('edits');
-    await waitFor(() => live(c, second.id) && option(c, second.id, 'effort')?.current === 'low');
-    expect(option(c, second.id, 'model')!.current).toBe('demo-small');
-    expect(option(c, second.id, 'mode')!.current).toBe('acceptEdits');
+    await waitFor(() => live(c, second.id) && option(c, second.id, 'mode')?.current === 'acceptEdits');
+    expect(option(c, second.id, 'effort')!.current).toBe('medium');
+
+    // Set on the Accounts page: new chats start with it.
+    expect(c.setDefaultChoice('demo', 'thought_level', 'low')).toBe(true);
+    expect(defaults.all.demo).toMatchObject({ chosen: { thought_level: 'low' }, explicit: true });
+    const third = await c.createChat('demo');
+    await waitFor(() => live(c, third.id) && option(c, third.id, 'effort')?.current === 'low');
+  });
+
+  it('ignores model and effort an older version saved from a chat as the agent\'s default', async () => {
+    const dir = await gitRepo();
+    const defaults = memoryDefaults();
+    const { core: c } = core(dir, { defaults });
+    const probe = await c.createChat('demo');
+    await waitFor(() => live(c, probe.id));
+    defaults.set('demo', { ...defaults.all.demo!, chosen: { thought_level: 'max' } });
+    const next = await c.createChat('demo');
+    await waitFor(() => live(c, next.id));
+    expect(option(c, next.id, 'effort')!.current).toBe('medium');
   });
 
   it('remembers the agent’s commands and shows them in a new chat before its session starts', async () => {

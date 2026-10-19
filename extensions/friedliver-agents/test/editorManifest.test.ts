@@ -23,6 +23,11 @@ describe('agents in the editor: contributions', () => {
     expect(binding.when).toContain('!inlineChatHasEditsAgent');
   });
 
+  it('leaves Ctrl+Shift+A to Toggle Block Comment in a writable editor on Linux and Windows', () => {
+    const binding = contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.moveToCenter');
+    expect(binding).toMatchObject({ key: 'ctrl+shift+a', mac: 'cmd+shift+a', when: '!terminalFocus && (isMac || !editorTextFocus || editorReadonly)' });
+  });
+
   it('puts the selection commands in the editor menu and the review in Source Control', () => {
     expect(contributes.menus['editor/context'].map((m: { command: string }) => m.command)).toEqual(EDITOR_COMMANDS.slice(0, 3));
     expect(contributes.menus['scm/title']).toEqual([expect.objectContaining({ command: 'friedliver.reviewChanges', when: 'scmProvider == git' })]);

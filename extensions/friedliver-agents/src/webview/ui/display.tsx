@@ -2,6 +2,7 @@
 import type { ButtonHTMLAttributes, ComponentChildren } from 'preact';
 import { Icon, type IconName } from './icon';
 import { AGENT_FACES, type AgentKey } from '../../shared/model';
+import { messageTime, messageTimeTitle, type MessageStamp } from '../../shared/view';
 import { IconButton, cx } from './controls';
 import { markFor } from './marks';
 import { useTooltip } from './overlays';
@@ -389,5 +390,19 @@ export function Row({
     <div class={cx('fl-row', className)} aria-selected={selected} title={title} style={style}>
       {body}
     </div>
+  );
+}
+
+/**
+ * When a message was sent (§2.32): hidden until the `[data-stamp]` message it is in is hovered or
+ * has focus. Nothing at all without a time (chats saved before times were kept).
+ */
+export function Timestamp({ stamp, class: className }: { stamp?: MessageStamp; class?: string }) {
+  if (!stamp) return null;
+  // ponytail: "today" is read when the message draws; one drawn before midnight keeps its short form until it draws again.
+  return (
+    <time class={cx('fl-time', className)} dateTime={new Date(stamp.at).toISOString()} title={messageTimeTitle(stamp)}>
+      {messageTime(stamp.at, Date.now())}
+    </time>
   );
 }

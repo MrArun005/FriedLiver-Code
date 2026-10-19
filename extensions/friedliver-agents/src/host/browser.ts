@@ -13,13 +13,12 @@ import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
 import { estimateTokens } from '../shared/tokens';
 import { extractPage, PageMemory, toSelector, type PageData } from './pageText';
-import { clampBrowserWidth, imageTokens, ownTab, saveScreenshot, shotParams, relaxLocalhostCors, type PausedResponse } from './browserRules';
+import { ConsoleLog, clampBrowserWidth, imageTokens, ownTab, saveScreenshot, shotParams, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
 const URL_KEY = 'friedliver.browser.lastUrl';
 const LOAD_TIMEOUT_MS = 15_000;
 const CDP_TIMEOUT_MS = 30_000;
-const CONSOLE_LINES = 100;
 const LOCAL_PATTERNS = ['http://localhost*', 'https://localhost*', 'http://127.0.0.1*', 'https://127.0.0.1*', 'http://[::1]*', 'https://[::1]*'];
 
 type CdpMessage = { id?: number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { message?: string }; sessionId?: string };
@@ -30,7 +29,7 @@ class Cdp {
   private readonly pending = new Map<number, { resolve(v: unknown): void; reject(e: Error): void }>();
   private sessionId?: string;
   private loads: (() => void)[] = [];
-  readonly console: string[] = [];
+  readonly console = new ConsoleLog();
   closed = false;
 
   private constructor(
@@ -148,8 +147,7 @@ class Cdp {
   }
 
   private log(line: string): void {
-    this.console.push(line.slice(0, 2000));
-    if (this.console.length > CONSOLE_LINES) this.console.splice(0, this.console.length - CONSOLE_LINES);
+    this.console.push(line);
   }
 }
 
@@ -348,10 +346,9 @@ export class BrowserPanel implements vscode.Disposable {
           `${width}×${height} JPEG, about ${imageTokens(width, height)} image tokens. Saved to ${file}. Read that file to see it; browser_snapshot costs far fewer tokens when text answers the question.`
         );
       }
-      case 'browser_console': {
-        const lines = (await this.page()).console;
-        return lines.length ? lines.join('\n') : 'No console messages since FriedLiver attached to the page.';
-      }
+      case 'browser_console':
+        // Only what is new for this chat, repeats collapsed, within CONSOLE_BUDGET.
+        return (await this.page()).console.take(chatId ?? '');
       case 'browser_back': {
         const cdp = await this.page();
         await sameOrigin(cdp);

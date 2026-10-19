@@ -4,7 +4,7 @@
 import type { LinkMode } from './links';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type AgentKey } from './model';
 import { isSystemTool, type SystemSettingsView, type SystemTool } from './system';
-import { offers, optionKey, type AgentDefaults, type SessionOption } from './session';
+import { defaultChoices, offers, optionKey, type AgentDefaults, type SessionOption } from './session';
 
 export type SignInState = 'signed-in' | 'needs-sign-in' | 'not-installed' | 'error';
 export type VendorKey = Exclude<AgentKey, 'demo'>;
@@ -250,7 +250,7 @@ export function modelChoices(d: AgentDefaults | undefined): { model?: SessionOpt
   return {
     model: options.find((o) => o.category === 'model' && o.type === 'select'),
     effort: options.find((o) => o.category === 'thought_level' && o.type === 'select'),
-    chosen: d?.chosen ?? {},
+    chosen: defaultChoices(d),
   };
 }
 
@@ -292,6 +292,26 @@ export function rosterOf(showDemo: boolean, records: Partial<Record<AgentKey, Ac
   const signIn: AgentRoster['signIn'] = {};
   for (const a of agents) if (records[a]) signIn[a] = records[a]!.status;
   return { agents, signIn };
+}
+
+/** An agent the Accounts page last found missing: never preselected for a new task. Unchecked agents may be. */
+export function installedOrUnknown(roster: AgentRoster, agent: AgentKey): boolean {
+  return roster.signIn[agent] !== 'not-installed';
+}
+
+/**
+ * The agents a new task (or Run on Several Agents) starts with: the last choice, without the ones the
+ * Accounts page found not installed; else the first shown agent that is signed in, then the first not
+ * known to be missing, then Demo. Picking an agent by hand still works whatever its status.
+ */
+export function preselectAgents(roster: AgentRoster, saved: readonly AgentKey[]): AgentKey[] {
+  const kept = saved.filter((a) => roster.agents.includes(a) && installedOrUnknown(roster, a));
+  if (kept.length) return kept;
+  const first =
+    roster.agents.find((a) => a !== 'demo' && roster.signIn[a] === 'signed-in') ??
+    roster.agents.find((a) => a !== 'demo' && installedOrUnknown(roster, a)) ??
+    (roster.agents.includes('demo') ? 'demo' : roster.agents[0]);
+  return first ? [first] : [];
 }
 
 // ---- The page ----

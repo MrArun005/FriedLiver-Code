@@ -154,14 +154,15 @@ function phoneItem(
         ...(plainCommand(i.commandLine) ? {} : { onMac: true }),
         risk: i.outside ? { level: 'careful', label: 'Outside the workspace', consequences: ['It runs in a folder you didn’t open'] } : commandRisk(i.commandLine),
         cwd: rel(i.cwd),
-        state: i.state,
+        // Still waiting when the window closed: neither ran nor denied.
+        state: i.expired ? 'expired' : i.state,
         outside: i.outside,
         output: tail(i.output, MAX_OUTPUT),
         ...(i.exitCode !== undefined ? { exitCode: i.exitCode } : {}),
         ...(i.auto ? { auto: i.auto } : {}),
       };
     case 'question':
-      return { k: 'question', id: i.requestId, message: i.message, fields: i.fields, state: i.state, ...(i.summary ? { summary: i.summary } : {}) };
+      return { k: 'question', id: i.requestId, message: i.message, fields: i.fields, state: i.expired ? 'expired' : i.state, ...(i.summary ? { summary: i.summary } : {}) };
     case 'review': {
       const text = i.state === 'pending' ? reviewText(i.reviewId) : undefined;
       const preview = text ? diffPreview(text.before, text.proposed, MAX_LINES) : undefined;
@@ -169,7 +170,7 @@ function phoneItem(
         k: 'review',
         id: i.reviewId,
         file: { path: rel(i.path), added: i.added, removed: i.removed, isNew: i.isNew, lines: preview?.lines ?? [], more: preview?.more ?? 0 },
-        state: i.state,
+        state: i.expired ? 'expired' : i.state,
         ...(i.auto ? { auto: i.auto } : {}),
       };
     }
@@ -182,7 +183,7 @@ function phoneItem(
         title: titles.get(i.requestId) ?? bridgeTitle(state, chat, i, true),
         agent: chat.agent,
         text: clip(i.text, 2000),
-        state: i.state,
+        state: i.expired ? 'expired' : i.state,
         ...(i.always && i.state === 'awaiting' && !a.locked.always ? { always: i.always } : {}),
         ...(a.locked.chat ? { once: true as const } : {}),
         ...(a.risk.tone === 'careful' ? { careful: true as const } : {}),

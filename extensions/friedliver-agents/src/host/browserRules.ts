@@ -154,3 +154,57 @@ export function shotParams(
     size: { width: Math.round(width * css), height: Math.round(height * css) },
   };
 }
+
+/** browser_console's answer, at most this many characters (~1.5k tokens) unless the agent asks for less. */
+export const CONSOLE_BUDGET = 6000;
+/** Console lines a page keeps for its readers, each cut to 2,000 characters. */
+const CONSOLE_KEEP = 300;
+
+/**
+ * A page's console for browser_console: each reader (a chat) gets only the lines since it last asked,
+ * repeats collapsed ("… ×12"), the newest that fit CONSOLE_BUDGET, and a note of what was left out,
+ * so polling a chatty page doesn't send the same hundred lines every time.
+ */
+export class ConsoleLog {
+  private lines: string[] = [];
+  /** Lines pushed since the page was attached; `lines` holds the newest of them. */
+  private total = 0;
+  private readonly read = new Map<string, number>();
+
+  push(line: string): void {
+    this.lines.push(line.slice(0, 2000));
+    this.total++;
+    if (this.lines.length > CONSOLE_KEEP) this.lines.splice(0, this.lines.length - CONSOLE_KEEP);
+  }
+
+  take(reader = '', budget = CONSOLE_BUDGET): string {
+    const from = this.read.get(reader) ?? 0;
+    this.read.set(reader, this.total);
+    const fresh = this.total - from;
+    if (!fresh) return from ? 'No new console messages since your last browser_console.' : 'No console messages since FriedLiver attached to the page.';
+    const kept = this.lines.slice(-Math.min(fresh, this.lines.length));
+    const lost = fresh - kept.length;
+    // Repeats, wherever they are, as one line with a count, at the place of their latest occurrence.
+    const count = new Map<string, number>();
+    for (const l of kept) count.set(l, (count.get(l) ?? 0) + 1);
+    const last = new Map<string, number>();
+    kept.forEach((l, n) => last.set(l, n));
+    const rows = kept.flatMap((l, n) => (last.get(l) === n ? [count.get(l)! > 1 ? `${l} (×${count.get(l)})` : l] : []));
+    // The newest lines that fit the budget.
+    const out: string[] = [];
+    let size = 0;
+    for (let n = rows.length - 1; n >= 0; n--) {
+      const add = Math.min(rows[n].length, budget) + 1;
+      if (out.length && size + add > budget) break;
+      out.unshift(rows[n].length > budget ? `${rows[n].slice(0, budget - 1)}…` : rows[n]);
+      size += add;
+    }
+    const older = rows.length - out.length;
+    const notes = [
+      older ? `${older} older line${older === 1 ? '' : 's'} left out (over the ${budget.toLocaleString('en-US')}-character budget)` : '',
+      lost ? `${lost} earlier line${lost === 1 ? '' : 's'} no longer kept` : '',
+      count.size < kept.length ? 'repeats collapsed' : '',
+    ].filter(Boolean);
+    return `${notes.length ? `[${notes.join('; ')}]\n` : ''}${out.join('\n')}`;
+  }
+}

@@ -2,6 +2,7 @@
 // brief a consulted agent gets, and what the FriedLiver tools return.
 import path from 'node:path';
 import { AGENT_FACES, AGENT_KEYS, lastReply, type AppState, type ChatView, type Item } from '../shared/model';
+import { turnsText } from '../shared/view';
 
 /** Characters kept from one message in a hand-off or a read. */
 const MAX_MESSAGE = 2000;
@@ -82,10 +83,12 @@ const MAX_LAST_REPLY = 1500;
  * (`hashes`, relative path → hash). The whole conversation stays a read_chat away. Sent once, in
  * front of the user's first message in the new chat, so it costs no turn.
  */
-export function handoffContext(chat: ChatView, hashes: Record<string, string> = {}): string {
+export function handoffContext(chat: ChatView, hashes: Record<string, string> = {}, again = false): string {
   const parts = [
     [
-      `[FriedLiver] You are taking over a task from another coding agent, ${chat.label}, in this same folder (${chat.cwd}).`,
+      again
+        ? `[FriedLiver] The task is back with you from ${chat.label}, which worked on it after you, in this same folder (${chat.cwd}). Here is where it is now.`
+        : `[FriedLiver] You are taking over a task from another coding agent, ${chat.label}, in this same folder (${chat.cwd}).`,
       "The files on disk already include the changes the user accepted. Continue from where it stopped. The user's message follows this context.",
       '',
       `Task: ${chat.title}`,
@@ -161,6 +164,19 @@ export function consultBrief(chat: ChatView): string {
   return lines.join('\n\n');
 }
 
+/**
+ * A follow-up question to a consultation that already has consultBrief: only what is new in the asking
+ * chat since then (its latest reply, if it changed, and files it changed since), not the brief again.
+ */
+export function consultFollowUp(chat: ChatView, since: { reply: string; files: number }): string {
+  const lines = [`[FriedLiver] ${chat.label} asks a follow-up question, below (same task: ${chat.title}).`];
+  const reply = lastReply(chat);
+  if (reply && reply !== since.reply) lines.push(`Its latest reply since your last answer (excerpt):\n${clip(reply.slice(-MAX_EXCERPT), MAX_EXCERPT)}`);
+  const added = chat.files.slice(since.files, since.files + 30);
+  if (added.length) lines.push(`Files it changed since: ${added.join(', ')}`);
+  return lines.join('\n\n');
+}
+
 /** A finished turn from one chat, given to another as a message. */
 export function forwardText(from: ChatView, text: string): string {
   return `[FriedLiver] From ${from.label}, another agent's chat (task: ${from.title}):\n\n${text}`;
@@ -169,7 +185,7 @@ export function forwardText(from: ChatView, text: string): string {
 /** read_chat: the latest messages of a chat. */
 export function renderChat(chat: ChatView, last: number): string {
   const lines = messages(chat, MAX_MESSAGE * 2).slice(-last);
-  const head = `${chat.id} · ${chat.label} · task: ${chat.title} · ${chat.busy ? 'busy' : 'idle'} · ${chat.turns} turn${chat.turns === 1 ? '' : 's'}`;
+  const head = `${chat.id} · ${chat.label} · task: ${chat.title} · ${chat.busy ? 'busy' : 'idle'} · ${turnsText(chat)}`;
   const body = lines.length ? lines.join('\n\n') : '(no messages yet)';
   const text = `${head}\n\n${body}`;
   return text.length > MAX_READ ? `…${text.slice(-MAX_READ)}` : text;
