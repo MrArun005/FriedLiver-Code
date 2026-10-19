@@ -312,15 +312,23 @@ button.seg-item[aria-checked='true'] {
 /* ---- Agent Manager ---- */
 
 .manager {
+  /* What the page keeps under the view at its end: the History row and the gap to it, and the end padding.
+     The map's sticky detail panel is shorter by this much, so it is all in the window at the page's end too. */
+  --mgr-end: 40px;
+  --mgr-history: 28px;
+  --mgr-below: var(--mgr-end);
   height: 100%;
   overflow: auto;
-  padding: var(--sp-5) var(--sp-5) 40px;
+  padding: var(--sp-5) var(--sp-5) var(--mgr-end);
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
 }
 .manager > * {
   width: 100%;
+}
+.manager:has(> .history) {
+  --mgr-below: calc(var(--sp-4) + var(--mgr-history) + var(--mgr-end));
 }
 .mgr-head {
   display: flex;
@@ -971,7 +979,7 @@ td.num {
 
 /* History */
 .history-toggle {
-  height: 28px;
+  height: var(--mgr-history);
   padding: 0 var(--sp-2) 0 4px;
   gap: 6px;
   border-color: transparent;
@@ -1379,6 +1387,7 @@ svg[data-lit] .map-file-line:not(.lit) {
   background: var(--vscode-editorHoverWidget-background, var(--menu-bg));
   box-shadow: var(--shadow-ctx);
   font-size: var(--t-90);
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 .tip-head {
@@ -1843,8 +1852,10 @@ button.viewer-thumb[aria-selected='true'] {
   flex-direction: column;
   gap: 6px;
   width: 300px;
-  max-height: calc(100vh - 2 * var(--sp-3));
+  max-height: calc(100vh - var(--sp-3) - max(var(--sp-3), var(--mgr-below)));
   overflow: auto;
+  /* Long paths, commands and URLs break rather than push the panel wider (they have no spaces to break at). */
+  overflow-wrap: anywhere;
   padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
@@ -1906,6 +1917,13 @@ button.viewer-thumb[aria-selected='true'] {
   padding-left: 18px;
   color: var(--fg-2);
 }
+/* A step with a very long command takes two lines at most (the whole of it is the tooltip). */
+.map-detail-step {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .map-detail-steps li[data-state='in_progress'] {
   color: var(--fg);
 }
@@ -1915,6 +1933,14 @@ button.viewer-thumb[aria-selected='true'] {
 }
 .map-detail .fl-btn--link {
   align-self: flex-start;
+}
+/* A long title or parent takes two lines at most (the whole of it is the tooltip), so it never crowds out what is below it. */
+.map-detail > :is(.tip-title, .sd-parent) {
+  display: -webkit-box;
+  flex: none;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 /* An outside Claude Code subagent's detail (COMPONENTS.md §2.31): a wider panel whose regions fill its height;
    two columns (story | facts and files) once it is 600 wide, one column that scrolls below that. */
@@ -1978,9 +2004,10 @@ button.viewer-thumb[aria-selected='true'] {
 .sd-more {
   align-self: flex-start;
 }
+/* One column: the whole panel scrolls, so the timeline that scrolls inside it stays shorter than the sheet (60vh). */
 .sd-timeline {
   min-height: 12em;
-  max-height: 28em;
+  max-height: min(28em, 40vh);
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -2024,9 +2051,6 @@ button.viewer-thumb[aria-selected='true'] {
 .sd-facts dd {
   min-width: 0;
   margin: 0;
-}
-.sd-parent .fl-btn {
-  max-width: 100%;
 }
 .sd-pills {
   display: flex;
