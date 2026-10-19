@@ -32,6 +32,8 @@ import {
   subagents,
   sortChats,
   statusOf,
+  turnsOf,
+  turnsText,
   type Badge,
   type CardLine,
   type CardModel,
@@ -42,10 +44,10 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, MenuTitle, Pill, Row as UiRow } from './ui';
-import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, type AgentDefaults, type ApprovalLevel } from '../shared/session';
+import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
+import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, usageTotalLines, usageTotals, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
-import { AskMenu, HandoffMenu, PipeMenu, PipeTargets } from './connect';
+import { AskMenu, HandoffMenu, HandoffTargets, PipeMenu, PipeTargets } from './connect';
 import { AutoBadge, ModeBadge, TaskOptions, decisionId } from './controls';
 import { ApprovalCard } from './approval';
 import { approvalOf, type Approvable } from '../shared/approval';
@@ -53,7 +55,8 @@ import { AgentMap } from './map';
 import { Gallery } from './gallery';
 import { Inbox } from './inbox';
 import { inbox } from '../shared/inbox';
-import type { OutsideImages } from '../shared/gallery';
+import { preselectAgents } from '../shared/accounts';
+import type { ImageStoreInfo, OutsideImages } from '../shared/gallery';
 import { chatName, chatTip } from '../shared/names';
 
 type View = 'board' | 'list' | 'map' | 'images' | 'inbox';
@@ -266,8 +269,10 @@ function Manager() {
   const [defaults, setDefaults] = useState<Partial<Record<AgentKey, AgentDefaults>>>({});
   const [claude, setClaude] = useState<ClaudeSession[]>([]);
   const [outsideImages, setOutsideImages] = useState<OutsideImages[]>([]);
+  const [imageStore, setImageStore] = useState<ImageStoreInfo>();
   const { state } = useHost((m) => {
     if (m.type === 'claudeImages') setOutsideImages(m.sessions);
+    if (m.type === 'imageStore') setImageStore(m.store);
     if (m.type === 'snapshot' && m.defaults) setDefaults(m.defaults);
     if (m.type === 'defaults') setDefaults(m.defaults);
     if (m.type === 'claudeSessions') setClaude(m.sessions);
@@ -294,6 +299,7 @@ function Manager() {
   if (view !== 'inbox') cameFrom.current = view;
   const tally = { ...counts({ ...state, chats: own }) };
   const saved = totalSaved(own);
+  const used = useMemo(() => usageTotals(own, now), [own, now]);
   tally.archived += oldOutside.length;
 
   useEffect(() => {
@@ -366,6 +372,11 @@ function Manager() {
               <span class="count-item">
                 <Dot state="working" still={tally.working === 0} /> {tally.working} working
               </span>
+              {tally.problem > 0 && (
+                <span class="count-item">
+                  <Dot state="error" /> {tally.problem} problem{tally.problem === 1 ? '' : 's'}
+                </span>
+              )}
               <span class="count-item">
                 <Dot state="done" /> {tally.done} done
               </span>
@@ -375,6 +386,11 @@ function Manager() {
                   title="Estimated tokens FriedLiver's compact answers saved across these chats: index reads and diffs instead of whole files, page text instead of page dumps, smaller screenshots, compacted command output and hand-offs."
                 >
                   <Icon name="bolt" /> ~{formatTokens(saved)} tokens saved
+                </span>
+              )}
+              {used.window.turns > 0 && (
+                <span class="count-item" title={usageTotalLines(used)}>
+                  <Icon name="gauge" /> {formatTokens(used.today.total)} tokens today
                 </span>
               )}
               {tally.archived > 0 && (
@@ -446,7 +462,7 @@ function Manager() {
         {view !== 'images' && view !== 'inbox' && <NewTask defaults={defaults} />}
 
         <div id="view" class="mgr-view" data-view={view} role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.title}>
-          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} />}
+          {view === 'images' && <Gallery state={state} outside={outsideImages} now={now} query={query} store={imageStore} />}
           {view === 'inbox' && <Inbox state={state} now={now} onClose={() => setView(cameFrom.current)} />}
           {view !== 'images' && view !== 'inbox' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
           {view !== 'images' && view !== 'inbox' && !query && shown.length === 0 && outside.length === 0 && (
@@ -467,11 +483,18 @@ function Manager() {
 }
 
 function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefaults>> }) {
-  const shown = useRoster().agents;
-  const [saved, setAgents] = usePersisted<AgentKey[]>('agents', ['claude']);
-  // A hidden agent (Demo, once turned off) drops out of a saved choice.
+  const roster = useRoster();
+  const shown = roster.agents;
+  const [saved, setSaved] = usePersisted<AgentKey[]>('agents', ['claude']);
+  // Until you pick, the choice leaves out agents the Accounts page found not installed (and hidden ones,
+  // like Demo once turned off); an agent you pick yourself stays picked whatever its status.
+  const [touched, setTouched] = useState(false);
   const kept = saved.filter((a) => shown.includes(a));
-  const agents: AgentKey[] = kept.length ? kept : [shown[0] ?? 'claude'];
+  const agents: AgentKey[] = touched && kept.length ? kept : preselectAgents(roster, saved);
+  const setAgents = (next: AgentKey[]) => {
+    setTouched(true);
+    setSaved(next);
+  };
   const [worktree, setWorktree] = useState<boolean | null>(null);
   const [prompt, setPrompt] = useState('');
   // Model and effort per agent, and how much the task may do without asking; Full auto is confirmed by the editor.
@@ -717,8 +740,8 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
         ))}
       <Decide chat={chat} line={line} />
       {progress && <Steps progress={progress} />}
-      <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${chat.turns} turn${chat.turns === 1 ? '' : 's'} · started ${model.age} ago`}>
-        {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, chat.turns > 0 ? `${chat.turns} turn${chat.turns === 1 ? '' : 's'}` : undefined, model.age].filter(Boolean).join(' · ')}
+      <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${turnsText(chat)} · started ${model.age} ago`}>
+        {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, turnsOf(chat) > 0 ? turnsText(chat) : undefined, model.age].filter(Boolean).join(' · ')}
       </div>
       {(chat.branch || badges.length > 0 || conflicts.length > 0) && (
         <div class="card-pills">
@@ -766,8 +789,6 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
     if (form) form.click();
     else open(chat.id);
   };
-  // Hand off only to agents the pickers offer (Demo when shown).
-  const agents = useRoster().agents;
   return (
     <Popover label={`More for ${chat.title}`} title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm card-more" trigger={<Icon name="more" />}>
       {(close) => (
@@ -776,16 +797,7 @@ function CardMore({ chat, canMerge, changes, archive }: { chat: ChatView; canMer
           <MenuItem icon="diff" label="View changes" disabled={!changes} title={changes ? undefined : 'No changes yet'} onSelect={() => (close(), send({ type: 'viewChanges', chatId: chat.id }))} />
           <MenuItem icon="ask" label="Ask another agent…" onSelect={() => (close(false), ask())} />
           <MenuSep />
-          <MenuTitle>Hand off to</MenuTitle>
-          {agents.map((agent) => (
-            <MenuItem
-              key={agent}
-              lead={<Glyph agent={agent} size="sm" />}
-              label={agentName(agent)}
-              end={agent === chat.agent ? 'new chat' : undefined}
-              onSelect={() => (close(), send({ type: 'handoff', chatId: chat.id, agent }))}
-            />
-          ))}
+          <HandoffTargets chat={chat} close={close} title="Hand off to" />
           <MenuSep />
           <PipeTargets chat={chat} close={close} />
           <MenuSep />
@@ -842,7 +854,7 @@ function Compare({ group, now }: { group: FanoutGroup; now: number }) {
                   <span class="hint">{DOT_LABEL[status]}</span>
                   <span class="spacer" />
                   <span class="compare-stats">
-                    {c.turns} turn{c.turns === 1 ? '' : 's'} · {c.files.length} file{c.files.length === 1 ? '' : 's'} · {ago(c.lastActivity, now)}
+                    {turnsText(c)} · {c.files.length} file{c.files.length === 1 ? '' : 's'} · {ago(c.lastActivity, now)}
                   </span>
                 </div>
                 <p class="compare-reply">{reply || <span class="hint">No reply yet.</span>}</p>

@@ -28,7 +28,7 @@ export const hasDetails = (t: ToolItem) => !!t.input || !!t.cmd || !!t.about || 
  * `busy`: the chat's turn is running; a step left in progress after it ends doesn't pulse.
  * `chatId` and `cwd`: the chat, for Run in terminal and for opening files in its folder.
  */
-export type StepsProps = { tools: ToolItem[]; approvals?: Record<string, Approval>; waiting: Set<string>; waitingKey: string; busy: boolean; chatId: string; cwd: string };
+export type StepsProps = { tools: ToolItem[]; approvals?: Record<string, Approval>; waiting: Set<string>; waitingKey: string; busy: boolean; chatId: string; cwd: string; noFold?: boolean };
 
 /** A run of tool calls; drawn again when one of them or the questions about them change. */
 export const Steps = memo(
@@ -38,16 +38,18 @@ export const Steps = memo(
     a.busy === b.busy &&
     a.chatId === b.chatId &&
     a.cwd === b.cwd &&
+    a.noFold === b.noFold &&
     a.tools.length === b.tools.length &&
     a.tools.every((t, n) => t === b.tools[n] && a.approvals?.[t.id]?.text === b.approvals?.[t.id]?.text),
 );
 
-function StepsView({ tools, approvals, waiting, busy, chatId, cwd }: StepsProps) {
+function StepsView({ tools, approvals, waiting, busy, chatId, cwd, noFold }: StepsProps) {
   // Failed steps show their output; the others open on request.
   const [open, setOpen] = useState<Record<string, boolean>>({});
   // A long run of steps can fold to its heading.
   const [folded, setFolded] = useState(false);
-  const foldable = tools.length >= FOLD_AT;
+  // `noFold`: a timeline of its own that scrolls (an outside subagent's), no headings between its runs.
+  const foldable = !noFold && tools.length >= FOLD_AT;
   return (
     <>
       {foldable && (
@@ -153,7 +155,8 @@ function StepDetails({ id, tool: t, chatId, cwd }: { id: string; tool: ToolItem;
     exit !== undefined ? `exit ${exit}` : t.status === 'failed' ? 'failed' : t.status === 'in_progress' ? 'running…' : undefined,
     t.ms !== undefined ? formatDuration(t.ms) : undefined,
   ].filter(Boolean);
-  const runnable = cmd && !cmd.cut && isShell(t) && typeable(cmd.line);
+  // No chat (an outside agent's steps, read-only): nothing to run them in.
+  const runnable = !!chatId && cmd && !cmd.cut && isShell(t) && typeable(cmd.line);
   // A command's input is the command; other tools show their raw input.
   const input = !cmd && t.input;
   return (

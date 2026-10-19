@@ -17,12 +17,19 @@
 //        &theme=dark-2026|light-2026 (the owner's theme, test/fixtures/theme-*-2026.css)
 //        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
 //        &fixture=approvals[&countdown=1] (approvals at every weight: routine, review, careful; ui-fixture-approvals.mjs)
+//        &fixture=discuss|discuss-before (/discuss: Postgres vs MySQL, running, split, agreed; before = the same question by /ask, ui-fixture-discuss.mjs)
+//        &fixture=agent-errors (agent errors in plain words, and chats agent-to-agent goes back to, ui-fixture-agent-errors.mjs)
 //        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
+//   --only discuss   run only the /discuss card's checks (screenshots {board-meter,board,meter,timeline}-{running,split,agreed}-{1200,640}-{dark,light}.png to --out)
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
+//   --only agent-errors the agent-error notices and the hand-off/ask menus that reuse a chat (agent-errors-*.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
+//   --only subagent-detail  an outside Claude Code subagent's detail (working and done), Dark 2026, sheet and panel
+//                   [--shot-tag before|after]: screenshots to ~/code/FriedLiver-Code-design/review/subagent-detail/
 //   --only labels   no numbered agent label ("Claude 9") in any rendered text or aria-label, tooltips aside
+//   --only narrow   the Modes and model menus and the approval cards fit a 200 and 290 px side bar, no text cut short
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -41,6 +48,9 @@ import { createRequire } from 'node:module';
 import { accountsFixture } from './ui-fixture-accounts.mjs';
 import { inboxFixture } from './ui-fixture-inbox.mjs';
 import { approvalsFixture } from './ui-fixture-approvals.mjs';
+import { discussFixture } from './ui-fixture-discuss.mjs';
+import { subagentDetailFixture } from './ui-fixture-subagent-detail.mjs';
+import { agentErrorsFixture } from './ui-fixture-agent-errors.mjs';
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(ext, '../..');
@@ -56,6 +66,7 @@ const { values: opts } = parseArgs({
     only: { type: 'string' },
     // --gutter-shot before|after: also save review/left-gutter-<it>-{480,1200}.png
     'gutter-shot': { type: 'string' },
+    'shot-tag': { type: 'string', default: 'after' },
   },
 });
 
@@ -173,6 +184,10 @@ function page(params) {
             ? referenceFixture(Date.now())
             : params.get('fixture') === 'approvals'
               ? approvalsFixture(Date.now(), { countdown: params.get('countdown') === '1' })
+            : params.get('fixture') === 'discuss' || params.get('fixture') === 'discuss-before'
+              ? discussFixture(Date.now(), { before: params.get('fixture') === 'discuss-before' })
+            : params.get('fixture') === 'agent-errors'
+              ? agentErrorsFixture(Date.now())
             : params.get('fixture') === 'inbox' || params.get('fixture') === 'inbox-empty'
               ? inboxFixture(Date.now(), { answered: params.get('fixture') === 'inbox-empty' })
             : params.get('fixture') === 'permissions' || surface === 'permissions'
@@ -187,7 +202,7 @@ function page(params) {
   const snapshot =
     surface === 'accounts'
       ? { type: 'accounts', view: { ...accountsFixture(Date.now()), ...(focus ? { focus: { agent: focus, n: 1 } } : {}) } }
-      : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults };
+      : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults, ...(params.get('discussLayout') ? { discussLayout: params.get('discussLayout') } : {}) };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))], ['imagesTab', params.get('imagesTab')], ['openTabs', openTabs]].filter(([, v]) => v);
   const saved = savedEntries.length ? Object.fromEntries(savedEntries) : undefined;
@@ -325,7 +340,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks }[opts.only ?? ''];
+  const only = { discuss: discussChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -456,8 +471,8 @@ async function shoot() {
 
     await p.click('.mgr-waiting');
     check((await p.locator('.inbox').count()) === 1, 'the decisions pill opens the Inbox');
-    // Esc says no in the Inbox; the view switch (1) goes back to the board.
-    await p.keyboard.press('1');
+    // In the Inbox its digits pick answers and Esc says no: the Board tab goes back to the board.
+    await p.getByRole('tab', { name: /Board/ }).click();
     await p.locator('[data-nav="chat-c1"]').focus();
     await p.keyboard.press('j');
     check(await p.evaluate(() => document.activeElement?.getAttribute('data-nav') === 'chat-x1'), 'j moves to the next card');
@@ -1125,8 +1140,8 @@ async function shoot() {
           const s = await stripState(many);
           check(
             s.tabs === n && s.marks && s.markOnly && s.otherLabels && s.openInView && s.whole && s.noFade && s.page &&
-              (s.openLabel >= 110 || s.openTitleWhole) && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
-            `${theme} ${n} tabs at ${w}px: whole tabs only, a mark and a dot on each (a badge when mark-only), the open one titled (≥ 110) and in view [${JSON.stringify(s)}]`,
+              (s.openLabel >= 110 || s.openTitleWhole || (w <= 300 && s.openLabel >= 64)) && (n > 2 || w < 600 || s.fit === 'full') && (n < 15 || s.fit === 'icon'),
+            `${theme} ${n} tabs at ${w}px: whole tabs only, a mark and a dot on each (a badge when mark-only), the open one titled (≥ 110; ≥ 64 at 300px, so other chats' marks fit beside it) and in view [${JSON.stringify(s)}]`,
           );
           if (n === 15) {
             // A wheel notch moves the strip by whole tabs: still no partial tab.
@@ -1452,6 +1467,7 @@ async function shoot() {
   await inboxChecks({ open, check, posted });
   await labelChecks({ open, check, posted });
   await gutterChecks({ open, check, posted, save });
+  await narrowChecks({ open, check, posted });
   await browser.close();
   if (problems.length) {
     console.error(`\n${problems.length} problem(s):\n${problems.join('\n')}`);
@@ -1616,6 +1632,59 @@ async function imagesChecks({ open, check, posted }) {
     await p.close();
   }
 
+  for (const width of [1200, 640]) {
+    // The copies: space used in the bar, pins, Done looking with its undo toast.
+    const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images', width, 900);
+    await p.waitForSelector('.gallery-card');
+    const store = (s) => p.evaluate((st) => window.postMessage({ type: 'imageStore', store: st }, '*'), s);
+    const MB = 1024 * 1024;
+    const pinnedKeys = all.slice(1, 3).map((i) => i.key);
+    await store({ used: 212 * MB, cap: 1024 * MB, pinned: pinnedKeys, hidden: [] });
+    await p.waitForSelector('.gallery-used');
+    check((await p.locator('.gallery-used-text').innerText()) === '212 MB of 1 GB', `${width}: the bar shows the space the copies use`);
+    check((await p.locator('.gallery-used .fl-progress').getAttribute('aria-valuenow')) === String(212 * MB), `${width}: with a meter`);
+    check((await p.locator('.gallery-pin[aria-pressed="true"]').count()) === 2, `${width}: pinned images show a pressed star`);
+    const bar = await p.evaluate(() => {
+      const b = document.querySelector('.gallery-bar').getBoundingClientRect();
+      const s = document.querySelector('.gallery-store').getBoundingClientRect();
+      return { inside: s.right <= b.right + 0.5 && s.left >= b.left - 0.5, page: document.scrollingElement.scrollWidth - window.innerWidth };
+    });
+    check(bar.inside && bar.page <= 0, `${width}: the store group stays in the bar, no sideways scroll`);
+    await settle(p);
+    await p.locator('.gallery-item').nth(4).hover();
+    if (width === 1200) await shotTo(p, 'images-store');
+    else await shotTo(p, 'images-store-640');
+
+    if (width === 1200) {
+      await p.locator('.gallery-item').nth(4).locator('.gallery-pin').click();
+      check((await posted(p)).some((m) => m.type === 'imagePin' && m.key === all[4].key && m.pinned === true), 'the star pins by key');
+      await p.locator('.gallery-item').nth(1).locator('.gallery-pin').click();
+      check((await posted(p)).some((m) => m.type === 'imagePin' && m.key === all[1].key && m.pinned === false), 'a pressed star unpins');
+
+      // Done looking on All: every unpinned image; the host answers with them hidden.
+      await p.click('button:has-text("Done looking")');
+      check(JSON.stringify((await posted(p)).filter((m) => m.type === 'imagesDone').at(-1)) === JSON.stringify({ type: 'imagesDone' }), 'Done looking on All covers every chat');
+      await store({ used: 9 * MB, cap: 1024 * MB, pinned: pinnedKeys, hidden: all.filter((i) => !pinnedKeys.includes(i.key)).map((i) => i.key) });
+      await p.waitForFunction((n) => document.querySelectorAll('.gallery-card').length === n, pinnedKeys.length);
+      check((await p.locator('.fl-toast').innerText()).includes(`Done looking at ${all.length - 2} images`), 'a toast says how many, with Undo');
+      check((await p.locator('.gallery-tabs button.tab').first().innerText()).replace(/\s+/g, ' ').trim() === 'All 2', 'only the pinned images are left');
+      await shotTo(p, 'images-done-toast');
+      await p.keyboard.press('Meta+z');
+      check((await posted(p)).some((m) => m.type === 'imagesUndo') && (await p.locator('.fl-toast').count()) === 0, '⌘Z while the toast shows undoes');
+      check(!(await posted(p)).some((m) => m.type === 'imagesCommit'), 'an undone Done looking never commits');
+      await store({ used: 212 * MB, cap: 1024 * MB, pinned: pinnedKeys, hidden: [] });
+      await p.waitForFunction((n) => document.querySelectorAll('.gallery-card').length === n, all.length);
+
+      // One chat's tab, by keyboard; the toast runs out and commits.
+      await p.click('.gallery-tabs button.tab:has-text("Compare the composer")');
+      await p.keyboard.press('Meta+Shift+Backspace');
+      check(JSON.stringify((await posted(p)).filter((m) => m.type === 'imagesDone').at(-1)) === JSON.stringify({ type: 'imagesDone', chatId: 'chat-review' }), '⇧⌘⌫ is Done looking for the open chat');
+      await p.waitForFunction(() => window.__posted.some((m) => m.type === 'imagesCommit'), null, { timeout: 12_000 });
+      check(true, 'when the undo time ends the view commits');
+    }
+    await p.close();
+  }
+
   {
     // What can't be done isn't offered: no file for an attachment, no step outside FriedLiver.
     const p = await open('surface=tasks&theme=dark-2026&view=images&fixture=images&imagesTab=chat-tabs', 1200, 900);
@@ -1699,6 +1768,90 @@ async function labelChecks({ open, check }) {
   }
 }
 
+// ---- A narrow side bar: the composer's menus and the approval cards fit, and no text is cut short ----
+
+/** Boxes under `root` that spill past the viewport, and text cut with an ellipsis (or clipped) to fit. */
+async function narrowOffenders(p, root) {
+  return p.evaluate((sel) => {
+    const out = [];
+    const name = (e) => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} "${(e.textContent ?? '').trim().slice(0, 40)}"`;
+    for (const r of document.querySelectorAll(sel)) {
+      const b = r.getBoundingClientRect();
+      if (b.left < -0.5 || b.right > window.innerWidth + 0.5) out.push(`${name(r)} spans ${Math.round(b.left)}..${Math.round(b.right)} of ${window.innerWidth}`);
+      const scrolls = (e) => {
+        for (let x = e.parentElement; x && x !== r; x = x.parentElement) if (/auto|scroll/.test(window.getComputedStyle(x).overflowX)) return true;
+        return false;
+      };
+      for (const e of r.querySelectorAll('*')) {
+        const eb = e.getBoundingClientRect();
+        if (eb.width && eb.height && (eb.left < b.left - 0.5 || eb.right > b.right + 0.5) && !scrolls(e)) out.push(`${name(e)} spills past its card (${Math.round(eb.left)}..${Math.round(eb.right)} of ${Math.round(b.left)}..${Math.round(b.right)})`);
+      }
+      for (const e of [r, ...r.querySelectorAll('*')]) {
+        if (!e.childNodes.length || ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+        const cs = window.getComputedStyle(e);
+        // An inline box has no clientWidth of its own and clips nothing.
+        if (cs.display === 'none' || cs.display === 'inline' || cs.visibility === 'hidden') continue;
+        const clips = cs.textOverflow === 'ellipsis' || cs.overflowX === 'hidden' || cs.overflowX === 'clip';
+        if (clips && e.scrollWidth > e.clientWidth + 1) out.push(`${name(e)} cut (${e.scrollWidth} > ${e.clientWidth})`);
+      }
+    }
+    return out;
+  }, root);
+}
+
+async function narrowChecks({ open, check }) {
+  for (const width of [200, 290]) {
+    const p = await open('surface=chat&theme=dark-2026&side=1&select=chat-c5', width, 900);
+    await p.click('.cc-mode');
+    await p.waitForSelector('.cc-modes-menu');
+    let bad = await narrowOffenders(p, '.cc-modes-menu');
+    check(bad.length === 0, `at ${width}px the Modes menu fits the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
+    await p.keyboard.press('Escape');
+    await p.click('.cc-model');
+    await p.waitForSelector('.cc-model-menu');
+    bad = await narrowOffenders(p, '.cc-model-menu');
+    check(bad.length === 0, `at ${width}px the model menu fits the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
+    await p.close();
+    const a = await open('surface=chat&theme=dark-2026&side=1&fixture=approvals&select=chat-shop', width, 1500);
+    await a.waitForSelector('.apv');
+    bad = await narrowOffenders(a, '.apv');
+    check(bad.length === 0, `at ${width}px the approval cards fit the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
+    await a.close();
+    // The start cards: Demo's "fake, local" note sits under its name, not on it.
+    const e = await open('surface=chat&theme=dark-2026&side=1&empty=1', width, 900);
+    const overlaps = await e.evaluate(() =>
+      [...document.querySelectorAll('.pick-agent')].flatMap((b) => {
+        const note = b.querySelector('.pick-note');
+        const name = [...b.children].filter((c) => c.tagName === 'SPAN' && !c.classList.contains('pick-note')).at(-1);
+        if (!note || !name) return [];
+        const n = note.getBoundingClientRect();
+        const t = name.getBoundingClientRect();
+        const card = b.getBoundingClientRect();
+        return n.top < t.bottom - 0.5 || n.bottom > card.bottom + 0.5 ? [`${b.textContent.trim()}: note ${Math.round(n.top)}..${Math.round(n.bottom)}, name ends ${Math.round(t.bottom)}`] : [];
+      }),
+    );
+    const notes = await e.locator('.pick-agent .pick-note').count();
+    check(notes === 1 && overlaps.length === 0, `at ${width}px Demo's start card keeps its note under its name${overlaps.length ? ` [${overlaps.join(' | ')}]` : ''}`);
+    await e.close();
+    // Five open chats: the strip shows more than the open one (marks, or titles), and scrolls to the rest.
+    const t = await open('surface=chat&theme=dark-2026&side=1&tabs=5', width, 900);
+    const strip = await t.evaluate(() => {
+      const box = document.querySelector('.switcher .tabs');
+      if (!box) return { tabs: 0, seen: 0 };
+      const b = box.getBoundingClientRect();
+      const tabs = [...box.querySelectorAll('[role="tab"]')];
+      const seen = tabs.filter((x) => {
+        const r = x.getBoundingClientRect();
+        const cs = window.getComputedStyle(x);
+        return cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 8 && Math.min(r.right, b.right) - Math.max(r.left, b.left) >= Math.min(r.width, 20);
+      });
+      return { tabs: tabs.length, seen: seen.length, scrolls: box.scrollWidth > box.clientWidth + 1 };
+    });
+    check(strip.tabs === 5 && strip.seen >= (width >= 250 ? 3 : 1), `at ${width}px five open chats show in the tab strip (${strip.seen} of ${strip.tabs} on screen${strip.scrolls ? ', the rest by scrolling' : ''})`);
+    await t.close();
+  }
+}
+
 // ---- The chat's left and right gutter: nothing in the transcript reaches past it ----
 
 /**
@@ -1766,6 +1919,73 @@ function stretched(v, key) {
   if (Array.isArray(v)) return v.map((x) => stretched(x, key));
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'id' || k.endsWith('Id') ? x : stretched(x, k)]));
   return v;
+}
+
+/** An outside subagent's detail on the map, as the host would feed it: the brief, steps, tokens, files, the report. */
+async function subagentDetailChecks({ open, check, posted }) {
+  const fx = subagentDetailFixture(Date.now());
+  const after = opts['shot-tag'] === 'after';
+  const out = path.join(os.homedir(), 'code/FriedLiver-Code-design/review/subagent-detail');
+  fs.mkdirSync(out, { recursive: true });
+  for (const [state, title] of [['working', 'Fix token waste findings'], ['done', 'Audit the token waste']]) {
+    for (const [width, height] of [[870, 900], [1440, 900]]) {
+      const p = await open('surface=tasks&theme=dark-2026&view=map', width, height, 2);
+      await p.evaluate((s) => window.postMessage({ type: 'claudeSessions', sessions: [s] }, '*'), fx.session);
+      // The outside session's lane is the last: its fold of done agents.
+      if (state === 'done') await p.locator('.map-fold').last().click();
+      const node = p.locator(`.map-sub[aria-label="Subagent: ${title}"]`);
+      await node.waitFor();
+      await node.click();
+      await p.locator('.map-detail').waitFor();
+      await p.waitForFunction(() => window.__posted.some((m) => m.type === 'watchSubagent' && m.id), null, { timeout: 2000 }).catch(() => {});
+      const asked =(await posted(p)).find((m) => m.type === 'watchSubagent' && m.id);
+      if (after) check(asked?.sessionId === fx.session.id && !!fx.details[asked.id], `${state} at ${width}: opening it follows its transcript [${JSON.stringify(asked ?? (await posted(p)))}]`);
+      const detail = fx.details[asked?.id ?? fx.session.subagents.find((s) => s.title === title).id];
+      await p.evaluate((d) => window.postMessage({ type: 'subagentDetail', detail: d }, '*'), detail);
+      // Scrolled to the very bottom (Playwright brought the node into view), the sticky panel rides up with its column.
+      await p.evaluate(() => document.querySelector('.map-detail').scrollIntoView({ block: 'nearest' }));
+      await p.waitForTimeout(400);
+      if (after) {
+        const r = await p.locator('.map-detail').evaluate((el) => {
+          const tl = el.querySelector('.sd-timeline');
+          return {
+            brief: el.querySelector('.sd-brief')?.textContent ?? '',
+            steps: el.querySelectorAll('.sd-timeline .tl-step').length,
+            report: !!el.querySelector('.sd-report .md'),
+            tokens: el.querySelector('.sd-tokens')?.textContent ?? '',
+            parent: el.querySelector('.sd-parent')?.textContent ?? '',
+            files: el.querySelectorAll('.sd-files .fl-row').length,
+            atEnd: tl ? Math.abs(tl.scrollHeight - tl.scrollTop - tl.clientHeight) < 4 : false,
+            side: document.documentElement.scrollWidth <= window.innerWidth,
+          };
+        });
+        check(r.brief.includes('token-efficiency review'), `${state} at ${width}: shows the brief`);
+        check(r.steps >= 25, `${state} at ${width}: shows its steps [${r.steps}]`);
+        check(r.parent.includes('IDE identification question') && !r.parent.trim().startsWith('of '), `${state} at ${width}: names its parent session as a field [${r.parent}]`);
+        check(/34\.7M|52\.1M/.test(r.tokens), `${state} at ${width}: shows its token use [${r.tokens}]`);
+        check(r.files >= 5, `${state} at ${width}: lists the files it touched [${r.files}]`);
+        check(state === 'done' ? r.report : !r.report, `${state} at ${width}: ${state === 'done' ? 'shows its' : 'no'} report`);
+        check(state === 'done' || r.atEnd, `${state} at ${width}: the timeline follows the newest step`);
+        check(r.side, `${state} at ${width}: nothing scrolls sideways`);
+        // Live: the running step finishing and a new note arrive as a partial update.
+        if (state === 'working' && width === 870) {
+          const last = detail.entries.at(-1);
+          await p.evaluate(
+            ([d, l]) => window.postMessage({ type: 'subagentDetail', detail: { ...d, reset: false, entries: [{ ...l, status: 'completed', ms: 90_000 }, { kind: 'note', id: 'n99', seq: l.seq + 1, rev: 99, text: 'All green. Pushing.' }] } }, '*'),
+            [detail, last],
+          );
+          await p.waitForTimeout(200);
+          const live = await p.locator('.map-detail').evaluate((el) => ({ note: [...el.querySelectorAll('.sd-note')].map((n) => n.textContent).at(-1), steps: el.querySelectorAll('.sd-timeline .tl-step').length }));
+          check(!!live.note?.includes('All green') && live.steps === r.steps, `${state}: a live update adds to the timeline in place [${JSON.stringify(live)}]`);
+        }
+      }
+      await p.screenshot({ path: path.join(out, `subagent-${state}-${width}-${opts['shot-tag']}.png`), animations: 'disabled', caret: 'hide' });
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => window.__posted.some((m) => m.type === 'watchSubagent' && !m.id), null, { timeout: 2000 }).catch(() => {});
+      if (after) check((await posted(p)).some((m) => m.type === 'watchSubagent' && !m.id) && !(await p.locator('.map-detail').count()), `${state} at ${width}: Esc closes it and it stops following`);
+      await p.close();
+    }
+  }
 }
 
 async function gutterChecks({ open, check }) {
@@ -1982,6 +2202,126 @@ function sharedGallery() {
 }
 
 // ---- Approvals: routine rows, review and careful cards, the Allow menu, hold to allow, the Inbox lanes ----
+
+async function discussChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const shot = async (p, name, element) => {
+    const file = path.join(out, `${name}.png`);
+    await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    console.log(`  ${file}`);
+  };
+  const noScroll = (p) => p.evaluate(() => [...document.querySelectorAll('.transcript, body, .fl-discuss')].every((e) => e.scrollWidth <= e.clientWidth + 1));
+  const errors = [];
+  const watch = (p, what) => {
+    p.on('pageerror', (e) => errors.push(`${what}: ${e.message}`));
+    p.on('console', (m) => m.type() === 'error' && errors.push(`${what}: ${m.text()}`));
+  };
+  // The header's status pill follows the discussion, not the starter's last turn (never "Done" while another agent speaks).
+  for (const width of [900, 480]) {
+    const p = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main', width, 900, 2);
+    await p.waitForSelector('.fl-discuss');
+    await p.waitForTimeout(300);
+    check((await p.locator('.chat-head .status-pill').innerText()) === 'Discussing · Codex speaking', `${width}: the running discussion's header says who is speaking`);
+    await p.close();
+    const done = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-agreed', width, 900, 2);
+    await done.waitForSelector('.fl-discuss');
+    check((await done.locator('.chat-head .status-pill').innerText()) === 'Done', `${width}: once it ends the header is back to the chat's own status`);
+    await done.close();
+  }
+  // Every layout × state × width × theme, the card alone: <layout>-<state>-<width>-<theme>.png.
+  for (const layout of ['board+meter', 'board', 'meter', 'timeline'])
+    for (const [chat, name] of [['chat-main', 'running'], ['chat-split', 'split'], ['chat-agreed', 'agreed']])
+      for (const width of [1200, 640])
+        for (const theme of ['dark', 'light']) {
+          const what = `${layout} ${name} ${width} ${theme}`;
+          const p = await open(`surface=chat&theme=${theme}-2026&fixture=discuss&select=${chat}&discussLayout=${encodeURIComponent(layout)}`, width, 1600, 2);
+          watch(p, what);
+          await p.waitForSelector(`.fl-discuss[data-layout="${layout}"]`);
+          await p.waitForTimeout(300);
+          check(await noScroll(p), `${what}: no sideways scroll`);
+          check((await p.locator('.transcript .prose').count()) === 1, `${what}: the starting agent's discussion turns fold into the card`);
+          const primaries = await p.locator('.fl-discuss .fl-btn--primary:not(.fl-split-caret)').count();
+          check(primaries === (name === 'running' ? 0 : 1), `${what}: ${name === 'running' ? 'no primary while it runs' : 'one primary: Carry out'}`);
+          await shot(p, `${layout.replace('+', '-')}-${name}-${width}-${theme}`, '.fl-discuss');
+          await p.close();
+        }
+  check(!errors.length, `no page errors (${errors.slice(0, 3).join(' | ')})`);
+  // Live: the setting changes, the open card redraws.
+  const live = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-main&discussLayout=board', 1200, 1400);
+  await live.waitForSelector('.fl-discuss[data-layout="board"]');
+  await live.evaluate(() => window.postMessage({ type: 'discussLayout', layout: 'timeline' }, '*'));
+  await live.waitForSelector('.fl-discuss[data-layout="timeline"] .fl-discuss__thread');
+  check(true, 'changing friedliver.discuss.layout redraws the open card');
+  // Add a point: Enter sends it; Stop asks the host to stop.
+  await live.evaluate(() => (window.__posted.length = 0));
+  await live.getByPlaceholder('Add a point. It goes in before round 3.').fill('Budget is two days.');
+  await live.getByPlaceholder('Add a point. It goes in before round 3.').press('Enter');
+  await live.getByRole('button', { name: 'Stop' }).click();
+  const sent = await live.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
+  check(sent.length === 2 && sent[0].act === 'point' && sent[0].text === 'Budget is two days.' && sent[1].act === 'stop', 'the inline field adds a point, Stop stops');
+  await live.close();
+  const p = await open('surface=chat&theme=dark-2026&fixture=discuss&select=chat-split', 1200, 1400);
+  await p.waitForSelector('.fl-discuss');
+  await p.evaluate(() => (window.__posted.length = 0));
+  await p.locator('.fl-discuss .fl-split > .fl-btn--primary').click();
+  const carried = await p.evaluate(() => window.__posted.filter((m) => m.type === 'discussion'));
+  check(carried.length === 1 && carried[0].act === 'carry' && carried[0].agent === 'codex', 'Carry out goes to the agent the summary suggests');
+  await p.locator('.fl-discuss .fl-split-caret').click();
+  check((await p.locator('.fl-menu [role^="menuitem"]').count()) === 3, 'the split menu lists every participant');
+  await p.close();
+}
+
+async function agentErrorsChecks({ open, check }) {
+  const out = opts.out;
+  fs.mkdirSync(out, { recursive: true });
+  const shot = async (p, name, element) => {
+    const file = path.join(out, `${name}.png`);
+    await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    console.log(`  ${file}`);
+  };
+  const posted = (p) => p.evaluate(() => window.__posted.filter((m) => !['ready', 'imageThumb', 'imageSrc', 'select', 'seen', 'draft'].includes(m.type)));
+  for (const [theme, tone] of [['dark-2026', 'dark'], ['light-2026', 'light']]) {
+    for (const width of [900, 480]) {
+      const codex = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-codex`, width, 700, 2);
+      const text = await codex.locator('#root').innerText();
+      check(!/Internal error/i.test(text), `${width} ${tone}: no bare "Internal error"`);
+      check(text.includes("Codex can't use the model old-mini") && text.includes('not supported when using Codex with a ChatGPT account'), `${width} ${tone}: the model notice names the model and gives the agent's words`);
+      // §2.26 Narrow: under 560 px of banner the actions sit below the text, never squeezing it.
+      const box = (sel) => codex.locator(`.notice ${sel}`).first().boundingBox();
+      const [textBox, actionsBox] = [await box('.fl-banner__text'), await box('.fl-banner__actions')];
+      const below = actionsBox.y >= textBox.y + textBox.height - 1;
+      check(width === 480 ? below : !below, `${width} ${tone}: the notice's actions are ${width === 480 ? 'below' : 'beside'} its text`);
+      // Prose in the body font; only code (a command, a `code` span) in the editor's font.
+      const font = (sel) => codex.locator(sel).first().evaluate((e) => e.ownerDocument.defaultView.getComputedStyle(e).fontFamily);
+      check((await font('.notice .notice-detail')) === (await font('.notice .fl-banner__text')), `${width} ${tone}: the agent's words are prose, in the body font`);
+      await shot(codex, `agent-errors-model-${width}-${tone}`);
+      await codex.getByRole('button', { name: 'Use 6 Luna' }).click();
+      check((await posted(codex)).some((m) => m.type === 'notice' && m.action?.do === 'setOption' && m.action.value === 'luna'), `${width} ${tone}: "Use 6 Luna" switches the model`);
+      await codex.close();
+      const gemini = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-gemini`, width, 700, 2);
+      check((await gemini.locator('#root').innerText()).includes('Cannot enable privileged approval modes in an untrusted folder'), `${width} ${tone}: the mode notice gives Gemini's reason`);
+      check((await gemini.locator('.notice .notice-detail code').allInnerTexts()).join() === 'gemini', `${width} ${tone}: a command inside the prose is a code span`);
+      await shot(gemini, `agent-errors-mode-${width}-${tone}`);
+      await gemini.close();
+      if (width !== 900) continue;
+      const main = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-main`, width, 700, 2);
+      const install = main.locator('.notice code.notice-detail');
+      check((await install.innerText()) === 'npm install -g @google/gemini-cli' && /mono|courier|menlo/i.test(await install.evaluate((e) => e.ownerDocument.defaultView.getComputedStyle(e).fontFamily)), `${tone}: an install command stays code, in the editor's font`);
+      await main.getByRole('button', { name: 'More' }).first().click();
+      await main.waitForSelector('[role="menuitem"]');
+      check((await main.locator('#root').innerText()).includes('In a new chat'), `${tone}: the hand-off menu offers a new chat besides the linked one`);
+      await shot(main, `agent-errors-handoff-${tone}`);
+      await main.keyboard.press('Escape');
+      await main.getByRole('button', { name: 'Ask another agent' }).first().click();
+      await main.locator('.seg-item', { hasText: 'Codex' }).click();
+      await main.locator('textarea[aria-label^="Question for"]').fill('And for refunds?');
+      check((await main.locator('.ask-form').getByRole('button', { name: 'New chat', exact: true }).count()) === 1, `${tone}: Ask offers "New chat" when Codex already has a chat here`);
+      await shot(main, `agent-errors-ask-${tone}`);
+      await main.close();
+    }
+  }
+}
 
 async function approvalsChecks({ open, check }) {
   const out = opts.out;

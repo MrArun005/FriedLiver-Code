@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BROWSER_WIDTH, browserNeedsApproval, checkBrowserUrl, clampBrowserWidth, isLocalhost, relaxLocalhostCors } from '../src/host/browserRules';
+import { BROWSER_WIDTH, CONSOLE_BUDGET, ConsoleLog, browserNeedsApproval, checkBrowserUrl, clampBrowserWidth, isLocalhost, relaxLocalhostCors } from '../src/host/browserRules';
 import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
 
@@ -186,5 +186,34 @@ describe('screenshots sized for tokens', () => {
     expect(shotParams({ width: 1280, height: 800, dpr: 1 }, { maxWidth: 400 }).size).toEqual({ width: 400, height: 250 });
     expect(parseCall('browser_screenshot', { selector: 'e3', max_width: 600 })).toEqual({ tool: 'browser_screenshot', selector: 'e3', maxWidth: 600 });
     expect(parseCall('browser_screenshot', { max_width: 50 })).toBeNull();
+  });
+});
+
+describe('browser_console', () => {
+  it('gives each chat only the lines since it last asked', () => {
+    const log = new ConsoleLog();
+    expect(log.take('a')).toBe('No console messages since FriedLiver attached to the page.');
+    log.push('[log] one');
+    log.push('[log] two');
+    expect(log.take('a')).toBe('[log] one\n[log] two');
+    expect(log.take('a')).toBe('No new console messages since your last browser_console.');
+    log.push('[error] three');
+    expect(log.take('a')).toBe('[error] three');
+    // Another chat starts from the beginning of what is kept.
+    expect(log.take('b')).toBe('[log] one\n[log] two\n[error] three');
+  });
+
+  it('collapses repeats and keeps to its budget, newest first, saying what it left out', () => {
+    const log = new ConsoleLog();
+    for (let i = 0; i < 50; i++) log.push('[warn] React key missing');
+    log.push('[error] boom');
+    expect(log.take('a')).toBe('[repeats collapsed]\n[warn] React key missing (×50)\n[error] boom');
+    for (let i = 0; i < 400; i++) log.push(`[log] line ${i} ${'x'.repeat(80)}`);
+    const out = log.take('a');
+    expect(out.length).toBeLessThanOrEqual(CONSOLE_BUDGET + 200);
+    expect(out).toMatch(/^\[\d+ older lines left out \(over the 6,000-character budget\); 100 earlier lines no longer kept\]/);
+    expect(out.endsWith(`[log] line 399 ${'x'.repeat(80)}`)).toBe(true);
+    log.push('y'.repeat(9000));
+    expect(log.take('a').length).toBeLessThanOrEqual(2000);
   });
 });

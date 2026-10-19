@@ -5,10 +5,10 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { AGENT_FACES, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, savedLines, turnsLeft, usageLines, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
-import { FRIEDLIVER_COMMANDS, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
-import { Dot, Icon, memo, scrollBehavior, send, useNow, type IconName } from './common';
+import { FRIEDLIVER_COMMANDS, agentMissing, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
+import { Dot, Icon, memo, scrollBehavior, send, useNow, useRoster, type IconName } from './common';
 import { agentName, chatTip } from '../shared/names';
-import { IconButton, Toggle } from './ui';
+import { Button, IconButton, Toggle } from './ui';
 
 export type ComposerMenu = 'slash' | 'model' | 'modes' | 'agents' | null;
 
@@ -162,6 +162,7 @@ export function ModelMenu({ chat, close }: MenuProps) {
   const { model, modelConfig, other } = optionGroups(chat.session);
   const pick = model ?? [...modelConfig, ...other].find((o) => o.type === 'select');
   const toggles = [...modelConfig, ...other].filter((o) => o.type === 'boolean');
+  const missing = agentMissing(chat, useRoster().signIn[chat.agent]);
   return (
     <div ref={panel} class="cc-menu cc-model-menu" role="menu" aria-label="Select a model" onKeyDown={onKeyDown}>
       <div class="cc-menu-title">Select a model</div>
@@ -184,7 +185,24 @@ export function ModelMenu({ chat, close }: MenuProps) {
             {pick.current === c.value && <Icon name="check" size={16} />}
           </button>
         ))}
-        {!pick && <div class="cc-empty">{chat.session?.live ? `${agentName(chat.agent)} offers no model choice` : `${agentName(chat.agent)} is starting…`}</div>}
+        {!pick &&
+          (missing ? (
+            <div class="cc-empty cc-missing">
+              <span>{agentName(chat.agent)}: Not installed</span>
+              <Button
+                variant="quiet"
+                size="sm"
+                onClick={() => {
+                  send({ type: 'notice', chatId: chat.id, action: { label: 'Install in terminal', do: 'install', agent: chat.agent } });
+                  close();
+                }}
+              >
+                Install
+              </Button>
+            </div>
+          ) : (
+            <div class="cc-empty">{chat.session?.live ? `${agentName(chat.agent)} offers no model choice` : `${agentName(chat.agent)} is starting…`}</div>
+          ))}
       </div>
       <Divider />
       <EffortRow chat={chat} />

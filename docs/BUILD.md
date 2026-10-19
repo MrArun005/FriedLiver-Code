@@ -82,7 +82,7 @@ Environment variables:
 | `VSCODE_DIR` | `vscode` | Upstream checkout |
 | `FRIEDLIVER_EXTENSIONS_DIR` | `extensions` | Where `prepare.mjs` takes the FriedLiver built-ins from |
 | `FRIEDLIVER_CACHE_DIR` | `.cache` | Downloaded Node toolchain |
-| `FRIEDLIVER_VERSION` | upstream tag | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag |
+| `FRIEDLIVER_VERSION` | newest release tag in the checkout's history | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag. Other builds take the newest `vX.Y.Z[-N]` tag that HEAD contains (the pinned upstream version when git has no tags), so the update check only offers a newer release, and stamp `friedliverBuild` as e.g. `1.142.0-7+3.gd0cca9f1ae` (3 commits past it) |
 | `FRIEDLIVER_REQUIRE_PINS` | unset | When set, a download with no SHA-256 pin in `scripts/checksums.json` fails the build (release builds set it) |
 | `FRIEDLIVER_KEEP_LOCALES` | `en,en-GB` | Chromium locale packs `--package` keeps (`<lang>.lproj` in macOS's Electron Framework, `locales/<lang>.pak` elsewhere); English is always kept as Chromium's fallback, `all` keeps every pack. The others are about 45 MB on macOS. Only Chromium's own strings (spellcheck and webview context menus, a few native dialogs) are affected; FriedLiver's UI language comes from VS Code language packs |
 

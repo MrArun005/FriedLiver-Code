@@ -118,16 +118,18 @@ export async function headContent(root: string, relPath: string): Promise<string
  * Staged and unstaged changes to tracked files, as one patch against HEAD (or,
  * before the first commit, what is staged followed by what isn't). External
  * diff programs and textconv filters stay off: a repository's config or
- * `.gitattributes` would otherwise run them.
+ * `.gitattributes` would otherwise run them. `exclude`: git pathspec globs left
+ * out (lockfiles, built files); `stat`: a `--stat` summary instead of the patch.
  */
-export async function workingDiff(root: string): Promise<string> {
-  const opts = ['--no-color', '--no-ext-diff', '--no-textconv', '-M'];
+export async function workingDiff(root: string, options: { exclude?: readonly string[]; stat?: boolean } = {}): Promise<string> {
+  const opts = ['--no-color', '--no-ext-diff', '--no-textconv', '-M', ...(options.stat ? ['--stat=200,160', '--stat-count=500'] : [])];
+  const specs = options.exclude?.length ? ['.', ...options.exclude.map((g) => `:(exclude,glob)${g}`)] : [];
   const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD']).then(
     () => true,
     () => false,
   );
-  if (head) return git(root, ['diff', ...opts, 'HEAD', '--']);
-  return (await git(root, ['diff', '--cached', ...opts, '--'])) + (await git(root, ['diff', ...opts, '--']));
+  if (head) return git(root, ['diff', ...opts, 'HEAD', '--', ...specs]);
+  return (await git(root, ['diff', '--cached', ...opts, '--', ...specs])) + (await git(root, ['diff', ...opts, '--', ...specs]));
 }
 
 /** Stages everything and commits. Returns the short commit hash. */

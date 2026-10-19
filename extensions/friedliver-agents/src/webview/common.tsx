@@ -7,9 +7,10 @@ import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
+import { discussLayouts, type DiscussLayout } from '../shared/discussView';
 import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
-import { TAB_MIN, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
+import { TAB_MIN, markWindow, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -57,6 +58,13 @@ export function useRoster(): AgentRoster {
     return () => void rosterWatchers.delete(wake);
   }, []);
   return roster;
+}
+
+/** friedliver.discuss.layout, drawing the card again when it changes. */
+export function useDiscussLayout(): DiscussLayout {
+  const [, setN] = useState(0);
+  useEffect(() => discussLayouts.watch(() => setN((n) => n + 1)), []);
+  return discussLayouts.get();
 }
 
 /** A small mark for an agent's last known sign-in; nothing while it was never checked. */
@@ -166,6 +174,9 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
         setState(keyItems(undefined, m.state));
         setSelected(m.selected);
         if (m.roster) setRoster(m.roster);
+        if (m.discussLayout) discussLayouts.set(m.discussLayout);
+      } else if (m.type === 'discussLayout') {
+        discussLayouts.set(m.layout);
       } else if (m.type === 'roster') {
         setRoster(m.roster);
       } else if (m.type === 'action') {
@@ -614,10 +625,11 @@ function windowMarks(el: HTMLElement) {
   };
   if (el.dataset.fit !== 'icon' || at < 0 || !mark) return reset();
   const step = mark.getBoundingClientRect().width + (parseFloat(window.getComputedStyle(el).columnGap) || 0);
-  const k = Math.floor((el.clientWidth - TAB_MIN.open) / step);
-  if (k >= wraps.length - 1 || k < 0) return reset();
+  const { marks: k, openWidth } = markWindow(el.clientWidth, step, wraps.length);
+  // Everything fits with the open tab at its full minimum: no window needed.
+  if (k >= wraps.length - 1 && openWidth >= TAB_MIN.open) return reset();
   el.setAttribute('data-windowed', '');
-  el.style.setProperty('--open-w', `${el.clientWidth - k * step}px`);
+  el.style.setProperty('--open-w', `${openWidth}px`);
   const first = Math.max(Math.max(0, at - k), Math.min(Math.round(el.scrollLeft / step), at, wraps.length - 1 - k));
   el.scrollLeft = first * step;
 }

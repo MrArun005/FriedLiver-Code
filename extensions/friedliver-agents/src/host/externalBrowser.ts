@@ -84,15 +84,31 @@ export async function registerClaude(file: string, want: ReturnType<typeof claud
   const servers = config.mcpServers ?? {};
   const had = servers[SERVER_NAME];
   if (JSON.stringify(had) === JSON.stringify(want)) return 'unchanged';
+  if (had !== undefined && !isOurEntry(had)) throw new Error(`${file} already has an MCP server named "${SERVER_NAME}" that FriedLiver didn't add; left it alone.`);
   await writeConfig(file, { ...config, mcpServers: { ...servers, [SERVER_NAME]: want } }, exists);
   return had === undefined ? 'added' : 'updated';
 }
 
-/** Removes our entry (with `onlyHttp`, only an older http one, which pointed at a port that may now be anyone's); true when removed. */
+/**
+ * An entry FriedLiver wrote: the stdio one running its externalStdio.js, or an older http one pointing at
+ * FriedLiver's loopback server. A `friedliver-browser` server the user set up some other way is theirs.
+ */
+export function isOurEntry(entry: unknown): boolean {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const e = entry as { type?: unknown; args?: unknown; url?: unknown };
+  if (e.type === 'stdio') return Array.isArray(e.args) && typeof e.args[0] === 'string' && /[\\/]externalStdio\.js$/.test(e.args[0]);
+  return e.type === 'http' && typeof e.url === 'string' && /^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(e.url);
+}
+
+/**
+ * Removes the entry FriedLiver added (with `onlyHttp`, only an older http one, which pointed at a port that
+ * may now be anyone's), and nothing when there is none or it isn't ours; true when removed. A file without
+ * our entry is not written at all.
+ */
 export async function unregisterClaude(file: string, onlyHttp = false): Promise<boolean> {
   const { config, exists } = await readConfig(file);
   const servers = config.mcpServers;
-  if (!exists || !servers || !(SERVER_NAME in servers)) return false;
+  if (!exists || !servers || !(SERVER_NAME in servers) || !isOurEntry(servers[SERVER_NAME])) return false;
   if (onlyHttp && (servers[SERVER_NAME] as { type?: unknown } | null)?.type !== 'http') return false;
   const rest = { ...servers };
   delete rest[SERVER_NAME];

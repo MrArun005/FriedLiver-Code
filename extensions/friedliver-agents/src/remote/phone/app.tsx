@@ -841,11 +841,11 @@ function ItemView({ item }: { item: PhoneItem }) {
         </div>
       );
     case 'question':
-      return <Resolved verb="Asked" outcome={item.summary ?? (item.state === 'declined' ? 'skipped' : 'answered')} />;
+      return <Resolved verb="Asked" outcome={item.state === 'expired' ? 'expired — the agent stopped' : (item.summary ?? (item.state === 'declined' ? 'skipped' : 'answered'))} />;
     case 'review':
-      return <Resolved verb="Edit" target={item.file.path} outcome={`${item.state}${item.auto ? ` · ${item.auto}` : ''}`} tone={item.state === 'rejected' ? 'denied' : 'done'} />;
+      return <Resolved verb="Edit" target={item.file.path} outcome={`${item.state === 'expired' ? 'expired — the agent stopped' : item.state}${item.auto ? ` · ${item.auto}` : ''}`} tone={item.state === 'rejected' ? 'denied' : 'done'} />;
     case 'bridge':
-      return <Resolved verb={item.title} outcome={item.state} tone={item.state === 'denied' ? 'denied' : 'done'} />;
+      return <Resolved verb={item.title} outcome={item.state === 'expired' ? 'expired — the agent stopped' : item.state} tone={item.state === 'denied' ? 'denied' : 'done'} />;
     case 'notice':
       return <p class={`notice${item.tone === 'error' ? ' notice--error' : ''}`}>{item.text}</p>;
     case 'changes':

@@ -522,7 +522,7 @@
         "command": "friedliver.moveToCenter",
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a",
-        "when": "!terminalFocus"
+        "when": "!terminalFocus && (isMac || !editorTextFocus || editorReadonly)"
       },
       {
         "command": "friedliver.review.acceptAll",
@@ -637,6 +637,37 @@
     "configuration": {
       "title": "FriedLiver Agents",
       "properties": {
+        "friedliver.discuss.maxRounds": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 5,
+          "markdownDescription": "Rounds a `/discuss` runs at most before it is summed up. It ends sooner when everyone agrees."
+        },
+        "friedliver.discuss.layout": {
+          "type": "string",
+          "default": "board+meter",
+          "enum": [
+            "board+meter",
+            "board",
+            "meter",
+            "timeline"
+          ],
+          "enumDescriptions": [
+            "A board with a column for each position and each agent under the one it holds, then a meter showing how sure each agent is and how far it moved.",
+            "Only the board: a column for each position, each agent under the one it holds.",
+            "Only the meter: each agent on a line between the two positions, nearer the end it is surer of.",
+            "A timeline: each round in order, with each agent's turn and whose point it answers."
+          ],
+          "markdownDescription": "How a `/discuss` card shows the discussion while it runs. Once it ends, every layout shows the same conclusion; open cards change as soon as you change this."
+        },
+        "friedliver.discuss.tokenBudget": {
+          "type": "integer",
+          "default": 60000,
+          "minimum": 5000,
+          "maximum": 500000,
+          "markdownDescription": "Tokens (estimated, sent and received) a `/discuss` may use; past it the discussion stops and is summed up."
+        },
         "friedliver.chat.autoAllowLinkedReads": {
           "scope": "machine",
           "type": "boolean",
@@ -850,6 +881,18 @@
           "default": true,
           "description": "Show this folder's Claude Code sessions started outside FriedLiver (the claude CLI, the Claude Code extension) in the Agent Manager, read from ~/.claude/projects. FriedLiver only reads them."
         },
+        "friedliver.images.storageLimitMB": {
+          "type": "integer",
+          "default": 1024,
+          "minimum": 50,
+          "markdownDescription": "How much space FriedLiver's copies of the images agents read, take and make may use, in MB. Past it, the oldest unpinned copies are removed. Pinned images are always kept."
+        },
+        "friedliver.images.keepDays": {
+          "type": "integer",
+          "default": 7,
+          "minimum": 1,
+          "markdownDescription": "Unpinned image copies, and FriedLiver's own screenshots, older than this many days are removed. **Done looking** in the Images view removes them sooner."
+        },
         "friedliver.restoreChats": {
           "type": "boolean",
           "default": true,
@@ -876,8 +919,8 @@
         "friedliver.browser.externalClients": {
           "scope": "machine",
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "Lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through a stdio MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` (no secret in it; it reads a token that changes every launch from FriedLiver's storage). Every action still asks you first. Read from your user settings only."
+          "default": false,
+          "markdownDescription": "Opt-in: lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through a stdio MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` (no secret in it; it reads a token that changes every launch from FriedLiver's storage). Off by default: FriedLiver writes nothing to `~/.claude.json` until you turn this on or run **FriedLiver: Connect Claude Code to the browser**; turning it off removes the entry FriedLiver added. Every action still asks you first. Read from your user settings only."
         },
         "friedliver.browser.externalAutoApprove": {
           "scope": "machine",
@@ -890,6 +933,13 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
+        },
+        "friedliver.usage.dailyTokenWarning": {
+          "scope": "machine",
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Warns once a day when the tokens the agents report for today, across the chats in a window, pass this many. Counted on this computer only; nothing is sent anywhere. `0` (the default) turns it off."
         },
         "friedliver.system.enabled": {
           "type": "boolean",
