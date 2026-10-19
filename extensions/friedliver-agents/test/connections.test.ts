@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MAX_PIPE_FORWARDS } from '../src/host/connections';
 import { chatStatus, lastReply, stateLine, type ChatView, type LinkItem } from '../src/shared/model';
-import { disposeCores, gitRepo, makeCore, waitFor } from './helpers';
+import { DEMO_AGENT, disposeCores, gitRepo, makeCore, waitFor } from './helpers';
 
 afterEach(disposeCores);
 
@@ -97,6 +97,39 @@ describe('consult', () => {
     expect(links(core.chat(a.id)!).at(-1)).toMatchObject({ role: 'reply', text: expect.stringMatching(/what is this\? \(\+1 image\)$/) });
     expect(core.snapshot.images.map((i) => i.title)).toEqual(['shot.png']);
   });
+
+  it('briefs a consultation once; a follow-up carries only what is new', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir);
+    const a = await core.createChat('demo');
+    await core.send(a.id, 'hello there');
+    const first = await core.consult(a.id, 'gemini', 'first question', 'user');
+    expect(first).toContain('Answer the question.');
+    expect(first).toContain('Its task:');
+    const second = await core.consult(a.id, 'gemini', 'second question', 'user');
+    expect(second).toMatch(/asks a follow-up question/);
+    expect(second).not.toContain('Answer the question.');
+    expect(second).not.toContain('Its latest reply');
+    expect(second).toMatch(/second question$/);
+    // The asking chat moved on: the follow-up says what changed.
+    await core.send(a.id, 'something new');
+    const third = await core.consult(a.id, 'gemini', 'third question', 'user');
+    expect(third).toContain('Its latest reply since your last answer (excerpt):\nYou said: something new');
+  });
+
+  it('keeps a chat named after its own request when you later ask another agent from it', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir);
+    const a = await core.createChat('demo');
+    await core.send(a.id, 'hello there');
+    await core.send(a.id, '@codex what is up with the build');
+    expect(core.chat(a.id)!.title).toBe('hello there');
+    await core.consult(a.id, 'gemini', 'Ask demo about the failing tests in api', 'user');
+    expect(core.chat(a.id)!.title).toBe('hello there');
+    // A real request still renames it.
+    await core.send(a.id, 'Fix the failing parser tests');
+    expect(core.chat(a.id)!.title).toBe('Fix failing parser tests');
+  });
 });
 
 describe('pipes and forwards', () => {
@@ -171,6 +204,19 @@ describe('fan-out', () => {
     for (const c of chats) expect(existsSync(c.cwd) && c.cwd !== dir).toBe(true);
     await done;
     for (const c of chats) expect(lastReply(core.chat(c.id)!)).toBe('You said: hello all');
+  });
+
+  it('says once that an agent is not installed, not for its warm start and again for its turn', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { agentCommand: (id) => (id === 'claude' ? { command: path.join(dir, 'no-such-agent'), args: [] } : { command: process.execPath, args: [DEMO_AGENT] }) });
+    // Claude first: its warm start fails while Demo's worktree is still being made.
+    const { chats, done } = await core.fanout(['claude', 'demo', 'gemini'], 'hello all', true);
+    await done;
+    const claude = core.chat(chats[0].id)!;
+    const errors = claude.items.filter((i) => i.kind === 'notice' && i.tone === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ text: expect.stringContaining("isn't installed"), actions: expect.arrayContaining([expect.objectContaining({ do: 'install' })]) });
+    expect(lastReply(core.chat(chats[1].id)!)).toBe('You said: hello all');
   });
 
   it('shares a folder that is not a git repository, and says so', async () => {

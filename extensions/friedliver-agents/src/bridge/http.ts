@@ -26,6 +26,8 @@ export interface HttpToolsOptions {
   externalKey?(): string | undefined;
   /** Does a checked call for the chat. The signal aborts when the agent hangs up before the answer. */
   call(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<ToolResult>;
+  /** Tools the chat's session isn't offered (mcp.ts toolsFor): unsupported or turned-off system_*, index_* with the index off. */
+  omitFor?(chatId: string): string[];
   log?(line: string): void;
   /** For tests. */
   keepaliveMs?: number;
@@ -182,7 +184,8 @@ async function answer(req: IncomingMessage, res: ServerResponse, chatId: string,
     if (!res.writableFinished) gone.abort();
   });
   const external = isExternal(chatId);
-  const handleOne = (m: unknown) => handle(m, external);
+  const omit = o.omitFor?.(chatId) ?? [];
+  const handleOne = (m: unknown) => handle(m, external, omit);
   const run = async (handled: Exclude<ReturnType<typeof handle>, null>): Promise<object> => {
     if ('reply' in handled) return handled.reply;
     const call = parseCall(handled.call, handled.args);

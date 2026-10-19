@@ -379,10 +379,21 @@ export interface AgentDefaults {
   options: SessionOption[];
   /** The commands the agent's last session offered, so "/" works before a session starts. */
   commands?: SlashCommand[];
-  /** The user's last choice per optionKey. */
+  /** The model and effort (per optionKey) new chats start with, as set on the Accounts page; see defaultChoices. */
   chosen: Record<string, string | boolean>;
+  /**
+   * `chosen` was set on the Accounts page. Older versions saved there whatever was picked last in any chat,
+   * so a max effort tried once became every new chat's (and every inline edit's and consult's); without
+   * this mark those choices are ignored and new chats start at the agent's own default.
+   */
+  explicit?: true;
   /** Last level chosen for this agent; never Full auto. */
   approval?: Exclude<ApprovalLevel, 'full'>;
+}
+
+/** The choices new chats of an agent start with: only those you set on the Accounts page. */
+export function defaultChoices(d: Pick<AgentDefaults, 'chosen' | 'explicit'> | undefined): Record<string, string | boolean> {
+  return d?.explicit ? d.chosen : {};
 }
 
 /** Shift+Tab, as in Claude Code: Ask → Auto-accept edits → Plan → Ask. Full auto is never one key away. */

@@ -1,9 +1,12 @@
 # Mac & Windows control
 
 A fixed set of things agents can ask to do on your computer, as `system_*`
-tools: every FriedLiver chat (except read-only chats and inline edits) and
-Claude Code outside FriedLiver get them. macOS and Windows; on Linux each one
-answers "not supported".
+tools: every FriedLiver chat (except read-only chats and inline edits) gets
+them; Claude Code outside FriedLiver doesn't (its `friedliver-browser` server
+has the browser tools only). macOS and Windows: a session isn't offered them
+on Linux, nor `system_shortcut` on Windows, nor any while
+`friedliver.system.enabled` is off or one you turned off in
+`friedliver.system.tools`, so its tool list stays short.
 
 Code: `extensions/friedliver-agents/src/host/system.ts` (the actions),
 `src/host/bridgeRequests.ts` (approvals), `src/shared/system.ts` (names and
@@ -51,7 +54,7 @@ is base64 JSON on stdin. Each run is capped (15 s, 2 minutes for Shortcuts;
 
 | | Allow once | Allow for this chat | Always allow | Full auto |
 |---|---|---|---|---|
-| Most actions | yes | that tool on that target, this chat (or Claude Code session) | that tool on that target, every chat (Manage Permissions → Mac & Windows control) | only with `friedliver.system.fullAutoAllowed` |
+| Most actions | yes | that tool on that target, this chat | that tool on that target, every chat (Manage Permissions → Mac & Windows control) | only with `friedliver.system.fullAutoAllowed` |
 | Reading the clipboard, window screenshots, opening or focusing terminals, shells, System Settings, Keychain Access, Registry Editor, Task Manager and the like | yes | no | no | no |
 
 A target is the app (`app:Spotify`), a link's site (`url:https://example.com`),
@@ -60,7 +63,7 @@ copying, listing). The target is checked again just before acting; if it
 changed after you approved, nothing happens. Agent-to-agent "allow" and
 `friedliver.browser.externalAutoApprove` don't cover these tools.
 
-Limits: 30 actions a minute per chat or Claude Code session; three requests
+Limits: 30 actions a minute per chat; three requests
 waiting on you per chat.
 
 ## Settings

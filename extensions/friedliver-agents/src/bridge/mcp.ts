@@ -6,7 +6,7 @@
 // With the MCP SDK, zod and ajv in it, each one held about 10 MB more than the
 // runtime itself; written out here, it holds next to nothing.
 import { AGENT_KEYS } from '../shared/model';
-import { SYSTEM_LIMITS } from '../shared/system';
+import { SYSTEM_LIMITS, SYSTEM_TOOLS, unsupportedOn, type SystemTool } from '../shared/system';
 import { READ_LIMITS } from '../host/indexReads';
 import { SHOT } from '../host/browserRules';
 import { SNAPSHOT_LIMITS } from '../host/pageText';
@@ -15,16 +15,24 @@ import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
 /** Newest first; a client asking for another version gets the newest. */
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
 
-const INSTRUCTIONS =
-  'Tools from FriedLiver, the editor you run in. They reach the other coding agents and chats open there. ' +
-  'The user may be asked to allow each call, and may say no; carry on without it if so. ' +
-  'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code. ' +
-  'The system_* tools act on the user\'s Mac or Windows PC (open apps, files and links, the clipboard, notifications, volume, window screenshots); each is asked for. ' +
-  'The index_* tools query a ready index of this project and cost far fewer tokens than reading files: ' +
-  'find code with index_search or index_symbols (not grep), look at a file with index_outline, read just the part you need with index_read (a symbol or lines, not the whole file), ' +
-  'and after a file changed use index_diff (what changed since you saw it) or index_changes with since "last_turn" instead of reading it again.';
+const INSTRUCTIONS = {
+  head:
+    'Tools from FriedLiver, the editor you run in. They reach the other coding agents and chats open there. ' +
+    'The user may be asked to allow each call, and may say no; carry on without it if so.',
+  browser: 'The browser_* tools drive the browser built into FriedLiver (http and https pages only), which the user sees beside the code.',
+  system: "The system_* tools act on the user's Mac or Windows PC (open apps, files and links, the clipboard, notifications, volume, window screenshots); each is asked for.",
+  index:
+    'The index_* tools query a ready index of this project and cost far fewer tokens than reading files: ' +
+    'find code with index_search or index_symbols (not grep), look at a file with index_outline, read just the part you need with index_read (a symbol or lines, not the whole file), ' +
+    'and after a file changed use index_diff (what changed since you saw it) or index_changes with since "last_turn" instead of reading it again.',
+};
 
-const DRAFT_07 = 'http://json-schema.org/draft-07/schema#';
+/** The server's instructions, naming only the kinds of tools this session was offered. */
+export function instructionsFor(tools: readonly { name: string }[]): string {
+  const has = (prefix: string) => tools.some((t) => t.name.startsWith(prefix));
+  return [INSTRUCTIONS.head, has('browser_') && INSTRUCTIONS.browser, has('system_') && INSTRUCTIONS.system, has('index_') && INSTRUCTIONS.index].filter(Boolean).join(' ');
+}
+
 const CHAT_ID = { type: 'string', pattern: '^[\\w.:-]{1,128}$' };
 const NO_INPUT = { type: 'object', properties: {} };
 
@@ -56,7 +64,6 @@ export const TOOLS = [
       'Asking the same agent again continues the same consultation; pass chat_id to ask a specific chat instead. ' +
       'The user is asked to allow it first unless they already did.',
     inputSchema: {
-      $schema: DRAFT_07,
       type: 'object',
       properties: {
         agent: { type: 'string', enum: [...AGENT_KEYS], description: 'Which agent: claude, codex (GPT), gemini, or demo (an offline test agent).' },
@@ -73,7 +80,6 @@ export const TOOLS = [
       'Sends a message to another FriedLiver chat, as if the user typed it there, and returns at once without its reply. ' +
       'The chat must be idle. Use read_chat later to see what it answered. The user is asked to allow it first unless they already did.',
     inputSchema: {
-      $schema: DRAFT_07,
       type: 'object',
       properties: {
         chat_id: { ...CHAT_ID, description: 'A chat id from list_chats, like "chat-3".' },
@@ -87,7 +93,6 @@ export const TOOLS = [
     title: 'Read a chat',
     description: 'Reads the latest messages of another FriedLiver chat: what the user and its agent said. The user is asked to allow it first unless they already did.',
     inputSchema: {
-      $schema: DRAFT_07,
       type: 'object',
       properties: {
         chat_id: { ...CHAT_ID, description: 'A chat id from list_chats, like "chat-3".' },
@@ -105,7 +110,6 @@ export const TOOLS = [
       'which every agent in FriedLiver gets at the start of its next sessions. Only durable facts, not progress notes. ' +
       'The user is asked to allow it first unless they already did.',
     inputSchema: {
-      $schema: DRAFT_07,
       type: 'object',
       properties: { fact: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.text, description: 'The fact, in one sentence.' } },
       required: ['fact'],
@@ -128,7 +132,6 @@ function indexTools() {
         "Searches FriedLiver's index of this project by keywords or identifiers (camelCase and snake_case parts match too). Returns the best-ranked files, " +
         'each with its matching definitions and a few numbered ±3-line windows, within a token budget. Repeated windows are named, not repeated.' + PREFER,
       inputSchema: {
-        $schema: DRAFT_07,
         type: 'object',
         properties: {
           query: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'Words or identifiers, like "refresh token expiry" or "parseConfig".' },
@@ -143,7 +146,7 @@ function indexTools() {
       name: 'index_symbols',
       title: 'Find definitions',
       description: 'Finds where functions, classes, types and the like with this name are defined in the project (exact name, else names starting with it).' + PREFER,
-      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A name, like "UserService".' } }, required: ['name'] },
+      inputSchema: { type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.query, description: 'A name, like "UserService".' } }, required: ['name'] },
       ...ro,
     },
     {
@@ -153,7 +156,6 @@ function indexTools() {
         'Reads one definition (symbol, e.g. "parseConfig" or "UserService.save") or a line range of a project file, with numbered lines and a one-line header. ' +
         'Use it instead of reading whole files: a file over 150 lines comes back as its outline unless you name a symbol or lines.',
       inputSchema: {
-        $schema: DRAFT_07,
         type: 'object',
         properties: {
           path: PATH,
@@ -168,14 +170,14 @@ function indexTools() {
       name: 'index_outline',
       title: 'Outline a file',
       description: 'The signatures of the definitions in one file, with their lines: the cheapest look at a file. Then index_read a symbol.',
-      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      inputSchema: { type: 'object', properties: { path: PATH }, required: ['path'] },
       ...ro,
     },
     {
       name: 'index_related',
       title: 'Related files',
       description: 'The files a file imports and the project files that import it (TS/JS, Python, Go, Java/Kotlin).',
-      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      inputSchema: { type: 'object', properties: { path: PATH }, required: ['path'] },
       ...ro,
     },
     {
@@ -184,7 +186,7 @@ function indexTools() {
       description:
         'A compact unified diff of a project file against the version you were last shown in this chat (by index_read or a file read FriedLiver saw). ' +
         'Use it instead of re-reading a file after it changed.',
-      inputSchema: { $schema: DRAFT_07, type: 'object', properties: { path: PATH }, required: ['path'] },
+      inputSchema: { type: 'object', properties: { path: PATH }, required: ['path'] },
       ...ro,
     },
     {
@@ -193,7 +195,6 @@ function indexTools() {
       description:
         "The project's current hash (the root of a Merkle tree over the indexed files) and the files added, modified or deleted since an earlier hash: by default since the project was last opened.",
       inputSchema: {
-        $schema: DRAFT_07,
         type: 'object',
         properties: {
           since: {
@@ -213,7 +214,7 @@ function browserTools() {
     name,
     title,
     description,
-    inputSchema: Object.keys(properties).length ? { $schema: DRAFT_07, type: 'object', properties, ...(required.length ? { required } : {}) } : NO_INPUT,
+    inputSchema: Object.keys(properties).length ? { type: 'object', properties, ...(required.length ? { required } : {}) } : NO_INPUT,
     ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
   });
   const SELECTOR = { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.url, description: 'An element id from browser_snapshot with elements: true, like "e12", or a CSS selector like "#submit".' };
@@ -255,7 +256,7 @@ function browserTools() {
       [],
       true,
     ),
-    tool('browser_console', 'Console', 'The open page\'s latest console messages and uncaught errors (up to 100).', {}, [], true),
+    tool('browser_console', 'Console', 'The open page\'s console messages and uncaught errors since you last asked, repeats collapsed, the newest ~6,000 characters.', {}, [], true),
     tool('browser_back', 'Go back', 'Goes back one page in the browser\'s history.' + ASKS),
     tool('browser_reload', 'Reload', 'Reloads the open page.' + ASKS),
   ];
@@ -267,7 +268,6 @@ function systemTools() {
   const WINDOW = { type: 'integer', minimum: 1, maximum: 0x7fffffff, description: 'A window id from system_apps.' };
   // No top-level oneOf (Claude's API refuses it): "exactly one of" is in the words and checked by parseCall.
   const schema = (properties: Record<string, object>, required: string[] = []) => ({
-    $schema: DRAFT_07,
     type: 'object',
     properties,
     ...(required.length ? { required } : {}),
@@ -363,12 +363,46 @@ const result = (id: string | number, value: object) => ({ jsonrpc: '2.0', id, re
 const error = (id: string | number, code: number, message: string) => ({ jsonrpc: '2.0', id, error: { code, message } });
 export const toolError = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
 
-/** The browser and system tools: what a client outside FriedLiver (EXTERNAL_CLIENT) is offered. */
-export const EXTERNAL_TOOLS = TOOLS.filter((t) => t.name.startsWith('browser_') || t.name.startsWith('system_'));
+/**
+ * The browser tools: all a client outside FriedLiver (EXTERNAL_CLIENT, Claude Code through friedliver-browser)
+ * is offered. Not the system_* tools: those act on the whole computer, and only FriedLiver's own chats get them.
+ */
+export const EXTERNAL_TOOLS = TOOLS.filter((t) => t.name.startsWith('browser_'));
 
-/** One JSON-RPC message from the agent; `external` offers and takes EXTERNAL_TOOLS only. */
-export function handle(raw: unknown, external = false): Handled {
-  const tools = external ? EXTERNAL_TOOLS : TOOLS;
+/** Tools left out of a session (`omit`, names): system_* this platform lacks or the user turned off, index_* with the index off. */
+export const OMIT_ENV = 'FRIEDLIVER_OMIT_TOOLS';
+
+/**
+ * The tools a session is not offered, so tools/list (sent with every session, and counted against the
+ * agent's context) carries only what can work: the system_* tools this platform doesn't have, all of them
+ * when the user turned them off or there is no system host, the ones turned off one by one, and the
+ * index_* tools when the project index is off.
+ */
+export function omittedTools(o: { platform: 'mac' | 'win' | 'other'; system?: { enabled: boolean; tools: Record<SystemTool, boolean> }; index: boolean }): string[] {
+  const off = new Set<string>(!o.system?.enabled ? SYSTEM_TOOLS : [...unsupportedOn(o.platform), ...SYSTEM_TOOLS.filter((t) => !o.system!.tools[t])]);
+  if (!o.index) for (const t of TOOLS) if (t.name.startsWith('index_')) off.add(t.name);
+  return [...off];
+}
+
+const listed = new Map<string, (typeof TOOLS)[number][]>();
+/** The tools a session is offered: `omit` taken out of TOOLS (or EXTERNAL_TOOLS). The same list object for the same ask. */
+export function toolsFor(omit: readonly string[] = [], external = false): (typeof TOOLS)[number][] {
+  const base = external ? EXTERNAL_TOOLS : TOOLS;
+  if (!omit.length) return base;
+  const key = `${external ? 'x' : ''}:${[...omit].sort().join(',')}`;
+  let tools = listed.get(key);
+  if (!tools) {
+    const out = new Set(omit);
+    tools = base.filter((t) => !out.has(t.name));
+    if (listed.size > 64) listed.clear();
+    listed.set(key, tools);
+  }
+  return tools;
+}
+
+/** One JSON-RPC message from the agent; `external` offers and takes EXTERNAL_TOOLS only, `omit` none of those tools. */
+export function handle(raw: unknown, external = false, omit: readonly string[] = []): Handled {
+  const tools = toolsFor(omit, external);
   if (!isObj(raw)) return null;
   const m = raw as Message;
   // Notifications (initialized, cancelled, progress) need no answer.
@@ -383,7 +417,7 @@ export function handle(raw: unknown, external = false): Handled {
           protocolVersion: typeof asked === 'string' && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
           capabilities: { tools: { listChanged: true } },
           serverInfo: { name: 'friedliver', version: '1.0.0' },
-          instructions: INSTRUCTIONS,
+          instructions: instructionsFor(tools),
         }),
       };
     }

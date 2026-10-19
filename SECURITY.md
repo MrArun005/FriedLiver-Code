@@ -206,7 +206,13 @@ read the clipboard or screenshot a window. What stands in the way:
   Full auto covers the rest only if you turn on
   `friedliver.system.fullAutoAllowed` (off by default; turning it on asks).
   Agent-to-agent "allow" and `friedliver.browser.externalAutoApprove` never
-  cover them. Read-only chats and inline edits don't get them.
+  cover them. Read-only chats and inline edits don't get them, and neither
+  does Claude Code outside FriedLiver (the `friedliver-browser` server offers
+  the `browser_*` tools only; a `system_*` call from it is refused).
+- **Only where they work.** A session's tool list leaves out the `system_*`
+  tools on Linux (and `system_shortcut` on Windows), all of them while
+  `friedliver.system.enabled` is off, and each one you turned off in
+  `friedliver.system.tools`; a call to a tool left out is "not found".
 - **A fixed set, nothing arbitrary.** No script, command line or key press
   from an agent is ever run. Programs start from fixed absolute paths
   (`/usr/bin/open`, `/usr/bin/osascript`, `/usr/bin/shortcuts`, `pbcopy`,
@@ -226,7 +232,7 @@ read the clipboard or screenshot a window. What stands in the way:
 - **Checked twice.** What the action would touch is worked out before asking
   and again just before acting; if it changed while you decided (a file
   swapped, a window gone), nothing happens.
-- **Bounded and logged.** 30 actions a minute per chat (or outside session),
+- **Bounded and logged.** 30 actions a minute per chat,
   100 KB of clipboard text either way, three requests waiting per chat. Every
   attempt, allowed or not, goes to the **FriedLiver: System Actions** output
   channel with time, agent, chat, tool and arguments, clipboard text and
@@ -288,8 +294,10 @@ arguments are checked, and its images and output are bounded.
   checkouts next to the repository.
 - **Chats** also keep each session's settings (model, effort, mode) and the
   choices you made, so the next session applies them. Full auto is never saved.
-- **globalState** keeps, per agent, the options its last session offered and
-  your last choices (never Full auto). **workspaceState** keeps this
+- **globalState** keeps, per agent, the options its last session offered, the
+  model and effort you set for new chats on the Agents & Accounts page, and
+  the last approval level (never Full auto). A model or effort picked in one
+  chat stays with that chat. **workspaceState** keeps this
   workspace's "Always allow" rules.
 - **The output channel** (FriedLiver Agents) logs agent commands, agent stderr
   and errors. It never logs keys.
@@ -390,6 +398,21 @@ checks (`parseCall`, `src/host/bridgeRequests.ts`).
   forward it or set up a pipe. The consulted chat is an ordinary chat with the
   same path checks, `.git` refusal, notification text handling and update
   compaction as any other.
+
+### Claude Code outside FriedLiver (`friedliver-browser`)
+
+- **Opt-in.** `friedliver.browser.externalClients` is off by default and read
+  from your user settings only. Until you turn it on, or run **FriedLiver:
+  Connect Claude Code to the browser** (which turns it on), FriedLiver writes
+  nothing to `~/.claude.json`. On, it writes a secret-free stdio entry named
+  `friedliver-browser` (a backup of the old file first, then a temp file and a
+  rename, through a symlinked `~/.claude.json` to the file it points at).
+  Turning it off revokes this launch's token, deletes the token file and
+  removes that entry; an entry FriedLiver didn't write (another program's
+  server by the same name) is never removed or replaced.
+- **The browser only.** That client reaches the `browser_*` tools and nothing
+  else: not the agent-to-agent tools, not the index, not `system_*`. Every
+  action asks (docs/CONNECTIONS.md).
 
 ### FriedLiver Remote
 
@@ -575,3 +598,4 @@ for a typical single-user desktop.
 | FL-33 | Medium | Remote | The server bound every private interface, including VPN tunnels and VM or container bridges, and kept listening after a network change. | Fixed before merge. Those interfaces are skipped, and the server stops when the addresses change. |
 | FL-34 | Low | Remote | Unauthenticated sockets had no cap or handshake timeout. Tokenless requests (a web page's `<img>`) counted toward lockout. There was no WebSocket backpressure. | Fixed before merge. 64/16 connection caps, a 10 s handshake limit, lockout before TLS, tokenless and cross-site requests refused without counting, and a 256 KB write buffer. |
 | FL-35 | Low | Remote | The phone could approve commands it showed clipped or with hidden characters. An OK given on the Mac after a revoke still applied. Pairing needed no OK on the Mac. Use over HTTP alone went unnoticed. | Fixed before merge. Approve such commands on the Mac. OKs check the device is still paired, and revoking refuses pending ones. Each pairing needs a modal OK, and the Mac is told on each phone's first use. |
+| FL-36 | Low | Claude Code config | `friedliver.browser.externalClients` was on by default, so FriedLiver wrote a `friedliver-browser` MCP server into `~/.claude.json` on every start without being asked, and that client was offered the `system_*` tools too. | Fixed. Off by default and opt-in (the setting, or **Connect Claude Code to the browser**, which turns it on); with it off FriedLiver only removes the entry it added, and never touches another program's entry by that name. The external client gets the `browser_*` tools only. |

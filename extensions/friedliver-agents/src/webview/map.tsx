@@ -5,7 +5,7 @@ import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
 import type { ClaudeSession } from '../shared/messages';
-import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
+import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, turnsText, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
 import { chatName, chatTip } from '../shared/names';
 import { Button, IconButton } from './ui';
@@ -98,6 +98,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                     {lane.working > 0 ? ` · ${lane.working} working` : ''}
                   </tspan>
                   {lane.needsYou > 0 && <tspan class="lane-meta loud">{` · ${lane.needsYou} need${lane.needsYou === 1 ? 's' : ''} you`}</tspan>}
+                  {(lane.problem ?? 0) > 0 && <tspan class="lane-meta">{` · ${lane.problem} problem${lane.problem === 1 ? '' : 's'}`}</tspan>}
                 </text>
               </g>
             ))}
@@ -404,7 +405,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
         {line.text}
       </div>
       <div class="tip-meta">
-        {chat.files.length} file{chat.files.length === 1 ? '' : 's'} · {chat.turns} turn{chat.turns === 1 ? '' : 's'} · active {ago(chat.lastActivity, now)}
+        {chat.files.length} file{chat.files.length === 1 ? '' : 's'} · {turnsText(chat)} · active {ago(chat.lastActivity, now)}
       </div>
       {chat.branch && (
         <div>

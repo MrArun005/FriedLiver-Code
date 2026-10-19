@@ -9,7 +9,7 @@ import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type C
 import { agentName, chatName, chatRef } from '../shared/names';
 import type { AgentCore, PendingReview, SendOptions } from './core';
 import { EditChats, runEdit, type EditOutcome } from './editFlow';
-import { editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
+import { EDIT_AGENT_HINT, editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
 import { branchName, collectChanges, reviewMessage, reviewPrompt } from './gitChanges';
 import { insideRoots } from './paths';
 import type { ReviewPlacement } from './review';
@@ -173,7 +173,7 @@ export class EditorAgent implements vscode.Disposable {
       box.title = `Edit with ${AGENT_FACES[parseEditInput(box.value).agent ?? chosen].name} · ${where}`;
     };
     box.placeholder = 'Describe the change';
-    box.prompt = 'Start with @claude, @gpt, @gemini or @demo to pick another agent.';
+    box.prompt = EDIT_AGENT_HINT;
     box.buttons = [change];
     refresh();
     return new Promise((resolve) => {

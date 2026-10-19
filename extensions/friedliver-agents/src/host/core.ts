@@ -13,12 +13,14 @@ import { visibleText, type TerminalListener } from '@friedliver/main/agents/term
 import { TurnLog } from '@friedliver/main/agents/turnLog';
 import * as git from '@friedliver/main/workspace/git';
 import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
+import { OMIT_ENV, omittedTools } from '../bridge/mcp';
 import type { Attachment } from '../shared/messages';
 import { describeRule, matchesRule } from '../shared/rules';
 import { describeGrant, sameGrant, siteOrigin, type Access, type Grant } from '../shared/permissions';
 import {
   APPROVAL_NAMES,
   EMPTY_SESSION,
+  defaultChoices,
   baseModel,
   choiceName,
   hiddenModels,
@@ -174,6 +176,8 @@ export interface CoreOptions {
   index?: ToolHost['index'];
   /** The system_* tools (system.ts, the user's settings, the audit log). */
   system?: ToolHost['system'];
+  /** Whether the project index is on (friedliver.index.enabled); without it, sessions aren't offered the index_* tools. On when absent and `index` is given. */
+  indexEnabled?(): boolean;
   /** A file (absolute) a chat's agent read or wrote: it has seen this version (projectIndexHost.ts observe). */
   indexSeen?(chatId: string, file: string): void;
   /** A project map for a new session's first message (projectIndex.ts projectPrimer), at most `maxTokens`. */
@@ -294,6 +298,8 @@ export class AgentCore {
   private readonly turnDecision = new Map<string, 'accept' | 'reject'>();
   /** Files each chat's running turn said it touches, for checkpoints shared with another chat. */
   private readonly reported = new Map<string, Set<string>>();
+  /** New tasks whose first message is on its way: their turn, not the warm start, reports a failure to start. */
+  private readonly turnComing = new Set<string>();
   private readonly links: Connections;
   private readonly requests: BridgeRequests;
   private bridge?: BridgeServer;
@@ -348,8 +354,9 @@ export class AgentCore {
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
       rulesFor: (chatId) => this.rulesFor(chatId),
       // The map shares the rules' cap: rules first, the map gets what is left (~4 bytes a token), at most PRIMER_TOKENS.
+      // The map tells the agent to use the index_* tools: only for a session that is offered them.
       primerFor: async (chatId, _agent, text) =>
-        this.readOnlyChat(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
+        !this.toolsOffered(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
       freshSessionFor: (chatId) => this.readOnlyChat(chatId),
       sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
@@ -459,6 +466,7 @@ export class AgentCore {
     }
     const chat = this.hub.createChat(agent, cwd, options.resume?.sessionId);
     if (wt) this.worktrees.set(chat.id, wt);
+    if (options.messageFollows) this.turnComing.add(chat.id);
     // Counted still (saved state keeps it), never shown: a chat is named by its topic (names.ts).
     this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1;
     const name = AGENT_FACES[agent].name;
@@ -506,8 +514,8 @@ export class AgentCore {
       if (this.hub.getChat(chatId)) await this.hub.startSession(chatId);
     } catch (err) {
       const chat = this.chat(chatId);
-      // A turn that started meanwhile reports the same failure itself.
-      if (chat && !chat.busy) this.items(chatId, [this.failureNotice(chat.agent, err, chatId)]);
+      // A turn that started meanwhile, or is about to (a new task's first message), reports the same failure itself.
+      if (chat && !chat.busy && !this.turnComing.has(chatId)) this.items(chatId, [this.failureNotice(chat.agent, err, chatId)]);
     } finally {
       const session = this.chat(chatId)?.session;
       if (session?.starting) this.dispatch({ t: 'session', chatId, session: { ...session, starting: false } });
@@ -741,12 +749,14 @@ export class AgentCore {
     return true;
   }
 
-  /** Remembers a choice for this chat and for the agent's next chats. Modes aren't remembered; levels are. */
+  /**
+   * Remembers a choice (model, effort…) for this chat, and its next sessions. Not for the agent's other chats:
+   * only the Accounts page sets those (setDefaultChoice), so trying max effort in one chat doesn't make every
+   * new chat, inline edit and consultation use it.
+   */
   private remember(chat: ChatView, option: SessionOption, value: string | boolean): void {
     const key = optionKey(option);
     this.chosen.set(chat.id, { ...this.chosen.get(chat.id), [key]: value });
-    const d = this.options.defaults?.get(chat.agent);
-    this.saveDefaults(chat.agent, { chosen: { ...d?.chosen, [key]: value } });
   }
 
   private saveDefaults(agent: AgentKey, patch: Partial<AgentDefaults>): void {
@@ -845,7 +855,7 @@ export class AgentCore {
     };
     this.dispatch({ t: 'session', chatId, session });
     this.options.accountSeen?.(chat.agent, { status: 'signed-in', ...this.versionOf(chat.agent, start.agentInfo) });
-    const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...this.options.defaults?.get(chat.agent)?.chosen, ...this.chosen.get(chatId) };
+    const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...defaultChoices(this.options.defaults?.get(chat.agent)), ...this.chosen.get(chatId) };
     // The model first: it decides which effort levels there are.
     const keys = Object.keys(wanted).sort((a, b) => (a === 'model' ? -1 : b === 'model' ? 1 : 0));
     for (const key of keys) {
@@ -903,9 +913,10 @@ export class AgentCore {
     if (bad) throw new Error(`${bad.name || 'An attachment'} is not an image FriedLiver can send.`);
     // Shown like any attachment; an agent that can't take images gets the text and says so in its chat.
     images.forEach((img, n) => this.addImage(this.id('you'), srcs[n]!, img.name || 'Attached image', 'you', { chatId }));
-    // A chat whose first message is a question for another agent is about that question.
+    // A chat whose first message is a question for another agent is about that question. Later ones don't
+    // rename it: a consultation is a side question, not the chat's request (retitle follows only real requests).
     const chat = this.requireChat(chatId);
-    if (by === 'user') this.retitle(chat, text);
+    if (by === 'user' && !chat.titlePinned && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link')) this.retitle(chat, text);
     return this.links.consult(chatId, agent, text, by, { images, fresh });
   }
 
@@ -946,7 +957,7 @@ export class AgentCore {
     const chats: ChatView[] = [];
     for (const agent of agents) {
       // The agent's name keeps branch names apart when chats start in the same millisecond.
-      chats.push(await this.createChat(agent, { worktree: separate, title: prompt, worktreeName: `${agent} ${prompt}`, group, choices: extras.choices?.[agent], approval: extras.approval }));
+      chats.push(await this.createChat(agent, { worktree: separate, title: prompt, worktreeName: `${agent} ${prompt}`, group, choices: extras.choices?.[agent], approval: extras.approval, messageFollows: true }));
     }
     if (shared) for (const c of chats) this.items(c.id, [{ kind: 'notice', tone: 'info', text: shared }]);
     const done = Promise.all(chats.map((c) => this.sendMessage(c.id, prompt).catch((err: unknown) => this.items(c.id, [this.failureNotice(c.agent, err, c.id)])))).then(() => {});
@@ -965,6 +976,7 @@ export class AgentCore {
   async removeChat(chatId: string): Promise<void> {
     this.rulesBytes.delete(chatId);
     this.compactOffered.delete(chatId);
+    this.turnComing.delete(chatId);
     const chat = this.chat(chatId);
     if (!chat) return;
     if (chat.busy) await this.cancel(chatId);
@@ -1380,7 +1392,7 @@ export class AgentCore {
     const d = this.options.defaults?.get(agent);
     const option = d?.options.find((o) => optionKey(o) === key);
     if (!d || !option || !offers(option, value)) return false;
-    this.saveDefaults(agent, { chosen: { ...d.chosen, [key]: value } });
+    this.saveDefaults(agent, { chosen: { ...defaultChoices(d), [key]: value }, explicit: true });
     return true;
   }
 
@@ -1488,6 +1500,7 @@ export class AgentCore {
     const token = this.bridge.token(chatId);
     const url = http ? await this.bridge.httpUrl().catch((err: unknown) => this.options.log?.(`FriedLiver tools over HTTP are unavailable: ${messageOf(err)}`)) : undefined;
     if (url) return [{ type: 'http', name: 'friedliver', url, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] }];
+    const omit = this.omittedTools();
     return [
       {
         name: 'friedliver',
@@ -1498,15 +1511,28 @@ export class AgentCore {
           { name: 'ELECTRON_RUN_AS_NODE', value: '1' },
           { name: BRIDGE_ENV, value: this.bridge.address },
           { name: TOKEN_ENV, value: token },
+          ...(omit.length ? [{ name: OMIT_ENV, value: omit.join(',') }] : []),
         ],
       },
     ];
   }
 
+  /** The tools a session isn't offered: system_* this computer lacks or the user turned off, index_* with the index off. */
+  private omittedTools(): string[] {
+    const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'other';
+    const index = !!this.options.index && (this.options.indexEnabled?.() ?? true);
+    return omittedTools({ platform, system: this.options.system?.settings(), index });
+  }
+
+  /** Whether a new session gets the FriedLiver tools at all (the project map's index_* advice needs them). */
+  private toolsOffered(chatId: string): boolean {
+    return !this.readOnlyChat(chatId) && !!this.options.bridgeScript && this.policy() !== 'off' && !this.omittedTools().includes('index_search');
+  }
+
   /** Starts the bridge socket before the first session that could use it. A failure only costs the tools. */
   private ensureBridge(): Promise<void> {
     if (!this.options.bridgeScript || this.policy() === 'off') return Promise.resolve();
-    this.bridgeStarting ??= BridgeServer.start((chatId, call, signal) => this.bridgeCall(chatId, call, signal), this.options.log).then(
+    this.bridgeStarting ??= BridgeServer.start((chatId, call, signal) => this.bridgeCall(chatId, call, signal), this.options.log, () => this.omittedTools()).then(
       (server) => {
         this.bridge = server;
       },
@@ -1543,6 +1569,7 @@ export class AgentCore {
   private async runPrompt(chatId: string, blocks: acp.ContentBlock[]): Promise<TurnResult> {
     const start = this.requireChat(chatId);
     const agent = start.agent;
+    this.turnComing.delete(chatId);
     // A consultation or a pipe gives a chat its turn; the user started the rest.
     const byUser = start.origin?.kind !== 'consult';
     this.dispatch({ t: 'busy', chatId, busy: true, at: Date.now() });
