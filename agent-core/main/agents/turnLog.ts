@@ -1,6 +1,8 @@
 /**
- * Checkpoints. Every agent write already passes through FriedLiver, so the
- * content a file had before each turn is known; undoing a turn writes it back.
+ * Checkpoints for writes FriedLiver sees: its own (every write an agent makes
+ * through ACP passes through it) and files an agent asked to edit, recorded
+ * before the edit. Undoing a turn writes the old content back. Changes an agent
+ * makes on its own are found by the host's git checkpoints instead.
  */
 export interface TurnFiles {
   turnId: string;
@@ -39,6 +41,16 @@ export class TurnLog {
     if (turn && !turn.before.has(file)) turn.before.set(file, before);
   }
 
+  /** What the latest turn saw in `file` before it changed; undefined when that turn didn't record it. */
+  before(chatId: string, file: string): string | null | undefined {
+    return this.turns.get(chatId)?.at(-1)?.before.get(file);
+  }
+
+  /** Forgets a file the latest turn recorded but didn't change, e.g. an edit the user turned down. */
+  drop(chatId: string, file: string): void {
+    this.turns.get(chatId)?.at(-1)?.before.delete(file);
+  }
+
   /**
    * What a file held before the oldest kept turn that changed it, which is
    * where the chat started from unless it ran more than KEEP_TURNS turns.
@@ -70,15 +82,21 @@ export class TurnLog {
    * Restores the files a turn changed. Only the newest turn can be undone, so
    * a later turn's edits are never silently overwritten.
    */
-  async undo(chatId: string, turnId: string, io: UndoIo): Promise<string[]> {
+  async undo(chatId: string, turnId: string, io: UndoIo, skip: (file: string) => boolean = () => false): Promise<string[]> {
     const list = this.turns.get(chatId) ?? [];
     const turn = list.at(-1);
     if (!turn || turn.turnId !== turnId) throw new Error('Only the most recent turn can be undone.');
     for (const [file, content] of turn.before) {
+      if (skip(file)) continue;
       if (content === null) await io.remove(file);
       else await io.write(file, content);
     }
     list.pop();
-    return [...turn.before.keys()];
+    return [...turn.before.keys()].filter((f) => !skip(f));
+  }
+
+  /** The latest turn's id, even when it recorded nothing. */
+  current(chatId: string): string | undefined {
+    return this.turns.get(chatId)?.at(-1)?.turnId;
   }
 }

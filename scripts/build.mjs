@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { VSCODE_DIR, checkSha256, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File } from './lib.mjs';
+import { CACHE_DIR, VSCODE_DIR, checkSha256, codesignArgs, fail, isWindows, keepChromiumLocale, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
 
 const args = new Set(process.argv.slice(2));
 const wantPackage = args.has('--package');
@@ -162,7 +162,8 @@ if (args.has('--no-compile')) {
  * Removes what a FriedLiver user never runs, before installers and signing: source maps
  * (about 300 MB; Microsoft's release pipeline uploads them elsewhere) and the Copilot SDK
  * runtime (about 150 MB; packaged because the agent-host code imports it, but built-in AI
- * features are off and Copilot is gone, see patches 0010 and 0020).
+ * features are off and Copilot is gone, see patches 0010 and 0020), and Chromium's locale
+ * packs except English (about 45 MB on macOS; keepChromiumLocale, FRIEDLIVER_KEEP_LOCALES).
  */
 function trimPackagedApp(appDir) {
 	const app = process.platform === 'darwin'
@@ -187,7 +188,87 @@ function trimPackagedApp(appDir) {
 			remove(path.join(unpackedGithub, name));
 		}
 	}
-	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps and the Copilot SDK runtime from the app`);
+	const locales = process.platform === 'darwin'
+		? path.join(app, '..', '..', 'Frameworks', 'Electron Framework.framework', 'Versions', 'A', 'Resources')
+		: path.join(appDir, 'locales');
+	if (fs.existsSync(locales)) {
+		for (const name of fs.readdirSync(locales).filter(n => !keepChromiumLocale(n))) {
+			remove(path.join(locales, name));
+		}
+	} else {
+		log(`no Chromium locale folder at ${locales}; locale packs not trimmed`);
+	}
+	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps, the Copilot SDK runtime and Chromium locale packs from the app`);
+}
+
+/**
+ * Upstream's .deb step looks the VS Code sysroot (the toolchain it reads library
+ * dependencies with) up through api.github.com too, which answers anonymous calls from
+ * shared CI runners and some proxies with 403 (see seedRipgrepCache). It skips the lookup
+ * when the sysroot folder already has a .stamp naming the asset, so we fetch the asset from
+ * the plain release-download URL, check it against upstream's
+ * build/checksums/vscode-sysroot.txt (the hash upstream itself checks) before unpacking it,
+ * and point VSCODE_SYSROOT_DIR at a folder of ours instead of the shared temp folder.
+ * Returns the env for the .deb steps.
+ */
+function seedVSCodeSysroot(arch) {
+	const debArch = { x64: 'amd64', arm64: 'arm64', armhf: 'armhf' }[arch];
+	const sysroot = vscodeSysrootAsset(
+		fs.readFileSync(path.join(VSCODE_DIR, 'build', 'linux', 'debian', 'install-sysroot.ts'), 'utf8'),
+		fs.readFileSync(path.join(VSCODE_DIR, 'build', 'checksums', 'vscode-sysroot.txt'), 'utf8'),
+		debArch, process.env.VSCODE_SYSROOT_PREFIX);
+	if (!sysroot) {
+		log(`sysroot: no ${debArch ?? arch} asset found from upstream's install-sysroot.ts and checksums; leaving the download to upstream`);
+		return env;
+	}
+	const dir = process.env.VSCODE_SYSROOT_DIR || path.join(CACHE_DIR, `vscode-${debArch}-sysroot`);
+	const stamp = path.join(dir, '.stamp');
+	if (fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === sysroot.asset) {
+		log(`sysroot ${sysroot.asset} present: ${dir}`);
+		return { ...env, VSCODE_SYSROOT_DIR: dir };
+	}
+	fs.rmSync(dir, { recursive: true, force: true });
+	fs.mkdirSync(dir, { recursive: true });
+	const tgz = path.join(dir, sysroot.asset);
+	run('curl', ['-fsSL', '--retry', '3', '-o', tgz, sysroot.url], { cwd: dir });
+	checkSha256(tgz, sysroot.sha256, `sysroot ${sysroot.asset}`);
+	run('tar', ['-xzf', tgz, '-C', dir], { cwd: dir });
+	fs.rmSync(tgz, { force: true });
+	fs.writeFileSync(stamp, sysroot.asset);
+	log(`sysroot seeded: ${dir}`);
+	return { ...env, VSCODE_SYSROOT_DIR: dir };
+}
+
+/**
+ * Before the app is signed: the usage descriptions macOS shows when the composer's mic first asks
+ * for the microphone and speech recognition (Electron's Info.plist has no speech one), and the
+ * dictation helper (extensions/friedliver-agents/native/build.sh, built by CI) executable and
+ * signed first, so the app's signature seals it. Without the helper the mic shows the Fn Fn hint.
+ */
+function finishMacApp(appPath, signing) {
+	const plist = path.join(appPath, 'Contents', 'Info.plist');
+	for (const [key, text] of [
+		['NSMicrophoneUsageDescription', 'FriedLiver listens while you dictate a message with the mic button.'],
+		['NSSpeechRecognitionUsageDescription', 'FriedLiver turns what you say into text when you dictate a message.'],
+	]) {
+		run('plutil', ['-replace', key, '-string', text, plist]);
+	}
+	const helper = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-dictate');
+	if (fs.existsSync(helper)) {
+		fs.chmodSync(helper, 0o755);
+		run('codesign', codesignArgs(helper, { ...signing, identifier: 'com.friedliver.dictate' }));
+		log('dictation helper signed');
+	} else {
+		log('no dictation helper in the app (native/build.sh not run): the mic falls back to the Fn Fn hint');
+	}
+	const journal = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-fsevents');
+	if (fs.existsSync(journal)) {
+		fs.chmodSync(journal, 0o755);
+		run('codesign', codesignArgs(journal, { ...signing, identifier: 'com.friedliver.fsevents' }));
+		log('change journal helper signed');
+	} else {
+		log('no change journal helper in the app (native/build.sh not run): the project index checks every file on open');
+	}
 }
 
 /**
@@ -209,13 +290,18 @@ function buildInstaller(arch, appDir) {
 		if (!app) {
 			fail(`no .app in ${appDir}`);
 		}
-		// Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
-		run('codesign', ['--force', '--deep', '--sign', '-', path.join(appDir, app)], { cwd: appDir });
+		// MACOS_SIGN_IDENTITY / MACOS_SIGN_KEYCHAIN come from build.yml's signing keychain; without them
+		// (forks, local builds) ad-hoc, the minimum Apple silicon runs. Not notarized either way.
+		const signing = { identity: process.env.MACOS_SIGN_IDENTITY ?? '', keychain: process.env.MACOS_SIGN_KEYCHAIN ?? '' };
+		log(signing.identity ? 'signing with the certificate from the signing keychain' : 'no signing identity: ad-hoc signature');
+		finishMacApp(path.join(appDir, app), signing);
+		run('codesign', codesignArgs(path.join(appDir, app), { ...signing, deep: true }), { cwd: appDir });
 		file = path.join(dest, `FriedLiver-darwin-${arch}-${version}.dmg`);
 		run('hdiutil', ['create', '-volname', 'FriedLiver', '-srcfolder', path.join(appDir, app), '-ov', '-format', 'UDZO', file], { cwd: appDir });
 	} else if (process.platform === 'linux') {
-		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-prepare-deb`], { env });
-		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-build-deb`], { env });
+		const debEnv = seedVSCodeSysroot(arch);
+		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-prepare-deb`], { env: debEnv });
+		run('npm', ['run', 'gulp', '--', `vscode-linux-${arch}-build-deb`], { env: debEnv });
 		const debDir = fs.readdirSync(path.join(VSCODE_DIR, '.build', 'linux', 'deb'))
 			.map(d => path.join(VSCODE_DIR, '.build', 'linux', 'deb', d, 'deb'))
 			.find(d => fs.existsSync(d));

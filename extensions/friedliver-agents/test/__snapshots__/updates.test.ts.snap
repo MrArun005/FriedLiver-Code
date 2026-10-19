@@ -1,0 +1,43 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`install script > waits for the app, swaps the bundle from the DMG, clears quarantine and reopens the real path 1`] = `
+"#!/bin/sh
+# FriedLiver update: written by the Agents extension, runs once, deletes itself.
+set -u
+PID=4242
+APP='/Applications/FriedLiver.app'
+DMG='/tmp/fl-x/it'\\''s.dmg'
+DIR='/tmp/fl-x'
+LOG='/tmp/friedliver-update.log'
+VERSION='1.142.0-3'
+MNT="$DIR/mnt"
+say() { echo "$(date '+%Y-%m-%dT%H:%M:%S') $*" >> "$LOG"; }
+fail() { say "$1"; echo "RESULT failed $1" >> "$LOG"; open "$DMG"; exit 1; }
+: > "$LOG"
+say "install script started: $VERSION into $APP (waiting for pid $PID)"
+i=0
+while kill -0 "$PID" 2>/dev/null; do
+  i=$((i + 1)); [ "$i" -gt 300 ] && fail "the app did not quit within 300 s"
+  sleep 1
+done
+mkdir -p "$MNT"
+hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG" >> "$LOG" 2>&1 || fail "could not mount the DMG"
+SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -n 1)
+say "copying \${SRC:-<no .app in the DMG>}"
+OK=0
+if [ -n "$SRC" ] && rm -rf "$APP.new" && ditto "$SRC" "$APP.new" >> "$LOG" 2>&1; then
+  rm -rf "$APP.old"
+  if mv "$APP" "$APP.old"; then
+    if mv "$APP.new" "$APP"; then OK=1; rm -rf "$APP.old"; else mv "$APP.old" "$APP"; fi
+  fi
+fi
+rm -rf "$APP.new"
+hdiutil detach "$MNT" -quiet || hdiutil detach "$MNT" -force -quiet
+[ "$OK" = 1 ] || fail "could not replace $APP"
+xattr -dr com.apple.quarantine "$APP" >> "$LOG" 2>&1 || say "could not clear quarantine (continuing)"
+say "installed; relaunching $APP"
+echo "RESULT ok $VERSION" >> "$LOG"
+open -a "$APP"
+rm -rf "$DIR"
+"
+`;

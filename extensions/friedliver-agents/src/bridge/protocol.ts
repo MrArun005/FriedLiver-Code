@@ -1,7 +1,12 @@
 // Lines between the FriedLiver MCP server an agent session runs (dist/bridge.js)
 // and the extension host, over a local socket: one JSON object per line.
 // The host treats every line as untrusted and checks it here first.
+import { READ_LIMITS } from '../host/indexReads';
+import { SHOT } from '../host/browserRules';
+import { SNAPSHOT_LIMITS } from '../host/pageText';
+import type { IndexCall } from '../host/projectIndex';
 import { isAgentKey, type AgentKey } from '../shared/model';
+import { SYSTEM_LIMITS } from '../shared/system';
 
 /** Where the host listens: a Unix socket path or a Windows pipe name. */
 export const BRIDGE_ENV = 'FRIEDLIVER_BRIDGE';
@@ -17,6 +22,10 @@ export const BRIDGE_LIMITS = {
   text: 100_000,
   /** Messages read_chat returns at most. */
   last: 50,
+  /** Characters in a URL or CSS selector for the browser tools. */
+  url: 2048,
+  /** Characters in an index_* query, name or path. */
+  query: 512,
 };
 
 /** What an agent asks for through the FriedLiver tools. */
@@ -25,7 +34,48 @@ export type BridgeCall =
   | { tool: 'list_chats' }
   | { tool: 'ask_agent'; agent: AgentKey; prompt: string; chatId?: string }
   | { tool: 'send_to_chat'; chatId: string; message: string }
-  | { tool: 'read_chat'; chatId: string; last?: number };
+  | { tool: 'read_chat'; chatId: string; last?: number }
+  | { tool: 'remember'; fact: string }
+  | { tool: 'browser_open'; url: string }
+  | { tool: 'browser_click'; selector?: string; text?: string }
+  | { tool: 'browser_type'; selector: string; text: string }
+  | { tool: 'browser_snapshot'; elements?: boolean; budget?: number; full?: boolean }
+  | { tool: 'browser_screenshot'; selector?: string; maxWidth?: number }
+  | { tool: 'browser_console' | 'browser_back' | 'browser_reload' }
+  | IndexCall
+  | SystemCall;
+
+/** The OS actions (shared/system.ts): exactly one target for open and focus. */
+export type SystemCall =
+  | { tool: 'system_open'; app: string }
+  | { tool: 'system_open'; path: string }
+  | { tool: 'system_open'; url: string }
+  | { tool: 'system_apps' | 'system_clipboard_read' }
+  | { tool: 'system_focus'; app: string }
+  | { tool: 'system_focus'; window: number }
+  | { tool: 'system_shortcut'; name: string }
+  | { tool: 'system_clipboard_write'; text: string }
+  | { tool: 'system_notify'; title: string; body: string }
+  | { tool: 'system_volume'; action: 'get' | 'mute' | 'unmute' }
+  | { tool: 'system_volume'; action: 'set'; level: number }
+  | { tool: 'system_screenshot_window'; window: number };
+
+export type BrowserCall = Extract<BridgeCall, { tool: `browser_${string}` }>;
+
+/**
+ * The caller id of a client outside FriedLiver (the Claude Code extension or CLI) holding the
+ * external token. Never a chat id (those match `chat-<n>`); it may use the browser_* tools only.
+ */
+export const EXTERNAL_CLIENT = ':external';
+
+/** An external caller's id: EXTERNAL_CLIENT and its MCP session, `:external:<session>`. */
+export const isExternal = (id: string): boolean => id === EXTERNAL_CLIENT || id.startsWith(`${EXTERNAL_CLIENT}:`);
+
+export const isIndexCall = (call: BridgeCall): call is IndexCall => call.tool.startsWith('index_');
+
+export const isBrowserCall = (call: BridgeCall): call is BrowserCall => call.tool.startsWith('browser_');
+
+export const isSystemCall = (call: BridgeCall): call is SystemCall => call.tool.startsWith('system_');
 
 export interface BridgeRequest {
   id: number;
@@ -42,6 +92,23 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.text;
 const chatId = (v: unknown): v is string => typeof v === 'string' && CHAT_ID.test(v);
+const short = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.url;
+const query = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= BRIDGE_LIMITS.query;
+/** No control characters (newlines, NUL, escapes) and no direction overrides: names that show as what they are. */
+// eslint-disable-next-line no-control-regex
+const PLAIN = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$/;
+const name = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= SYSTEM_LIMITS.name && PLAIN.test(v);
+const windowId = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
+/** Exactly one of these keys is present (and nothing else is checked here). */
+const oneOf = (a: Obj, keys: string[]): string | undefined => {
+  const present = keys.filter((k) => a[k] !== undefined);
+  return present.length === 1 ? present[0] : undefined;
+};
+
+/** A workspace-relative path: no absolute paths, drive letters or `..`. */
+/** Absent, or an integer in [min, max]. */
+const int = (v: unknown, min: number, max: number) => v === undefined || (Number.isInteger(v) && (v as number) >= min && (v as number) <= max);
+const relPath = (v: unknown): v is string => query(v) && !/^([/\\]|[A-Za-z]:)/.test(v) && !v.split(/[/\\]/).includes('..');
 
 /** The tool call in a request, or null when anything about it is off. */
 export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
@@ -62,6 +129,81 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
       if (last !== undefined && !(Number.isInteger(last) && (last as number) >= 1 && (last as number) <= BRIDGE_LIMITS.last)) return null;
       return { tool, chatId: a.chat_id, ...(last !== undefined ? { last: last as number } : {}) };
     }
+    case 'remember':
+      return text(a.fact) ? { tool, fact: a.fact } : null;
+    case 'browser_open':
+      return short(a.url) ? { tool, url: a.url } : null;
+    case 'browser_click':
+      // Exactly one of the two.
+      if (short(a.selector) === short(a.text) || (a.selector !== undefined && !short(a.selector)) || (a.text !== undefined && !short(a.text))) return null;
+      return short(a.selector) ? { tool, selector: a.selector } : { tool, text: a.text as string };
+    case 'browser_type':
+      return short(a.selector) && typeof a.text === 'string' && a.text.length <= BRIDGE_LIMITS.text ? { tool, selector: a.selector, text: a.text } : null;
+    case 'browser_snapshot': {
+      const { elements, budget, full } = a;
+      if ((elements !== undefined && typeof elements !== 'boolean') || (full !== undefined && typeof full !== 'boolean') || !int(budget, SNAPSHOT_LIMITS.minBudget, SNAPSHOT_LIMITS.maxBudget)) return null;
+      return { tool, ...(elements !== undefined ? { elements } : {}), ...(budget !== undefined ? { budget: budget as number } : {}), ...(full !== undefined ? { full } : {}) };
+    }
+    case 'browser_screenshot': {
+      const { selector } = a;
+      const maxWidth = a.max_width;
+      if ((selector !== undefined && !short(selector)) || !int(maxWidth, SHOT.minWidth, SHOT.maxMaxWidth)) return null;
+      return { tool, ...(selector !== undefined ? { selector: selector as string } : {}), ...(maxWidth !== undefined ? { maxWidth: maxWidth as number } : {}) };
+    }
+    case 'browser_console':
+    case 'browser_back':
+    case 'browser_reload':
+      return { tool };
+    case 'index_search': {
+      const { limit, budget } = a;
+      if (!query(a.query) || !int(limit, 1, 50) || !int(budget, READ_LIMITS.minBudget, READ_LIMITS.maxBudget)) return null;
+      return { tool, query: a.query, ...(limit !== undefined ? { limit: limit as number } : {}), ...(budget !== undefined ? { budget: budget as number } : {}) };
+    }
+    case 'index_read': {
+      const { symbol, lines } = a;
+      if (!relPath(a.path) || (symbol !== undefined && !query(symbol))) return null;
+      if (lines !== undefined && !(Array.isArray(lines) && lines.length === 2 && lines.every((n) => Number.isInteger(n) && n >= 1 && n <= 10_000_000) && lines[0] <= lines[1])) return null;
+      if (symbol !== undefined && lines !== undefined) return null;
+      return { tool, path: a.path, ...(symbol !== undefined ? { symbol: symbol as string } : {}), ...(lines !== undefined ? { lines: [lines[0], lines[1]] as [number, number] } : {}) };
+    }
+    case 'index_symbols':
+      return query(a.name) ? { tool, name: a.name } : null;
+    case 'index_outline':
+    case 'index_related':
+    case 'index_diff':
+      return relPath(a.path) ? { tool, path: a.path } : null;
+    case 'system_apps':
+    case 'system_clipboard_read':
+      return { tool };
+    case 'system_open': {
+      const key = oneOf(a, ['app', 'path', 'url']);
+      if (key === 'app') return name(a.app) ? { tool, app: a.app } : null;
+      if (key === 'path') return name(a.path) ? { tool, path: a.path } : null;
+      if (key === 'url') return short(a.url) && PLAIN.test(a.url) ? { tool, url: a.url } : null;
+      return null;
+    }
+    case 'system_focus': {
+      const key = oneOf(a, ['app', 'window']);
+      if (key === 'app') return name(a.app) ? { tool, app: a.app } : null;
+      if (key === 'window') return windowId(a.window) ? { tool, window: a.window } : null;
+      return null;
+    }
+    case 'system_shortcut':
+      return name(a.name) ? { tool, name: a.name } : null;
+    case 'system_clipboard_write':
+      return typeof a.text === 'string' && a.text !== '' && Buffer.byteLength(a.text, 'utf8') <= SYSTEM_LIMITS.clipboard ? { tool, text: a.text } : null;
+    case 'system_notify':
+      return name(a.title) && a.title.length <= SYSTEM_LIMITS.title && typeof a.body === 'string' && a.body.length <= SYSTEM_LIMITS.body && !a.body.includes('\0')
+        ? { tool, title: a.title, body: a.body }
+        : null;
+    case 'system_volume':
+      if (a.action === 'set') return Number.isInteger(a.level) && (a.level as number) >= 0 && (a.level as number) <= 100 ? { tool, action: 'set', level: a.level as number } : null;
+      return (a.action === 'get' || a.action === 'mute' || a.action === 'unmute') && a.level === undefined ? { tool, action: a.action } : null;
+    case 'system_screenshot_window':
+      return windowId(a.window) ? { tool, window: a.window } : null;
+    case 'index_changes':
+      if (a.since === undefined) return { tool };
+      return typeof a.since === 'string' && /^([0-9a-fA-F]{8,64}|last_turn)$/.test(a.since) ? { tool, since: a.since } : null;
     default:
       return null;
   }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.friedliver.dictate</string>
+	<key>CFBundleName</key>
+	<string>FriedLiver Dictation</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FriedLiver listens while you dictate a message with the mic button.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>FriedLiver turns what you say into text when you dictate a message.</string>
+</dict>
+</plist>

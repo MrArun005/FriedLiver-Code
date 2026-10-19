@@ -1,0 +1,3719 @@
+/*
+ * FriedLiver components: every control, chip, field, menu, card and sheet in every view.
+ * Spec: ~/code/FriedLiver-Code-design/COMPONENTS.md. Class names are stable: .fl-<component>,
+ * .fl-<component>--<variant|size>, .fl-<component>__<part>; state lives in ARIA attributes.
+ * Only tokens.css holds raw values; a component may set its own geometry as custom properties
+ * at its root (named --<component>-*). Preact wrappers: src/webview/ui/.
+ * Nothing outside this file may style buttons, pills or fields (test/designSystem.test.ts).
+ * Loaded last (tokens.css, webview.css, components.css): a component wins a tie with a view rule.
+ */
+
+/* ---- Base: resets, not looks ---- */
+
+* {
+  box-sizing: border-box;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border: 2px solid transparent;
+  border-radius: var(--r-pill);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--vscode-scrollbarSlider-hoverBackground);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+:where(:focus-visible) {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+/* Zero specificity: any component class wins. */
+:where(button) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+:where(button:disabled) {
+  opacity: 0.4;
+  cursor: default;
+}
+:where(textarea, input[type='text'], input[type='search'], input[type='number']) {
+  font: inherit;
+  color: var(--vscode-input-foreground, var(--fg));
+  background: var(--input-bg);
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-4);
+  padding: var(--sp-1) var(--sp-2);
+  width: 100%;
+  resize: vertical;
+}
+:where(textarea, input)::placeholder {
+  color: var(--placeholder);
+}
+:where(input[type='search'])::-webkit-search-cancel-button {
+  filter: grayscale(1);
+}
+:where(input[type='checkbox']) {
+  accent-color: var(--button-bg);
+  width: var(--i-sm);
+  height: var(--i-sm);
+  margin: 0;
+}
+/* A key: the text's own size on a 16px line, so 18 tall with its border; r3 on the code tone. */
+:where(kbd),
+.fl-kbd {
+  display: inline-block;
+  min-width: var(--h-xs);
+  padding: 0 var(--sp-1);
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-3);
+  background: var(--code-bg);
+  color: var(--fg-2);
+  font: inherit;
+  line-height: var(--h-2xs);
+  text-align: center;
+  white-space: nowrap;
+}
+/* A key inside a button: no box, after the label ("Allow ⏎"), in the label's colour (dimmed, it failed AA). */
+.fl-kbd--inline {
+  min-width: 0;
+  line-height: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+}
+:where(code, pre, .mono) {
+  font-family: var(--mono);
+}
+:where(code) {
+  font-size: var(--t-90);
+  color: var(--inline-code-fg);
+  background: var(--inline-code-bg);
+  border-radius: var(--r-3);
+  padding: var(--sp-half) var(--sp-1);
+}
+:where(pre) {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--t-85);
+}
+:where(.icon) {
+  flex: none;
+}
+
+/* ---- Button (§2.1): primary · secondary · quiet · danger · brand · link; sm 22 · md 26 · lg 32 · touch 44; r5 ---- */
+
+.fl-btn {
+  --btn-h: var(--h-md);
+  --btn-px: var(--sp-3);
+  --btn-gap: var(--sp-1);
+  --btn-i: var(--i-md);
+  --btn-fs: var(--t-100);
+  --btn-bg: var(--pill-bg);
+  --btn-bg-hover: var(--pill-hover);
+  --btn-bg-active: var(--pill-active);
+  --btn-fg: var(--fg);
+  --btn-fg-hover: var(--btn-fg);
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--btn-gap);
+  height: var(--btn-h);
+  min-width: calc(var(--btn-h) * 2);
+  padding: 0 var(--btn-px);
+  border: var(--line) solid var(--ctl-border);
+  border-radius: var(--r-ctl);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font: inherit;
+  font-size: var(--btn-fs);
+  font-weight: var(--w-regular);
+  line-height: 1;
+  white-space: nowrap;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+}
+.fl-btn > .icon {
+  width: var(--btn-i);
+  height: var(--btn-i);
+}
+.fl-btn:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--btn-bg-hover);
+  color: var(--btn-fg-hover);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+.fl-btn:active:not(:disabled, [aria-disabled='true']) {
+  background: var(--btn-bg-active);
+}
+.fl-btn:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+}
+.fl-btn:disabled,
+.fl-btn[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}
+/* The trigger of an open menu keeps its pressed fill (a disclosure's aria-expanded doesn't). */
+.fl-btn[aria-haspopup][aria-expanded='true'] {
+  background: var(--btn-bg-active);
+}
+/* A quiet or secondary toggle button that is on: the same "on" as a pressed pill (focus blue at 24%). */
+:is(.fl-btn--secondary, .fl-btn--quiet)[aria-pressed='true'] {
+  --btn-bg: color-mix(in srgb, var(--focus) 24%, transparent);
+  --btn-bg-hover: color-mix(in srgb, var(--focus) 32%, transparent);
+  --btn-fg: var(--sel-fg);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+.fl-btn--sm {
+  --btn-h: var(--h-sm);
+  --btn-px: var(--sp-2);
+  --btn-i: var(--i-sm);
+  --btn-fs: var(--t-90);
+}
+.fl-btn--lg {
+  --btn-h: var(--h-lg);
+  --btn-px: var(--sp-4);
+  --btn-gap: var(--sp-2);
+}
+.fl-btn--touch {
+  --btn-h: var(--h-touch);
+  --btn-px: var(--sp-4);
+  --btn-gap: var(--sp-2);
+  --btn-i: var(--i-lg);
+  --btn-fs: var(--t-touch);
+}
+.fl-btn--block {
+  display: flex;
+  width: 100%;
+}
+.fl-btn--primary {
+  --btn-bg: var(--primary-bg);
+  --btn-bg-hover: color-mix(in srgb, var(--primary-bg) 88%, var(--primary-fg));
+  --btn-bg-active: color-mix(in srgb, var(--primary-bg) 78%, var(--primary-fg));
+  --btn-fg: var(--primary-fg);
+  font-weight: var(--w-medium);
+}
+/* The brand fill: the composer's send, and at most one per screen instead of primary. */
+.fl-btn--brand {
+  --btn-bg: var(--send-bg);
+  --btn-bg-hover: color-mix(in srgb, var(--send-bg) 88%, var(--send-fg));
+  --btn-bg-active: color-mix(in srgb, var(--send-bg) 82%, var(--bg));
+  --btn-fg: var(--send-fg);
+  font-weight: var(--w-medium);
+}
+.fl-btn--secondary {
+  --btn-bg: var(--pill-bg);
+}
+.fl-btn--quiet {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--ghost-hover);
+  --btn-fg: var(--fg-2);
+  --btn-fg-hover: var(--fg);
+}
+.fl-btn--danger {
+  --btn-bg: color-mix(in srgb, var(--error) var(--tint), transparent);
+  --btn-bg-hover: color-mix(in srgb, var(--error) var(--tint-hover), transparent);
+  --btn-bg-active: color-mix(in srgb, var(--error) 30%, transparent);
+  --btn-fg: var(--error);
+  font-weight: var(--w-medium);
+}
+.fl-btn--quiet.fl-btn--danger {
+  --btn-bg: transparent;
+  font-weight: var(--w-regular);
+}
+.fl-btn--link {
+  --btn-bg: transparent;
+  --btn-bg-hover: transparent;
+  --btn-bg-active: transparent;
+  --btn-fg: var(--link);
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.fl-btn--link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Muted link: one that repeats on every row ("Full turn", "More"), grey and underlined, so the accent stays on the one action. */
+.fl-btn--link.fl-btn--muted {
+  --btn-fg: var(--fg-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--hairline);
+}
+.fl-btn--link.fl-btn--muted:hover:not(:disabled) {
+  --btn-fg: var(--fg);
+  text-decoration-color: currentColor;
+}
+/* Text: a title that opens something (a card's title). The text's own colour and size; wraps. */
+.fl-btn--text {
+  --btn-bg: transparent;
+  --btn-bg-hover: transparent;
+  --btn-bg-active: transparent;
+  --btn-fg: inherit;
+  display: inline;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.fl-btn--text.fl-btn--truncate {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fl-btn--text:hover:not(:disabled) {
+  text-decoration: underline;
+  text-decoration-color: var(--fg-2);
+  text-underline-offset: 3px;
+}
+/* IconButton: the same button, square; quiet unless a variant says otherwise. The composer's + and /. */
+.fl-btn--icon {
+  width: var(--btn-h);
+  min-width: 0;
+  padding: 0;
+}
+/* Round: the phone's swipe-row and pager actions only, a full circle at touch size (§2.2). */
+.fl-btn--round {
+  border-radius: var(--r-round);
+}
+.fl-btn--icon.fl-btn--quiet {
+  --btn-fg: var(--fg);
+}
+.fl-btn--icon.fl-btn--quiet.fl-btn--muted {
+  --btn-fg: var(--fg-2);
+}
+/* Loading: the label keeps its room, a spinner sits in the middle. */
+.fl-btn[aria-busy='true'] {
+  color: transparent;
+  cursor: progress;
+}
+.fl-btn[aria-busy='true'] > :not(.fl-spinner) {
+  visibility: hidden;
+}
+.fl-btn[aria-busy='true'] > .fl-spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-color: color-mix(in srgb, var(--btn-fg) 25%, transparent);
+  border-top-color: var(--btn-fg);
+}
+/* A quieter second part of a label: the label's own colour at 75% (stays 4.5:1 on every fill). */
+.fl-btn__sub {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* Split button: the default action and a ▾ for the others, one r5 outline. */
+.fl-split {
+  display: inline-flex;
+  flex: none;
+  border-radius: var(--r-ctl);
+}
+.fl-split > .fl-btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.fl-split > .fl-btn:last-child,
+.fl-split > .pop:last-child > .fl-btn {
+  width: var(--btn-h);
+  min-width: 0;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: var(--line) solid color-mix(in srgb, currentColor 25%, transparent);
+}
+.fl-split > .pop:last-child > .fl-btn > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+
+/* Hold to confirm: the fill sweeps for 600ms while held; let go early and nothing happens. */
+.fl-btn--hold {
+  overflow: hidden;
+}
+.fl-btn--hold {
+  user-select: none;
+  touch-action: none;
+}
+/* The fill tracks the hold: it sweeps in over 600ms while held and drains back (200ms) when let go early. */
+.fl-btn--hold::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.22;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--dur-slow) var(--ease-out);
+  pointer-events: none;
+}
+.fl-btn--hold[data-holding]::after {
+  transform: scaleX(1);
+  transition: transform var(--dur-hold) var(--ease-linear);
+}
+
+/* ---- Pill / Chip / Tag (§2.3): status, risk, filter; sm 18 · md 22 · touch 32; pill radius ---- */
+
+.fl-pill {
+  --pill-h: var(--h-xs);
+  --pill-px: var(--sp-2);
+  --pill-fs: var(--t-85);
+  --pill-c: var(--fg);
+  --pill-fill: var(--pill-bg);
+  --pill-fill-hover: var(--pill-hover);
+  /* Shrinks with its row (the text ends in an ellipsis); never stretches across a column. */
+  flex: 0 1 auto;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: 100%;
+  min-width: 0;
+  height: var(--pill-h);
+  padding: 0 var(--pill-px);
+  border: var(--line) solid var(--ctl-border);
+  border-radius: var(--r-pill);
+  background: var(--pill-fill);
+  color: var(--pill-c);
+  font: inherit;
+  font-size: var(--pill-fs);
+  font-weight: var(--w-regular);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-pill > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-pill__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* fit: in a card narrower than 360px (an approval in a side bar) the pill takes its own line and wraps its words rather than cut them. */
+@container (max-width: 360px) {
+  .fl-pill--fit {
+    flex: none;
+    max-width: 100%;
+    height: auto;
+    min-height: var(--pill-h);
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .fl-pill--fit > .fl-pill__text {
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+}
+.fl-pill__sub {
+  flex: none;
+  color: var(--fg);
+}
+.fl-pill__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-round);
+  background: currentColor;
+}
+.fl-pill--md {
+  --pill-h: var(--h-sm);
+  --pill-fs: var(--t-90);
+}
+.fl-pill--mono {
+  font-family: var(--mono);
+}
+.fl-pill--touch {
+  --pill-h: var(--h-lg);
+  --pill-px: var(--sp-3);
+  --pill-fs: var(--t-100);
+}
+/* Text on a pill's own fill is --fg, never --fg-2 (3.9:1 on --pill-bg): a muted or routine pill is the neutral pill, untinted. */
+/* Tones: the tone's colour on a 14% tint of itself. Risk uses neutral, warn and error with a dot. */
+.fl-pill[data-tone] {
+  /* Tone text mixes toward the text colour in light themes (--tone-ink), so green and amber stay readable on white. */
+  --pill-c: color-mix(in srgb, var(--tone) var(--tone-ink), var(--fg));
+  --pill-fill: color-mix(in srgb, var(--tone) var(--tint), transparent);
+  --pill-fill-hover: color-mix(in srgb, var(--tone) var(--tint-hover), transparent);
+}
+.fl-pill[data-tone='muted'] {
+  --pill-c: var(--fg);
+  --pill-fill: var(--pill-bg);
+  --pill-fill-hover: var(--pill-hover);
+}
+[data-tone='working'],
+[data-tone='info'] {
+  --tone: var(--status-working);
+}
+[data-tone='done'] {
+  --tone: var(--status-done);
+}
+[data-tone='success'] {
+  --tone: var(--tl-success);
+}
+[data-tone='failed'],
+[data-tone='error'],
+[data-tone='careful'] {
+  --tone: var(--error);
+}
+[data-tone='waiting'] {
+  --tone: var(--decision);
+}
+[data-tone='warn'],
+[data-tone='review'] {
+  --tone: var(--warn);
+}
+[data-tone='accent'] {
+  --tone: var(--accent);
+}
+[data-tone='routine'] {
+  --tone: var(--fg-2);
+}
+.fl-pill[data-tone='routine'] {
+  --pill-c: var(--fg);
+  --pill-fill: var(--pill-bg);
+}
+/* A pill you can press: the composer's agents and model pills, filter chips. */
+button.fl-pill,
+.fl-pill--interactive {
+  cursor: pointer;
+}
+button.fl-pill:hover:not(:disabled),
+.fl-pill--interactive:hover {
+  background: var(--pill-fill-hover);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+button.fl-pill:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+}
+.fl-pill[aria-pressed='true'],
+.fl-pill[aria-selected='true'],
+.fl-pill[aria-checked='true'] {
+  /* On: the theme's focus blue at 24% (a selection, not a status), the strong text colour. */
+  --pill-c: var(--sel-fg);
+  --pill-fill: color-mix(in srgb, var(--focus) 24%, transparent);
+  --pill-fill-hover: color-mix(in srgb, var(--focus) 32%, transparent);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+/* A chip with its own × (ChipButton): the pill is the frame, its main part and the × are the buttons. */
+.fl-pill__main {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.fl-pill__main > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-pill:has(> .fl-pill__main:hover) {
+  background: var(--pill-fill-hover);
+}
+.fl-pill__main:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--sp-half);
+}
+.fl-pill__x {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  width: var(--i-sm);
+  height: var(--i-sm);
+  margin-right: calc(var(--sp-1) * -1);
+  border-radius: var(--r-pill);
+  color: var(--fg-2);
+}
+.fl-pill__x:hover {
+  color: var(--fg);
+  background: var(--pill-hover);
+}
+
+/* ---- Badge / Count (§2.4): 16 tall, pill ---- */
+
+.fl-count {
+  display: inline-block;
+  flex: none;
+  min-width: var(--h-2xs);
+  height: var(--h-2xs);
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  color: var(--fg);
+  font-size: var(--t-75);
+  font-weight: var(--w-strong);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--h-2xs);
+  text-align: center;
+  outline: var(--line) solid var(--ctl-border);
+  outline-offset: -1px;
+}
+.fl-count--loud {
+  background: var(--decision);
+  color: var(--decision-fg);
+}
+
+/* ---- Segmented control (§2.5): track r6 on the tonal fill, segments r4 (6 − 2 inset) ---- */
+
+.fl-seg {
+  --seg-h: var(--h-md);
+  display: inline-flex;
+  flex: none;
+  gap: var(--sp-half);
+  height: var(--seg-h);
+  padding: var(--sp-half);
+  border-radius: var(--r-6);
+  background: var(--pill-bg);
+  box-shadow: inset 0 0 0 var(--line) var(--ctl-border);
+}
+.fl-seg__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 100%;
+  min-width: 0;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-90);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-seg__item > .icon {
+  width: var(--i-sm);
+  height: var(--i-sm);
+}
+/* Segments read --fg on the track (--fg-2 is 3.9:1 on --pill-bg); hover shows as a fill. */
+.fl-seg__item:hover:not(:disabled, [aria-checked='true'], [aria-selected='true'], [aria-pressed='true']) {
+  background: var(--hover-bg);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+.fl-seg__item[aria-checked='true'],
+.fl-seg__item[aria-selected='true'],
+.fl-seg__item[aria-pressed='true'] {
+  color: var(--sel-fg);
+  background: var(--seg-on);
+  box-shadow: var(--elev-1);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+.fl-seg__item:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: 0;
+}
+.fl-seg--touch {
+  --seg-h: var(--h-touch);
+}
+.fl-seg--touch .fl-seg__item {
+  padding: 0 var(--sp-4);
+  font-size: var(--t-touch);
+}
+.fl-seg--block {
+  display: flex;
+}
+.fl-seg--block .fl-seg__item {
+  flex: 1;
+}
+
+/* ---- Toggle switch (§2.6): 32×18, thumb 14; touch 44×26, thumb 22 ---- */
+
+.fl-toggle {
+  --tg-w: 32px;
+  --tg-h: var(--h-xs);
+  --tg-k: 14px;
+  position: relative;
+  flex: none;
+  width: var(--tg-w);
+  height: var(--tg-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--border);
+  box-shadow: inset 0 0 0 var(--line) var(--ctl-border);
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease-out);
+}
+.fl-toggle::after {
+  content: '';
+  position: absolute;
+  top: calc((var(--tg-h) - var(--tg-k)) / 2);
+  left: calc((var(--tg-h) - var(--tg-k)) / 2);
+  width: var(--tg-k);
+  height: var(--tg-k);
+  border-radius: var(--r-round);
+  background: var(--thumb);
+  box-shadow: var(--shadow-thumb);
+  transition: left var(--dur) var(--ease-out);
+}
+.fl-toggle[aria-checked='true'] {
+  background: var(--toggle-on);
+  box-shadow: inset 0 0 0 var(--line) var(--ctl-border-active);
+}
+.fl-toggle[aria-checked='true']::after {
+  left: calc(var(--tg-w) - var(--tg-k) - (var(--tg-h) - var(--tg-k)) / 2);
+}
+.fl-toggle:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--border) 75%, var(--fg));
+  outline: var(--hover-outline);
+}
+.fl-toggle[aria-checked='true']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--toggle-on) 85%, var(--fg));
+}
+.fl-toggle:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+}
+.fl-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fl-toggle--touch {
+  --tg-w: var(--h-touch);
+  --tg-h: 26px;
+  --tg-k: 22px;
+}
+
+/* ---- Checkbox (§2.7): 14 square, r3; Radio row (§2.8): a row with a 14 dot ---- */
+
+.fl-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  color: var(--fg);
+  cursor: pointer;
+}
+.fl-check__box,
+.fl-radio__dot {
+  appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: var(--i-sm);
+  height: var(--i-sm);
+  margin: 0;
+  border: var(--line) solid color-mix(in srgb, var(--fg-2) 70%, transparent);
+  background: var(--input-bg);
+  cursor: pointer;
+}
+.fl-check__box {
+  border-radius: var(--r-3);
+}
+.fl-check__box::after {
+  content: '';
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 1.5px solid var(--button-fg);
+  border-bottom: 1.5px solid var(--button-fg);
+  transform: rotate(-45deg) scale(0);
+}
+.fl-check__box:checked,
+.fl-check__box:indeterminate {
+  border-color: var(--button-bg);
+  background: var(--button-bg);
+}
+.fl-check__box:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+.fl-check__box:indeterminate::after {
+  height: 0;
+  margin-top: 0;
+  border-left: 0;
+  transform: none;
+}
+.fl-check__box:focus-visible,
+.fl-radio__dot:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+}
+.fl-check:has(:disabled),
+.fl-radio:has(:disabled) {
+  opacity: 0.4;
+  cursor: default;
+}
+.fl-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-row);
+  color: var(--fg);
+  cursor: pointer;
+}
+.fl-radio__dot {
+  margin-top: calc((1lh - var(--i-sm)) / 2);
+  border-radius: var(--r-round);
+}
+.fl-radio__dot:checked {
+  border-color: var(--button-bg);
+  box-shadow: inset 0 0 0 4px var(--button-bg);
+}
+.fl-radio--btn {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+.fl-radio--btn:focus-visible {
+  outline: var(--line) solid var(--focus);
+  outline-offset: -1px;
+}
+/* A ChoiceRow's dot or box draws the state the row carries. */
+.fl-radio__dot[data-on] {
+  border-color: var(--button-bg);
+  box-shadow: inset 0 0 0 4px var(--button-bg);
+}
+.fl-check__box[data-on] {
+  border-color: var(--button-bg);
+  background: var(--button-bg);
+}
+.fl-check__box[data-on]::after {
+  transform: rotate(-45deg) scale(1);
+}
+.fl-radio__key {
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+}
+.fl-radio:hover {
+  background: var(--hover-bg);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+.fl-radio:has(:checked),
+.fl-radio[data-on] {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+.fl-radio__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: var(--lh-tight);
+  padding-top: calc((1lh - 1em * var(--lh-tight)) / 2);
+}
+.fl-radio__desc {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-radio:hover .fl-radio__desc {
+  color: var(--fg);
+}
+.fl-radio:is(:has(:checked), [data-on]) .fl-radio__desc {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* ---- Input / Textarea / Search (§2.9): 26 tall, r5, the theme's input fill; focus = ring + 3px halo ---- */
+
+.fl-input {
+  --in-h: var(--h-md);
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: var(--in-h);
+  margin: 0;
+  padding: 0 var(--sp-2);
+  border: var(--line) solid var(--field-border);
+  border-radius: var(--r-ctl);
+  background: var(--input-bg);
+  color: var(--vscode-input-foreground, var(--fg));
+  font: inherit;
+  font-size: var(--t-100);
+  line-height: var(--lh);
+  outline: none;
+  resize: none;
+}
+.fl-input::placeholder {
+  color: var(--placeholder);
+}
+.fl-input:hover:not(:disabled, :focus) {
+  border-color: var(--border);
+}
+.fl-input:focus,
+.fl-input:focus-visible {
+  border-color: var(--focus);
+  box-shadow: var(--focus-halo);
+  outline: none;
+}
+.fl-input[aria-invalid='true'] {
+  border-color: var(--error);
+}
+.fl-input:disabled {
+  opacity: 0.4;
+}
+.fl-input--sm {
+  --in-h: var(--h-sm);
+  font-size: var(--t-90);
+}
+.fl-input--touch {
+  --in-h: var(--h-touch);
+  padding: 0 var(--sp-3);
+  font-size: var(--t-touch);
+}
+textarea.fl-input {
+  height: auto;
+  /* As many lines as its rows (3 unless set), then it grows with its text. */
+  min-height: calc(var(--rows, 3) * 1lh + var(--sp-2) + 2px);
+  padding: var(--sp-1) var(--sp-2);
+  resize: vertical;
+  field-sizing: content;
+}
+.fl-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.fl-search > .icon {
+  position: absolute;
+  left: var(--sp-2);
+  width: var(--i-sm);
+  height: var(--i-sm);
+  color: var(--fg-2);
+  pointer-events: none;
+}
+.fl-search > .fl-input {
+  padding-left: calc(var(--sp-2) * 2 + var(--i-sm));
+  padding-right: var(--h-md);
+}
+.fl-search > .fl-btn {
+  position: absolute;
+  right: var(--sp-half);
+}
+.fl-input::-webkit-search-cancel-button {
+  display: none;
+}
+.fl-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.fl-field__label {
+  font-size: var(--t-90);
+  color: var(--fg);
+}
+.fl-field__help {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-field__help[data-tone='error'] {
+  color: var(--error);
+}
+
+/* ---- Select / Dropdown trigger (§2.10): the field's look, a chevron at the end ---- */
+
+.fl-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 120px;
+  max-width: 100%;
+  height: var(--h-md);
+  padding: 0 var(--sp-2);
+  border: var(--line) solid var(--field-border);
+  border-radius: var(--r-ctl);
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-100);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-select > .icon:last-child {
+  width: var(--i-xs);
+  height: var(--i-xs);
+  color: var(--fg-2);
+}
+.fl-select__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-select__value[data-empty] {
+  color: var(--placeholder);
+}
+.fl-select:hover:not(:disabled) {
+  border-color: var(--border);
+}
+.fl-select:focus-visible,
+.fl-select[aria-expanded='true'] {
+  border-color: var(--focus);
+  box-shadow: var(--focus-halo);
+  outline: none;
+}
+.fl-select--sm {
+  min-width: 0;
+  height: var(--h-sm);
+  font-size: var(--t-90);
+}
+.fl-select:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Menu / Popover (§2.11): glass r8 on elevation 3; rows inset 4, r4 (concentric) ---- */
+
+.fl-menu {
+  position: absolute;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-half);
+  min-width: 200px;
+  max-width: min(380px, calc(100vw - var(--sp-4)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-1) 0;
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-box);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--elev-3);
+  color: var(--vscode-menu-foreground, var(--fg));
+  font-size: var(--t-100);
+  text-align: left;
+  animation: rise var(--dur) var(--ease-out);
+}
+.fl-menu > * {
+  flex-shrink: 0;
+}
+/* Anchored under its trigger (.pop); flips above or to the end edge when there is no room. */
+.pop {
+  position: relative;
+  display: inline-flex;
+}
+.pop > .fl-menu {
+  top: calc(100% + var(--sp-1));
+  left: 0;
+}
+.pop > .fl-menu[data-end] {
+  left: auto;
+  right: 0;
+}
+.pop > .fl-menu[data-up] {
+  top: auto;
+  bottom: calc(100% + var(--sp-1));
+}
+.fl-menu--form {
+  gap: var(--sp-2);
+  min-width: 340px;
+  padding: var(--sp-3);
+}
+.fl-menu__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--t-85);
+  color: var(--fg-50);
+}
+.fl-menu__item,
+.fl-menu [role^='menuitem'] {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  margin: 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--r-row);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-menu__item > .icon,
+.fl-menu [role^='menuitem'] > .icon {
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-menu__item:hover:not(:disabled),
+.fl-menu__item:focus-visible,
+.fl-menu [role^='menuitem']:hover:not(:disabled),
+.fl-menu [role^='menuitem']:focus-visible,
+.fl-menu__item[data-active] {
+  background: var(--hover-bg);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+.fl-menu__item[aria-checked='true'],
+.fl-menu [role^='menuitem'][aria-checked='true'] {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+.fl-menu [role^='menuitem'][aria-checked='true'] > .icon,
+.fl-menu__item[aria-checked='true'] > .icon,
+.fl-menu__item[aria-checked='true'] .fl-menu__desc {
+  color: inherit;
+}
+.fl-menu__item:disabled,
+.fl-menu [role^='menuitem']:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fl-menu__item[data-tone='error'],
+.fl-menu [role^='menuitem'].danger {
+  color: var(--error);
+}
+.fl-menu__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: var(--lh-tight);
+}
+.fl-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-menu__desc {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+  white-space: normal;
+}
+.fl-menu__end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  color: var(--fg-2);
+}
+.fl-menu__check {
+  visibility: hidden;
+}
+[aria-checked='true'] > .fl-menu__end > .fl-menu__check {
+  visibility: visible;
+}
+.fl-menu__sep {
+  flex: none;
+  height: var(--line);
+  margin: var(--sp-1) 0;
+  background: var(--border);
+}
+.fl-menu__filter {
+  flex: none;
+  width: auto;
+  height: var(--h-md);
+  margin: 0 var(--sp-1) var(--sp-1);
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-row);
+  background: var(--input-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-90);
+  outline: none;
+}
+.fl-menu__empty {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+
+/* ---- Tooltip (§2.12): solid, r6, 11px; after 500ms, never interactive ---- */
+
+.fl-tip {
+  position: fixed;
+  z-index: var(--z-tip);
+  max-width: 280px;
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--menu-bg);
+  box-shadow: var(--shadow-tip);
+  color: var(--fg);
+  font-size: var(--t-85);
+  line-height: var(--lh);
+  pointer-events: none;
+  animation: fadeIn var(--dur-fast) var(--ease-out);
+}
+.fl-tip .fl-kbd {
+  margin-left: var(--sp-1);
+}
+
+/* ---- Timestamp (§2.32): when a message was sent; shown while its message is hovered or focused ---- */
+
+.fl-time {
+  color: var(--fg-2);
+  /* --t-85 of the base size, not of the text around it: 11px in a smaller card head too. */
+  font-size: calc(var(--fs) * 0.85);
+  font-weight: 400;
+  line-height: var(--lh);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+[data-stamp]:hover .fl-time,
+[data-stamp]:focus-within .fl-time {
+  opacity: 1;
+}
+
+/* ---- Toast (§2.13): glass r8, elevation 3, bottom right; a draining bar while it counts down ---- */
+
+.fl-toasts {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  pointer-events: none;
+}
+.fl-toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  width: min(400px, calc(100vw - var(--sp-8)));
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-box);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--elev-3);
+  color: var(--fg);
+  overflow: hidden;
+  pointer-events: auto;
+  animation: rise var(--dur) var(--ease-out);
+}
+.fl-toast > .icon {
+  width: var(--i-md);
+  height: var(--i-md);
+  margin-top: calc((1lh - var(--i-md)) / 2);
+  color: var(--tone, var(--fg-2));
+}
+.fl-toast__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.fl-toast__title {
+  font-weight: var(--w-strong);
+}
+.fl-toast__text {
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.fl-toast__actions {
+  display: flex;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.fl-toast > .fl-countdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 0;
+}
+
+/* ---- Card (§2.16): inline (menu tone) · flat (outline only) · raised (lifts); r8; 12 padding and rhythm (sm 8·12 / 8) ---- */
+
+.fl-card {
+  --card-pad: var(--sp-3);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--card-pad);
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-box);
+  background: var(--menu-bg);
+  color: var(--fg);
+}
+.fl-card--flat {
+  background: transparent;
+}
+.fl-card--raised {
+  box-shadow: var(--elev-1);
+}
+.fl-card--bare {
+  --card-pad: 0;
+  gap: 0;
+}
+/* Ghost: no fill or border at rest (a routine request's sentence row); the focus ring still applies. */
+.fl-card--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+/* A card that just arrived: the 150ms rise. */
+.fl-card[data-enter] {
+  animation: rise var(--dur) var(--ease-out);
+}
+.fl-card--sm {
+  --card-pad: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
+}
+.fl-card--interactive:hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--fg));
+}
+.fl-card:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+}
+/* The one the keys act on, or the one that needs you: the decision colour's ring and 3px halo. */
+.fl-card[data-focus],
+.fl-card[data-tone='waiting'] {
+  border-color: var(--decision-line);
+}
+.fl-card[data-focus] {
+  box-shadow: 0 0 0 3px var(--decision-soft);
+}
+.fl-card[data-tone='waiting'] {
+  background: linear-gradient(var(--decision-soft), var(--decision-soft)), var(--menu-bg);
+}
+.fl-card[data-tone='error'],
+.fl-card[data-tone='failed'],
+.fl-card[data-tone='careful'] {
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+.fl-card[data-muted] {
+  opacity: 0.6;
+}
+.fl-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  min-height: var(--h-sm);
+}
+.fl-card__head > .icon {
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-strong);
+}
+.fl-card__meta {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-card__body {
+  min-width: 0;
+}
+.fl-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.fl-card__foot[data-start] {
+  justify-content: flex-start;
+}
+
+/* ---- Discussion card (§2.30): a Card holding a /discuss. Running: A's board, B's meter, both, or C's thread
+   (friedliver.discuss.layout); done: C's conclusion in every layout. Its parts only lay out components and set text. ---- */
+
+.fl-discuss {
+  --card-pad: var(--sp-4);
+  gap: var(--sp-4);
+}
+.fl-discuss p {
+  margin: 0;
+}
+.fl-discuss code {
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-3);
+  background: var(--inline-code-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+}
+.fl-discuss ul {
+  display: grid;
+  gap: var(--sp-half);
+  margin: 0;
+  padding-left: var(--sp-4);
+  line-height: var(--lh);
+}
+.fl-discuss details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.fl-discuss details > summary::-webkit-details-marker {
+  display: none;
+}
+.fl-discuss details > summary:focus-visible,
+.fl-discuss [tabindex='-1']:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+  border-radius: var(--r-row);
+}
+/* A folded part's twisty: 12, turns 90° open. */
+.fl-discuss details > summary > .icon:first-child {
+  width: var(--i-xs);
+  height: var(--i-xs);
+  color: var(--fg-2);
+  transition: transform var(--dur) var(--ease-out);
+}
+.fl-discuss details[open] > summary > .icon:first-child,
+
+/* Head: the question as a 16px title, its context under it, the live state at the end. */
+.fl-discuss__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.fl-discuss__head > .icon {
+  flex: none;
+  width: var(--i-md);
+  height: var(--i-md);
+  margin-top: var(--sp-half);
+  color: var(--fg-2);
+}
+.fl-discuss__q {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-half);
+}
+.fl-discuss__title {
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  line-height: var(--lh-tight);
+  color: var(--sel-fg);
+  overflow-wrap: anywhere;
+}
+.fl-discuss__context {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__context code {
+  font-size: var(--t-100);
+}
+.fl-discuss__meta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding-top: var(--sp-half);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss[data-state='running'] .fl-discuss__meta {
+  color: var(--fg);
+}
+.fl-discuss__hint {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+
+/* Foot while it runs: the add-a-point field (the rest of the row) and Stop. */
+.fl-discuss__add {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.fl-discuss__add > .fl-input,
+.fl-discuss__add > .fl-discuss__hint {
+  flex: 1;
+  min-width: 0;
+}
+
+/* C's quote link (also A's reply line): a Text button with a 2px rule on its left, quiet grey. */
+.fl-discuss__quote.fl-btn {
+  --btn-fg: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  justify-self: start;
+  flex: 0 1 auto;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  padding: 0 var(--sp-2);
+  border-left: 2px solid var(--border);
+  border-radius: 0;
+  font-size: var(--t-85);
+  text-align: left;
+}
+.fl-discuss__quote.fl-btn > .icon {
+  flex: none;
+}
+.fl-discuss__quote b {
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+.fl-discuss__quote.fl-btn:hover:not(:disabled) {
+  color: var(--fg);
+  border-left-color: var(--fg-2);
+}
+.fl-discuss__stack {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-half);
+}
+.fl-discuss__body {
+  min-width: 0;
+  font-size: var(--t-100);
+}
+
+/* A point the user added (A: a bordered row; C: a plain line in the thread). */
+.fl-discuss__you {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--line) solid var(--hairline);
+  border-radius: var(--r-box);
+  color: var(--fg);
+}
+.fl-discuss__you[data-plain] {
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-half);
+  border: 0;
+}
+.fl-discuss__you > .icon {
+  flex: none;
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-discuss__you b {
+  font-weight: var(--w-strong);
+}
+
+/* ===== A · Positions board ===== */
+.fl-discuss__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.fl-discuss__bar .fl-dot {
+  margin-left: var(--sp-1);
+}
+.fl-discuss__board {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+.fl-discuss__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2);
+  border: var(--line) solid var(--hairline);
+  border-radius: var(--r-box);
+  background: var(--bg);
+}
+.fl-discuss__col[data-empty] {
+  align-self: start;
+  border-style: dashed;
+  background: transparent;
+}
+.fl-discuss__col-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  padding: 0 var(--sp-1);
+}
+.fl-discuss__col-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__count {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__empty {
+  padding: var(--sp-2) var(--sp-1);
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.fl-discuss__tile {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--line) solid var(--ctl-border);
+  border-radius: var(--r-row);
+  background: var(--menu-bg);
+}
+.fl-discuss__tile[data-speaking] {
+  box-shadow: inset 2px 0 0 var(--status-working);
+}
+.fl-discuss__tile-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.fl-discuss__tile-head > b {
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__speaking {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__conf {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+.fl-discuss__claim {
+  min-width: 0;
+  color: var(--sel-fg);
+  line-height: var(--lh);
+}
+.fl-discuss__claim[data-strong] {
+  font-weight: var(--w-medium);
+}
+.fl-discuss__sub {
+  display: flex;
+  align-items: center;
+  font-size: var(--t-85);
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.fl-discuss__sub > .fl-btn--link,
+.fl-discuss__more > .fl-btn--link {
+  margin-left: auto;
+  flex: none;
+  font-size: inherit;
+}
+
+/* ===== B · Stance meter ===== */
+.fl-discuss__steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.fl-discuss__step[data-st='working'] {
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+.fl-discuss__link {
+  width: var(--sp-6);
+  height: var(--line);
+  background: var(--border);
+}
+.fl-discuss__legend {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.fl-discuss__meter {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  border: var(--line) solid var(--hairline);
+  border-radius: var(--r-box);
+  background: var(--bg);
+}
+.fl-discuss__axis,
+.fl-discuss__lane {
+  display: grid;
+  grid-template-columns: var(--discuss-who-w) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-3);
+}
+.fl-discuss__ends {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__ends b {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__ends .icon {
+  flex: none;
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-discuss__who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.fl-discuss__track {
+  position: relative;
+  height: var(--discuss-lane-h);
+}
+.fl-discuss__meter[data-compact] .fl-discuss__track {
+  height: var(--discuss-lane-h-compact);
+}
+.fl-discuss__track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--line);
+  background: var(--border);
+}
+.fl-discuss__mid {
+  position: absolute;
+  left: 50%;
+  top: var(--sp-2);
+  bottom: var(--sp-2);
+  width: var(--line);
+  background: var(--border);
+}
+.fl-discuss__trail {
+  position: absolute;
+  left: var(--x);
+  width: var(--w);
+  top: calc(50% - 1px);
+  height: 2px;
+  border-radius: var(--r-pill);
+  background: var(--fg-50);
+}
+.fl-discuss__ghost {
+  position: absolute;
+  left: var(--x);
+  top: 50%;
+  width: var(--sp-2);
+  height: var(--sp-2);
+  margin: calc(var(--sp-1) * -1) 0 0 calc(var(--sp-1) * -1);
+  border-radius: var(--r-round);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1.5px var(--fg-2);
+}
+.fl-discuss__legend > .fl-discuss__ghost {
+  position: static;
+  margin: 0;
+  display: inline-block;
+}
+.fl-discuss__marker {
+  position: absolute;
+  left: var(--x);
+  top: 50%;
+  display: inline-grid;
+  transform: translate(-50%, -50%);
+  border-radius: calc(var(--discuss-marker) / 4);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+.fl-discuss__marker > .fl-avatar {
+  background: color-mix(in srgb, var(--hue) 22%, var(--bg));
+}
+.fl-discuss__marker[data-speaking] {
+  box-shadow:
+    0 0 0 3px var(--bg),
+    0 0 0 5px var(--status-working);
+}
+.fl-discuss__val {
+  position: absolute;
+  left: var(--x);
+  top: calc(50% + var(--discuss-marker) / 2 + var(--sp-half));
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--t-75);
+  color: var(--fg-2);
+}
+.fl-discuss__val[data-speaking] {
+  top: calc(50% + var(--discuss-marker) / 2 + var(--sp-1));
+}
+.fl-discuss__val[data-end='start'] {
+  transform: translateX(-20%);
+}
+.fl-discuss__val[data-end='end'] {
+  transform: translateX(-80%);
+}
+.fl-discuss__meter[data-compact] .fl-discuss__val {
+  display: none;
+}
+.fl-discuss__rows {
+  display: grid;
+  gap: var(--sp-half);
+}
+.fl-discuss__group,
+.fl-discuss__group > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+details.fl-discuss__group {
+  display: block;
+}
+.fl-discuss__group[data-open] {
+  font-weight: var(--w-strong);
+  color: var(--fg);
+}
+.fl-discuss__group > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-discuss__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  min-height: var(--h-lg);
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-row);
+}
+summary.fl-discuss__row:hover {
+  background: var(--hover-bg);
+}
+.fl-discuss__row[data-speaking] {
+  background: color-mix(in srgb, var(--status-working) 6%, transparent);
+}
+.fl-discuss__row > b {
+  flex: none;
+  min-width: calc(var(--sp-8) + var(--sp-5));
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__row > .icon {
+  flex: none;
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-discuss__row > .icon:last-child {
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-discuss__row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--sel-fg);
+}
+.fl-discuss__re {
+  color: var(--fg-2);
+}
+.fl-discuss__row-wrap > .fl-discuss__body {
+  padding: var(--sp-1) var(--sp-2) var(--sp-2) calc(var(--i-md) + var(--sp-4));
+}
+
+/* ===== C · Threaded timeline ===== */
+.fl-discuss__thread {
+  display: grid;
+  gap: var(--sp-2);
+}
+.fl-discuss__round {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  padding-bottom: var(--sp-1);
+  border-bottom: var(--line) solid var(--hairline);
+}
+.fl-discuss__round > .icon {
+  width: var(--i-xs);
+  height: var(--i-xs);
+  color: var(--fg-2);
+}
+.fl-discuss__round > b {
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__round-label {
+  min-width: 0;
+  margin-right: auto;
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.fl-discuss__round[data-next] {
+  opacity: 0.7;
+  border-bottom-style: dashed;
+}
+.fl-discuss__tag {
+  padding-left: var(--sp-2);
+  border-left: var(--line) solid var(--border);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.fl-discuss__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--t-85);
+  color: var(--fg);
+}
+.fl-discuss__turn {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--i-lg) minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+.fl-discuss__turn::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--i-lg) / 2);
+  top: calc(var(--i-lg) + var(--sp-1));
+  bottom: calc(var(--sp-2) * -1);
+  width: var(--line);
+  background: var(--border);
+}
+.fl-discuss__turn:last-child::before,
+.fl-discuss__turn:has(+ :not(.fl-discuss__turn))::before {
+  display: none;
+}
+.fl-discuss__node {
+  padding-top: var(--sp-2);
+}
+.fl-discuss__turn-card {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--line) solid var(--hairline);
+  border-radius: var(--r-box);
+  background: var(--bg);
+}
+.fl-discuss__turn[data-speaking] .fl-discuss__turn-card {
+  border-color: color-mix(in srgb, var(--status-working) 45%, transparent);
+}
+.fl-discuss__turn-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.fl-discuss__turn-head > b {
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__more {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.fl-discuss__more-text {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fl-discuss__more > .fl-btn--link {
+  margin-left: 0;
+  align-self: flex-end;
+}
+
+/* ===== The conclusion: C's, in every layout ===== */
+.fl-discuss__hero {
+  display: grid;
+  gap: var(--sp-2);
+}
+.fl-discuss__hero-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--t-hero);
+  font-weight: var(--w-strong);
+  line-height: var(--lh-tight);
+  color: var(--sel-fg);
+}
+.fl-discuss__hero-title > .icon {
+  flex: none;
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-discuss__hero-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+.fl-discuss__sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+.fl-discuss__sides[data-n='2'] {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.fl-discuss__side {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: var(--line) solid var(--hairline);
+  border-radius: var(--r-box);
+  background: var(--bg);
+}
+.fl-discuss__side-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+}
+.fl-discuss__side-head > b {
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
+}
+.fl-discuss__side-who {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__vs {
+  align-self: center;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-discuss__section {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.fl-discuss__label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--t-90);
+  font-weight: var(--w-strong);
+  color: var(--fg);
+}
+.fl-discuss__label > .icon {
+  width: var(--i-sm);
+  height: var(--i-sm);
+  color: var(--fg-2);
+}
+.fl-discuss__next {
+  font-weight: var(--w-medium);
+  line-height: var(--lh);
+  color: var(--sel-fg);
+}
+.fl-discuss__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.fl-discuss__actions > .fl-discuss__hint {
+  margin-right: auto;
+}
+.fl-discuss__fold {
+  display: grid;
+  gap: var(--sp-3);
+}
+.fl-discuss__fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  min-height: var(--h-sm);
+  font-size: var(--t-90);
+  color: var(--fg-2);
+}
+.fl-discuss__fold > summary:hover {
+  color: var(--fg);
+}
+.fl-discuss__fold:not([open]) {
+  display: block;
+}
+/* The folded per-round history: one line a round (twisty, round, label, each agent's stance, the tag). */
+.fl-discuss__history {
+  display: grid;
+  padding-top: var(--sp-1);
+  border-top: var(--line) solid var(--hairline);
+}
+.fl-discuss__history > .fl-discuss__round-fold > summary.fl-discuss__round {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto var(--discuss-tag-w);
+  column-gap: var(--sp-2);
+  min-height: var(--h-lg);
+  padding: 0;
+}
+.fl-discuss__history > .fl-discuss__round-fold:last-child > summary.fl-discuss__round {
+  border-bottom: 0;
+}
+.fl-discuss__history .fl-discuss__chips {
+  justify-self: end;
+  margin-left: 0;
+}
+.fl-discuss__round-fold > .fl-discuss__thread {
+  padding: var(--sp-2) 0 var(--sp-3);
+}
+
+/* Narrow (under 720): the head's state goes under the title, the meter's names to their marks, sides stack. */
+@media (max-width: 720px) {
+  .fl-discuss {
+    --card-pad: var(--sp-3);
+    gap: var(--sp-3);
+  }
+  .fl-discuss__head {
+    flex-wrap: wrap;
+  }
+  .fl-discuss__meta {
+    order: 3;
+    flex-basis: 100%;
+    padding-left: calc(var(--i-md) + var(--sp-2));
+  }
+  .fl-discuss__bar > .fl-discuss__hint,
+  .fl-discuss__legend {
+    display: none;
+  }
+  .fl-discuss__tile {
+    padding: var(--sp-2);
+  }
+  .fl-discuss__axis,
+  .fl-discuss__lane {
+    grid-template-columns: var(--i-lg) minmax(0, 1fr);
+    gap: var(--sp-2);
+  }
+  .fl-discuss__who > span:not(.fl-avatar) {
+    display: none;
+  }
+  .fl-discuss__meter {
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .fl-discuss__ends b {
+    font-size: var(--t-100);
+  }
+  .fl-discuss__link {
+    width: var(--sp-3);
+  }
+  .fl-discuss__row {
+    flex-wrap: wrap;
+    padding: var(--sp-1) var(--sp-2);
+  }
+  .fl-discuss__row-text {
+    flex-basis: 100%;
+    white-space: normal;
+    padding-left: calc(var(--i-md) + var(--sp-2));
+  }
+  .fl-discuss__row > .icon:last-child {
+    display: none;
+  }
+  .fl-discuss__sides,
+  .fl-discuss__sides[data-n='2'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fl-discuss__vs {
+    display: none;
+  }
+  .fl-discuss__thread .fl-discuss__tag {
+    display: none;
+  }
+  .fl-discuss__history > .fl-discuss__round-fold > summary.fl-discuss__round {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    row-gap: var(--sp-1);
+    padding: var(--sp-1) 0;
+  }
+  .fl-discuss__history .fl-discuss__round-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .fl-discuss__history .fl-discuss__chips {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+  .fl-discuss__history .fl-discuss__tag {
+    display: inline;
+    grid-column: 2 / -1;
+    justify-self: start;
+    padding-left: 0;
+    border-left: 0;
+  }
+  .fl-discuss__actions {
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fl-discuss details > summary > .icon:first-child {
+    transition: none;
+  }
+}
+
+/* ---- Dialog (§2.15): glass r8 on a 75% overlay, elevation 4. Sheet: r12 top, a handle ---- */
+
+.fl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: var(--overlay);
+  animation: fadeIn var(--dur) var(--ease-out);
+}
+.fl-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: min(560px, 100%);
+  max-height: calc(100vh - var(--sp-8));
+  overflow: auto;
+  padding: var(--sp-4);
+  border: var(--line) solid var(--dialog-border);
+  border-radius: var(--r-box);
+  background: var(--glass-dialog-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--elev-4);
+  color: var(--fg);
+  animation: rise var(--dur) var(--ease-out);
+}
+.fl-dialog--wide {
+  width: min(880px, 100%);
+}
+.fl-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.fl-dialog__title {
+  margin: 0;
+  font-size: var(--t-title);
+  font-weight: var(--w-strong);
+  line-height: var(--lh-tight);
+}
+.fl-dialog__sub {
+  margin-top: var(--sp-1);
+  color: var(--fg-2);
+}
+.fl-dialog__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.fl-overlay--sheet {
+  place-items: end stretch;
+  padding: 0;
+}
+.fl-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-height: 60vh;
+  overflow: auto;
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+  border-top: var(--line) solid var(--dialog-border);
+  border-radius: var(--r-12) var(--r-12) 0 0;
+  background: var(--glass-dialog-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sheet);
+  color: var(--fg);
+  animation: sheet-in var(--dur-slow) var(--ease-out);
+}
+.fl-sheet__handle {
+  flex: none;
+  width: 36px;
+  height: var(--sp-1);
+  margin: 0 auto;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--fg-2) 40%, transparent);
+  cursor: grab;
+}
+
+/* ---- Tabs (§2.16): a strip of r5 tabs, 26 tall in a 30 strip; selected takes the selection fill ---- */
+
+.fl-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-half);
+  height: var(--tab-h);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.fl-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: 220px;
+  height: var(--h-md);
+  padding: 0 var(--sp-2);
+  border: var(--line) solid var(--ctl-border);
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-tab:hover {
+  color: var(--fg);
+  background: var(--hover-bg);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+.fl-tab[aria-selected='true'] {
+  color: var(--sel-fg);
+  background: var(--sel-bg);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+.fl-tab:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: -2px;
+}
+.fl-tab > .fl-avatar,
+.fl-tab > .fl-dot {
+  flex: none;
+}
+/* A closable tab: the × sits inside its end, shown on hover, on the open tab and on keyboard focus. */
+.fl-tab-wrap {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 220px;
+}
+.fl-tab-wrap > .fl-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.fl-tab-wrap:has(> .fl-tab__x) > .fl-tab {
+  padding-right: calc(var(--sp-1) * 2 + var(--i-md));
+}
+.fl-tab__x {
+  position: absolute;
+  right: var(--sp-1);
+  display: inline-grid;
+  place-items: center;
+  width: var(--i-md);
+  height: var(--i-md);
+  border: 0;
+  border-radius: var(--r-row);
+  background: none;
+  color: var(--fg-2);
+  opacity: 0;
+  cursor: pointer;
+}
+.fl-tab-wrap:hover > .fl-tab__x,
+.fl-tab-wrap[data-active] > .fl-tab__x,
+.fl-tab-wrap:focus-within > .fl-tab__x {
+  opacity: 1;
+}
+.fl-tab__x:hover {
+  color: var(--fg);
+  background: var(--ghost-hover);
+}
+.fl-tab__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-tab > .fl-mark {
+  flex: none;
+}
+.fl-tab:hover > .fl-mark,
+.fl-tab[aria-selected='true'] > .fl-mark {
+  color: var(--hue);
+}
+/*
+ * Fit (§2.18): a crowded strip (data-fit, set from tabFit()) shrinks its tabs before it scrolls.
+ * full: tabs shrink from their own width. compact: squeezed to --tab-min-compact; only the open, hovered
+ * or focused tab keeps room for its ×. icon: every tab but the open one is a mark-only tab, 26 square,
+ * its status a badge on the mark (closed by middle-click, Delete or Cmd/Ctrl+W; an immediate tooltip
+ * names it); the open one keeps its title (--tab-open-min and up) and shows its × on hover or focus.
+ */
+[data-fit] > .fl-tab-wrap {
+  flex: 0 1 auto;
+  max-width: var(--tab-max);
+}
+[data-fit='compact'] > .fl-tab-wrap {
+  min-width: var(--tab-min-compact);
+}
+[data-fit='compact'] > .fl-tab-wrap:not([data-active], :hover, :focus-within) > .fl-tab,
+[data-fit='icon'] > .fl-tab-wrap[data-active]:not(:hover, :focus-within) > .fl-tab {
+  padding-right: var(--sp-2);
+}
+/* Marks only: even the open tab's × waits for the pointer or focus, so its title keeps the room. */
+[data-fit='icon'] > .fl-tab-wrap[data-active]:not(:hover, :focus-within) > .fl-tab__x {
+  opacity: 0;
+}
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) {
+  flex: none;
+}
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) > .fl-tab {
+  position: relative;
+  padding: 0 var(--sp-1);
+}
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-tab__label,
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-pill,
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) > .fl-tab__x {
+  display: none;
+}
+/* The status as a badge on the mark's bottom-right corner, ringed in the page colour. */
+[data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-dot {
+  position: absolute;
+  top: calc(50% + var(--sp-half));
+  left: calc(var(--sp-1) + var(--i-md) - var(--dot) + var(--sp-half));
+  box-shadow: 0 0 0 var(--sp-half) var(--bg);
+}
+/* The open tab keeps its title: at least --tab-open-min; with marks only it takes all the room the others leave. */
+[data-fit] > .fl-tab-wrap[data-active] {
+  min-width: var(--tab-open-min);
+}
+[data-fit='icon'] > .fl-tab-wrap[data-active] {
+  flex: 1 1 auto;
+  max-width: none;
+}
+/* Still too many: a whole window of marks beside it, the open tab taking exactly the rest (--open-w, useTabStrip). */
+[data-fit='icon'][data-windowed] > .fl-tab-wrap[data-active] {
+  flex: none;
+  /* A narrow side bar gives the open tab less than --tab-open-min, so the other chats' marks still show. */
+  min-width: min(var(--tab-open-min), var(--open-w, var(--tab-open-min)));
+  width: var(--open-w, auto);
+}
+/* Past the fit it scrolls by whole tabs; a tab an edge cuts is clipped away (--clip-l/-r from useTabStrip). */
+[role='tablist'][data-overflow] {
+  scroll-snap-type: x mandatory;
+  clip-path: inset(0 var(--clip-r, 0) 0 var(--clip-l, 0));
+}
+[role='tablist'][data-overflow] > .fl-tab-wrap {
+  scroll-snap-align: start;
+}
+
+/* ---- Agent mark (§2.22b): 16, monochrome in the text colour, its hue on a hovered or selected tab ---- */
+
+/* Unknown agents and FriedLiver's own (Demo) stay in the text colour when lit. */
+.fl-mark,
+.fl-mark[data-agent='demo'] {
+  --hue: currentColor;
+}
+.fl-mark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--i-md);
+  height: var(--i-md);
+  color: inherit;
+}
+.fl-mark > svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- List row / tree row (§2.17): 26 tall, r4; indent 12 a level ---- */
+
+.fl-row {
+  --level: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  min-height: var(--h-md);
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) calc(var(--sp-2) + (var(--level) - 1) * var(--sp-3));
+  border: 0;
+  border-radius: var(--r-row);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+button.fl-row,
+.fl-row[role='option'],
+.fl-row[role='treeitem'] {
+  width: 100%;
+  cursor: pointer;
+}
+.fl-row > .icon {
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--fg-2);
+}
+.fl-row:is(button, [role='option'], [role='treeitem']):hover {
+  background: var(--hover-bg);
+  outline: var(--hover-outline);
+  outline-offset: -1px;
+}
+.fl-row[aria-selected='true'] {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+  outline: var(--sel-outline);
+  outline-offset: -1px;
+}
+.fl-row:focus-visible {
+  outline: var(--line) solid var(--focus);
+  outline-offset: -1px;
+}
+.fl-row[aria-selected='true'] > .icon,
+.fl-row[aria-selected='true'] .fl-row__meta,
+.fl-row:is(button, [role='option'], [role='treeitem']):hover .fl-row__meta {
+  color: inherit;
+}
+.fl-row__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fl-row__meta {
+  flex: none;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.fl-row__twisty {
+  display: inline-grid;
+  color: var(--fg-2);
+  transform: rotate(-90deg);
+  transition: transform var(--dur) var(--ease-out);
+}
+.fl-row[aria-expanded='true'] > .fl-row__twisty {
+  transform: none;
+}
+
+/* ---- Table (§2.18): full width; header 26, rows 32; hairline rules, no column lines ---- */
+
+.fl-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--t-90);
+}
+.fl-table th {
+  position: sticky;
+  top: 0;
+  height: var(--h-md);
+  padding: 0 var(--sp-2);
+  border-bottom: var(--line) solid var(--border);
+  background: var(--bg);
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  font-weight: var(--w-regular);
+  text-align: left;
+  white-space: nowrap;
+}
+.fl-table td {
+  height: var(--h-lg);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: var(--line) solid var(--hairline);
+  vertical-align: middle;
+}
+.fl-table tbody tr:hover td {
+  background: var(--hover-bg);
+}
+.fl-table tr[aria-selected='true'] td {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.fl-table :is(td, th)[data-num] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fl-table-frame {
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-box);
+  overflow: hidden;
+}
+
+/* ---- Code block · IN/OUT · Diff (§2.19) ---- */
+
+.fl-code {
+  position: relative;
+  margin: 0;
+  padding: var(--sp-2);
+  border-radius: var(--r-row);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.fl-code__tools {
+  position: absolute;
+  top: var(--sp-1);
+  right: var(--sp-1);
+  display: flex;
+  gap: var(--sp-half);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-out);
+}
+.fl-code:hover > .fl-code__tools,
+.fl-code:focus-within > .fl-code__tools {
+  opacity: 1;
+}
+.fl-io {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  border: var(--line-half) solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--tool-bg);
+  font-family: var(--mono);
+  font-size: var(--t-85);
+  overflow: hidden;
+}
+.fl-io__label,
+.fl-io__body {
+  padding: var(--sp-1);
+}
+.fl-io__label {
+  padding-right: var(--sp-2);
+  color: var(--fg-2);
+  opacity: 0.5;
+}
+.fl-io__body {
+  min-width: 0;
+  max-height: 60px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  mask-image: linear-gradient(to bottom, black 50px, transparent 60px);
+}
+.fl-io__body[data-open] {
+  max-height: none;
+  mask-image: none;
+}
+.fl-io > :nth-child(n + 3) {
+  border-top: var(--line-half) solid var(--border);
+}
+.fl-io__body[data-out] {
+  background: var(--code-bg);
+}
+.fl-diff {
+  margin: 0;
+  padding: var(--sp-1) 0;
+  border-radius: var(--r-row);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  line-height: var(--lh);
+  overflow-x: auto;
+}
+.fl-diff__line {
+  display: grid;
+  grid-template-columns: 4ch 2ch 1fr;
+  padding: 0 var(--sp-2);
+  white-space: pre;
+}
+.fl-diff__no {
+  color: var(--fg-2);
+  opacity: 0.6;
+  text-align: right;
+  padding-right: var(--sp-1);
+}
+.fl-diff__line[data-kind='add'] {
+  background: color-mix(in srgb, var(--added) 12%, transparent);
+}
+.fl-diff__line[data-kind='add'] .fl-diff__sign {
+  color: var(--added);
+}
+.fl-diff__line[data-kind='del'] {
+  background: color-mix(in srgb, var(--removed) 12%, transparent);
+}
+.fl-diff__line[data-kind='del'] .fl-diff__sign {
+  color: var(--removed);
+}
+.fl-diff-stat {
+  font-family: var(--mono);
+  font-size: var(--t-85);
+}
+.fl-diff-stat > [data-kind='add'] {
+  color: var(--added);
+}
+.fl-diff-stat > [data-kind='del'] {
+  color: var(--removed);
+  margin-left: var(--sp-1);
+}
+
+/* ---- Avatar / agent glyph (§2.20): radius = size ÷ 4; status dot (§2.21) ---- */
+
+.fl-avatar {
+  --av: 20px;
+  --hue: var(--hue-demo);
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--av);
+  height: var(--av);
+  border-radius: calc(var(--av) / 4);
+  background: color-mix(in srgb, var(--hue) 16%, transparent);
+  color: var(--hue);
+  font-size: var(--t-85);
+  font-weight: var(--w-strong);
+  line-height: 1;
+  outline: var(--line) solid var(--ctl-border);
+  outline-offset: -1px;
+}
+.fl-avatar--sm {
+  --av: 16px;
+  font-size: var(--t-75);
+}
+.fl-avatar--lg {
+  --av: 32px;
+  font-size: var(--t-100);
+}
+/* The /discuss meter's marker (§2.30): 28, between md and lg. */
+.fl-avatar--marker {
+  --av: var(--discuss-marker);
+}
+/* With its Mark (§2.22b) in place of the letter: the mark at 70% of the tile, in the agent's hue. */
+.fl-avatar--mark > .fl-mark {
+  width: 70%;
+  height: 70%;
+  color: var(--hue);
+}
+[data-agent='claude'] {
+  --hue: var(--hue-claude);
+}
+[data-agent='codex'] {
+  --hue: var(--hue-codex);
+}
+[data-agent='gemini'] {
+  --hue: var(--hue-gemini);
+}
+[data-agent='demo'] {
+  --hue: var(--hue-demo);
+}
+.fl-dot {
+  --dot: 8px;
+  flex: none;
+  display: inline-block;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--r-round);
+  background: var(--dot-idle);
+}
+.fl-dot--sm {
+  --dot: 6px;
+}
+.fl-dot[data-state='working'] {
+  background: var(--status-working);
+  animation: blink 1s linear infinite;
+}
+.fl-dot[data-state='needs-you'] {
+  background: var(--status-waiting);
+}
+.fl-dot[data-state='done'] {
+  background: var(--status-done);
+}
+.fl-dot[data-state='error'] {
+  background: var(--status-failed);
+}
+.fl-dot[data-still] {
+  animation: none;
+}
+/* Elsewhere: a ring, not a fill. */
+.fl-dot[data-ring] {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--dot-idle);
+}
+
+/* ---- Progress · spinner · countdown (§2.22) ---- */
+
+.fl-progress {
+  display: block;
+  height: var(--sp-1);
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  overflow: hidden;
+  outline: var(--line) solid var(--ctl-border);
+}
+.fl-progress > i {
+  display: block;
+  width: var(--value, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--status-working);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.fl-progress[data-indeterminate] > i {
+  width: 30%;
+  animation: slide 1.2s var(--ease-out) infinite;
+}
+.fl-spinner {
+  --sz: var(--i-sm);
+  flex: none;
+  display: inline-block;
+  width: var(--sz);
+  height: var(--sz);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  border-radius: var(--r-round);
+  animation: spin 0.8s linear infinite;
+}
+.fl-spinner--sm {
+  --sz: var(--i-xs);
+}
+.fl-spinner--lg {
+  --sz: var(--i-lg);
+}
+.fl-btn > .fl-spinner {
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+}
+.fl-countdown {
+  display: block;
+  height: var(--sp-half);
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  overflow: hidden;
+}
+.fl-countdown > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  animation: drain var(--countdown, 6s) var(--ease-linear) forwards;
+}
+.fl-countdown[data-paused] > i {
+  animation-play-state: paused;
+}
+
+/* ---- Divider (§2.24) ---- */
+
+.fl-divider {
+  flex: none;
+  height: var(--line);
+  margin: var(--sp-1) 0;
+  border: 0;
+  background: var(--border);
+}
+.fl-divider--v {
+  width: var(--line);
+  height: var(--i-md);
+  margin: 0 var(--sp-1);
+}
+
+/* ---- Empty state (§2.25): centred in the whole width, one action ---- */
+
+.fl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-4);
+  color: var(--fg-2);
+  text-align: center;
+}
+.fl-empty > .icon {
+  width: var(--i-xl);
+  height: var(--i-xl);
+}
+.fl-empty__title {
+  color: var(--fg);
+  font-weight: var(--w-strong);
+}
+.fl-empty__text {
+  font-size: var(--t-90);
+}
+.fl-empty__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+/* ---- Banner (§2.26): inline, full width, r8; a tone tints it 8% ---- */
+
+.fl-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  border: var(--line) solid var(--border);
+  border-radius: var(--r-box);
+  background: var(--menu-bg);
+  color: var(--fg);
+  container: fl-banner / inline-size;
+}
+.fl-banner[data-tone] {
+  border-color: color-mix(in srgb, var(--tone) 35%, transparent);
+  background: color-mix(in srgb, var(--tone) 8%, var(--bg));
+}
+.fl-banner > .icon {
+  width: var(--i-md);
+  height: var(--i-md);
+  color: var(--tone, var(--fg-2));
+}
+.fl-banner__text {
+  flex: 1;
+  min-width: 0;
+}
+.fl-banner__actions {
+  display: flex;
+  gap: var(--sp-1);
+}
+/* Narrow (§2.26): under 560 of banner the actions take their own row, under the text, so they never squeeze it. */
+@container fl-banner (max-width: 560px) {
+  .fl-banner__actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+  /* In line with the text, past the icon. */
+  .fl-banner > .icon ~ .fl-banner__actions {
+    padding-left: calc(var(--i-md) + var(--sp-3));
+  }
+}
+
+/* ==== Composer (§2.27): the owner-approved reference, frozen. ====
+   Its input, mic, +, /, agents and model pills, mode button and send define the Button (md 26, r5),
+   IconButton, Pill (18, pill radius) and Input looks above. It keeps its cc-* names; change it only
+   with the owner's sign-off, and change the components above to match. */
+
+/* ---- Composer (§2.1, §2.2): one box, one tone; chips, the message, one row of controls ---- */
+
+.composer-dock {
+  position: relative;
+  z-index: var(--z-composer);
+  flex: none;
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+.composer-col {
+  position: relative;
+  max-width: 680px;
+  margin: 0 auto;
+}
+.composer {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-composer);
+}
+/* The mode's colour: the focus ring and the send button. */
+.composer,
+.composer[data-mode='ask'] {
+  --mode: var(--accent);
+  --mode-send: var(--send-bg);
+  --mode-send-fg: var(--send-fg);
+}
+.composer[data-mode='edits'] {
+  --mode: var(--fg);
+  --mode-send: var(--fg);
+  --mode-send-fg: var(--tool-bg);
+}
+.composer[data-mode='plan'] {
+  --mode: var(--focus-border);
+  --mode-send: var(--button-bg);
+  --mode-send-fg: var(--button-fg);
+}
+.composer[data-mode='full'] {
+  --mode: var(--error);
+  --mode-send: var(--error);
+  --mode-send-fg: var(--button-fg);
+}
+.composer:focus-within {
+  border-color: var(--mode);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--mode) 12%, transparent),
+    0 1px 2px color-mix(in srgb, var(--mode) 20%, transparent);
+}
+/* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
+.cc-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.cc-chips[data-over] {
+  mask-image: linear-gradient(to right, black calc(100% - var(--sp-5)), transparent);
+}
+.cc-chips-count {
+  flex: none;
+  padding: 0 var(--sp-1);
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.cc-chip,
+.cc-chips .code-ref {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 24px;
+  max-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  background: var(--chip-bg);
+  font-size: var(--t-85);
+  font-weight: 500;
+  overflow: hidden;
+}
+.cc-chip:hover,
+.cc-chips .code-ref:hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--fg));
+}
+/* The chip opens a preview; its own × removes it. */
+button.cc-chip-open {
+  min-width: 0;
+  gap: var(--sp-1);
+}
+.cc-chip img {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  object-fit: cover;
+  border-radius: var(--r-1);
+}
+.cc-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-chip-meta {
+  flex: none;
+  color: var(--fg-2);
+  font-weight: 400;
+}
+button.cc-chip-remove {
+  flex: none;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-3);
+  color: var(--fg-2);
+}
+button.cc-chip-remove:hover {
+  color: var(--fg);
+  background: var(--ghost-hover);
+}
+/* A full look at an attached image. */
+.image-preview img {
+  max-width: calc(100vw - 64px);
+  max-height: calc(100vh - 64px);
+  border-radius: var(--r-6);
+  object-fit: contain;
+}
+.cc-chips .code-ref button.ref {
+  height: auto;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.cc-chips .code-ref button.ref:hover {
+  background: none;
+}
+.cc-input {
+  position: relative;
+  display: flex;
+}
+.cc-input textarea {
+  flex: 1;
+  min-height: calc(1.5em + 20px);
+  /* Eight lines, then it scrolls inside; never more than a quarter of the panel. */
+  max-height: min(calc(8lh + 20px), 25vh);
+  field-sizing: content;
+  padding: 10px 36px 10px 14px;
+  border: 0;
+  border-radius: var(--r-8);
+  background: transparent;
+  color: var(--fg);
+  caret-color: var(--fg);
+  font-size: var(--t-100);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+button.cc-mic {
+  position: absolute;
+  top: 5px;
+  right: 0;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 5px;
+  border-radius: var(--r-5);
+  color: var(--mic-fg);
+  background: var(--mic-bg);
+}
+button.cc-mic:hover {
+  color: var(--mic-fg);
+  background: var(--mic-hover);
+}
+button.cc-mic .icon {
+  width: 16px;
+  height: 16px;
+}
+/* The footer: +, /, pills; the mode and send at the right end. */
+.composer-bar {
+  position: relative;
+  z-index: var(--z-footer);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px;
+  border-top: 0.5px solid var(--border);
+  color: var(--fg-2);
+}
+button.cc-icon-btn {
+  flex: none;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-5);
+  color: var(--fg);
+}
+button.cc-icon-btn:hover:not(:disabled),
+button.cc-icon-btn[aria-expanded='true'] {
+  background: var(--ghost-hover);
+}
+button.cc-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  color: var(--fg);
+  font-size: var(--t-85);
+  line-height: 18px;
+  white-space: nowrap;
+}
+button.cc-pill:hover {
+  background: var(--pill-hover);
+}
+button.cc-agents {
+  flex: none;
+}
+button.cc-agents .dot {
+  width: 6px;
+  height: 6px;
+}
+.cc-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-pill-sub {
+  flex: none;
+  color: var(--fg-2);
+}
+.composer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+button.cc-mode {
+  flex: none;
+  height: 26px;
+  gap: 0;
+  padding: 0 var(--sp-2) 0 0;
+  border-radius: var(--r-5);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.cc-icon-box {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+}
+button.cc-mode:hover,
+button.cc-mode[aria-expanded='true'],
+.composer[data-menu='modes'] button.cc-mode {
+  background: var(--ghost-hover);
+}
+/* The agent's own mode, when it won't ask: said in the error colour. */
+button.cc-mode[data-warn] {
+  color: var(--error);
+}
+button.send-btn {
+  flex: none;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 2px;
+  border-radius: var(--r-5);
+  color: var(--mode-send-fg);
+  background: var(--mode-send);
+}
+button.send-btn:hover:not(:disabled) {
+  background: var(--mode-send);
+  filter: brightness(1.1);
+}
+button.send-btn:active:not(:disabled) {
+  filter: brightness(0.9);
+}
+button.send-btn:disabled {
+  opacity: 0.4;
+}
+/* Narrow: labels go before anything overlaps (the controls keep their tooltips). */
+@container (max-width: 420px) {
+  button.cc-mode {
+    padding: 0;
+    font-size: 0;
+  }
+  .composer-hint {
+    display: none;
+  }
+}
+@container (max-width: 300px) {
+  button.cc-pill {
+    margin-left: 2px;
+  }
+  .cc-pill-sub {
+    display: none;
+  }
+}
+
+/* ---- Banners above the composer (§2.10) ---- */
+
+.banners {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  pointer-events: none;
+}
+.banners > * {
+  pointer-events: auto;
+}
+.banners:empty {
+  display: none;
+}
+.banner {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--menu-bg);
+  animation: var(--fade-banner);
+}
+.banner-text {
+  margin-left: var(--sp-2);
+  font-weight: 700;
+  color: var(--fg);
+}
+.banner a {
+  color: var(--link);
+}
+/* While subagents run: one muted line, each name a link to its card. */
+.sa-strip {
+  padding: 0 var(--sp-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+button.sa-name {
+  display: inline;
+  color: var(--fg);
+}
+button.sa-name:hover {
+  text-decoration: underline;
+}
+
+/* ---- Menus above the composer (§2.3–2.6): model, modes, / and the typeahead ---- */
+
+/* Measured from the composer's outer edge: the menu spans its border, 8px above it. */
+.cc-menu {
+  position: absolute;
+  z-index: var(--z-menu);
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 1px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 70vh;
+  margin-bottom: var(--sp-2);
+  padding: 6px 0 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  /* The Menu component's surface (§2.13): glass on elevation 3 (owner, 2026-10-18: the composer's menus follow Menu). */
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--elev-3);
+  color: var(--fg);
+  font-size: var(--t-100);
+  text-align: left;
+  animation: rise var(--dur) var(--ease-out);
+}
+.cc-modes-menu {
+  left: auto;
+  /* Measured on 7.png: 301px wide with its border, its right edge on the mode button's (36.5px in from the composer's).
+     A narrower composer (the side bar's default ~260-290px) moves it right, then narrows it to the composer's own
+     width, so it never spills past either edge of the panel. */
+  right: clamp(-1px, calc(100% + 1px - 301px), 35.5px);
+  width: min(301px, calc(100% + 2px));
+  font-size: var(--t-90);
+}
+.cc-slash-menu,
+.cc-typeahead {
+  max-height: 50vh;
+}
+.cc-slash-menu {
+  padding-top: 0;
+}
+.cc-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* More below: the list's end fades while it can scroll further. */
+.cc-menu-list[data-more] {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--sp-5)), transparent);
+}
+.cc-typeahead {
+  overflow-y: auto;
+}
+.cc-model-menu .cc-menu-list {
+  max-height: 270px;
+}
+.cc-slash-menu .cc-menu-list {
+  gap: 0;
+  max-height: 300px;
+  padding-bottom: var(--sp-2);
+}
+.cc-menu-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--t-85);
+  color: var(--fg-50);
+}
+.cc-modes-menu .cc-menu-title {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.cc-keys {
+  font-size: var(--t-75);
+  color: var(--fg-2);
+  opacity: 0.7;
+}
+.cc-menu-section {
+  display: flex;
+  flex-direction: column;
+}
+.cc-menu-sub {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--t-85);
+  color: var(--fg-50);
+}
+.cc-divider {
+  flex: none;
+  height: 1px;
+  margin: var(--sp-1) 0;
+  background: var(--border);
+}
+.cc-empty {
+  padding: var(--sp-1) var(--sp-3);
+  color: var(--fg-2);
+}
+/* The agent isn't installed: say so, with Install, where the models would be. */
+.cc-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+/* A row: inset 4 from the menu's sides, so r4 sits concentric in the menu's r8. */
+button.cc-item,
+.cc-item {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-md);
+  margin: 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-4);
+  color: var(--fg);
+  text-align: left;
+}
+button.cc-item:hover,
+button.cc-item:focus-visible,
+.cc-item.pick-row:hover,
+.cc-item.pick-row[aria-selected='true'] {
+  background: var(--hover-bg);
+  outline: none;
+}
+button.cc-item[aria-checked='true'] {
+  color: var(--sel-fg);
+  background: var(--sel-bg);
+}
+.cc-item > .icon {
+  color: var(--fg-2);
+}
+.cc-item > .icon:last-child:not(:first-child) {
+  margin-left: auto;
+}
+button.cc-item[aria-checked='true'] .icon,
+button.cc-item[aria-checked='true'] .cc-item-desc {
+  color: var(--sel-fg);
+}
+.cc-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Two-line rows: each line 1.2em. */
+.cc-model-menu .cc-item-text,
+.cc-modes-menu .cc-item-text {
+  line-height: 1.2em;
+}
+.cc-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-modes-menu .cc-item-name,
+.cc-modes-menu .cc-item-desc {
+  white-space: normal;
+}
+.cc-item-desc {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.cc-model-menu .cc-item-desc {
+  color: inherit;
+  opacity: 0.5;
+}
+.cc-item-hint {
+  margin-top: 2px;
+  font-size: var(--t-85);
+  color: var(--disabled);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The / menu keeps one line per command: name, then its description, cut to fit. */
+.cc-slash-menu .cc-item-text {
+  flex: 1;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.cc-slash-menu .cc-item-name {
+  flex: none;
+  max-width: 60%;
+}
+.cc-slash-menu .cc-item-hint {
+  margin-top: 0;
+  flex: 1;
+}
+.cc-item-value {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-2);
+}
+.cc-typeahead .cc-item-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A narrow side bar wraps "Effort (Medium)", then puts the slider under it, rather than cutting the name. */
+.cc-effort {
+  flex-wrap: wrap;
+}
+.cc-effort .cc-item-name {
+  white-space: normal;
+}
+.cc-effort .cc-item-name .cc-item-value {
+  margin-left: 0;
+}
+button.cc-more-btn > .icon:last-child {
+  transition: transform var(--ease-toggle);
+}
+button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
+  transform: rotate(180deg);
+}
+/* Effort: a 76×18 track, a notch per level, a 14px thumb. */
+.cc-slider {
+  --track: 76px;
+  position: relative;
+  flex: none;
+  width: var(--track);
+  height: 18px;
+  margin-left: auto;
+  border-radius: var(--r-pill);
+  background: var(--border);
+  cursor: pointer;
+  touch-action: none;
+}
+.cc-slider::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(18px + var(--at) * (var(--track) - 18px));
+  border-radius: var(--r-pill);
+  background: var(--effort-fill);
+}
+.cc-notch {
+  position: absolute;
+  top: 7px;
+  left: calc(7px + var(--i) * (var(--track) - 18px));
+  width: 4px;
+  height: 4px;
+  border-radius: var(--r-round);
+  background: color-mix(in srgb, var(--fg-2) 40%, transparent);
+}
+.cc-thumb {
+  position: absolute;
+  top: 2px;
+  left: calc(2px + var(--at) * (var(--track) - 18px));
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-round);
+  background: var(--thumb);
+  box-shadow: var(--shadow-thumb);
+  transition: left var(--ease-toggle);
+}
+/* The / palette's filter: the composer's tone inside the menu. */
+.cc-search {
+  flex: none;
+  width: auto;
+  height: var(--h-md);
+  margin: var(--sp-1) var(--sp-1) var(--sp-1);
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: var(--t-90);
+  outline: none;
+}
+.cc-search::placeholder {
+  color: var(--fg-50);
+}
+
+/* The frozen send button's border colour, which the old button.primary rule set: kept so its computed style is unchanged. */
+.composer button.send-btn {
+  border-color: transparent;
+}
+
+/* Phone app (remote): one switch makes every control touch-sized. */
+[data-density='touch'] {
+  --h-xs: 28px;
+  --h-sm: 36px;
+  --h-md: var(--h-touch);
+}
+/* Fields on a phone keep 16px text: iOS zooms into anything smaller. */
+[data-density='touch'] .fl-input {
+  font-size: var(--t-touch);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-menu,
+  .fl-toast,
+  .fl-dialog,
+  .fl-sheet,
+  .fl-overlay,
+  .fl-tip {
+    animation: none;
+  }
+  .fl-dot[data-state='working'],
+  .fl-progress[data-indeterminate] > i {
+    animation: none;
+  }
+  .fl-time {
+    transition: none;
+  }
+}
+
+/* ==== The composer's mic (feat/mic-visualizer) ====
+   A bare glyph at rest; listening, it grows into a blue pill, [mic | level bars], white on blue.
+   Outside the frozen composer section (which stays byte for byte as approved) and one class more
+   specific than its button.cc-mic, so these win. */
+.composer button.cc-mic {
+  color: var(--mic-idle);
+  background: none;
+}
+.composer button.cc-mic:hover {
+  color: var(--mic-idle);
+  background: var(--ghost-hover);
+}
+.composer button.cc-mic[data-state='listening'] {
+  width: auto;
+  gap: 5px;
+  padding: 0 8px 0 5px;
+  color: var(--mic-fg);
+  background: var(--mic-bg);
+}
+.cc-input:has(button.cc-mic[data-state='listening']) textarea {
+  padding-right: 76px;
+}
+.mic-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+.mic-bars i {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--mic-fg);
+  transform: scaleY(0.15);
+}
+/* Reduced motion: one pulsing dot instead of the bars. */
+.mic-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mic-fg);
+  animation: mic-pulse 1.2s ease infinite;
+}
+@keyframes mic-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}

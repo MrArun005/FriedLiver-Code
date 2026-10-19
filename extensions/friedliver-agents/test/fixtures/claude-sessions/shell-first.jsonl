@@ -1,0 +1,6 @@
+{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"},"uuid":"u0","sessionId":"x"}
+{"type":"user","message":{"role":"user","content":"/model opus"},"uuid":"u1","sessionId":"x"}
+{"type":"user","message":{"role":"user","content":"npm uninstall -g @zed-industries/claude-agent-acp"},"uuid":"u2","sessionId":"x"}
+{"type":"user","message":{"role":"user","content":"hey"},"uuid":"u3","sessionId":"x"}
+{"type":"user","message":{"role":"user","content":"Why does the payslip PDF\ncut off the last row?"},"uuid":"u4","sessionId":"x"}
+{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a"}}]},"uuid":"a1","sessionId":"x"}

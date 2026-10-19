@@ -1,0 +1,219 @@
+import { describe, expect, it } from 'vitest';
+import { BROWSER_WIDTH, CONSOLE_BUDGET, ConsoleLog, browserNeedsApproval, checkBrowserUrl, clampBrowserWidth, isLocalhost, relaxLocalhostCors } from '../src/host/browserRules';
+import { handle, TOOLS } from '../src/bridge/mcp';
+import { parseCall } from '../src/bridge/protocol';
+
+describe('browser URLs agents may open', () => {
+  it('takes http and https, and adds http:// to bare localhost addresses', () => {
+    expect(checkBrowserUrl('https://example.com/a?b=1')).toBe('https://example.com/a?b=1');
+    expect(checkBrowserUrl(' http://localhost:3000 ')).toBe('http://localhost:3000/');
+    expect(checkBrowserUrl('localhost:5173/app')).toBe('http://localhost:5173/app');
+    expect(checkBrowserUrl('127.0.0.1:8080')).toBe('http://127.0.0.1:8080/');
+    expect(checkBrowserUrl('[::1]:4000')).toBe('http://[::1]:4000/');
+  });
+
+  it.each(['file:///etc/passwd', 'chrome://settings', 'devtools://devtools/bundled/inspector.html', 'javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,hi', 'about:blank', 'ftp://x.org', 'view-source:https://a.com', 'chrome-extension://abc/x'])(
+    'refuses %s',
+    (url) => expect(() => checkBrowserUrl(url)).toThrow(/only http and https/),
+  );
+
+  it('refuses what is not a URL', () => {
+    expect(() => checkBrowserUrl('not a url')).toThrow(/Not a URL/);
+    expect(() => checkBrowserUrl('')).toThrow(/Not a URL/);
+  });
+
+  it('knows localhost', () => {
+    expect(isLocalhost('http://localhost:3000/x')).toBe(true);
+    expect(isLocalhost('https://127.0.0.1/')).toBe(true);
+    expect(isLocalhost('http://[::1]:1/')).toBe(true);
+    expect(isLocalhost('http://localhost.evil.com/')).toBe(false);
+    expect(isLocalhost('http://127.0.0.2/')).toBe(false);
+    expect(isLocalhost('file://localhost/etc')).toBe(false);
+    expect(isLocalhost('garbage')).toBe(false);
+  });
+});
+
+describe('browser width', () => {
+  it('stays between 40% and 70% of the window', () => {
+    expect(clampBrowserWidth(0.55)).toBe(0.55);
+    expect(clampBrowserWidth(0.1)).toBe(BROWSER_WIDTH.min);
+    expect(clampBrowserWidth(0.95)).toBe(BROWSER_WIDTH.max);
+    expect(clampBrowserWidth(0.4)).toBe(0.4);
+    expect(clampBrowserWidth(0.7)).toBe(0.7);
+  });
+  it('falls back to half for anything that is not a number', () => {
+    for (const v of [undefined, null, NaN, Infinity, '0.6', {}]) expect(clampBrowserWidth(v)).toBe(0.5);
+  });
+});
+
+describe('which browser tools wait for the user', () => {
+  it('looking never does; acting does unless the chat is on Full auto', () => {
+    for (const tool of ['browser_snapshot', 'browser_screenshot', 'browser_console']) {
+      expect(browserNeedsApproval(tool, 'ask')).toBe(false);
+    }
+    for (const tool of ['browser_open', 'browser_click', 'browser_type', 'browser_back', 'browser_reload']) {
+      expect(browserNeedsApproval(tool, undefined)).toBe(true);
+      expect(browserNeedsApproval(tool, 'ask')).toBe(true);
+      expect(browserNeedsApproval(tool, 'edits')).toBe(true);
+      expect(browserNeedsApproval(tool, 'full')).toBe(false);
+    }
+  });
+});
+
+describe('relaxing CORS for localhost', () => {
+  const paused = (url: string, method = 'GET', headers: Record<string, string> = { Origin: 'http://localhost:3000' }) => ({
+    request: { url, method, headers },
+    responseHeaders: [
+      { name: 'Content-Type', value: 'application/json' },
+      { name: 'access-control-allow-origin', value: 'https://other.example' },
+    ],
+  });
+
+  it('leaves anything not from localhost alone', () => {
+    expect(relaxLocalhostCors(paused('https://api.example.com/x'))).toBeNull();
+    expect(relaxLocalhostCors(paused('http://localhost.evil.com/x'))).toBeNull();
+  });
+
+  it('leaves same-origin requests (no Origin) alone', () => {
+    expect(relaxLocalhostCors(paused('http://localhost:8080/x', 'GET', {}))).toBeNull();
+  });
+
+  it('allows the requesting origin on a localhost response, replacing what the server said', () => {
+    const r = relaxLocalhostCors(paused('http://127.0.0.1:8080/api'))!;
+    expect(r.fulfill).toBe(false);
+    const names = r.headers.map((h) => h.name.toLowerCase());
+    expect(names.filter((n) => n === 'access-control-allow-origin')).toHaveLength(1);
+    expect(r.headers).toContainEqual({ name: 'Access-Control-Allow-Origin', value: 'http://localhost:3000' });
+    expect(r.headers).toContainEqual({ name: 'Access-Control-Allow-Credentials', value: 'true' });
+    expect(r.headers).toContainEqual({ name: 'Content-Type', value: 'application/json' });
+  });
+
+  it('answers a localhost preflight itself, echoing what was asked', () => {
+    const r = relaxLocalhostCors(
+      paused('http://localhost:8080/api', 'OPTIONS', { origin: 'http://localhost:3000', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'content-type, x-token' }),
+    )!;
+    expect(r.fulfill).toBe(true);
+    expect(r.headers).toContainEqual({ name: 'Access-Control-Allow-Methods', value: 'PUT' });
+    expect(r.headers).toContainEqual({ name: 'Access-Control-Allow-Headers', value: 'content-type, x-token' });
+    expect(r.headers.some((h) => h.name === 'Content-Type')).toBe(false);
+  });
+});
+
+describe('browser tool arguments', () => {
+  it('lists the browser tools over MCP', () => {
+    const names = TOOLS.map((t) => t.name);
+    for (const n of ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload']) expect(names).toContain(n);
+  });
+
+  it('parses good calls', () => {
+    expect(parseCall('browser_open', { url: 'http://localhost:3000' })).toEqual({ tool: 'browser_open', url: 'http://localhost:3000' });
+    expect(parseCall('browser_click', { selector: '#go' })).toEqual({ tool: 'browser_click', selector: '#go' });
+    expect(parseCall('browser_click', { text: 'Sign in' })).toEqual({ tool: 'browser_click', text: 'Sign in' });
+    expect(parseCall('browser_type', { selector: 'input[name=q]', text: '' })).toEqual({ tool: 'browser_type', selector: 'input[name=q]', text: '' });
+    for (const tool of ['browser_snapshot', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload']) expect(parseCall(tool, {})).toEqual({ tool });
+  });
+
+  it.each([
+    ['browser_open', {}],
+    ['browser_open', { url: 42 }],
+    ['browser_open', { url: 'x'.repeat(5000) }],
+    ['browser_click', {}],
+    ['browser_click', { selector: '#a', text: 'b' }],
+    ['browser_click', { selector: '  ' }],
+    ['browser_type', { selector: '#a' }],
+    ['browser_type', { text: 'hi' }],
+    ['browser_type', { selector: '#a', text: 7 }],
+  ])('refuses %s %j', (tool, args) => {
+    expect(parseCall(tool, args)).toBeNull();
+    expect(handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } })).toMatchObject({ reply: { result: { isError: true } } });
+  });
+});
+
+describe('security: only FriedLiver-opened tabs, local-only CORS, private screenshots', () => {
+  it('never adopts a tab FriedLiver did not open', async () => {
+    const { ownTab } = await import('../src/host/browserRules');
+    const mine = { id: 1 };
+    const users = { id: 2 };
+    expect(ownTab(mine, [users, mine])).toBe(mine);
+    expect(() => ownTab(undefined, [users])).toThrow(/browser_open first/);
+    expect(() => ownTab(mine, [users])).toThrow(/browser_open first/);
+  });
+
+  it('leaves a non-local Origin untouched, even on a localhost response', () => {
+    for (const origin of ['https://evil.example', 'http://localhost.evil.com', 'null']) {
+      expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/api', method: 'GET', headers: { Origin: origin } }, responseHeaders: [] })).toBeNull();
+      expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/api', method: 'OPTIONS', headers: { Origin: origin } } })).toBeNull();
+    }
+    expect(relaxLocalhostCors({ request: { url: 'http://localhost:8080/', method: 'GET', headers: { Origin: 'http://[::1]:3000' } } })).not.toBeNull();
+  });
+
+  it('saves screenshots in a private per-session folder, never overwriting', async () => {
+    const { saveScreenshot } = await import('../src/host/browserRules');
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'fl-test-'));
+    const a = await saveScreenshot(base, Buffer.from('a'));
+    const b = await saveScreenshot(base, Buffer.from('b'));
+    expect(a).not.toBe(b);
+    expect(path.dirname(a)).toBe(path.dirname(b));
+    expect(path.dirname(path.dirname(a))).toBe(base);
+    expect(path.basename(path.dirname(a))).not.toBe('friedliver-browser');
+    if (process.platform !== 'win32') expect((await fs.stat(path.dirname(a))).mode & 0o777).toBe(0o700);
+    expect(await fs.readFile(a, 'utf8')).toBe('a');
+    await fs.rm(base, { recursive: true });
+  });
+});
+
+describe('screenshots sized for tokens', () => {
+  it('prices an image as Claude does: w×h/750 after its own downscale', async () => {
+    const { imageTokens } = await import('../src/host/browserRules');
+    expect(imageTokens(1024, 640)).toBe(874);
+    // 2560×1600 (a retina viewport) is scaled to fit 1568 px and 1.15 MP first.
+    expect(imageTokens(2560, 1600)).toBeGreaterThan(1500);
+    expect(imageTokens(2560, 1600)).toBeLessThanOrEqual(1600);
+  });
+
+  it('captures the viewport at most max_width CSS px wide at 1x, or one element with a margin, as JPEG', async () => {
+    const { shotParams } = await import('../src/host/browserRules');
+    const view = shotParams({ width: 1280, height: 800, dpr: 2 }, {});
+    expect(view).toMatchObject({ format: 'jpeg', clip: { x: 0, y: 0, width: 1280, height: 800 } });
+    expect(view.clip.scale * 2 * 1280).toBeCloseTo(1024);
+    expect(view.size).toEqual({ width: 1024, height: 640 });
+    const el = shotParams({ width: 1280, height: 800, dpr: 2, scrollX: 0, scrollY: 300 }, { rect: { x: 100, y: 50, width: 300, height: 40 } });
+    expect(el.clip).toMatchObject({ x: 92, y: 342, width: 316, height: 56 });
+    expect(el.size).toEqual({ width: 316, height: 56 });
+    expect(shotParams({ width: 1280, height: 800, dpr: 1 }, { maxWidth: 400 }).size).toEqual({ width: 400, height: 250 });
+    expect(parseCall('browser_screenshot', { selector: 'e3', max_width: 600 })).toEqual({ tool: 'browser_screenshot', selector: 'e3', maxWidth: 600 });
+    expect(parseCall('browser_screenshot', { max_width: 50 })).toBeNull();
+  });
+});
+
+describe('browser_console', () => {
+  it('gives each chat only the lines since it last asked', () => {
+    const log = new ConsoleLog();
+    expect(log.take('a')).toBe('No console messages since FriedLiver attached to the page.');
+    log.push('[log] one');
+    log.push('[log] two');
+    expect(log.take('a')).toBe('[log] one\n[log] two');
+    expect(log.take('a')).toBe('No new console messages since your last browser_console.');
+    log.push('[error] three');
+    expect(log.take('a')).toBe('[error] three');
+    // Another chat starts from the beginning of what is kept.
+    expect(log.take('b')).toBe('[log] one\n[log] two\n[error] three');
+  });
+
+  it('collapses repeats and keeps to its budget, newest first, saying what it left out', () => {
+    const log = new ConsoleLog();
+    for (let i = 0; i < 50; i++) log.push('[warn] React key missing');
+    log.push('[error] boom');
+    expect(log.take('a')).toBe('[repeats collapsed]\n[warn] React key missing (×50)\n[error] boom');
+    for (let i = 0; i < 400; i++) log.push(`[log] line ${i} ${'x'.repeat(80)}`);
+    const out = log.take('a');
+    expect(out.length).toBeLessThanOrEqual(CONSOLE_BUDGET + 200);
+    expect(out).toMatch(/^\[\d+ older lines left out \(over the 6,000-character budget\); 100 earlier lines no longer kept\]/);
+    expect(out.endsWith(`[log] line 399 ${'x'.repeat(80)}`)).toBe(true);
+    log.push('y'.repeat(9000));
+    expect(log.take('a').length).toBeLessThanOrEqual(2000);
+  });
+});

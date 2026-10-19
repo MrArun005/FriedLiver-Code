@@ -105,3 +105,15 @@ function isMissing(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException).code;
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
+
+/**
+ * A path a request names (a command's folder, a file it reads), relative ones resolved against the
+ * chat's folder, with every symlink followed: the real path when it is inside `roots`, else null.
+ * Fails closed: a relative path with no folder to resolve it against, or one that doesn't resolve, is null.
+ */
+export function workspacePath(file: string | undefined, base: string | undefined, roots: readonly string[]): string | null {
+  if (!file || file.includes('\0')) return null;
+  if (!path.isAbsolute(file) && !(base && path.isAbsolute(base))) return null;
+  const real = realPath(path.isAbsolute(file) ? file : path.resolve(base!, file));
+  return real !== null && insideRoots(real, roots) !== null ? real : null;
+}
