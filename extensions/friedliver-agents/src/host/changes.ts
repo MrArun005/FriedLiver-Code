@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { chatRef } from '../shared/names';
 import * as vscode from 'vscode';
 import * as git from '@friedliver/main/workspace/git';
 import type { AgentCore } from './core';
@@ -13,13 +14,13 @@ function beforeUri(chatId: string, file: string): vscode.Uri {
 /** Serves the "before" side of a chat's diffs from its turn log. */
 export function registerBeforeProvider(core: () => AgentCore): vscode.Disposable {
   return vscode.workspace.registerTextDocumentContentProvider(BEFORE_SCHEME, {
-    provideTextDocumentContent(uri) {
+    async provideTextDocumentContent(uri) {
       const chatId = uri.path.split('/')[1];
       const file = new URLSearchParams(uri.query).get('file');
       if (!chatId || !file || !core().chat(chatId)) return '';
       // Only files the chat touched, so this can't be used to read anything else.
       if (!core().touchedFiles(chatId).includes(file)) return '';
-      return core().beforeChat(chatId, file) ?? '';
+      return (await core().beforeChat(chatId, file)) ?? '';
     },
   });
 }
@@ -45,24 +46,25 @@ export async function viewChanges(core: AgentCore, chatId: string): Promise<void
       const task = vscode.Uri.file(path.join(wt.path, f.path));
       return [task, f.status === 'A' ? undefined : main, f.status === 'D' ? undefined : task];
     });
-    await vscode.commands.executeCommand('vscode.changes', `${chat.label}: ${wt.branch} vs the main checkout`, list);
+    await vscode.commands.executeCommand('vscode.changes', `${chatRef(chat)}: ${wt.branch} vs the main checkout`, list);
     return;
   }
 
   const touched = core.touchedFiles(chatId);
   if (!touched.length) {
-    void vscode.window.showInformationMessage(`${chat.label} hasn’t changed any files.`);
+    void vscode.window.showInformationMessage(`${chatRef(chat)} hasn’t changed any files.`);
     return;
   }
-  const known = touched.filter((f) => core.beforeChat(chatId, f) !== undefined);
+  const before = await Promise.all(touched.map((f) => core.beforeChat(chatId, f)));
+  const known = touched.filter((_, n) => before[n] !== undefined);
   if (known.length) {
-    const list = known.map((f) => [vscode.Uri.file(f), core.beforeChat(chatId, f) === null ? undefined : beforeUri(chatId, f), vscode.Uri.file(f)]);
-    await vscode.commands.executeCommand('vscode.changes', `${chat.label}: changes since the chat started`, list);
+    const list = known.map((f) => [vscode.Uri.file(f), before[touched.indexOf(f)] === null ? undefined : beforeUri(chatId, f), vscode.Uri.file(f)]);
+    await vscode.commands.executeCommand('vscode.changes', `${chatRef(chat)}: changes since the chat started`, list);
     return;
   }
   const picked = await vscode.window.showQuickPick(
     touched.map((f) => ({ label: path.basename(f), description: vscode.workspace.asRelativePath(f), file: f })),
-    { title: `Files ${chat.label} touched`, placeHolder: 'Open a file' },
+    { title: `Files changed in ${chatRef(chat)}`, placeHolder: 'Open a file' },
   );
   if (picked) await vscode.window.showTextDocument(vscode.Uri.file(picked.file), { preview: true });
 }

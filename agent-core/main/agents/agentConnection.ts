@@ -3,6 +3,7 @@ import { Readable, Writable } from 'node:stream';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentSpec } from './registry';
 import { killProcessTree, launchFor } from './processes';
+import { authStatusOf, type AuthStatus } from './signIn';
 import { TerminalManager, type TerminalListener } from './terminals';
 
 /** What the editor provides to a running agent. */
@@ -11,10 +12,27 @@ export interface ClientHost {
   requestPermission(req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionResponse>;
   readTextFile(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse>;
   writeTextFile(req: acp.WriteTextFileRequest): Promise<void>;
+  /** A question for the user as a small form (ACP form elicitation). Without it, every one is declined. */
+  createElicitation?(req: acp.CreateElicitationRequest, signal: AbortSignal): Promise<acp.CreateElicitationResponse>;
+  /** The identity the agent says it runs as (`_auth/status_update`), already checked. */
+  authStatus?(status: AuthStatus): void;
   terminalListener?: TerminalListener;
 }
 
 export type AgentStartFailure = 'not_installed' | 'crashed';
+
+/** Gemini's unstable model list, which SDK 1.8 has no type for. */
+export interface SessionModels {
+  currentModelId: string;
+  availableModels: { modelId: string; name: string; description?: string | null }[];
+}
+
+/** What `session/new` and `session/load` answer besides the session id. */
+export interface SessionSetup {
+  configOptions?: acp.SessionConfigOption[] | null;
+  modes?: acp.SessionModeState | null;
+  models?: SessionModels | null;
+}
 
 export class AgentStartError extends Error {
   constructor(
@@ -58,6 +76,7 @@ export class AgentConnection {
     readonly info: acp.InitializeResponse,
     readonly terminals: TerminalManager,
     private readonly stderrTail: string[],
+    private readonly log?: (line: string) => void,
   ) {
     this.exited = new Promise((resolve) => {
       const onExit = () => {
@@ -131,8 +150,14 @@ export class AgentConnection {
     const connection = lib
       .client({ name: 'friedliver' })
       .onNotification(lib.methods.client.session.update, ({ params }) => host.sessionUpdate(params))
+      // Claude's and Codex's adapters say which account they run as; an agent that doesn't stays silent.
+      .onNotification('_auth/status_update', (raw) => raw, ({ params }) => {
+        const status = authStatusOf(params);
+        if (status) host.authStatus?.(status);
+      })
       .onRequest(lib.methods.client.session.requestPermission, ({ params, signal }) => host.requestPermission(params, signal))
       .onRequest(lib.methods.client.fs.readTextFile, ({ params }) => host.readTextFile(params))
+      .onRequest(lib.methods.client.elicitation.create, ({ params, signal }) => host.createElicitation?.(params, signal) ?? Promise.resolve({ action: 'decline' as const }))
       .onRequest(lib.methods.client.fs.writeTextFile, async ({ params }) => {
         await host.writeTextFile(params);
         return {};
@@ -158,12 +183,16 @@ export class AgentConnection {
             fs: { readTextFile: true, writeTextFile: true },
             terminal: true,
             auth: { terminal: true },
+            // On/off options (Fast mode) as toggles, and short notices ("Auto mode unavailable") as notices.
+            session: { configOptions: { boolean: {} }, notices: {} },
+            // Questions as small forms: Claude's AskUserQuestion needs this, or it turns the tool off.
+            elicitation: { form: {} },
           },
           clientInfo: { name: 'friedliver', version: options.clientVersion },
         }),
         failed,
       ]);
-      return new AgentConnection(spec, child, connection, info, terminals, stderrTail);
+      return new AgentConnection(spec, child, connection, info, terminals, stderrTail, log);
     } catch (err) {
       // The connection often closes a moment before the process reports its
       // exit (always on Windows, where a missing command exits through
@@ -191,21 +220,75 @@ export class AgentConnection {
     return this.info.agentCapabilities?.loadSession === true;
   }
 
+  /** Whether session MCP servers may be HTTP endpoints, not only programs to start. */
+  get supportsHttpMcp(): boolean {
+    return this.info.agentCapabilities?.mcpCapabilities?.http === true;
+  }
+
   get authMethods(): acp.AuthMethod[] {
     return this.info.authMethods ?? [];
   }
 
-  /** `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own. */
-  newSession(cwd: string, mcpServers: acp.McpServer[] = []): Promise<acp.NewSessionResponse> {
-    return this.connection.agent.request(sdk!.methods.agent.session.new, { cwd, mcpServers });
+  /** A message can join the running turn (`_session/steering`, Claude's adapter and the Demo). */
+  get supportsSteering(): boolean {
+    const meta = this.info._meta as { steering?: { supported?: unknown } } | null | undefined;
+    return meta?.steering?.supported === true;
   }
 
-  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = []): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers });
+  /** The agent can sign out itself (ACP `logout`), so FriedLiver never deletes its files. */
+  get supportsLogout(): boolean {
+    return (this.info.agentCapabilities as { auth?: { logout?: unknown } } | undefined)?.auth?.logout != null;
+  }
+
+  get supportsCloseSession(): boolean {
+    return this.info.agentCapabilities?.sessionCapabilities?.close != null;
+  }
+
+  /**
+   * `mcpServers` are tool servers the agent starts for this session, e.g. FriedLiver's own.
+   * `meta` is the request's `_meta`, e.g. claude-agent-acp's `systemPrompt` and `claudeCode.options`.
+   */
+  newSession(cwd: string, mcpServers: acp.McpServer[] = [], meta?: Record<string, unknown>): Promise<SessionSetup & { sessionId: string }> {
+    return this.request(sdk!.methods.agent.session.new, { cwd, mcpServers, ...(meta ? { _meta: meta } : {}) });
+  }
+
+  async loadSession(sessionId: string, cwd: string, mcpServers: acp.McpServer[] = [], meta?: Record<string, unknown>): Promise<SessionSetup> {
+    return ((await this.request<SessionSetup | undefined>(sdk!.methods.agent.session.load, { sessionId, cwd, mcpServers, ...(meta ? { _meta: meta } : {}) })) as SessionSetup | undefined) ?? {};
+  }
+
+  /** Returns the agent's whole list of options afterwards: changing the model can change the effort levels. */
+  async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<acp.SessionConfigOption[]> {
+    const params: acp.SetSessionConfigOptionRequest =
+      typeof value === 'boolean' ? { sessionId, configId, type: 'boolean', value } : { sessionId, configId, value };
+    const r = await this.request<acp.SetSessionConfigOptionResponse>(sdk!.methods.agent.session.setConfigOption, params);
+    return r.configOptions ?? [];
+  }
+
+  async setMode(sessionId: string, modeId: string): Promise<void> {
+    await this.request(sdk!.methods.agent.session.setMode, { sessionId, modeId });
+  }
+
+  /** Gemini's unstable `session/set_model`, which SDK 1.8 has no type for. */
+  async setModel(sessionId: string, modelId: string): Promise<void> {
+    await this.request('session/set_model', { sessionId, modelId });
+  }
+
+  /** Adds a message to the running turn. False when no turn is running, so it must go as a prompt. */
+  async steer(sessionId: string, prompt: acp.ContentBlock[]): Promise<boolean> {
+    const r = await this.request<{ outcome?: string }>('_session/steering', {
+      sessionId,
+      prompt,
+      _meta: { steering: { idleBehavior: 'promptRequired' } },
+    });
+    return r?.outcome !== 'promptRequired';
+  }
+
+  async closeSession(sessionId: string): Promise<void> {
+    await this.request(sdk!.methods.agent.session.close, { sessionId });
   }
 
   prompt(sessionId: string, prompt: acp.ContentBlock[]): Promise<acp.PromptResponse> {
-    return this.connection.agent.request(sdk!.methods.agent.session.prompt, { sessionId, prompt });
+    return this.request(sdk!.methods.agent.session.prompt, { sessionId, prompt });
   }
 
   cancel(sessionId: string): Promise<void> {
@@ -213,7 +296,11 @@ export class AgentConnection {
   }
 
   async authenticate(methodId: string): Promise<void> {
-    await this.connection.agent.request(sdk!.methods.agent.authenticate, { methodId });
+    await this.request(sdk!.methods.agent.authenticate, { methodId });
+  }
+
+  async logout(): Promise<void> {
+    await this.request(sdk!.methods.agent.logout, {});
   }
 
   async stop(): Promise<void> {
@@ -232,6 +319,16 @@ export class AgentConnection {
     clearTimeout(forced);
   }
 
+  /** Every request to the agent; a failure is logged with the agent's own code, message and data before it is thrown on. */
+  private async request<T>(method: string, params: unknown): Promise<T> {
+    try {
+      return await this.connection.agent.request<T>(method, params as never);
+    } catch (err) {
+      if (this.alive) this.log?.(`[${this.spec.id}] ${method} failed: ${describeAgentError(err)}`);
+      throw err;
+    }
+  }
+
   recentStderr(): string {
     return this.stderrTail.join('\n');
   }
@@ -243,6 +340,46 @@ function notInstalled(spec: AgentSpec): AgentStartError {
     spec,
     'not_installed',
   );
+}
+
+/** An error as the log shows it: the JSON-RPC code, message and data. */
+export function describeAgentError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const { code, data } = err as { code?: unknown; data?: unknown };
+  const json = data === undefined ? '' : JSON.stringify(data);
+  return `${code !== undefined ? `code ${String(code)} ` : ''}"${err.message}"${json ? ` data ${json.length > 2000 ? `${json.slice(0, 2000)}…` : json}` : ''}`;
+}
+
+/**
+ * What the agent itself said went wrong. Agents often answer with a bare
+ * "Internal error" and put the reason in `data`: Gemini as `details`, Codex as
+ * `message` holding the API's JSON error.
+ */
+export function agentErrorMessage(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  return reasonIn((err as { data?: unknown }).data) ?? err.message;
+}
+
+function reasonIn(data: unknown, depth = 0): string | undefined {
+  if (depth > 6) return undefined;
+  if (typeof data === 'string') {
+    const s = data.trim();
+    if (!s) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (parsed && typeof parsed === 'object') return reasonIn(parsed, depth + 1) ?? s;
+    } catch {
+      // Plain text.
+    }
+    return s;
+  }
+  if (!data || typeof data !== 'object') return undefined;
+  const d = data as Record<string, unknown>;
+  for (const key of ['error', 'message', 'details', 'detail', 'reason']) {
+    const found = reasonIn(d[key], depth + 1);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 export function isAuthRequired(err: unknown): boolean {

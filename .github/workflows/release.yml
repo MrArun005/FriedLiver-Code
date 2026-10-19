@@ -1,0 +1,127 @@
+name: Release
+
+# One button: Actions > Release > Run workflow (on main). Takes main's head commit,
+# refuses unless CI passed on it, picks the next version (v1.142.0-N+1, see
+# scripts/release.mjs), writes notes from the pull requests merged since the last
+# release, then build.yml builds every OS and publishes the release (which creates
+# the tag on that commit). Last, a Mac downloads the published DMG and zip and checks
+# their SHA-256 and signature. docs/RELEASING.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time; a second click waits.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      notes: ${{ steps.version.outputs.notes }}
+    steps:
+      - name: Main only, and only when CI passed on it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$REF" != refs/heads/main ]; then
+            echo "::error::Run Release on main, not $REF."
+            exit 1
+          fi
+          result=$(gh run list --workflow ci.yml --commit "$SHA" --event push --limit 1 --json status,conclusion --jq '.[0] | "\(.status)/\(.conclusion)"')
+          echo "CI on $SHA: ${result:-no run}"
+          if [ "$result" != completed/success ]; then
+            echo "::error::CI on main ($SHA) is ${result:-missing}, not green. Wait for it or fix main, then run Release again."
+            exit 1
+          fi
+      # All history and tags: the version comes from the tags, the notes from the commits since the last one.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release.mjs
+
+  build:
+    needs: prepare
+    # build.yml's release job publishes, so it may write releases (and only that job asks to).
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      sha: ${{ github.sha }}
+      notes: ${{ needs.prepare.outputs.notes }}
+
+  # What a user gets: the published DMG and zip match SHA256SUMS.txt, and the app in each
+  # is signed with FriedLiver's certificate (not ad hoc, not a cdhash) and verifies strictly.
+  verify:
+    needs: [prepare, build]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Download and check the macOS release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.version }}
+          # The signing certificate's hash (docs/BUILD.md); change it here when the certificate is rotated.
+          CERT_ROOT: b96aa277e482e0496e8a4c1cda1b881748597643
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dir="$RUNNER_TEMP/verify"
+          mkdir -p "$dir" && cd "$dir"
+          gh release download "$TAG" -p 'FriedLiver-darwin-arm64-*.dmg' -p 'friedliver-fork-macos-arm64.zip' -p SHA256SUMS.txt
+          dmgs=(FriedLiver-darwin-arm64-*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ] || [ ! -f friedliver-fork-macos-arm64.zip ]; then
+            echo "::error::$TAG must have exactly one macOS DMG and friedliver-fork-macos-arm64.zip"
+            exit 1
+          fi
+          for f in "${dmgs[0]}" friedliver-fork-macos-arm64.zip; do
+            line=$(awk -v f="$f" '$2 == f' SHA256SUMS.txt)
+            if [ -z "$line" ]; then echo "::error::$f is not in SHA256SUMS.txt"; exit 1; fi
+            echo "$line" | shasum -a 256 -c - || { echo "::error::$f does not match SHA256SUMS.txt"; exit 1; }
+          done
+          check() {
+            local app=$1 requirement
+            codesign --verify --deep --strict --verbose=2 "$app" || { echo "::error::$app: codesign --verify --deep --strict failed"; exit 1; }
+            requirement=$(codesign -d -r- "$app" 2>&1)
+            echo "$requirement"
+            if ! grep -qF "certificate root = H\"$CERT_ROOT\"" <<< "$requirement"; then
+              echo "::error::$app is not signed with FriedLiver's certificate (expected certificate root = H\"$CERT_ROOT\")"
+              exit 1
+            fi
+          }
+          mnt="$dir/dmg"
+          mkdir "$mnt"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "${dmgs[0]}"
+          apps=("$mnt"/*.app)
+          [ "${#apps[@]}" -eq 1 ] || { echo "::error::the DMG holds ${#apps[@]} apps"; exit 1; }
+          check "${apps[0]}"
+          hdiutil detach "$mnt"
+          ditto -x -k friedliver-fork-macos-arm64.zip unzipped
+          apps=(unzipped/*.app)
+          [ "${#apps[@]}" -eq 1 ] || { echo "::error::the zip holds ${#apps[@]} apps"; exit 1; }
+          check "${apps[0]}"
+          echo "$TAG: DMG and zip match SHA256SUMS.txt and are signed with certificate root $CERT_ROOT." | tee -a "$GITHUB_STEP_SUMMARY"

@@ -9,7 +9,11 @@ import type { AgentKey } from '../shared/model';
  */
 export function installCommandFor(agent: AgentKey): string | null {
   if (agent === 'demo') return null;
-  const command = DEFAULT_AGENTS[agent].installCommand;
+  return cliLineFor(DEFAULT_AGENTS[agent].installCommand);
+}
+
+/** One of FriedLiver's own lines for a terminal (shared/accounts.ts CLI_ACCOUNTS), if it has only plain characters. */
+export function cliLineFor(command: string): string | null {
   return /^[\w@/.: -]+$/.test(command) ? command : null;
 }
 

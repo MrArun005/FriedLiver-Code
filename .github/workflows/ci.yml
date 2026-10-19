@@ -6,6 +6,9 @@ name: CI
 on:
   push:
   pull_request:
+  # update-prs.yml starts it on a pull request branch it merged main into: its push
+  # (made with the workflow token) starts no workflow by itself.
+  workflow_dispatch:
 
 # Read-only token; pull requests from forks get no secrets either (this is not pull_request_target).
 permissions:
@@ -31,6 +34,20 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: node extensions/friedliver-theme/scripts/generate-themes.mjs --check
+      # Mac & Windows control on each OS: its tests (programs mocked), the macOS scripts compiled with
+      # osacompile, and on Windows the real PowerShell templates with harmless inputs (parse every
+      # template, list processes, a clipboard round trip).
+      - name: System control tests
+        working-directory: extensions/friedliver-agents
+        env:
+          FRIEDLIVER_SYSTEM_SMOKE: ${{ runner.os == 'Windows' && '1' || '' }}
+        run: |
+          npm ci
+          npx vitest run test/system.test.ts test/systemRequests.test.ts
+      # The composer mic's Swift helper compiles (build.yml builds and bundles it).
+      - name: Compile the dictation helper
+        if: runner.os == 'macOS'
+        run: extensions/friedliver-agents/native/build.sh --check
 
   extensions:
     needs: test

@@ -7,6 +7,10 @@ import { insideRoots } from '../src/host/paths';
 describe('webview message validation', () => {
   it('accepts well-formed messages', () => {
     expect(parseWebviewMessage({ type: 'ready' })).toEqual({ type: 'ready' });
+    expect(parseWebviewMessage({ type: 'openChat', chatId: 'chat-1', item: 'toolu_01' })).toEqual({ type: 'openChat', chatId: 'chat-1', item: 'toolu_01' });
+    expect(parseWebviewMessage({ type: 'openChat', chatId: 'chat-1', item: 'a b' })).toEqual({ type: 'openChat', chatId: 'chat-1' });
+    expect(parseWebviewMessage({ type: 'openClaudeSession', sessionId: '11111111-1111-4111-8111-111111111111' })).toEqual({ type: 'openClaudeSession', sessionId: '11111111-1111-4111-8111-111111111111' });
+    expect(parseWebviewMessage({ type: 'openClaudeSession', sessionId: '../x' })).toBeNull();
     expect(parseWebviewMessage({ type: 'newChat', agent: 'gemini' })).toEqual({ type: 'newChat', agent: 'gemini' });
     expect(parseWebviewMessage({ type: 'send', chatId: 'chat-1', text: 'hi', images: [{ name: 'a.png', mimeType: 'image/png', data: 'aGk=' }] })).toMatchObject({
       type: 'send',
@@ -14,6 +18,17 @@ describe('webview message validation', () => {
     });
     expect(parseWebviewMessage({ type: 'permission', requestId: 'perm-1', optionId: null })).toEqual({ type: 'permission', requestId: 'perm-1', optionId: null });
     expect(parseWebviewMessage({ type: 'notice', chatId: 'chat-1', action: { label: 'Log in', do: 'signIn', agent: 'claude', methodId: 'claude-login' } })).toBeTruthy();
+    expect(parseWebviewMessage({ type: 'imageThumb', path: '/w/a.png', extra: 1 })).toEqual({ type: 'imageThumb', path: '/w/a.png' });
+    expect(parseWebviewMessage({ type: 'revealImage', path: '/w/a.png' })).toEqual({ type: 'revealImage', path: '/w/a.png' });
+    // Done looking names a scope, never files: the host picks the files from its own state.
+    expect(parseWebviewMessage({ type: 'imagesDone', paths: ['/etc/passwd'] })).toEqual({ type: 'imagesDone' });
+    expect(parseWebviewMessage({ type: 'imagesDone', chatId: 'claude:abc-1' })).toEqual({ type: 'imagesDone', chatId: 'claude:abc-1' });
+    expect(parseWebviewMessage({ type: 'imagesUndo' })).toEqual({ type: 'imagesUndo' });
+    expect(parseWebviewMessage({ type: 'imagesCommit' })).toEqual({ type: 'imagesCommit' });
+    expect(parseWebviewMessage({ type: 'imagePin', key: 'c1\u0000/w/a.png', pinned: true })).toEqual({ type: 'imagePin', key: 'c1\u0000/w/a.png', pinned: true });
+    expect(parseWebviewMessage({ type: 'imagesDone', chatId: '../x y' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'imagePin', key: '', pinned: true })).toBeNull();
+    expect(parseWebviewMessage({ type: 'imagePin', key: 'k', pinned: 'yes' })).toBeNull();
   });
 
   it('drops extra fields', () => {
@@ -39,6 +54,9 @@ describe('webview message validation', () => {
       { type: 'notice', chatId: 'chat-1', action: { label: 'x', do: 'install', command: '' } },
       { type: 'createTask', agent: 'demo', prompt: '   ', worktree: false },
       { type: 'createTask', agent: 'demo', prompt: 'go', worktree: 'yes' },
+      { type: 'imageThumb', path: '' },
+      { type: 'imageThumb', path: 'x'.repeat(5000) },
+      { type: 'revealImage', path: 42 },
     ];
     for (const m of bad) expect(parseWebviewMessage(m), JSON.stringify(m)).toBeNull();
   });
@@ -77,6 +95,32 @@ describe('code references in messages (additive fields)', () => {
   });
 });
 
+describe('Run in terminal', () => {
+  const heredoc = "cat << 'EOF' | python3 minidb.py\nSELECT 1;\n\tEOF";
+
+  it('takes a command with its lines and tabs as it is, and an optional folder', () => {
+    expect(parseWebviewMessage({ type: 'runInTerminal', chatId: 'chat-1', command: heredoc })).toEqual({ type: 'runInTerminal', chatId: 'chat-1', command: heredoc });
+    expect(parseWebviewMessage({ type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: '/work/app', extra: true })).toEqual({ type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: '/work/app' });
+  });
+
+  it('refuses control characters, empty or huge commands, and bad ids or folders', () => {
+    const bad: unknown[] = [
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'echo \u001b]0;title\u0007' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'echo a\u0000b' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'echo \u0003' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: '  \n ' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'x'.repeat(64 * 1024 + 1) },
+      { type: 'runInTerminal', chatId: 'chat-1', command: ['npm', 'test'] },
+      { type: 'runInTerminal', chatId: '../x', command: 'npm test' },
+      { type: 'runInTerminal', command: 'npm test' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: '' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: 'a\0b' },
+      { type: 'runInTerminal', chatId: 'chat-1', command: 'npm test', cwd: 3 },
+    ];
+    for (const m of bad) expect(parseWebviewMessage(m), JSON.stringify(m).slice(0, 120)).toBeNull();
+  });
+});
+
 describe('workspace path check', () => {
   const roots = ['/work/app', '/work/.app-worktrees/task-1'];
 
@@ -109,7 +153,7 @@ describe('markdown', () => {
     expect(parseMarkdown('# Title\n\nSome **bold** text.\n\n- one\n- two\n\n```ts\nconst a = 1;\n```')).toEqual([
       { t: 'h', level: 1, inline: [{ t: 'text', v: 'Title' }] },
       { t: 'p', inline: [{ t: 'text', v: 'Some ' }, { t: 'strong', v: 'bold' }, { t: 'text', v: ' text.' }] },
-      { t: 'ul', items: [[{ t: 'text', v: 'one' }], [{ t: 'text', v: 'two' }]] },
+      { t: 'ul', items: [{ inline: [{ t: 'text', v: 'one' }] }, { inline: [{ t: 'text', v: 'two' }] }] },
       { t: 'pre', lang: 'ts', code: 'const a = 1;' },
     ]);
   });

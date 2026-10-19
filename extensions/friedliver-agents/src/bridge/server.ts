@@ -1,15 +1,19 @@
-// The "friedliver" MCP server (dist/bridge.js). Each agent session that may
-// reach other agents starts one. It offers the tools in mcp.ts and passes every
-// call to the editor over a local socket; the editor checks the call against
-// the user's setting, asks the user when it should, and does the work.
+// The "friedliver" MCP server over stdio (dist/bridge.js). Each session of an
+// agent that takes only stdio MCP servers starts one (agents that take HTTP
+// reach the same tools in the editor, http.ts). It offers the tools in mcp.ts
+// and passes every call to the editor over a local socket; the editor checks
+// the call against the user's setting, asks the user when it should, and does
+// the work.
 import net from 'node:net';
-import { handle, progress, toolReply, type ToolResult } from './mcp';
+import { OMIT_ENV, handle, progress, toolReply, type ToolResult } from './mcp';
 import { BRIDGE_ENV, BRIDGE_LIMITS, TOKEN_ENV, encodeRequest, type BridgeCall, type BridgeResponse } from './protocol';
 
 /** While an answer is pending, a progress note this often keeps clients that time out idle tools waiting. */
 const PROGRESS_MS = 15_000;
 
 const address = process.env[BRIDGE_ENV];
+/** Tools this session isn't offered (mcp.ts toolsFor), as the editor worked them out when it started the session. */
+const omit = (process.env[OMIT_ENV] ?? '').split(',').filter(Boolean);
 const token = process.env[TOKEN_ENV];
 // Nothing this process starts should inherit the chat's secret.
 delete process.env[TOKEN_ENV];
@@ -96,7 +100,7 @@ function onLine(line: string): void {
   }
   // Batches are from older protocol versions; each message is answered on its own line.
   for (const message of Array.isArray(raw) ? raw : [raw]) {
-    const handled = handle(message);
+    const handled = handle(message, false, omit);
     if (!handled) continue;
     if ('reply' in handled) write(handled.reply);
     else void run(handled.call, handled.args, handled.progressToken).then((r) => write(toolReply(handled.id, r)));

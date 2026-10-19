@@ -14,26 +14,35 @@ export interface AgentSpec {
   installCommand: string;
   /** How to sign in with the vendor's own tool, shown when the agent asks for auth. */
   loginHint: string;
+  /**
+   * The oldest adapter version that has what FriedLiver uses (effort levels, plan approval).
+   * Older ones still run; Accounts says to update.
+   */
+  minVersion?: string;
 }
 
 // Agents are started directly, never through `npx`: npx keeps an extra Node
-// process alive for the whole session, which costs ~50 MB per agent.
+// process alive for the whole session, which costs ~50 MB per agent. The
+// @zed-industries/* adapters are deprecated; the @agentclientprotocol/* ones
+// install the same command names.
 export const DEFAULT_AGENTS: Record<VendorAgentId, AgentSpec> = {
   claude: {
     id: 'claude',
     label: 'Claude',
     command: 'claude-agent-acp',
     args: [],
-    installCommand: 'npm install -g @zed-industries/claude-agent-acp',
+    installCommand: 'npm install -g @agentclientprotocol/claude-agent-acp',
     loginHint: 'Run `claude` in a terminal and type /login, or set ANTHROPIC_API_KEY.',
+    minVersion: '0.90.0',
   },
   codex: {
     id: 'codex',
-    label: 'GPT (Codex)',
+    label: 'Codex',
     command: 'codex-acp',
     args: [],
-    installCommand: 'npm install -g @zed-industries/codex-acp',
+    installCommand: 'npm install -g @agentclientprotocol/codex-acp',
     loginHint: 'Run `codex login` in a terminal (Sign in with ChatGPT), or set OPENAI_API_KEY.',
+    minVersion: '2.0.0',
   },
   gemini: {
     id: 'gemini',

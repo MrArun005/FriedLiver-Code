@@ -11,6 +11,7 @@ import {
   shortCommand,
   stateLine,
   titleFrom,
+  topicTitle,
   waitingItems,
   type Action,
   type AppState,
@@ -59,6 +60,32 @@ describe('transcript reducer', () => {
       { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed' } },
     ]);
     expect(s.chats[0].items).toEqual([{ kind: 'tool', id: 't1', title: 'Read', toolKind: undefined, status: 'completed', locations: [] }]);
+  });
+
+  it("keeps Claude's tool name and a subagent's parent tool call", () => {
+    const meta = (claudeCode: object) => ({ _meta: { claudeCode } });
+    const s = run([
+      { t: 'created', chat: chat() },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call', toolCallId: 'task', title: 'Find it', kind: 'think', status: 'pending', rawInput: { description: 'Find it', prompt: 'p', subagent_type: 'Explore' }, ...meta({ toolName: 'Task' }) } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call', toolCallId: 'inner', title: 'Read', status: 'pending', ...meta({ toolName: 'Read', parentToolUseId: 'task' }) } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'task', status: 'completed', ...meta({ toolName: 'Task' }) } },
+    ]);
+    expect(s.chats[0].items).toMatchObject([
+      { kind: 'tool', id: 'task', tool: 'Task', status: 'completed' },
+      { kind: 'tool', id: 'inner', tool: 'Read', parent: 'task' },
+    ]);
+  });
+
+  it("keeps a subagent's own words out of the chat's reply", () => {
+    const sub = { _meta: { claudeCode: { parentToolUseId: 'task' } } };
+    const s = run([
+      { t: 'created', chat: chat() },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Spawning. ' } } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'inner chatter' }, ...sub } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'inner thought' }, ...sub } },
+      { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' } } },
+    ]);
+    expect(s.chats[0].items).toMatchObject([{ kind: 'agent', text: 'Spawning. Done.' }]);
   });
 
   it('tracks commands, output and exit', () => {
@@ -187,6 +214,13 @@ describe('status and task cards', () => {
     expect(stateLine(plan).text).toBe('Step 2 of 4: two');
   });
 
+  it('says a permission for a command once, not "rm x: rm x" (QA F14)', () => {
+    const perm = (title: string) =>
+      chat({ items: [{ kind: 'permission', requestId: 'p1', title, options: [], detail: { command: { line: 'rm src/legacyStore.ts' } } } as never] });
+    expect(stateLine(perm('rm src/legacyStore.ts'))).toMatchObject({ text: 'Asks to run', code: 'rm src/legacyStore.ts' });
+    expect(stateLine(perm('Delete the old store'))).toMatchObject({ text: 'Asks: Delete the old store', code: 'rm src/legacyStore.ts' });
+  });
+
   it('shortens titles and ages', () => {
     expect(titleFrom('fix it\nmore')).toBe('fix it');
     expect(titleFrom('x'.repeat(80))).toHaveLength(58);
@@ -208,5 +242,36 @@ describe('status and task cards', () => {
     expect(lineStats(null, 'a\nb\n')).toEqual({ added: 2, removed: 0 });
     expect(lineStats('a\nb\nc\n', 'a\nB\nc\nd\n')).toEqual({ added: 2, removed: 1 });
     expect(lineStats('same\n', 'same\n')).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe('chat titles from the topic', () => {
+  it('names a chat after a substantive request, short and in sentence case', () => {
+    expect(topicTitle('add auto-update for releases')).toBe('Add auto-update for releases');
+    expect(topicTitle('Hi! Can you please fix the browser approval prompts? They keep popping up.')).toBe('Fix browser approval prompts');
+    expect(topicTitle('@claude refactor the payroll export so it streams rows to disk instead')).toBe('Refactor payroll export so it streams');
+    expect(topicTitle('make the PR list load faster.')).toBe('Make PR list load faster');
+  });
+
+  it('skips greetings, acknowledgements, slash and shell commands', () => {
+    for (const t of ['hi', 'ok', 'go', 'merge', 'yes', 'yes go ahead', 'ok merge it', 'thanks!', 'sounds good, go ahead please', '/review', 'git push origin main', '$ ls -la', 'npm test', '']) {
+      expect(topicTitle(t), t).toBeNull();
+    }
+  });
+
+  it('keeps a pinned (renamed) title and ignores later automatic ones', () => {
+    let s = reduce(EMPTY_STATE, { t: 'created', chat: chat() });
+    s = reduce(s, { t: 'title', chatId: 'chat-1', title: 'First topic' });
+    expect(s.chats[0].title).toBe('First topic');
+    s = reduce(s, { t: 'title', chatId: 'chat-1', title: 'My name', pinned: true });
+    s = reduce(s, { t: 'title', chatId: 'chat-1', title: 'Second topic' });
+    s = reduce(s, { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'session_info_update', title: 'Agent title' } });
+    expect(s.chats[0]).toMatchObject({ title: 'My name', titlePinned: true });
+  });
+
+  it("takes the agent's own session title while not pinned", () => {
+    let s = reduce(EMPTY_STATE, { t: 'created', chat: chat() });
+    s = reduce(s, { t: 'update', chatId: 'chat-1', update: { sessionUpdate: 'session_info_update', title: 'Agent title' } });
+    expect(s.chats[0].title).toBe('Agent title');
   });
 });

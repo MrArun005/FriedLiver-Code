@@ -1,0 +1,88 @@
+name: Update pull requests
+
+# Keeps finished branches mergeable: after every push to main, each open pull
+# request into main that is behind it gets main merged in (a merge commit, never a
+# rebase, so nothing is force-pushed), then CI runs on it. A branch that conflicts
+# gets one comment (kept up to date, removed once it merges cleanly) saying how to
+# fix it. Pull requests from forks are skipped. docs/RELEASING.md.
+#
+# Limit: the workflow token may not write .github/workflows/, so when main's new
+# commits change a workflow the merge is refused and the comment says to merge
+# locally (git merge origin/main && git push).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only the newest main matters.
+concurrency:
+  group: update-prs
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Merge main into branches, comment on pull requests, start CI.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Merge main into open pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          marker='<!-- friedliver:update-branch -->'
+          main=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          comment_id() {
+            gh api --paginate "repos/$GH_REPO/issues/$1/comments" --jq '.[] | select(.body | startswith("<!-- friedliver:update-branch -->")) | .id' | head -1
+          }
+          gh api --paginate "repos/$GH_REPO/pulls?state=open&base=main&per_page=100" \
+            --jq '.[] | [.number, .head.ref, .head.sha, (.head.repo.full_name // "")] | @tsv' |
+          while IFS=$'\t' read -r number branch head repo; do
+            if [ "$repo" != "$GH_REPO" ]; then
+              echo "#$number: from a fork, skipped"
+              continue
+            fi
+            behind=$(gh api "repos/$GH_REPO/compare/$head...$main" --jq .ahead_by)
+            existing=$(comment_id "$number")
+            if [ "$behind" = 0 ]; then
+              echo "#$number ($branch): up to date"
+              if [ -n "$existing" ]; then gh api -X DELETE "repos/$GH_REPO/issues/comments/$existing"; fi
+              continue
+            fi
+            if out=$(gh api -X PUT "repos/$GH_REPO/pulls/$number/update-branch" -f expected_head_sha="$head" 2>&1); then
+              # The merge lands asynchronously; CI starts once the branch has moved.
+              for _ in $(seq 30); do
+                [ "$(gh api "repos/$GH_REPO/pulls/$number" --jq .head.sha)" != "$head" ] && break
+                sleep 2
+              done
+              gh workflow run ci.yml --ref "$branch"
+              echo "#$number ($branch): merged main ($main), CI started"
+              if [ -n "$existing" ]; then gh api -X DELETE "repos/$GH_REPO/issues/comments/$existing"; fi
+            else
+              echo "::warning::#$number ($branch): could not merge main: $out"
+              body="$marker
+          **main ($main) could not be merged into \`$branch\` automatically.**
+
+          GitHub said: $out
+
+          Fix it locally, then push (a merge, not a rebase):
+          \`\`\`
+          git fetch origin && git switch $branch && git merge origin/main
+          # resolve the conflicts, run the tests
+          git push
+          \`\`\`"
+              if [ -n "$existing" ]; then
+                gh api -X PATCH "repos/$GH_REPO/issues/comments/$existing" -f body="$body" > /dev/null
+              else
+                gh api "repos/$GH_REPO/issues/$number/comments" -f body="$body" > /dev/null
+              fi
+            fi
+          done

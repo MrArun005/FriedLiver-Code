@@ -1,0 +1,16 @@
+diff --git a/src/vs/workbench/api/browser/viewsExtensionPoint.ts b/src/vs/workbench/api/browser/viewsExtensionPoint.ts
+index 8337870..faea910 100644
+--- a/src/vs/workbench/api/browser/viewsExtensionPoint.ts
++++ b/src/vs/workbench/api/browser/viewsExtensionPoint.ts
+@@ -382,7 +382,10 @@ class ViewsExtensionHandler implements IWorkbenchContribution {
+ 			const icon = themeIcon || resources.joinPath(extension.extensionLocation, descriptor.icon);
+ 			const id = `workbench.view.extension.${descriptor.id}`;
+ 			const title = descriptor.title || id;
+-			const viewContainer = this.registerCustomViewContainer(id, title, icon, order++, extension.identifier, location);
++			// FriedLiver: the chat list sits right below Explorer (order 0), above Search (order 1). A new container
++			// is placed by order once, also in existing profiles; after that the user's drags win.
++			const friedliverChats = id === 'workbench.view.extension.friedliver-chats' && location === ViewContainerLocation.Sidebar;
++			const viewContainer = this.registerCustomViewContainer(id, title, icon, friedliverChats ? 0.5 : order++, extension.identifier, location);
+ 
+ 			// Move those views that belongs to this container
+ 			if (existingViewContainers.length) {

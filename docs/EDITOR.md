@@ -1,10 +1,12 @@
 # Agents in the editor
 
 You can work with an agent from the file you're editing, not just from the
-chat panel. These commands still use ordinary chats. Every write is a diff you
-accept or reject, and every command waits for your approval, the same as in
-the panel. They need only the stable VS Code API, so they also work when the
-extension is installed in VS Code or Antigravity.
+chat panel. These commands still use ordinary chats, with the chat's
+approval level: in Ask (the default) every write through FriedLiver is a diff
+you accept or reject, and every command or edit an agent asks permission for
+waits for you, the same as in the panel (README: "What FriedLiver controls for
+each agent"). They need only the stable VS Code API, so they also work when
+the extension is installed in VS Code or Antigravity.
 
 | Command | Where | What happens |
 |---|---|---|
@@ -21,7 +23,7 @@ extension is installed in VS Code or Antigravity.
    agent gets the function around the cursor (from the language's outline),
    or the cursor's line if no function is found.
 2. Describe the change. The box's title shows which agent will do it. Start
-   with `@claude`, `@gpt`, `@gemini` or `@demo` to pick another one, or use
+   with `@claude`, `@codex`, `@gemini` or `@demo` to pick another one, or use
    the button in the box. Otherwise you get the agent you last used for edits
    in this folder. Before you pick one, it's `friedliver.edit.defaultAgent`
    (Claude unless you change it).
