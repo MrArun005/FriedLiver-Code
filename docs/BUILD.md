@@ -56,10 +56,16 @@ release job gets a token that can write (`contents: write`).
      (https, only from this repo's release downloads and GitHub's asset hosts,
      every redirect checked), checks its size and its SHA-256 against
      `SHA256SUMS.txt` (missing or different: it refuses), then offers
-     **Restart to update**. A detached script in a private temp folder waits
-     for the app to exit, mounts the DMG, swaps the running `.app` (wherever it
-     is), and reopens it. If the `.app` or its folder isn't writable, the
-     verified DMG is opened instead.
+     **Restart to update**. A script in a private temp folder, started as its
+     own background app (`FriedLiver Update.app`, so quitting or force-quitting
+     FriedLiver can't stop it), waits for the app to exit, mounts the DMG
+     read-only at a mountpoint inside that folder (no second checksum pass,
+     one retry), swaps the running `.app` (wherever it is), and reopens it. It
+     always detaches the image and deletes its folder. On failure the current
+     app is untouched and the next launch says why, with **Download manually**
+     (the release page) and **Show log** (`$TMPDIR/friedliver-update.log`,
+     with the mount's exit codes). If the `.app` or its folder isn't
+     writable, the verified DMG is opened instead.
    - On Windows and Linux, Install opens the release page.
    - `friedliver.update.mode: "off"` (or `update.mode: "none"`) turns this off.
 

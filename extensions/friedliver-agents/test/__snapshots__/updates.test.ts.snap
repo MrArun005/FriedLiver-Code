@@ -2,7 +2,7 @@
 
 exports[`install script > waits for the app, swaps the bundle from the DMG, clears quarantine and reopens the real path 1`] = `
 "#!/bin/sh
-# FriedLiver update: written by the Agents extension, runs once, deletes itself.
+# FriedLiver update: written by the Agents extension, runs once as its own app, removes its folder.
 set -u
 PID=4242
 APP='/Applications/FriedLiver.app'
@@ -10,18 +10,40 @@ DMG='/tmp/fl-x/it'\\''s.dmg'
 DIR='/tmp/fl-x'
 LOG='/tmp/friedliver-update.log'
 VERSION='1.142.0-3'
+PAGE='https://github.com/MrArun005/FriedLiver-Code/releases/tag/v1.142.0-3'
 MNT="$DIR/mnt"
+RC=0
 say() { echo "$(date '+%Y-%m-%dT%H:%M:%S') $*" >> "$LOG"; }
-fail() { say "$1"; echo "RESULT failed $1" >> "$LOG"; open "$DMG"; exit 1; }
+fail() { say "$1"; echo "RESULT failed $1" >> "$LOG"; exit 1; }
+cleanup() {
+  hdiutil detach "$MNT" -quiet 2>/dev/null || hdiutil detach "$MNT" -force -quiet 2>/dev/null
+  # An empty mountpoint is not mounted; never rm -rf into a mounted image.
+  if [ -n "$(ls -A "$MNT" 2>/dev/null)" ]; then say "$MNT is still mounted; leaving $DIR"; else rm -rf "$DIR"; fi
+}
+trap cleanup EXIT
+trap 'fail "stopped by a signal"' HUP INT TERM
 : > "$LOG"
+exec >> "$LOG" 2>&1 # Stray errors too (LaunchServices sends stdout and stderr nowhere).
+echo "PAGE $PAGE"
 say "install script started: $VERSION into $APP (waiting for pid $PID)"
 i=0
 while kill -0 "$PID" 2>/dev/null; do
   i=$((i + 1)); [ "$i" -gt 300 ] && fail "the app did not quit within 300 s"
   sleep 1
 done
+say "the app quit after $i s; mounting the update"
 mkdir -p "$MNT"
-hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG" >> "$LOG" 2>&1 || fail "could not mount the DMG"
+# No checksum pass: the extension already checked the DMG's SHA-256 against SHA256SUMS.
+# diskutil image (macOS 14+) first; where it's missing or fails, hdiutil.
+attach() {
+  diskutil image attach --readOnly --nobrowse --mountPoint "$MNT" "$DMG" >> "$LOG" 2>&1 && return 0
+  say "diskutil image attach exited $?; trying hdiutil"
+  hdiutil attach -nobrowse -readonly -noautoopen -noverify -mountpoint "$MNT" "$DMG" >> "$LOG" 2>&1
+  RC=$?
+  say "hdiutil attach exited $RC"
+  return $RC
+}
+attach || { sleep 2; say "retrying the mount"; attach; } || fail "could not mount the DMG (hdiutil exit $RC)"
 SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -n 1)
 say "copying \${SRC:-<no .app in the DMG>}"
 OK=0
@@ -38,6 +60,5 @@ xattr -dr com.apple.quarantine "$APP" >> "$LOG" 2>&1 || say "could not clear qua
 say "installed; relaunching $APP"
 echo "RESULT ok $VERSION" >> "$LOG"
 open -a "$APP"
-rm -rf "$DIR"
 "
 `;
