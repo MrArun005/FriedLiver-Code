@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
-import { appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, resolveRealApp, sumFor, type Release } from './updateCheck';
+import { appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, resolveRealApp, sumFor, versionLabel, type Release } from './updateCheck';
 
 const FIRST_CHECK_DELAY_MS = 30_000;
 const RECHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -34,14 +34,15 @@ export function startUpdateChecks(context: vscode.ExtensionContext): vscode.Disp
   const subs: vscode.Disposable[] = [
     log,
     vscode.commands.registerCommand('friedliver.showVersion', async () => {
-      const text = `FriedLiver ${appVersion()} (VS Code ${vscode.version}, ${channel()})`;
+      const text = `FriedLiver ${versionLabel(product(), vscode.version)} (VS Code ${vscode.version}, ${channel()})`;
       if ((await vscode.window.showInformationMessage(text, 'Copy')) === 'Copy') await vscode.env.clipboard.writeText(text);
     }),
     vscode.commands.registerCommand('friedliver.checkForUpdates', async () => {
       if (!isApp) return void vscode.window.showInformationMessage('Updates for this editor come from the editor itself.');
       log.info('Manual update check');
       // A manual check offers again even a version already offered this launch.
-      const message = manualCheckMessage(await check(new Set()), appVersion());
+      // Said with the build (a main build names its commit); compared by friedliverVersion alone (appVersion).
+      const message = manualCheckMessage(await check(new Set()), versionLabel(product(), vscode.version));
       if (message) void vscode.window.showInformationMessage(message);
     }),
   ];
@@ -74,7 +75,7 @@ async function reportLastInstall(log: vscode.LogOutputChannel): Promise<void> {
   if ((await vscode.window.showErrorMessage(`Update failed: ${why}`, 'Show log')) === 'Show log') log.show();
 }
 
-function product(): { friedliverVersion?: unknown; quality?: unknown } {
+function product(): { friedliverVersion?: unknown; friedliverBuild?: unknown; quality?: unknown } {
   try {
     return JSON.parse(readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8'));
   } catch {

@@ -302,6 +302,8 @@ export interface Answered {
 }
 
 function outcome(i: Waiting): { text: string; allowed: boolean } | undefined {
+  // Expired when the window closed: nobody answered it, so it isn't one of your decisions.
+  if (i.expired) return undefined;
   if (i.kind === 'permission') return i.answer && !i.auto ? { text: i.answer, allowed: !/^(no|reject|deny|cancel|stopped)/i.test(i.answer) } : undefined;
   if (i.kind === 'review') return i.state !== 'pending' && !i.auto ? { text: i.state === 'accepted' ? 'Accepted' : 'Rejected', allowed: i.state === 'accepted' } : undefined;
   if (i.kind === 'command') return i.state !== 'awaiting' && !i.auto ? { text: i.state === 'denied' ? 'Denied' : 'Ran', allowed: i.state !== 'denied' } : undefined;

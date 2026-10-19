@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { EMPTY_STATE, MAX_USAGE_LOG, reduce } from '../src/shared/model';
-import { usageLines } from '../src/shared/session';
+import { dailyWarning, usageLines, usageTotalLines, usageTotals } from '../src/shared/session';
 import { parseSaved, trimForSave } from '../src/host/persist';
 import { chat } from './fixtures/chats';
 import { disposeCores, gitRepo, makeCore, waitFor } from './helpers';
@@ -28,6 +28,31 @@ describe('per-turn token usage', () => {
     for (let i = 0; i < MAX_USAGE_LOG + 5; i++) s = reduce(s, { t: 'turnUsage', chatId: 'chat-1', usage: turn(i, 0, 0, 0) });
     expect(s.chats[0].usageLog).toHaveLength(MAX_USAGE_LOG);
     expect(s.chats[0].usageLog!.at(-1)!.input).toBe(MAX_USAGE_LOG + 4);
+  });
+
+  it('adds up every chat in the window, and the turns since local midnight', () => {
+    const now = new Date(2026, 9, 18, 15, 0).getTime();
+    const yesterday = new Date(2026, 9, 17, 23, 59).getTime();
+    const chats = [
+      chat('chat-1', { usageLog: [{ ...turn(1000, 200, 5000, 100), at: yesterday }, { ...turn(500, 100, 2000, 0), at: now - 60_000 }] }),
+      chat('chat-2', { usageLog: [{ ...turn(300, 50, 0, 50), at: now }] }),
+      chat('chat-3'),
+    ];
+    const t = usageTotals(chats, now);
+    expect(t.window).toEqual({ input: 1800, output: 350, cacheRead: 7000, cacheWrite: 150, total: 9300, turns: 3 });
+    expect(t.today).toEqual({ input: 800, output: 150, cacheRead: 2000, cacheWrite: 50, total: 3000, turns: 2 });
+    expect(usageTotalLines(t)).toContain('Today: 3k (800 input · 150 output · 2k cache read · 50 cache write)');
+    expect(usageTotals([], now).today.total).toBe(0);
+  });
+
+  it('warns once a day past the limit the user set, and never when it is off', () => {
+    const day = new Date(2026, 9, 18, 15, 0).getTime();
+    expect(dailyWarning(0, 5_000_000, day, undefined)).toBeUndefined();
+    expect(dailyWarning(1_000_000, 999_999, day, undefined)).toBeUndefined();
+    const w = dailyWarning(1_000_000, 1_200_000, day, undefined)!;
+    expect(w.text).toBe("Today's chats in this window used 1.2M tokens, over your 1.0M daily warning (friedliver.usage.dailyTokenWarning).");
+    expect(dailyWarning(1_000_000, 1_500_000, day + 3_600_000, w.day)).toBeUndefined();
+    expect(dailyWarning(1_000_000, 1_500_000, day + 86_400_000, w.day)).toBeDefined();
   });
 
   it('is kept on disk with the chat, junk dropped on the way back', () => {

@@ -3,11 +3,11 @@
 import {
   AGENT_KEYS,
   age,
-  boardColumn,
   bridgeTitle,
   chatStatus,
   decisions,
   fileConflicts,
+  formatDuration,
   stateLine,
   type AgentKey,
   type AppState,
@@ -21,6 +21,7 @@ import {
   type Item,
   type LinkKind,
   type StateLine,
+  MAX_ITEMS,
   MENTIONS,
 } from './model';
 import type { ClaudeSession, WebviewMessage } from './messages';
@@ -45,6 +46,40 @@ export function excerpt(text: string, max: number): string {
   return clip(plain, max);
 }
 
+/** When a message was sent (and a reply's last words came): your messages, replies and messages between chats only. */
+export interface MessageStamp {
+  at: number;
+  end?: number;
+}
+
+/** The time an item shows on hover, or none: steps, thinking, plans, cards that wait for you, and messages saved before times were kept. */
+export function messageStamp(item: Item): MessageStamp | undefined {
+  if (item.kind !== 'user' && item.kind !== 'agent' && item.kind !== 'link') return undefined;
+  if (!isTime(item.at)) return undefined;
+  const end = item.kind === 'agent' ? item.end : undefined;
+  return isTime(end) ? { at: item.at, end } : { at: item.at };
+}
+
+/** A number a Date can hold (saved files can say anything). */
+const isTime = (v: unknown): v is number => typeof v === 'number' && !Number.isNaN(new Date(v).getTime());
+
+/** "2:41 PM" today, "Oct 18, 2:41 PM" before, "Oct 18, 2025, 2:41 PM" in another year. */
+export function messageTime(at: number, now: number, locale?: string): string {
+  const d = new Date(at);
+  const n = new Date(now);
+  const today = d.toDateString() === n.toDateString();
+  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  if (!today) Object.assign(opts, { month: 'short', day: 'numeric' }, d.getFullYear() === n.getFullYear() ? {} : { year: 'numeric' });
+  // ICU puts a narrow no-break space before AM/PM; the element never wraps, so a plain space reads the same.
+  return d.toLocaleString(locale, opts).replace(/\s/g, ' ');
+}
+
+/** The tooltip: the exact time, and for a reply how long its words took to come. */
+export function messageTimeTitle(s: MessageStamp): string {
+  const iso = new Date(s.at).toISOString();
+  return s.end !== undefined && s.end > s.at ? `${iso} · took ${formatDuration(s.end - s.at)}` : iso;
+}
+
 /** "3s ago"; nothing yet reads "—". */
 export function ago(at: number, now: number): string {
   return at > 0 ? `${age(at, now)} ago` : '—';
@@ -58,6 +93,57 @@ export function ago(at: number, now: number): string {
 export function statusOf(chat: ChatView): ChatStatus {
   const status = chatStatus(chat);
   return status === 'idle' && chat.items.some((i) => i.kind === 'agent') ? 'done' : status;
+}
+
+/**
+ * The Manager's one definition of "needs you", used by the header, the map's lanes and the chat strip
+ * alike: a decision waits in the chat (what the Needs you column and the Inbox list). A chat that
+ * failed is a problem, counted on its own, not one that needs you.
+ */
+export function needsYou(chat: ChatView): boolean {
+  return statusOf(chat) === 'needs-you';
+}
+
+/**
+ * Turns, as the cards, the map and the comparison show them: the messages the agent was given that it
+ * answered. A turn that ended without a reply (the agent isn't installed, or failed to start) is not
+ * one; a consult or hand-off the agent answered is. Long chats drop their oldest replies (MAX_ITEMS),
+ * so the host's own tally of finished turns is the floor once the agent has replied at all.
+ */
+export function turnsOf(chat: ChatView): number {
+  let turns = 0;
+  let asked = false;
+  let answered = false;
+  for (const i of chat.items) {
+    if (i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from'))) {
+      if (asked && answered) turns++;
+      asked = true;
+      answered = false;
+    } else if (i.kind === 'agent' && i.text.trim()) answered = true;
+  }
+  if (asked && answered && !chat.busy) turns++;
+  return turns > 0 && chat.items.length >= MAX_ITEMS ? Math.max(turns, chat.turns) : turns;
+}
+
+/**
+ * The chat's agent can't start because it isn't installed: the Accounts page last found it missing, or
+ * the chat's latest failure offers to install it. Its pickers say so (with Install) instead of "starting…".
+ */
+export function agentMissing(chat: Pick<ChatView, 'agent' | 'items' | 'session'>, signIn?: string): boolean {
+  if (chat.agent === 'demo' || chat.session?.live) return false;
+  if (signIn === 'not-installed') return true;
+  for (let n = chat.items.length - 1; n >= 0; n--) {
+    const i = chat.items[n];
+    if (i.kind === 'agent') return false;
+    if (i.kind === 'notice' && i.tone === 'error') return !!i.actions?.some((a) => a.do === 'install');
+  }
+  return false;
+}
+
+/** "3 turns". */
+export function turnsText(chat: ChatView): string {
+  const n = turnsOf(chat);
+  return `${n} turn${n === 1 ? '' : 's'}`;
 }
 
 /** A subagent a chat launched (Claude's Task/Agent tool): a card under its chat, not a chat of its own. */
@@ -282,23 +368,29 @@ export function settleOrder(prev: Settled | undefined, next: string[], sort: str
 }
 
 export interface Counts {
+  /** Chats with a decision waiting: the Needs you column, the same chats the Inbox lists. */
   needsYou: number;
   working: number;
+  /** Chats whose last turn failed: the Problem column. */
+  problem: number;
+  /** Not started and done. */
   done: number;
   archived: number;
   decisions: number;
 }
 
+/** The Manager's counts, from statusOf: each open chat in exactly one of needs you, working, problem, done. */
 export function counts(state: Pick<AppState, 'chats'>): Counts {
-  const out: Counts = { needsYou: 0, working: 0, done: 0, archived: 0, decisions: 0 };
+  const out: Counts = { needsYou: 0, working: 0, problem: 0, done: 0, archived: 0, decisions: 0 };
   for (const chat of state.chats) {
     if (chat.archived) {
       out.archived++;
       continue;
     }
-    const col = boardColumn(statusOf(chat));
-    if (col === 'needs-you') out.needsYou++;
-    else if (col === 'working') out.working++;
+    const status = statusOf(chat);
+    if (status === 'needs-you') out.needsYou++;
+    else if (status === 'working') out.working++;
+    else if (status === 'error') out.problem++;
     else out.done++;
   }
   out.decisions = decisions({ chats: openChats(state.chats) }).length;
@@ -456,7 +548,7 @@ export function cardModel(state: Pick<AppState, 'chats' | 'links'>, chat: ChatVi
     chat.busy,
     chat.files.length,
     chat.changedFiles,
-    chat.turns,
+    turnsOf(chat),
     status,
     started,
     line.text,
@@ -539,7 +631,7 @@ export const openTab = (tabs: readonly string[], id: string): string[] => (tabs.
 export const closeTab = (tabs: readonly string[], id: string): string[] => tabs.filter((t) => t !== id);
 
 /** A tab's least width with its title (`full`), squeezed (`compact`), the open tab's (`open`); the gap between tabs. Mirrors --tab-*min in tokens.css. */
-export const TAB_MIN = { full: 112, compact: 88, open: 184, gap: 4 } as const;
+export const TAB_MIN = { full: 112, compact: 88, open: 184, gap: 4, narrowOpen: 120 } as const;
 export type TabFit = 'full' | 'compact' | 'icon';
 /**
  * How tabs fit a strip `width` wide: titles while each keeps its minimum, then squeezed, then marks only.
@@ -549,6 +641,22 @@ export function tabFit(width: number, count: number): TabFit {
   if (width <= 0 || count === 0) return 'full';
   const need = (min: number) => (count - 1) * (min + TAB_MIN.gap) + TAB_MIN.open;
   return need(TAB_MIN.full) <= width ? 'full' : need(TAB_MIN.compact) <= width ? 'compact' : 'icon';
+}
+
+/**
+ * Marks only (`fit` icon) in a strip `width` wide, `step` per mark, `total` tabs: how many marks show beside the
+ * open tab, and the open tab's width (the rest). The open tab keeps TAB_MIN.open while that leaves room for
+ * three marks; a side bar narrower than that (its default ~260-290px) gives the open tab less, down to
+ * TAB_MIN.narrowOpen (a title of about 70 still), so the other open chats still show instead of the open
+ * tab alone. The rest scroll.
+ */
+export function markWindow(width: number, step: number, total: number): { marks: number; openWidth: number } {
+  const others = Math.max(0, total - 1);
+  if (width <= 0 || step <= 0) return { marks: others, openWidth: TAB_MIN.open };
+  const want = Math.min(others, 3) * step;
+  const openMin = Math.max(TAB_MIN.narrowOpen, Math.min(TAB_MIN.open, width - want));
+  const marks = Math.max(0, Math.min(others, Math.floor((width - openMin) / step)));
+  return { marks, openWidth: width - marks * step };
 }
 
 /** A mark-only tab's tooltip: the title, the agent, the status, and Auto when on. */
@@ -862,6 +970,8 @@ export interface MapLane {
   chats: number;
   working: number;
   needsYou: number;
+  /** Chats whose last turn failed. */
+  problem?: number;
 }
 
 export interface MapEdge {
@@ -1023,8 +1133,8 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
       }
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
-    const statuses = inLane.map((c) => boardColumn(statusOf(c)));
-    lanes.push({ agent, y: top, h, chats: inLane.length, working: statuses.filter((s) => s === 'working').length, needsYou: statuses.filter((s) => s === 'needs-you').length });
+    const lane = counts({ chats: inLane });
+    lanes.push({ agent, y: top, h, chats: inLane.length, working: lane.working, needsYou: lane.needsYou, problem: lane.problem });
     y = top + h + M.laneGap;
   }
   const outside: MapOutside[] = [];

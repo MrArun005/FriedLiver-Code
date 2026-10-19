@@ -141,7 +141,7 @@ export class ReviewUi implements vscode.Disposable {
   async show(review: PendingReview, placement?: ReviewPlacement): Promise<void> {
     this.fs.set(proposedUri(review.reviewId, review.path), review.proposed, false);
     if (review.before === null) this.fs.set(originalUri(review), '', true);
-    if (review.auto && review.chatId && !placement) {
+    if (review.auto && review.chatId && !placement?.focus) {
       const previous = this.chatTabs.get(review.chatId);
       this.chatTabs.set(review.chatId, review.reviewId);
       if (previous && previous !== review.reviewId) await this.closeTab(previous);

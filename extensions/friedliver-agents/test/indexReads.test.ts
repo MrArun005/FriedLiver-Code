@@ -6,7 +6,7 @@ import { parseCall } from '../src/bridge/protocol';
 import { findSymbol, SeenFiles, symbolRange } from '../src/host/indexReads';
 import { answerIndex, outline, ProjectIndex, projectPrimer } from '../src/host/projectIndex';
 import { estimateTokens } from '../src/shared/tokens';
-import { disposeCores, makeCore, waitFor } from './helpers';
+import { buildBridge, disposeCores, makeCore, waitFor } from './helpers';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -299,7 +299,7 @@ describe('session primer', () => {
   it('goes in front of a new session\'s first message only', async () => {
     const root = await project({ 'a.ts': 'x' });
     const asked: string[] = [];
-    const core = makeCore(root, { primer: async (_chatId, text) => (asked.push(text), '<friedliver-project-map>MAP</friedliver-project-map>') });
+    const core = makeCore(root, { ...(await withTools()), primer: async (_chatId, text) => (asked.push(text), '<friedliver-project-map>MAP</friedliver-project-map>') });
     const chat = await core.createChat('demo');
     await core.send(chat.id, 'hello there');
     await core.send(chat.id, 'again');
@@ -308,6 +308,18 @@ describe('session primer', () => {
     expect(replies[1]).not.toContain('MAP');
     expect(asked).toEqual(['hello there']);
   }, 30_000);
+
+  it('is left out when the session gets no index_* tools: the index off, or the FriedLiver tools off', async () => {
+    const root = await project({ 'a.ts': 'x' });
+    const primer = async () => '<friedliver-project-map>MAP</friedliver-project-map>';
+    for (const over of [{ ...(await withTools()), indexEnabled: () => false }, { ...(await withTools()), agentToAgent: () => 'off' as const }, { primer }]) {
+      const core = makeCore(root, { primer, ...over });
+      const chat = await core.createChat('demo');
+      await core.send(chat.id, 'hello there');
+      expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'agent').map((i) => (i as { text: string }).text).join('')).not.toContain('MAP');
+      await disposeCores();
+    }
+  }, 30_000);
 });
 
 describe('prompt-cache-friendly order', () => {
@@ -315,6 +327,7 @@ describe('prompt-cache-friendly order', () => {
   it('puts the rules, then the map, then the message, the same way every session', async () => {
     const root = await project({ 'a.ts': 'x' });
     const core = makeCore(root, {
+      ...(await withTools()),
       sharedRules: async () => ({ text: '<friedliver-rules>RULES</friedliver-rules>', files: ['Personal rules'], truncated: false }),
       primer: async () => '<friedliver-project-map>MAP</friedliver-project-map>',
     });
@@ -329,3 +342,8 @@ describe('prompt-cache-friendly order', () => {
     expect(replies[1]).toBe(replies[0]);
   }, 30_000);
 });
+
+/** The FriedLiver tools on, with an index: what a session needs for the project map. */
+async function withTools() {
+  return { bridgeScript: await buildBridge(), index: async () => 'index answer' };
+}

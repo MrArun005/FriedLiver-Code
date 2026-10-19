@@ -10,6 +10,7 @@ import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { runRewind } from './host/rewindFlow';
 import { encodeCwd, listClaudeImages, listClaudeSessions } from './host/claudeSessions';
+import { SubagentWatch } from './host/subagentDetail';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
 import { ProjectIndexHost } from './host/projectIndexHost';
@@ -27,25 +28,26 @@ import { insideRoots } from './host/paths';
 import { ensureFile, importRules, loadRules, PROJECT_MEMORY, PROJECT_RULES, remember } from './host/sharedRules';
 import { StateFile } from './host/persist';
 import { SystemControl, systemSettings } from './host/system';
-import { ReviewUi } from './host/review';
+import { ReviewUi, type ReviewPlacement } from './host/review';
 import { RemoteControl } from './remote/host';
 import { userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
-import { isVendor, rosterOf, shownAgents } from './shared/accounts';
+import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
 import { discussLayoutOf, type DiscussLayout } from './shared/discussView';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
-import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
+import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
 import { appBundle, Permissions, userDataDir } from './host/permissions';
-import { APPROVAL_HINTS, type AgentDefaults, type ApprovalLevel } from './shared/session';
+import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
 import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
 import { agentName, chatName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
+import { codexModelVisibility } from './host/codexModels';
 
 /** friedliver.links.openIn: where web links you click open. */
 const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
@@ -131,6 +133,8 @@ export class Controller {
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
   private claudeSessions: ClaudeSession[] = [];
   private claudeWatchers = new Map<string, FSWatcher>();
+  /** The outside subagent whose detail sheet is open, and the Manager showing it. */
+  private subagent?: { watch: SubagentWatch; surface: Surface };
   /** The images in those sessions, as the Images view and the Manager last got them. */
   private claudeImages: OutsideImages[] = [];
   /** Thumbnails are made one at a time, the scaling in a worker thread. */
@@ -142,6 +146,8 @@ export class Controller {
   private readonly copied = new Set<string>();
   private imageTimers: { sync?: ReturnType<typeof setTimeout>; post?: ReturnType<typeof setTimeout>; commit?: ReturnType<typeof setTimeout> } = {};
   private claudeTimer?: ReturnType<typeof setTimeout>;
+  /** Connecting Claude Code to the browser, one write of ~/.claude.json at a time. */
+  private claudeLink: Promise<void> = Promise.resolve();
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
@@ -160,6 +166,8 @@ export class Controller {
   private stateFile?: StateFile;
   private warnedAgentToAgent = false;
   private warnedApprovals = false;
+  /** The day (its local midnight) the daily token warning last showed. */
+  private usageWarned?: number;
   /**
    * Messages sent again to a chat view that (re)loads soon after: a composer's code references and the
    * item Open scrolls to. A hidden view loses its content and a new one isn't ready yet, so what was
@@ -252,6 +260,7 @@ export class Controller {
         return { maxRounds: c.get<number>('maxRounds'), tokenBudget: c.get<number>('tokenBudget') };
       },
       index: async (call, chatId) => (this.projectIndex ? this.projectIndex.answer(call, chatId) : 'The project index is still starting. Try again shortly.'),
+      indexEnabled: () => vscode.workspace.getConfiguration('friedliver.index').get<boolean>('enabled', true),
       indexSeen: (chatId, file) => this.projectIndex?.observe(chatId, file),
       indexTurnEnded: (chatId) => this.projectIndex?.turnEnded(chatId),
       primer: async (_chatId, text, maxTokens) => this.projectIndex?.primer(text, maxTokens),
@@ -263,9 +272,11 @@ export class Controller {
         done: (summary) => void vscode.window.setStatusBarMessage(`$(device-desktop) Agent used: ${plainText(summary).replace(/\$\(/g, '$ (')}`, 5000),
       },
       approvalDefault: () => this.approvalDefault(),
+      // Codex keeps which models the account may use; the other agents list only those already.
+      modelVisibility: (agent) => (agent === 'codex' ? codexModelVisibility() : Promise.resolve(undefined)),
       // User settings only: a repository must not make requests allow themselves.
       autoRoutineSeconds: () => Number(userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('autoRoutineSeconds')).value) || 0,
-      sharedRules: () => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted }),
+      sharedRules: (agent) => loadRules({ personalDir: this.context.globalStorageUri.fsPath, folder: this.folders()[0], trusted: vscode.workspace.isTrusted, agent }),
       remember: (fact) => {
         const folder = this.folders()[0];
         if (!folder || !vscode.workspace.isTrusted) return Promise.reject(new Error('This workspace is not trusted (or no folder is open), so FriedLiver keeps no project memory here.'));
@@ -292,7 +303,7 @@ export class Controller {
       checkpointDir: path.join(context.globalStorageUri.fsPath, 'checkpoints'),
       outputDir: path.join(context.globalStorageUri.fsPath, 'output'),
       ui: {
-        showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review)),
+        showReview: (review) => !this.inlineChats.has(review.chatId ?? '') && void this.reviews.show(review, this.editor?.reviewPlacement(review) ?? this.besideManager()),
         closeReview: (id) => void this.reviews.close(id),
         askCommand: (ask) => !this.inlineChats.has(ask.chatId ?? '') && void this.askCommand(ask),
         askPermission: (ask) => !this.inlineChats.has(ask.chatId) && void this.askPermission(ask),
@@ -375,10 +386,11 @@ export class Controller {
     const saved = (chatId: string, naive: number, sent: number) => this.core.noteTokens(chatId, { naive, sent });
     this.projectIndex!.onSaved = saved;
     this.browser.onSaved = saved;
-    const unsubscribe = this.core.onAction((action) => {
+    const unsubscribe = this.core.onAction((action, state) => {
       this.remote?.onAction(action);
       this.batcher.push(action);
       this.stateFile?.schedule();
+      if (action.t === 'turnUsage') this.checkUsage(state);
     });
     context.subscriptions.push({ dispose: unsubscribe });
 
@@ -390,8 +402,10 @@ export class Controller {
     command('friedliver.links.useExternal', () => vscode.workspace.getConfiguration('friedliver.links').update('openIn', 'external', vscode.ConfigurationTarget.Global));
     this.browser.registerLinkOpener(linkMode);
     command('friedliver.system.showLog', () => this.systemLog.show(true));
-    command('friedliver.connectClaudeBrowser', () => this.connectClaude(true));
+    command('friedliver.connectClaudeBrowser', () => this.connectClaudeCommand());
     // Integration tests must not write the developer's ~/.claude.json.
+    // Opt-in (friedliver.browser.externalClients, off by default): on, this launch's token is written and the
+    // entry kept; off, an entry an earlier FriedLiver added is removed and ~/.claude.json is otherwise not touched.
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
@@ -878,7 +892,7 @@ export class Controller {
         case 'createTask': {
           const approval = await this.taskApproval(m.approval, [m.agent]);
           if (approval === null) return;
-          const chat = await this.core.createChat(m.agent, { worktree: m.worktree, title: m.prompt, choices: m.choices?.[m.agent], approval });
+          const chat = await this.core.createChat(m.agent, { worktree: m.worktree, title: m.prompt, choices: m.choices?.[m.agent], approval, messageFollows: true });
           void this.core.send(chat.id, m.prompt).catch((err: unknown) => this.error(err));
           return;
         }
@@ -886,6 +900,11 @@ export class Controller {
           // From the side bar's list: into the chat tab, opening one when there is none.
           if (surface.list && !this.chatPanel) await this.moveToCenter();
           await this.showChat(m.chatId, m.item);
+          return;
+        case 'watchSubagent':
+          this.subagent?.watch.stop();
+          this.subagent = m.sessionId && m.id ? { watch: new SubagentWatch(m.sessionId, m.id), surface } : undefined;
+          await this.pushSubagent();
           return;
         case 'openClaudeSession': {
           // Only a session this window listed, so a webview can't name some other folder's.
@@ -927,12 +946,12 @@ export class Controller {
           this.openTasks();
           return;
         case 'handoff': {
-          const chat = await this.core.handoff(m.chatId, m.agent);
+          const chat = await this.core.handoff(m.chatId, m.agent, m.fresh);
           this.selectOn(surface, chat.id);
           return;
         }
         case 'consult':
-          void this.core.consult(m.chatId, m.agent, m.text).catch((err: unknown) => this.error(err));
+          void this.core.consult(m.chatId, m.agent, m.text, 'user', [], m.fresh).catch((err: unknown) => this.error(err));
           return;
         case 'discuss':
           void this.core.discuss(m.chatId, m.agents, m.text).catch((err: unknown) => this.error(err));
@@ -1110,6 +1129,11 @@ export class Controller {
       case 'compact':
         await this.core.compact(chatId).catch((err: unknown) => this.error(err));
         return;
+      case 'setOption':
+        // Only a value the agent offers; then the message that failed goes again.
+        await this.core.setOption(chatId, action.optionId, action.value).catch((err: unknown) => this.error(err));
+        retry();
+        return;
       case 'signIn':
         await this.accounts.signIn(action.agent, action.methodId, retry);
         return;
@@ -1197,6 +1221,11 @@ export class Controller {
     else this.inboxWanted = true;
   }
 
+  /** While you look at the Agent Manager, a diff an agent opens goes beside it, unfocused, instead of covering it. */
+  private besideManager(): ReviewPlacement | undefined {
+    return this.tasksPanel?.active ? { viewColumn: vscode.ViewColumn.Beside, focus: false } : undefined;
+  }
+
   openTasks(): void {
     if (this.tasksPanel) {
       this.tasksPanel.reveal();
@@ -1238,8 +1267,12 @@ export class Controller {
 
   /** "Run a Task on Several Agents": one prompt, a chat per agent, to compare. */
   async fanoutCommand(): Promise<void> {
+    // Preselected: the agents that can run (not ones the Accounts page found not installed); Demo only when nothing else can.
+    const roster = this.roster();
+    const vendors = roster.agents.filter((a) => a !== 'demo' && installedOrUnknown(roster, a));
+    const preselected = vendors.length ? vendors : preselectAgents(roster, []);
     const picked = await vscode.window.showQuickPick(
-      shownAgents(this.showDemo()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: a !== 'demo' })),
+      roster.agents.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: preselected.includes(a) })),
       { title: 'Run a task on which agents?', canPickMany: true },
     );
     if (!picked?.length) return;
@@ -1760,18 +1793,34 @@ export class Controller {
    * launch's token file and the secret-free `friedliver-browser` stdio entry in ~/.claude.json. With
    * the setting off, revokes the token and removes both. `show` reports the result (the Connect command).
    */
-  private async connectClaude(show: boolean): Promise<void> {
+  private connectClaude(show: boolean): Promise<void> {
+    // One at a time: the command and the setting it turns on both get here, and both write ~/.claude.json.
+    this.claudeLink = this.claudeLink.then(() => this.linkClaude(show));
+    return this.claudeLink;
+  }
+
+  /** FriedLiver: Connect Claude Code to the browser: the explicit opt-in; turns friedliver.browser.externalClients on in your user settings. */
+  private async connectClaudeCommand(): Promise<void> {
+    if (!this.browserSetting('externalClients', false)) {
+      // The setting's change connects (onConfig); this call reports the result.
+      await vscode.workspace.getConfiguration('friedliver.browser').update('externalClients', true, vscode.ConfigurationTarget.Global);
+    }
+    await this.connectClaude(true);
+  }
+
+  private async linkClaude(show: boolean): Promise<void> {
     const say = (text: string, error = false) => {
       if (error) this.log.warn(text);
       else this.log.info(text);
       if (show) void (error ? vscode.window.showErrorMessage(text) : vscode.window.showInformationMessage(text));
     };
     try {
-      if (!this.browserSetting('externalClients', true)) {
+      if (!this.browserSetting('externalClients', false)) {
         this.core.revokeExternal();
         await removeTokenFile(this.context.globalStorageUri.fsPath);
-        await unregisterClaude(CLAUDE_CONFIG());
-        return say('Claude Code is not connected to the browser: friedliver.browser.externalClients is off.');
+        // Only the entry FriedLiver added, and only when there is one: otherwise the file isn't written.
+        const removed = await unregisterClaude(CLAUDE_CONFIG());
+        return say(`Claude Code is not connected to the browser: friedliver.browser.externalClients is off${removed ? '; removed the friedliver-browser entry FriedLiver had added to ~/.claude.json' : ''}.`);
       }
       const storage = this.context.globalStorageUri.fsPath;
       // First, before anything can fail: an older http entry points at a port another process may hold now.
@@ -1789,6 +1838,17 @@ export class Controller {
     } catch (err) {
       say(`Could not connect Claude Code to the browser: ${messageOf(err)}`, true);
     }
+  }
+
+  /** The optional daily spending warning (friedliver.usage.dailyTokenWarning; off by default), once a day. */
+  private checkUsage(state: AppState): void {
+    const limit = Number(userSetting(vscode.workspace.getConfiguration('friedliver.usage').inspect<unknown>('dailyTokenWarning')).value) || 0;
+    if (!limit) return;
+    const now = Date.now();
+    const warn = dailyWarning(limit, usageTotals(state.chats, now).today.total, now, this.usageWarned);
+    if (!warn) return;
+    this.usageWarned = warn.day;
+    void vscode.window.showWarningMessage(warn.text);
   }
 
   /** From the user's own settings only: a repository must not let its agents reach other chats unasked. */
@@ -1850,10 +1910,24 @@ export class Controller {
           showAll: vscode.workspace.getConfiguration('friedliver.claudeSessions').get<boolean>('showAll', false),
         }), saved) : [];
     for (const s of this.surfaces) if (s.kind === 'tasks' && s.ready) post(s, { type: 'claudeSessions', sessions: this.claudeSessions });
+    await this.pushSubagent();
     const images = gallery ? await listClaudeImages({ home, folders, skip: owned }) : [];
     if (JSON.stringify(images) === JSON.stringify(this.claudeImages)) return;
     this.claudeImages = images;
     for (const s of this.surfaces) if (s.kind !== 'chat' && s.ready) post(s, { type: 'claudeImages', sessions: images });
+  }
+
+  /** Sends the open subagent detail what its transcript gained (the watcher above calls this, debounced, as it grows). */
+  private async pushSubagent(): Promise<void> {
+    const sub = this.subagent;
+    if (!sub) return;
+    if (!this.surfaces.has(sub.surface)) {
+      sub.watch.stop();
+      this.subagent = undefined;
+      return;
+    }
+    const detail = await sub.watch.read();
+    if (detail && this.subagent === sub && sub.surface.ready) post(sub.surface, { type: 'subagentDetail', detail });
   }
 
   /**

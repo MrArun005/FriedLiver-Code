@@ -1916,6 +1916,151 @@ button.viewer-thumb[aria-selected='true'] {
 .map-detail .fl-btn--link {
   align-self: flex-start;
 }
+/* An outside Claude Code subagent's detail (COMPONENTS.md §2.31): a wider panel whose regions fill its height;
+   two columns (story | facts and files) once it is 600 wide, one column that scrolls below that. */
+.map-detail[data-rich] {
+  container-type: inline-size;
+  width: clamp(360px, 46%, 760px);
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .map-detail[data-rich] {
+    width: auto;
+    height: 60vh;
+  }
+}
+.sd {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.sd-main,
+.sd-side,
+.sd-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.sd-main,
+.sd-side {
+  gap: var(--sp-4);
+}
+.sd-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-sm);
+}
+.sd-h {
+  margin: 0;
+  font-size: var(--t-90);
+  font-weight: var(--w-strong);
+  color: var(--fg);
+}
+.sd-meta {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.sd-empty {
+  margin: 0;
+  color: var(--fg-2);
+}
+.sd-brief:not([data-open]) {
+  max-height: 7.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, var(--fg) 60%, transparent);
+}
+.sd-more {
+  align-self: flex-start;
+}
+.sd-timeline {
+  min-height: 12em;
+  max-height: 28em;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* The browser skips laying out rows scrolled out of view: the window the host keeps (300) stays smooth. */
+.sd-timeline > .tl {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 34px;
+}
+.sd-note-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--fg);
+}
+.sd-note[data-kind='thought'] .sd-note-text {
+  color: var(--fg-2);
+}
+.sd-note .step-verb {
+  font-weight: var(--w-medium);
+  color: var(--fg-2);
+}
+/* Label over value; as many across as fit (one column beside the story, several when it is the only column). */
+.sd-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+.sd-fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-half);
+  min-width: 0;
+}
+.sd-facts dt {
+  font-size: var(--t-85);
+  color: var(--fg-2);
+}
+.sd-facts dd {
+  min-width: 0;
+  margin: 0;
+}
+.sd-parent .fl-btn {
+  max-width: 100%;
+}
+.sd-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.sd-file-list {
+  display: flex;
+  flex-direction: column;
+}
+@container (min-width: 600px) {
+  .sd {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+    flex: 1;
+    min-height: 0;
+  }
+  .sd {
+    overflow: hidden;
+  }
+  .sd-main,
+  .sd-side {
+    min-height: 0;
+    overflow: auto;
+  }
+  .sd-steps {
+    flex: 1;
+    min-height: 12em;
+  }
+  .sd-timeline {
+    flex: 1;
+    max-height: none;
+  }
+}
 .seg-bar {
   display: grid;
   grid-auto-flow: column;
@@ -2095,6 +2240,11 @@ button.rewind-btn {
 .rewind-btn:focus-visible {
   opacity: 1;
 }
+/* Its time (§2.32), left of Rewind on the first line; floated, so it never adds a line. */
+.user-msg .msg-when {
+  float: right;
+  margin-left: var(--sp-2);
+}
 
 /* The agent's reply: plain text, Claude Code's paragraph rhythm. */
 .prose {
@@ -2216,6 +2366,11 @@ button.rewind-btn {
 .prose:hover .msg-tools .copy-btn,
 .msg-tools .copy-btn:focus-visible {
   opacity: 1;
+}
+/* Left of Copy, floated so it sits on the reply's first line as the box's corner time does, not centred on the button. */
+.msg-tools .msg-when {
+  float: left;
+  margin-right: var(--sp-1);
 }
 
 /* Code blocks: the code on its own tone, no border, no header; the tools show on hover. */
@@ -2369,6 +2524,16 @@ pre.code code {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+}
+/* A step is a row in every surface: the Manager's plain-button look (see its rule) is not its look. */
+.step-main,
+.step-main:hover:not(:disabled) {
+  justify-content: flex-start;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
 button.step-main:hover {
   opacity: 0.8;
@@ -2994,6 +3159,44 @@ button.cc-map-node:hover {
     justify-content: flex-end;
   }
 }
+/* A side bar (~200-360px): the sentence wraps instead of cutting its target, label, commits and URL short;
+   a pill keeps its one line and moves to its own. (Scoped under .apv so it outranks the rules further down; the risk pill wraps through .fl-pill--fit.) */
+@container (max-width: 360px) {
+  .apv .apv-what {
+    flex-wrap: wrap;
+    row-gap: var(--sp-half);
+  }
+  .apv .apv-tg,
+  .apv .apv-label,
+  .apv .apv-subj,
+  .apv .apv-url,
+  .apv .apv-batch-text {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .apv .apv-batch,
+  .apv .apv-act,
+  .apv .apv-dh {
+    flex-wrap: wrap;
+  }
+  .apv .apv-dh {
+    padding-block: var(--sp-half);
+  }
+  .apv .apv-batch-text {
+    flex: 1 1 100%;
+  }
+  /* A dropped commit: hash and author on one line, its subject under them. */
+  .apv .apv-commit {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 0;
+  }
+  .apv .apv-subj {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    overflow-wrap: break-word;
+  }
+}
 /* Narrow: where it runs gives way to what it is. */
 @container (max-width: 640px) {
   .apv-wh {
@@ -3521,6 +3724,7 @@ button.file-row .icon {
 }
 .notice-detail {
   display: block;
+  margin: 0;
   white-space: pre-wrap;
 }
 .link-head {
@@ -3825,7 +4029,8 @@ button.pick-agent {
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  padding: var(--sp-4) var(--sp-2) var(--sp-3);
+  /* Room at the bottom of every card for Demo's note, so it never sits on the name and the glyphs stay in line. */
+  padding: var(--sp-4) var(--sp-2) calc(var(--sp-2) + 1.3em);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--input-bg);
@@ -3839,7 +4044,13 @@ button.pick-agent:hover {
 }
 .pick-agent .pick-note {
   position: absolute;
-  bottom: var(--sp-1);
+  bottom: var(--sp-2);
+  left: var(--sp-1);
+  right: var(--sp-1);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* A fresh chat's first messages to pick from, over the composer. */
 .starters {

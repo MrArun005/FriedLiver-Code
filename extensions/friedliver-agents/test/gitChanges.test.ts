@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { collectChanges, reviewMessage, reviewPrompt } from '../src/host/gitChanges';
+import { MAX_DIFF_CHARS, collectChanges, excludedFromDiff, reviewMessage, reviewPrompt } from '../src/host/gitChanges';
 import { gitRepo } from './helpers';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
@@ -61,16 +61,42 @@ describe('Review My Changes: collecting the changes', () => {
     expect(changes.diff).toContain('+second');
   });
 
-  it('cuts a big diff at a line break and says so', async () => {
+  it('over the cap, sends the --stat and each file\'s diff cut short at a line break, and says so', async () => {
     const dir = await gitRepo();
     await writeFile(path.join(dir, 'big.txt'), Array.from({ length: 2000 }, (_, n) => `line ${n}`).join('\n'));
-    git(dir, 'add', 'big.txt');
-    const changes = (await collectChanges(dir, 1000))!;
+    await writeFile(path.join(dir, 'other.txt'), Array.from({ length: 500 }, (_, n) => `other ${n}`).join('\n'));
+    await writeFile(path.join(dir, 'small.txt'), 'tiny\n');
+    git(dir, 'add', '.');
+    const changes = (await collectChanges(dir, 3000))!;
     expect(changes.truncated).toBe(true);
-    expect(changes.diff.length).toBeLessThanOrEqual(1000);
-    expect(changes.diff.endsWith('\n')).toBe(false);
-    expect(changes.diff.split('\n').at(-1)).toMatch(/^\+line \d+$/);
-    expect(reviewPrompt(changes, dir)).toContain('[The diff is cut off after 1 KB. Read the remaining files yourself.]');
+    expect(changes.stat).toMatch(/big\.txt[\s\S]*other\.txt[\s\S]*small\.txt[\s\S]*3 files changed/);
+    expect(changes.diff.length + changes.stat!.length).toBeLessThanOrEqual(3000);
+    // Every file gets its start: the small one whole, the big ones cut with a count of what is left out.
+    expect(changes.diff).toContain('+tiny');
+    expect(changes.diff).toMatch(/\+line 0\n[\s\S]*… \d+ more lines of this file's diff left out/);
+    expect(changes.diff).toMatch(/\+other 0\n[\s\S]*… \d+ more lines of this file's diff left out/);
+    const prompt = reviewPrompt(changes, dir);
+    expect(prompt).toContain('Summary (git diff --stat):');
+    expect(prompt).toContain("each file's cut short");
+    expect(prompt).toContain('Read the files in the summary for the rest.]');
+    expect(MAX_DIFF_CHARS).toBe(40_000);
+  });
+
+  it('leaves lockfiles, minified and built files out of the diff, naming them', async () => {
+    const dir = await gitRepo();
+    await writeFile(path.join(dir, 'package-lock.json'), '{"lockfileVersion": 3}\n');
+    await mkdir(path.join(dir, 'dist'));
+    await writeFile(path.join(dir, 'dist', 'app.js'), 'built();\n');
+    await writeFile(path.join(dir, 'vendor.min.js'), 'min();\n');
+    await writeFile(path.join(dir, 'src.ts'), 'export const real = 1;\n');
+    git(dir, 'add', '.');
+    const changes = (await collectChanges(dir))!;
+    expect(changes.diff).toContain('+export const real = 1;');
+    expect(changes.diff).not.toMatch(/lockfileVersion|built\(\)|min\(\)/);
+    expect(changes.skipped?.sort()).toEqual(['dist/app.js', 'package-lock.json', 'vendor.min.js']);
+    expect(reviewPrompt(changes, dir)).toContain('[Not in the diff: 3 lockfiles, minified or built files (');
+    expect(excludedFromDiff('web/yarn.lock')).toBe(true);
+    expect(excludedFromDiff('src/distance.ts')).toBe(false);
   });
 
   it('runs no external diff or textconv program a repository configures', async (ctx) => {

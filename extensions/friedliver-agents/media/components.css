@@ -425,6 +425,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* fit: in a card narrower than 360px (an approval in a side bar) the pill takes its own line and wraps its words rather than cut them. */
+@container (max-width: 360px) {
+  .fl-pill--fit {
+    flex: none;
+    max-width: 100%;
+    height: auto;
+    min-height: var(--pill-h);
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .fl-pill--fit > .fl-pill__text {
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+}
 .fl-pill__sub {
   flex: none;
   color: var(--fg);
@@ -1186,6 +1201,24 @@ textarea.fl-input {
 }
 .fl-tip .fl-kbd {
   margin-left: var(--sp-1);
+}
+
+/* ---- Timestamp (§2.32): when a message was sent; shown while its message is hovered or focused ---- */
+
+.fl-time {
+  color: var(--fg-2);
+  /* --t-85 of the base size, not of the text around it: 11px in a smaller card head too. */
+  font-size: calc(var(--fs) * 0.85);
+  font-weight: 400;
+  line-height: var(--lh);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+[data-stamp]:hover .fl-time,
+[data-stamp]:focus-within .fl-time {
+  opacity: 1;
 }
 
 /* ---- Toast (§2.13): glass r8, elevation 3, bottom right; a draining bar while it counts down ---- */
@@ -2452,6 +2485,8 @@ summary.fl-discuss__row:hover {
 /* Still too many: a whole window of marks beside it, the open tab taking exactly the rest (--open-w, useTabStrip). */
 [data-fit='icon'][data-windowed] > .fl-tab-wrap[data-active] {
   flex: none;
+  /* A narrow side bar gives the open tab less than --tab-open-min, so the other chats' marks still show. */
+  min-width: min(var(--tab-open-min), var(--open-w, var(--tab-open-min)));
   width: var(--open-w, auto);
 }
 /* Past the fit it scrolls by whole tabs; a tab an edge cuts is clipped away (--clip-l/-r from useTabStrip). */
@@ -2910,6 +2945,7 @@ button.fl-row,
   border-radius: var(--r-box);
   background: var(--menu-bg);
   color: var(--fg);
+  container: fl-banner / inline-size;
 }
 .fl-banner[data-tone] {
   border-color: color-mix(in srgb, var(--tone) 35%, transparent);
@@ -2927,6 +2963,17 @@ button.fl-row,
 .fl-banner__actions {
   display: flex;
   gap: var(--sp-1);
+}
+/* Narrow (§2.26): under 560 of banner the actions take their own row, under the text, so they never squeeze it. */
+@container fl-banner (max-width: 560px) {
+  .fl-banner__actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+  /* In line with the text, past the icon. */
+  .fl-banner > .icon ~ .fl-banner__actions {
+    padding-left: calc(var(--i-md) + var(--sp-3));
+  }
 }
 
 /* ==== Composer (§2.27): the owner-approved reference, frozen. ====
@@ -3334,9 +3381,11 @@ button.sa-name:hover {
 }
 .cc-modes-menu {
   left: auto;
-  /* Measured on 7.png: 301px wide with its border, its right edge on the mode button's (36.5px in from the composer's). */
-  right: 35.5px;
-  width: 301px;
+  /* Measured on 7.png: 301px wide with its border, its right edge on the mode button's (36.5px in from the composer's).
+     A narrower composer (the side bar's default ~260-290px) moves it right, then narrows it to the composer's own
+     width, so it never spills past either edge of the panel. */
+  right: clamp(-1px, calc(100% + 1px - 301px), 35.5px);
+  width: min(301px, calc(100% + 2px));
   font-size: var(--t-90);
 }
 .cc-slash-menu,
@@ -3404,6 +3453,14 @@ button.sa-name:hover {
 .cc-empty {
   padding: var(--sp-1) var(--sp-3);
   color: var(--fg-2);
+}
+/* The agent isn't installed: say so, with Install, where the models would be. */
+.cc-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
 }
 /* A row: inset 4 from the menu's sides, so r4 sits concentric in the menu's r8. */
 button.cc-item,
@@ -3503,6 +3560,13 @@ button.cc-item[aria-checked='true'] .cc-item-desc {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A narrow side bar wraps "Effort (Medium)", then puts the slider under it, rather than cutting the name. */
+.cc-effort {
+  flex-wrap: wrap;
+}
+.cc-effort .cc-item-name {
+  white-space: normal;
+}
 .cc-effort .cc-item-name .cc-item-value {
   margin-left: 0;
 }
@@ -3599,6 +3663,9 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   .fl-dot[data-state='working'],
   .fl-progress[data-indeterminate] > i {
     animation: none;
+  }
+  .fl-time {
+    transition: none;
   }
 }
 

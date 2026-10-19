@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type * as acp from '@agentclientprotocol/sdk';
-import { AgentStartError } from '@friedliver/main/agents/agentConnection';
+import { AgentStartError, agentErrorMessage } from '@friedliver/main/agents/agentConnection';
 import { readIfExists, readTextFile, writeTextFile } from '@friedliver/main/agents/fileAccess';
 import { AgentHub, AuthRequiredError, NoSessionError, type SessionStart } from '@friedliver/main/agents/hub';
 import { DEFAULT_AGENTS, demoAgentSpec, type AgentSpec, type VendorAgentId } from '@friedliver/main/agents/registry';
@@ -13,12 +13,19 @@ import { visibleText, type TerminalListener } from '@friedliver/main/agents/term
 import { TurnLog } from '@friedliver/main/agents/turnLog';
 import * as git from '@friedliver/main/workspace/git';
 import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
+import { OMIT_ENV, omittedTools } from '../bridge/mcp';
 import type { Attachment } from '../shared/messages';
 import { describeRule, matchesRule } from '../shared/rules';
 import { describeGrant, sameGrant, siteOrigin, type Access, type Grant } from '../shared/permissions';
 import {
   APPROVAL_NAMES,
   EMPTY_SESSION,
+  defaultChoices,
+  baseModel,
+  choiceName,
+  hiddenModels,
+  withoutModels,
+  type ModelVisibility,
   levelOfMode,
   modeFor,
   modeOption,
@@ -172,6 +179,8 @@ export interface CoreOptions {
   index?: ToolHost['index'];
   /** The system_* tools (system.ts, the user's settings, the audit log). */
   system?: ToolHost['system'];
+  /** Whether the project index is on (friedliver.index.enabled); without it, sessions aren't offered the index_* tools. On when absent and `index` is given. */
+  indexEnabled?(): boolean;
   /** A file (absolute) a chat's agent read or wrote: it has seen this version (projectIndexHost.ts observe). */
   indexSeen?(chatId: string, file: string): void;
   /** A project map for a new session's first message (projectIndex.ts projectPrimer), at most `maxTokens`. */
@@ -182,6 +191,8 @@ export interface CoreOptions {
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
   approvalDefault?(): Exclude<ApprovalLevel, 'full'>;
+  /** Which models the agent's own records let this account use (Codex's models cache), to keep pickers to them. */
+  modelVisibility?(agent: AgentKey): Promise<ModelVisibility | undefined>;
   /** Each agent's last known options and the user's last choices, kept in the user's own storage. */
   defaults?: { get(agent: AgentKey): AgentDefaults | undefined; set(agent: AgentKey, value: AgentDefaults): void };
   /** Remembered "Always allow" answers (permissions.ts), from the user's own storage. */
@@ -193,7 +204,7 @@ export interface CoreOptions {
   /** Starts a new chat's agent and session at once, before its first message. On unless false. */
   warmStart?: boolean;
   /** The shared rules for a new session (sharedRules.ts loadRules); none when absent. */
-  sharedRules?(): Promise<Rules | undefined>;
+  sharedRules?(agent?: AgentKey): Promise<Rules | undefined>;
   /** Appends to the project's memory for the remember tool; absent without a trusted folder. */
   remember?(fact: string): Promise<string>;
   ui: CoreUi;
@@ -290,6 +301,8 @@ export class AgentCore {
   private readonly turnDecision = new Map<string, 'accept' | 'reject'>();
   /** Files each chat's running turn said it touches, for checkpoints shared with another chat. */
   private readonly reported = new Map<string, Set<string>>();
+  /** New tasks whose first message is on its way: their turn, not the warm start, reports a failure to start. */
+  private readonly turnComing = new Set<string>();
   private readonly links: Connections;
   /** /discuss (discuss.ts); chats taking part in one are read-only (`discussing`) until it ends. */
   readonly discussions: Discussions;
@@ -350,8 +363,9 @@ export class AgentCore {
       mcpServersFor: (chatId, agent) => this.mcpServersFor(chatId, agent.http),
       rulesFor: (chatId) => this.rulesFor(chatId),
       // The map shares the rules' cap: rules first, the map gets what is left (~4 bytes a token), at most PRIMER_TOKENS.
+      // The map tells the agent to use the index_* tools: only for a session that is offered them.
       primerFor: async (chatId, _agent, text) =>
-        this.readOnlyChat(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
+        !this.toolsOffered(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
       freshSessionFor: (chatId) => this.readOnlyChat(chatId),
       sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
     });
@@ -487,6 +501,7 @@ export class AgentCore {
     }
     const chat = this.hub.createChat(agent, cwd, options.resume?.sessionId);
     if (wt) this.worktrees.set(chat.id, wt);
+    if (options.messageFollows) this.turnComing.add(chat.id);
     // Counted still (saved state keeps it), never shown: a chat is named by its topic (names.ts).
     this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1;
     const name = AGENT_FACES[agent].name;
@@ -534,8 +549,8 @@ export class AgentCore {
       if (this.hub.getChat(chatId)) await this.hub.startSession(chatId);
     } catch (err) {
       const chat = this.chat(chatId);
-      // A turn that started meanwhile reports the same failure itself.
-      if (chat && !chat.busy) this.items(chatId, [this.failureNotice(chat.agent, err)]);
+      // A turn that started meanwhile, or is about to (a new task's first message), reports the same failure itself.
+      if (chat && !chat.busy && !this.turnComing.has(chatId)) this.items(chatId, [this.failureNotice(chat.agent, err, chatId)]);
     } finally {
       const session = this.chat(chatId)?.session;
       if (session?.starting) this.dispatch({ t: 'session', chatId, session: { ...session, starting: false } });
@@ -706,28 +721,39 @@ export class AgentCore {
     if (option.category === 'mode' && typeof value === 'string') {
       const level = levelOfMode(chat.agent, option, value);
       if (level === 'full' && !(await this.confirmFull(chat))) return;
-      if (level && level !== (chat.approval ?? 'ask')) this.setLevel(chat, level);
-    } else {
-      this.remember(chat, option, value);
+      const before = chat.approval ?? 'ask';
+      if (!level || level === before) {
+        await this.applyOption(chatId, option, value);
+        return;
+      }
+      // The level follows the mode only once the agent took it.
+      this.dispatch({ t: 'approval', chatId, level });
+      if (await this.applyOption(chatId, option, value)) this.setLevel(chat, level);
+      else this.dispatch({ t: 'approval', chatId, level: before });
+      return;
     }
+    this.remember(chat, option, value);
     await this.applyOption(chatId, option, value);
   }
 
   /** FriedLiver's approval level for the chat, and the agent's matching mode. */
   async setApproval(chatId: string, level: ApprovalLevel, via: Via = 'desktop'): Promise<void> {
     const chat = this.requireChat(chatId);
+    const before = chat.approval ?? 'ask';
     if (via !== 'desktop') {
       // From a phone: tightening goes ahead; loosening waits for the Mac; nothing becomes a default for new chats.
       if (level === (chat.approval ?? 'ask')) return;
       if (level === 'full' && !(await this.confirmFull(chat, via))) return;
       if (level === 'edits' && !(await this.confirmRemote(via, { title: `Let ${chatRef(chat)} accept edits without asking?`, detail: `${chat.label}'s edits would be written without review until the chat is switched back.`, button: 'Accept edits' }))) return;
       this.dispatch({ t: 'approval', chatId, level });
-      await this.applyLevel(chatId, true);
+      if (!(await this.applyLevel(chatId, true))) this.dispatch({ t: 'approval', chatId, level: before });
       return;
     }
     if (level === 'full' && !(await this.confirmFull(chat))) return;
-    this.setLevel(chat, level);
-    await this.applyLevel(chatId, true);
+    // Shown at once; back to the old level if the agent refuses the mode for it.
+    this.dispatch({ t: 'approval', chatId, level });
+    if (await this.applyLevel(chatId, true)) this.setLevel(chat, level);
+    else this.dispatch({ t: 'approval', chatId, level: before });
   }
 
   /** Plan mode on or off: a Plan entry in the agent's modes, or Codex's collaboration mode. */
@@ -737,7 +763,7 @@ export class AgentCore {
     if (!plan) return;
     const off = plan.option.category === 'mode' ? modeFor(chat.agent, plan.option, chat.approval ?? 'ask') : plan.off;
     const value = on ? plan.on : off;
-    if (value !== undefined && value !== plan.option.current) await this.applyOption(chatId, plan.option, value);
+    if (value !== undefined && value !== plan.option.current) await this.applyOption(chatId, plan.option, value, { by: 'user' });
   }
 
   private setLevel(chat: ChatView, level: ApprovalLevel): void {
@@ -760,12 +786,14 @@ export class AgentCore {
     return true;
   }
 
-  /** Remembers a choice for this chat and for the agent's next chats. Modes aren't remembered; levels are. */
+  /**
+   * Remembers a choice (model, effort…) for this chat, and its next sessions. Not for the agent's other chats:
+   * only the Accounts page sets those (setDefaultChoice), so trying max effort in one chat doesn't make every
+   * new chat, inline edit and consultation use it.
+   */
   private remember(chat: ChatView, option: SessionOption, value: string | boolean): void {
     const key = optionKey(option);
     this.chosen.set(chat.id, { ...this.chosen.get(chat.id), [key]: value });
-    const d = this.options.defaults?.get(chat.agent);
-    this.saveDefaults(chat.agent, { chosen: { ...d?.chosen, [key]: value } });
   }
 
   private saveDefaults(agent: AgentKey, patch: Partial<AgentDefaults>): void {
@@ -775,14 +803,19 @@ export class AgentCore {
     store.set(agent, { ...d, ...patch });
   }
 
-  /** Sends one setting to the agent the way it takes it, and shows the agent's answer. */
-  private async applyOption(chatId: string, option: SessionOption, value: string | boolean): Promise<void> {
+  /**
+   * Sends one setting to the agent the way it takes it, and shows the agent's
+   * answer. True when the agent took it. A refusal is always logged; it shows
+   * in the chat only for a change the user made just now (`by: 'user'`), never
+   * for one FriedLiver makes itself when a session starts.
+   */
+  private async applyOption(chatId: string, option: SessionOption, value: string | boolean, { by = 'user' }: { by?: 'user' | 'auto' } = {}): Promise<boolean> {
     const show = (session: ChatSession | undefined) => this.dispatch({ t: 'session', chatId, session });
     const local = (s: ChatSession | undefined) => s && { ...s, options: s.options.map((o) => (o.id === option.id ? { ...o, current: value } : o)) };
     if (!this.hub.hasSession(chatId)) {
       // Applied when the session starts: the mode through the approval level, the rest as chosen.
       show(local(this.chat(chatId)?.session));
-      return;
+      return true;
     }
     try {
       if (option.via === 'mode') {
@@ -794,23 +827,37 @@ export class AgentCore {
       } else {
         const list = await this.hub.setConfigOption(chatId, option.id, value);
         const prev = this.chat(chatId)?.session ?? EMPTY_SESSION;
-        const fresh = sessionOptions({ configOptions: list });
+        const fresh = withoutModels(sessionOptions({ configOptions: list }), prev.hiddenModels);
         show({ ...prev, options: [...prev.options.filter((o) => o.via !== 'option' && !fresh.some((n) => n.category === o.category)), ...fresh] });
       }
       this.updateKnown(chatId);
+      return true;
     } catch (err) {
-      if (err instanceof NoSessionError) return;
-      this.items(chatId, [{ kind: 'notice', tone: 'error', text: `Couldn't change ${option.name}: ${messageOf(err)}` }]);
+      if (err instanceof NoSessionError) return true;
+      const chat = this.chat(chatId);
+      const agent = chat ? this.label(chat.agent) : 'The agent';
+      const to = typeof value === 'string' ? choiceName(option, value) : value ? 'on' : 'off';
+      this.options.log?.(`${agent} refused ${option.name} = ${String(value)} in chat ${chatId} (${by === 'user' ? 'the user chose it' : 'set by FriedLiver'}): ${messageOf(err)}`);
+      const why = messageOf(err);
+      // Gemini keeps its privileged modes for folders the user trusted in Gemini itself.
+      const detail = chat?.agent === 'gemini' && /untrusted folder/i.test(why) ? "Trust this folder in Gemini: run `gemini` in it and choose to trust it, then pick the level again." : undefined;
+      if (by === 'user') this.items(chatId, [{ kind: 'notice', tone: 'error', text: `${agent} didn't change ${option.name} to ${to}: ${why}`, ...(detail ? { detail } : {}) }]);
+      return false;
     }
   }
 
-  /** Puts the agent in the mode for the chat's level. Leaves Plan mode alone unless the user chose a level just now. */
-  private async applyLevel(chatId: string, chosenNow: boolean): Promise<void> {
+  /**
+   * Puts the agent in the mode for the chat's level. Leaves Plan mode alone unless the user chose a level just now.
+   * False when the agent refused the mode. When a session starts the agent may keep its own mode (e.g. Gemini
+   * refuses Auto Edit in a folder it doesn't trust): FriedLiver's level still decides what it answers for the agent.
+   */
+  private async applyLevel(chatId: string, chosenNow: boolean): Promise<boolean> {
     const chat = this.chat(chatId);
     const mode = modeOption(chat?.session);
-    if (!chat || !mode || (!chosenNow && planning(chat.session) && planToggle(chat.session)?.option === mode)) return;
+    if (!chat || !mode || (!chosenNow && planning(chat.session) && planToggle(chat.session)?.option === mode)) return true;
     const want = modeFor(chat.agent, mode, chat.approval ?? 'ask');
-    if (want !== undefined && want !== mode.current) await this.applyOption(chatId, mode, want);
+    if (want === undefined || want === mode.current) return true;
+    return this.applyOption(chatId, mode, want, { by: chosenNow ? 'user' : 'auto' });
   }
 
   /** The agent's options and commands, kept as its defaults for the next chat's pickers and "/" menu. */
@@ -828,9 +875,13 @@ export class AgentCore {
   private async sessionStarted(chatId: string, start: SessionStart): Promise<void> {
     const chat = this.chat(chatId);
     if (!chat) return;
-    const prev = chat.session;
+    const offered = sessionOptions(start);
+    const hidden = hiddenModels(start, offered, await this.options.modelVisibility?.(chat.agent).catch(() => undefined));
+    // Read after the await: commands or usage the agent sent meanwhile stay.
+    const prev = this.chat(chatId)?.session;
     const session: ChatSession = {
-      options: sessionOptions(start),
+      options: withoutModels(offered, hidden),
+      ...(hidden.length ? { hiddenModels: hidden } : {}),
       // Commands may arrive before the session's answer; the agent sends a fresh list soon anyway.
       commands: prev?.commands ?? [],
       ...(prev?.usage && start.loaded ? { usage: prev.usage } : {}),
@@ -841,13 +892,13 @@ export class AgentCore {
     };
     this.dispatch({ t: 'session', chatId, session });
     this.options.accountSeen?.(chat.agent, { status: 'signed-in', ...this.versionOf(chat.agent, start.agentInfo) });
-    const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...this.options.defaults?.get(chat.agent)?.chosen, ...this.chosen.get(chatId) };
+    const wanted = start.loaded ? { ...this.chosen.get(chatId) } : { ...defaultChoices(this.options.defaults?.get(chat.agent)), ...this.chosen.get(chatId) };
     // The model first: it decides which effort levels there are.
     const keys = Object.keys(wanted).sort((a, b) => (a === 'model' ? -1 : b === 'model' ? 1 : 0));
     for (const key of keys) {
       const option = this.chat(chatId)?.session?.options.find((o) => optionKey(o) === key);
       const value = wanted[key];
-      if (option && option.category !== 'mode' && offers(option, value) && option.current !== value) await this.applyOption(chatId, option, value);
+      if (option && option.category !== 'mode' && offers(option, value) && option.current !== value) await this.applyOption(chatId, option, value, { by: 'auto' });
     }
     if (chat.readOnly || this.discussing.has(chatId)) await this.restrictMode(chatId);
     else await this.applyLevel(chatId, false);
@@ -861,7 +912,7 @@ export class AgentCore {
       this.options.log?.(`Read-only chat ${chatId}: the agent offers no plan or read-only mode; FriedLiver's refusals still apply.`);
       return;
     }
-    if (pick.option.current !== pick.value) await this.applyOption(chatId, pick.option, pick.value);
+    if (pick.option.current !== pick.value) await this.applyOption(chatId, pick.option, pick.value, { by: 'auto' });
   }
 
   /** Runs the last message again, or, when the chat has none yet, starts its agent again. */
@@ -887,22 +938,23 @@ export class AgentCore {
 
   // ---- Connections between chats ----
 
-  /** Continues the chat with another agent in a new chat; its transcript goes in front of the first message there. */
-  handoff(chatId: string, agent: AgentKey): Promise<ChatView> {
-    return this.links.handoff(chatId, agent);
+  /** Continues the chat with another agent: in the chat it handed off to before, or a new one (`fresh`). Where the task is goes in front of the next message there. */
+  handoff(chatId: string, agent: AgentKey, fresh = false): Promise<ChatView> {
+    return this.links.handoff(chatId, agent, fresh);
   }
 
   /** Asks another agent from this chat. Resolves with the answer, which also shows in this chat. */
-  async consult(chatId: string, agent: AgentKey, text: string, by: 'user' | 'agent' = 'user', images: Attachment[] = []): Promise<string> {
+  async consult(chatId: string, agent: AgentKey, text: string, by: 'user' | 'agent' = 'user', images: Attachment[] = [], fresh = false): Promise<string> {
     const srcs = images.map((img) => imageDataUri(img.mimeType, img.data));
     const bad = images.find((_, n) => !srcs[n]);
     if (bad) throw new Error(`${bad.name || 'An attachment'} is not an image FriedLiver can send.`);
     // Shown like any attachment; an agent that can't take images gets the text and says so in its chat.
     images.forEach((img, n) => this.addImage(this.id('you'), srcs[n]!, img.name || 'Attached image', 'you', { chatId }));
-    // A chat whose first message is a question for another agent is about that question.
+    // A chat whose first message is a question for another agent is about that question. Later ones don't
+    // rename it: a consultation is a side question, not the chat's request (retitle follows only real requests).
     const chat = this.requireChat(chatId);
-    if (by === 'user') this.retitle(chat, text);
-    return this.links.consult(chatId, agent, text, by, { images });
+    if (by === 'user' && !chat.titlePinned && !chat.items.some((i) => i.kind === 'user' || i.kind === 'link')) this.retitle(chat, text);
+    return this.links.consult(chatId, agent, text, by, { images, fresh });
   }
 
   /** /discuss: this chat's agent and `agents` talk `question` through; resolves with the conclusion on the card. */
@@ -986,10 +1038,10 @@ export class AgentCore {
     const chats: ChatView[] = [];
     for (const agent of agents) {
       // The agent's name keeps branch names apart when chats start in the same millisecond.
-      chats.push(await this.createChat(agent, { worktree: separate, title: prompt, worktreeName: `${agent} ${prompt}`, group, choices: extras.choices?.[agent], approval: extras.approval }));
+      chats.push(await this.createChat(agent, { worktree: separate, title: prompt, worktreeName: `${agent} ${prompt}`, group, choices: extras.choices?.[agent], approval: extras.approval, messageFollows: true }));
     }
     if (shared) for (const c of chats) this.items(c.id, [{ kind: 'notice', tone: 'info', text: shared }]);
-    const done = Promise.all(chats.map((c) => this.sendMessage(c.id, prompt).catch((err: unknown) => this.items(c.id, [this.failureNotice(c.agent, err)])))).then(() => {});
+    const done = Promise.all(chats.map((c) => this.sendMessage(c.id, prompt).catch((err: unknown) => this.items(c.id, [this.failureNotice(c.agent, err, c.id)])))).then(() => {});
     return { group, chats: chats.map((c) => this.requireChat(c.id)), done };
   }
 
@@ -1005,6 +1057,7 @@ export class AgentCore {
   async removeChat(chatId: string): Promise<void> {
     this.rulesBytes.delete(chatId);
     this.compactOffered.delete(chatId);
+    this.turnComing.delete(chatId);
     const chat = this.chat(chatId);
     if (!chat) return;
     if (chat.busy) await this.cancel(chatId);
@@ -1421,7 +1474,7 @@ export class AgentCore {
     const d = this.options.defaults?.get(agent);
     const option = d?.options.find((o) => optionKey(o) === key);
     if (!d || !option || !offers(option, value)) return false;
-    this.saveDefaults(agent, { chosen: { ...d.chosen, [key]: value } });
+    this.saveDefaults(agent, { chosen: { ...defaultChoices(d), [key]: value }, explicit: true });
     return true;
   }
 
@@ -1501,7 +1554,7 @@ export class AgentCore {
   }
 
   private async rulesFor(chatId: string): Promise<{ text: string; files: string[] } | undefined> {
-    const rules = await this.options.sharedRules?.();
+    const rules = await this.options.sharedRules?.(this.chat(chatId)?.agent);
     this.rulesBytes.set(chatId, rules ? Buffer.byteLength(rules.text) : 0);
     if (rules?.truncated) {
       this.items(chatId, [{ kind: 'notice', tone: 'error', text: `The shared rules are over ${RULES_CAP / 1024} KB, so this session got only the first ${RULES_CAP / 1024} KB. Shorten .friedliver/rules.md or memory.md.` }]);
@@ -1529,6 +1582,7 @@ export class AgentCore {
     const token = this.bridge.token(chatId);
     const url = http ? await this.bridge.httpUrl().catch((err: unknown) => this.options.log?.(`FriedLiver tools over HTTP are unavailable: ${messageOf(err)}`)) : undefined;
     if (url) return [{ type: 'http', name: 'friedliver', url, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] }];
+    const omit = this.omittedTools();
     return [
       {
         name: 'friedliver',
@@ -1539,15 +1593,28 @@ export class AgentCore {
           { name: 'ELECTRON_RUN_AS_NODE', value: '1' },
           { name: BRIDGE_ENV, value: this.bridge.address },
           { name: TOKEN_ENV, value: token },
+          ...(omit.length ? [{ name: OMIT_ENV, value: omit.join(',') }] : []),
         ],
       },
     ];
   }
 
+  /** The tools a session isn't offered: system_* this computer lacks or the user turned off, index_* with the index off. */
+  private omittedTools(): string[] {
+    const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'other';
+    const index = !!this.options.index && (this.options.indexEnabled?.() ?? true);
+    return omittedTools({ platform, system: this.options.system?.settings(), index });
+  }
+
+  /** Whether a new session gets the FriedLiver tools at all (the project map's index_* advice needs them). */
+  private toolsOffered(chatId: string): boolean {
+    return !this.readOnlyChat(chatId) && !!this.options.bridgeScript && this.policy() !== 'off' && !this.omittedTools().includes('index_search');
+  }
+
   /** Starts the bridge socket before the first session that could use it. A failure only costs the tools. */
   private ensureBridge(): Promise<void> {
     if (!this.options.bridgeScript || this.policy() === 'off') return Promise.resolve();
-    this.bridgeStarting ??= BridgeServer.start((chatId, call, signal) => this.bridgeCall(chatId, call, signal), this.options.log).then(
+    this.bridgeStarting ??= BridgeServer.start((chatId, call, signal) => this.bridgeCall(chatId, call, signal), this.options.log, () => this.omittedTools()).then(
       (server) => {
         this.bridge = server;
       },
@@ -1584,6 +1651,7 @@ export class AgentCore {
   private async runPrompt(chatId: string, blocks: acp.ContentBlock[]): Promise<TurnResult> {
     const start = this.requireChat(chatId);
     const agent = start.agent;
+    this.turnComing.delete(chatId);
     // A consultation or a pipe gives a chat its turn; the user started the rest.
     const byUser = start.origin?.kind !== 'consult';
     this.dispatch({ t: 'busy', chatId, busy: true, at: Date.now() });
@@ -1606,7 +1674,7 @@ export class AgentCore {
       if (result.stopReason !== 'end_turn') notice = stopNotice(result.stopReason, this.label(agent));
     } catch (err) {
       this.settleChat(chatId);
-      notice = this.failureNotice(agent, err);
+      notice = this.failureNotice(agent, err, chatId);
     } finally {
       this.stopping.delete(chatId);
       this.flushOutput();
@@ -1622,6 +1690,10 @@ export class AgentCore {
       this.dispatch({ t: 'changes', chatId, turnId, files });
       this.touch(chatId, files);
     }
+    // Codex 2 says a model isn't allowed as its reply, and ends the turn normally.
+    const said = stopReason === 'end_turn' ? this.turnReply(chatId) : '';
+    const refused = said.length < 1000 ? modelProblem(said) : undefined;
+    if (!notice && refused) notice = this.modelNotice(chatId, agent, refused, said);
     if (notice) this.items(chatId, [notice]);
     const chat = this.chat(chatId);
     if (chat) {
@@ -1848,8 +1920,36 @@ export class AgentCore {
     this.approvedWrites.set(chatId, map);
   }
 
-  private failureNotice(agent: AgentKey, err: unknown): Item {
+  /** The agent's reply in the turn that just ended, if it gave one. */
+  private turnReply(chatId: string): string {
+    const items = this.chat(chatId)?.items ?? [];
+    const lastUser = items.findLastIndex((i) => i.kind === 'user' || i.kind === 'link');
+    const own = items.slice(lastUser + 1);
+    return own.some((i) => i.kind === 'agent') ? lastReply({ ...this.chat(chatId)!, items: own }) : '';
+  }
+
+  /**
+   * The account can't use the chat's model: says which, and offers the models
+   * the agent lists for this account as one-click switches. An adapter too old
+   * for the account's models gets an update instead.
+   */
+  private modelNotice(chatId: string | undefined, agent: AgentKey, problem: { model: string; outdated: boolean }, said: string): Item {
+    const name = this.label(agent);
     const retry: NoticeAction = { label: 'Try again', do: 'retry' };
+    const update: NoticeAction[] = agent !== 'demo' ? [{ label: `Update ${name}`, do: 'install', agent }] : [];
+    const option = chatId ? this.chat(chatId)?.session?.options.find((o) => o.category === 'model' && o.type === 'select') : undefined;
+    const others = problem.outdated ? [] : (option?.choices ?? []).filter((c) => baseModel(c.value) !== baseModel(problem.model)).slice(0, 3);
+    if (problem.outdated || !option || !others.length) {
+      return { kind: 'notice', tone: 'error', text: `${name} can't run the model ${problem.model}: this version of ${name} is too old for it, or your account can't use it.`, detail: said.trim(), actions: [...update, retry] };
+    }
+    const switches = others.map((c): NoticeAction => ({ label: `Use ${c.name}`, do: 'setOption', optionId: option.id, value: c.value }));
+    return { kind: 'notice', tone: 'error', text: `${name} can't use the model ${problem.model} with this account.`, detail: said.trim(), actions: switches };
+  }
+
+  private failureNotice(agent: AgentKey, err: unknown, chatId?: string): Item {
+    const retry: NoticeAction = { label: 'Try again', do: 'retry' };
+    const problem = modelProblem(messageOf(err));
+    if (problem) return this.modelNotice(chatId, agent, problem, messageOf(err));
     if (err instanceof AuthRequiredError) {
       this.options.accountSeen?.(agent, { status: 'needs-sign-in', methods: signInMethods(err.methods) });
       const actions: NoticeAction[] = [
@@ -1869,6 +1969,7 @@ export class AgentCore {
         tone: 'error',
         text: err.message.split(' Install it with:')[0],
         detail: err.spec.installCommand,
+        detailKind: 'code',
         actions: [...(agent !== 'demo' ? [{ label: 'Install in terminal', do: 'install', agent } satisfies NoticeAction] : []), retry],
       };
     }
@@ -2308,8 +2409,15 @@ export class AgentCore {
   }
 }
 
+/** An error in plain words: for an agent's error, what the agent itself said, never a bare "Internal error". */
 export function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return agentErrorMessage(err);
+}
+
+/** The model an agent says this account can't use, from its error or its reply. */
+export function modelProblem(text: string): { model: string; outdated: boolean } | undefined {
+  const m = /\bThe '([^']{1,80})' model (is not supported|requires a newer version)/i.exec(text);
+  return m ? { model: m[1], outdated: /newer version/i.test(m[2]) } : undefined;
 }
 
 /** How a turn that didn't end normally reads. */

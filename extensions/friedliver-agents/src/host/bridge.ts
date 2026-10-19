@@ -36,11 +36,13 @@ export class BridgeServer {
     private readonly dir: string | undefined,
     private readonly handler: BridgeHandler,
     private readonly log?: (line: string) => void,
+    private readonly omitFor?: (chatId: string) => string[],
   ) {
     server.on('connection', (socket) => this.accept(socket));
   }
 
-  static async start(handler: BridgeHandler, log?: (line: string) => void): Promise<BridgeServer> {
+  /** `omitFor`: the tools a chat's session isn't offered over HTTP (a tools server gets them in OMIT_ENV). */
+  static async start(handler: BridgeHandler, log?: (line: string) => void, omitFor?: (chatId: string) => string[]): Promise<BridgeServer> {
     let address: string;
     let dir: string | undefined;
     if (process.platform === 'win32') {
@@ -67,7 +69,7 @@ export class BridgeServer {
       if (dir) await rm(dir, { recursive: true, force: true });
       throw err;
     }
-    return new BridgeServer(server, address, dir, handler, log);
+    return new BridgeServer(server, address, dir, handler, log, omitFor);
   }
 
   /** The chat's token, made on first use. It lives only in memory and in that chat's tool server. */
@@ -95,6 +97,7 @@ export class BridgeServer {
           (text) => ({ content: [{ type: 'text' as const, text: fit(text) }] }),
           (err: unknown) => toolError(fit(err instanceof Error ? err.message : String(err))),
         ),
+      omitFor: this.omitFor,
       log: this.log,
     });
     try {

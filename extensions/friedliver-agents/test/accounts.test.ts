@@ -4,6 +4,9 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { authStatusOf, signInMethods } from '@friedliver/main/agents/signIn';
 import type * as acp from '@agentclientprotocol/sdk';
+import { installedOrUnknown, preselectAgents, type AgentRoster } from '../src/shared/accounts';
+import { agentMissing } from '../src/shared/view';
+import type { Item } from '../src/shared/model';
 import {
   CLI_ACCOUNTS,
   KEY_SETUPS,
@@ -361,5 +364,30 @@ describe('Mac & Windows control on the page', () => {
     ]) {
       expect(parseAccountsMessage(bad, [])).toBeNull();
     }
+  });
+});
+
+describe('preselected agents for a new task', () => {
+  const roster = (signIn: AgentRoster['signIn'], agents: AgentKey[] = ['claude', 'codex', 'gemini', 'demo']): AgentRoster => ({ agents, signIn });
+
+  it('leaves out an agent the Accounts page found not installed', () => {
+    expect(preselectAgents(roster({ claude: 'not-installed', codex: 'signed-in' }), ['claude'])).toEqual(['codex']);
+    expect(preselectAgents(roster({ claude: 'not-installed', codex: 'signed-in' }), ['claude', 'gemini'])).toEqual(['gemini']);
+    expect(preselectAgents(roster({ claude: 'not-installed', codex: 'not-installed', gemini: 'not-installed' }), ['claude'])).toEqual(['demo']);
+    // Never checked: it may be there, so a saved choice stays.
+    expect(preselectAgents(roster({}), ['claude'])).toEqual(['claude']);
+    expect(preselectAgents(roster({ claude: 'needs-sign-in' }), ['claude'])).toEqual(['claude']);
+    // Demo hidden: nothing else installed falls back to the first agent shown.
+    expect(preselectAgents(roster({ claude: 'not-installed', codex: 'signed-in' }, ['claude', 'codex', 'gemini']), [])).toEqual(['codex']);
+    expect(installedOrUnknown(roster({ gemini: 'not-installed' }), 'gemini')).toBe(false);
+  });
+
+  it('says a chat’s agent is not installed instead of starting', () => {
+    const notice: Item = { kind: 'notice', tone: 'error', text: "Claude isn't installed", actions: [{ label: 'Install in terminal', do: 'install', agent: 'claude' }] };
+    expect(agentMissing({ agent: 'claude', items: [], session: undefined }, 'not-installed')).toBe(true);
+    expect(agentMissing({ agent: 'claude', items: [notice], session: undefined })).toBe(true);
+    expect(agentMissing({ agent: 'claude', items: [notice, { kind: 'agent', text: 'hi' }], session: undefined })).toBe(false);
+    expect(agentMissing({ agent: 'claude', items: [], session: undefined }, 'signed-in')).toBe(false);
+    expect(agentMissing({ agent: 'demo', items: [notice], session: undefined }, 'not-installed')).toBe(false);
   });
 });

@@ -99,8 +99,8 @@ export class BridgeRequests {
   async call(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {
     if (this.host.policy() === 'off') throw new Error('The user turned off agent-to-agent connections in FriedLiver.');
     if (isExternal(chatId)) {
-      if (isSystemCall(call)) return this.system(chatId, undefined, call, signal);
-      if (!isBrowserCall(call)) throw new Error('Only the browser_* and system_* tools are open to clients outside FriedLiver.');
+      // The computer itself (system_*) stays with FriedLiver's own chats, where each call is asked for in context.
+      if (!isBrowserCall(call)) throw new Error('Only the browser_* tools are open to clients outside FriedLiver.');
       return this.external(chatId, call, signal);
     }
     const caller = this.chat(chatId);

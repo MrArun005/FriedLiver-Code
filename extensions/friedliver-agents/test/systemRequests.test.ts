@@ -279,48 +279,32 @@ describe('system tools in a chat', () => {
 
 describe('system tools from Claude Code outside FriedLiver', () => {
   const S1 = `${EXTERNAL_CLIENT}:${'1'.repeat(32)}`;
-  const S2 = `${EXTERNAL_CLIENT}:${'2'.repeat(32)}`;
 
-  it('ask in a popup that says what and where; "this session" holds for that session, tool and target only', async () => {
+  it('are refused: the computer stays with FriedLiver\'s own chats, and nothing is asked or run', async () => {
     const s = setup();
-    const p = s.requests.call(S1, spotify, s.signal);
-    await s.flush();
-    expect(s.asks.at(-1)).toMatchObject({ chatId: S1, title: 'Claude Code wants to open Spotify', detail: 'app:Spotify', always: 'Spotify' });
-    expect(s.asks.at(-1)!.once).toBeUndefined();
-    s.requests.answer(s.asks.at(-1)!.requestId, 'allowChat');
-    await expect(p).resolves.toBe('done');
-    await expect(s.requests.call(S1, spotify, s.signal)).resolves.toBe('done');
-    expect(s.asks).toHaveLength(1);
-    void s.requests.call(S2, spotify, s.signal).catch(() => {});
-    await s.flush();
-    expect(s.asks).toHaveLength(2);
-    expect(s.audit.at(0)).toContain('Claude Code (outside FriedLiver)');
+    await expect(s.requests.call(S1, spotify, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
+    expect(s.asks).toHaveLength(0);
+    expect(s.audit).toHaveLength(0);
   });
 
-  it('offer only Allow once for the clipboard, and remember nothing', async () => {
+  it('refuse the clipboard too, without a popup', async () => {
     const s = setup();
-    const p = s.requests.call(S1, { tool: 'system_clipboard_read' }, s.signal);
-    await s.flush();
-    expect(s.asks.at(-1)).toMatchObject({ once: true });
-    expect(s.asks.at(-1)!.always).toBeUndefined();
-    s.requests.answer(s.asks.at(-1)!.requestId, 'allowChat');
-    await p;
-    void s.requests.call(S1, { tool: 'system_clipboard_read' }, s.signal).catch(() => {});
-    await s.flush();
-    expect(s.asks).toHaveLength(2);
+    await expect(s.requests.call(S1, { tool: 'system_clipboard_read' }, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
+    expect(s.asks).toHaveLength(0);
+    expect(s.audit).toHaveLength(0);
   });
 
-  it('are not covered by friedliver.browser.externalAutoApprove', async () => {
+  it('are not let through by friedliver.browser.externalAutoApprove', async () => {
     const s = setup();
     s.h.externalAutoApprove = () => true;
-    void s.requests.call(S1, spotify, s.signal).catch(() => {});
-    await s.flush();
-    expect(s.asks).toHaveLength(1);
+    await expect(s.requests.call(S1, spotify, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
+    expect(s.asks).toHaveLength(0);
+    expect(s.audit).toHaveLength(0);
   });
 
-  it('still reach only browser_* and system_* tools', async () => {
+  it('reach only the browser_* tools', async () => {
     const s = setup();
-    await expect(s.requests.call(S1, { tool: 'list_chats' }, s.signal)).rejects.toThrow(/browser_\* and system_\*/);
+    await expect(s.requests.call(S1, { tool: 'list_chats' }, s.signal)).rejects.toThrow(/Only the browser_\* tools/);
   });
 });
 

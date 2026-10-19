@@ -202,10 +202,10 @@ describe('the external client (Claude Code outside FriedLiver)', () => {
   };
   const tick = () => new Promise((r) => setTimeout(r, 0));
 
-  it('reaches only the browser and system tools', async () => {
+  it('reaches only the browser tools: not the chats, not the computer (system_*)', async () => {
     const { requests, signal } = ext(true);
-    for (const call of [{ tool: 'list_chats' }, { tool: 'list_agents' }, { tool: 'read_chat', chatId: 'chat-1' }] as const) {
-      await expect(requests.call(S1, call, signal)).rejects.toThrow(/Only the browser_\* and system_\* tools/);
+    for (const call of [{ tool: 'list_chats' }, { tool: 'list_agents' }, { tool: 'read_chat', chatId: 'chat-1' }, { tool: 'system_clipboard_read' }] as const) {
+      await expect(requests.call(S1, call, signal)).rejects.toThrow(/Only the browser_\* tools/);
     }
   });
 

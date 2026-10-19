@@ -8,5 +8,6 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 30_000,
     globalSetup: ['../../test/tmpRun.ts'],
+    setupFiles: ['test/tmpFile.ts'],
   },
 });
