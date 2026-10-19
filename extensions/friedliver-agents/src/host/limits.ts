@@ -7,6 +7,8 @@ import { IMAGE_MIME, LIMITS } from '../shared/messages';
 export const MAX_AGENT_READ_BYTES = 64 * 1024 * 1024;
 /** Tool input and output kept in updates the webviews get; larger ones are left out. */
 export const MAX_RAW_JSON = 64 * 1024;
+/** Characters of each side of a diff in a tool call the webviews get; the transcript shows a short preview of it. */
+export const MAX_DIFF_TEXT = 256 * 1024;
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -35,7 +37,7 @@ export function compactUpdate(update: acp.SessionUpdate): acp.SessionUpdate {
     case 'tool_call':
     case 'tool_call_update': {
       const out = { ...update };
-      if (update.content) out.content = update.content.map((c) => (c.type === 'content' ? { ...c, content: compactBlock(c.content) } : c));
+      if (update.content) out.content = update.content.map((c) => (c.type === 'content' ? { ...c, content: compactBlock(c.content) } : c.type === 'diff' ? compactDiff(c) : c));
       if (tooLarge(update.rawInput)) delete out.rawInput;
       if (tooLarge(update.rawOutput)) delete out.rawOutput;
       return out;
@@ -43,6 +45,12 @@ export function compactUpdate(update: acp.SessionUpdate): acp.SessionUpdate {
     default:
       return update;
   }
+}
+
+function compactDiff(diff: acp.Diff & { type: 'diff' }): acp.Diff & { type: 'diff' } {
+  const cut = (t: string) => (t.length > MAX_DIFF_TEXT ? t.slice(0, MAX_DIFF_TEXT) : t);
+  if ((diff.oldText?.length ?? 0) <= MAX_DIFF_TEXT && (diff.newText?.length ?? 0) <= MAX_DIFF_TEXT) return diff;
+  return { ...diff, oldText: diff.oldText == null ? diff.oldText : cut(diff.oldText), newText: cut(diff.newText ?? '') };
 }
 
 function compactBlock(block: acp.ContentBlock): acp.ContentBlock {

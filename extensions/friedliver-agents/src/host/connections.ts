@@ -1,7 +1,13 @@
 import type * as acp from '@agentclientprotocol/sdk';
+import { chatRef } from '../shared/names';
 import type { Attachment } from '../shared/messages';
-import { MAX_LINK_DEPTH, lastReply, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
-import { consultBrief, forwardText, handoffContext, handoffSummary } from './transcript';
+import { MAX_LINK_DEPTH, lastReply, linkedChat, type Action, type AgentKey, type AppState, type ChatLink, type ChatView, type LinkItem } from '../shared/model';
+import type { ApprovalLevel } from '../shared/session';
+import { createHash } from 'node:crypto';
+import { lstat, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { estimateTokens } from '../shared/tokens';
+import { consultBrief, consultFollowUp, forwardText, handoffContext, handoffSummary, rewoundHistory } from './transcript';
 
 /** Forwards one pipe makes before it pauses, so two agents can't keep each other busy forever. */
 export const MAX_PIPE_FORWARDS = 20;
@@ -18,6 +24,18 @@ export interface NewChat {
   origin?: ChatView['origin'];
   depth?: number;
   group?: string;
+  /** Session settings to apply once the agent's session starts: optionKey → value (see shared/session.ts). */
+  choices?: Record<string, string | boolean>;
+  /** The chat's approval level; the user's default when not given. Full auto must already be confirmed. */
+  approval?: ApprovalLevel;
+  /** Work in this workspace folder rather than the first one; ignored unless it is one of them. */
+  cwd?: string;
+  /** Continue this agent session (one started outside FriedLiver) in one of the workspace folders. */
+  resume?: { sessionId: string; cwd: string };
+  /** Answers only: no FriedLiver tools, and every write, read, command, permission and question is refused up front. */
+  readOnly?: boolean;
+  /** A message is sent as soon as it exists (a new task): a failed warm start leaves the error to that turn, so it shows once. */
+  messageFollows?: boolean;
 }
 
 /** How a turn ended, and what the agent said in it. */
@@ -42,6 +60,8 @@ export interface ChatHost {
 export interface ConsultOptions {
   /** Ask this chat, instead of the consultation the source already has with `agent` or a new one. */
   chatId?: string;
+  /** Start a new consultation even when the source already has one with `agent`. */
+  fresh?: boolean;
   images?: Attachment[];
   /** Called once the consulted chat is known, before its turn starts. */
   started?(chatId: string): void;
@@ -58,12 +78,25 @@ export class Connections {
   private readonly held = new Map<string, string>();
   /** Forwards each pipe made since it was last turned on. */
   private readonly used = new Map<string, number>();
+  /** Consulted chats that have had the asking chat's brief (this window), and what it said then. */
+  private readonly briefed = new Map<string, { from: string; reply: string; files: number }>();
 
   constructor(private readonly host: ChatHost) {}
 
-  /** A new chat for `agent` that continues `chatId`'s work, in the same folder. Spends no turn. */
-  async handoff(chatId: string, agent: AgentKey): Promise<ChatView> {
+  /**
+   * A chat for `agent` that continues `chatId`'s work, in the same folder. Spends no turn.
+   * Handing off to an agent again goes back to the chat this one handed off to before,
+   * which keeps what it knew, with where the task is now; `fresh` starts a new chat.
+   */
+  async handoff(chatId: string, agent: AgentKey, fresh = false): Promise<ChatView> {
     const source = this.require(chatId);
+    const again = fresh ? undefined : this.linkedChat(source.id, agent, 'handoff');
+    if (again) {
+      const link = this.linkBetween(source.id, again.id, 'handoff')!;
+      this.carry(link, source, again, 'handoff-to', 'handoff-from', handoffSummary(source), 'user');
+      this.host.preamble(again.id, handoffContext(source, await fileHashes(source), true));
+      return this.require(again.id);
+    }
     const target = await this.host.createChat(agent, {
       shareWorktreeOf: source.id,
       title: source.title === 'New chat' ? undefined : source.title,
@@ -73,7 +106,10 @@ export class Connections {
     const link = this.addLink('handoff', source.id, target.id, 'user', 1);
     const summary = handoffSummary(source);
     this.carry(link, source, target, 'handoff-to', 'handoff-from', summary, 'user');
-    this.host.preamble(target.id, handoffContext(source));
+    const context = handoffContext(source, await fileHashes(source));
+    this.host.preamble(target.id, context);
+    // The naive way carried the transcript itself.
+    this.host.dispatch({ t: 'tokens', chatId: target.id, add: { naive: estimateTokens(rewoundHistory(source, source.items)), sent: estimateTokens(context) } });
     return this.require(target.id);
   }
 
@@ -84,10 +120,10 @@ export class Connections {
    */
   async consult(chatId: string, agent: AgentKey, text: string, by: 'user' | 'agent', options: ConsultOptions = {}): Promise<string> {
     const source = this.require(chatId);
-    let target = options.chatId ? this.require(options.chatId) : this.consultation(source.id, agent);
+    let target = options.chatId ? this.require(options.chatId) : options.fresh ? undefined : this.consultation(source.id, agent);
     if (target?.id === source.id) throw new Error('A chat cannot ask itself.');
-    if (target && target.agent !== agent) throw new Error(`${target.label} is a ${target.agent} chat, not ${agent}.`);
-    if (target?.busy) throw new Error(`${target.label} is still working. Wait for it to finish, or ask again later.`);
+    if (target && target.agent !== agent) throw new Error(`${chatRef(target)} is a ${target.agent} chat, not ${agent}.`);
+    if (target?.busy) throw new Error(`${chatRef(target)} is still working. Wait for it to finish, or ask again later.`);
     if (!target) {
       const depth = source.depth + 1;
       if (by === 'agent' && depth > MAX_LINK_DEPTH) {
@@ -103,19 +139,29 @@ export class Connections {
     const link = this.linkBetween(source.id, target.id, 'consult') ?? this.addLink('consult', source.id, target.id, by, 0);
     options.started?.(target.id);
     this.carry(link, source, target, 'asked', 'consulted', text, by);
+    // The full brief once per consultation; a follow-up carries only what changed in the asking chat since.
+    const briefed = this.briefed.get(target.id);
+    const brief = briefed?.from === source.id ? consultFollowUp(source, briefed) : consultBrief(source);
+    const seen = { from: source.id, reply: lastReply(source), files: source.files.length };
     const blocks: acp.ContentBlock[] = [
-      { type: 'text', text: consultBrief(source) },
+      { type: 'text', text: brief },
       { type: 'text', text },
       ...(options.images ?? []).map((img): acp.ContentBlock => ({ type: 'image', data: img.data, mimeType: img.mimeType })),
     ];
+    const mark = this.require(target.id).items.length;
     const result = await this.host.prompt(target.id, blocks);
     const answered = this.chat(target.id);
-    if (!answered) throw new Error(`${target.label} was closed before it answered.`);
-    if (!result.reply) {
-      const why = result.stopReason && result.stopReason !== 'end_turn' ? ` (${result.stopReason})` : '';
-      this.notice(source.id, `${answered.label} stopped without answering${why}.`);
-      throw new Error(`${answered.label} stopped without answering${why}.`);
+    if (!answered) throw new Error(`${chatRef(target)} was closed before it answered.`);
+    // Why it couldn't, in its agent's words, rather than only that it didn't.
+    const failed = answered.items.slice(mark).findLast((i) => i.kind === 'notice' && i.tone === 'error');
+    if (!result.reply || (failed && result.stopReason === null)) {
+      const why = failed?.kind === 'notice' ? `. ${failed.text}` : result.stopReason && result.stopReason !== 'end_turn' ? ` (${result.stopReason}).` : '.';
+      const text = failed ? `${chatRef(answered)} couldn't answer${why}` : `${chatRef(answered)} stopped without answering${why}`;
+      this.notice(source.id, text, failed ? 'error' : 'info');
+      throw new Error(text);
     }
+    // Briefed once it answered: a turn that failed before the agent read it gets the whole brief next time.
+    this.briefed.set(target.id, seen);
     this.items(source.id, [this.linkItem(link, answered, 'reply', result.reply, by)]);
     this.count(link.id);
     return result.reply;
@@ -123,12 +169,11 @@ export class Connections {
 
   /** The consultation a chat already has with an agent, if it can take another question. */
   consultation(chatId: string, agent: AgentKey): ChatView | undefined {
-    for (const l of this.host.state.links) {
-      if (l.kind !== 'consult' || l.from !== chatId) continue;
-      const c = this.chat(l.to);
-      if (c && c.agent === agent && !c.archived) return c;
-    }
-    return undefined;
+    return this.linkedChat(chatId, agent, 'consult');
+  }
+
+  linkedChat(chatId: string, agent: AgentKey, kind: 'consult' | 'handoff'): ChatView | undefined {
+    return linkedChat(this.host.state, chatId, agent, kind);
   }
 
   /** Forwards each finished turn of `from` to `to` from now on. Turning a paused pipe on again resets its limit. */
@@ -139,7 +184,7 @@ export class Connections {
     const existing = this.host.state.links.find((l) => l.kind === 'pipe' && l.from === from && l.to === to);
     if (existing?.active) return existing;
     if (pipeReaches(this.host.state.links, to, from)) {
-      throw new Error(`That would make a loop: ${b.label} already forwards to ${a.label}, directly or through other chats.`);
+      throw new Error(`That would make a loop: ${chatRef(b)} already forwards to ${chatRef(a)}, directly or through other chats.`);
     }
     if (existing) {
       this.used.set(existing.id, 0);
@@ -161,7 +206,7 @@ export class Connections {
   async forward(from: string, to: string): Promise<TurnResult> {
     const source = this.require(from);
     const text = lastReply(source);
-    if (!text) throw new Error(`${source.label} has no reply to forward yet.`);
+    if (!text) throw new Error(`${chatRef(source)} has no reply to forward yet.`);
     return this.message(from, to, text, 'user');
   }
 
@@ -173,7 +218,7 @@ export class Connections {
     const source = this.require(from);
     const target = this.require(to);
     if (from === to) throw new Error('A chat cannot message itself.');
-    if (target.busy) throw new Error(`${target.label} is busy. Wait for it to finish, or stop it.`);
+    if (target.busy) throw new Error(`${chatRef(target)} is busy. Wait for it to finish, or stop it.`);
     const via = link ?? this.linkBetween(from, to) ?? this.linkBetween(to, from);
     const linkId = via?.id ?? this.host.id('msg');
     this.items(from, [{ kind: 'link', linkId, role: 'piped-out', chatId: to, agent: target.agent, label: target.label, text, by }]);
@@ -241,7 +286,7 @@ export class Connections {
     if (n >= MAX_PIPE_FORWARDS) {
       this.host.dispatch({ t: 'linkPatch', linkId: link.id, patch: { active: false } });
       const to = this.chat(link.to);
-      this.notice(link.from, `Paused the pipe to ${to?.label ?? 'the other chat'} after ${MAX_PIPE_FORWARDS} messages, so the agents can't keep each other going forever. Pipe it again to continue.`);
+      this.notice(link.from, `Paused the pipe to ${to ? `${chatRef(to)}` : 'the other chat'} after ${MAX_PIPE_FORWARDS} messages, so the agents can't keep each other going forever. Pipe it again to continue.`);
     }
   }
 
@@ -287,8 +332,8 @@ export class Connections {
     this.host.dispatch({ t: 'items', chatId, items, at: Date.now() });
   }
 
-  private notice(chatId: string, text: string): void {
-    this.host.dispatch({ t: 'items', chatId, items: [{ kind: 'notice', tone: 'info', text }], at: Date.now() });
+  private notice(chatId: string, text: string, tone: 'info' | 'error' = 'info'): void {
+    this.host.dispatch({ t: 'items', chatId, items: [{ kind: 'notice', tone, text }], at: Date.now() });
   }
 }
 
@@ -304,4 +349,21 @@ export function pipeReaches(links: readonly ChatLink[], from: string, to: string
     for (const l of links) if (l.kind === 'pipe' && l.active && l.from === at) queue.push(l.to);
   }
   return false;
+}
+
+/** Short content hashes (first 8 hex of SHA-256) of the files a chat changed, as they are now; missing ones left out. */
+async function fileHashes(chat: ChatView): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(
+    chat.files.slice(0, 50).map(async (f) => {
+      const abs = path.resolve(chat.cwd, f);
+      // Only inside the chat's folder, a regular file, not followed out through a symlink.
+      if (!abs.startsWith(chat.cwd + path.sep)) return;
+      const st = await lstat(abs).catch(() => null);
+      if (!st?.isFile() || st.size > 16 * 1024 * 1024) return;
+      const data = await readFile(abs).catch(() => null);
+      if (data) out[f] = createHash('sha256').update(data).digest('hex').slice(0, 8);
+    }),
+  );
+  return out;
 }

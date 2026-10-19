@@ -1,15 +1,41 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { build } from 'esbuild';
+import { afterAll } from 'vitest';
 import { AgentCore, type CoreOptions } from '../src/host/core';
 import type { AgentToAgent } from '../src/host/bridgeRequests';
+import { Permissions, type Store } from '../src/host/permissions';
+
+const made: string[] = [];
+afterAll(() => {
+  for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+/** A fresh temp folder (by its real path), removed after this test file. */
+export function tmpDir(prefix: string): string {
+  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), prefix)));
+  made.push(dir);
+  return dir;
+}
+
+/** A Memento in a plain object, like VS Code's globalState / workspaceState (which outlive a restart). */
+export function memoryStore(): Store & { data: Record<string, unknown> } {
+  const data: Record<string, unknown> = {};
+  return { data, get: <T>(k: string) => structuredClone(data[k]) as T | undefined, update: (k: string, v: unknown) => void (data[k] = structuredClone(v)) };
+}
+
+/** Remembered permissions over in-memory storage; `home` is a fresh folder unless given. */
+export function memoryPermissions(over: { home?: string; user?: Store; workspace?: Store } = {}): Permissions {
+  return new Permissions({ user: over.user ?? memoryStore(), workspace: over.workspace ?? memoryStore(), home: over.home ?? tmpDir('fl-home-') });
+}
 
 export const DEMO_AGENT = path.resolve(__dirname, '../../../agent-core/demo/fakeAgent.mjs');
 
 export async function gitRepo(): Promise<string> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'fl-conn-'));
+  const dir = tmpDir('fl-conn-');
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir });
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'test@example.com');
@@ -21,10 +47,10 @@ export async function gitRepo(): Promise<string> {
 }
 
 /** The FriedLiver tools' MCP server, bundled the way esbuild.mjs does it. */
-export async function buildBridge(): Promise<string> {
-  const out = path.join(await mkdtemp(path.join(os.tmpdir(), 'fl-bridge-')), 'bridge.js');
+export async function buildBridge(entry = 'server.ts'): Promise<string> {
+  const out = path.join(tmpDir('fl-bridge-'), 'bridge.js');
   await build({
-    entryPoints: [path.resolve(__dirname, '../src/bridge/server.ts')],
+    entryPoints: [path.resolve(__dirname, '../src/bridge', entry)],
     bundle: true,
     platform: 'node',
     format: 'cjs',

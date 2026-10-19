@@ -3,7 +3,9 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { BRIDGE_LIMITS, parseRequest, type BridgeCall, type BridgeResponse } from '../bridge/protocol';
+import { HttpTools } from '../bridge/http';
+import { toolError } from '../bridge/mcp';
+import { BRIDGE_LIMITS, EXTERNAL_CLIENT, isExternal, parseRequest, type BridgeCall, type BridgeResponse } from '../bridge/protocol';
 
 /** Does what a chat's agent asked; throwing sends the message back to the agent as the tool's error. */
 export type BridgeHandler = (chatId: string, call: BridgeCall, signal: AbortSignal) => Promise<string>;
@@ -13,15 +15,19 @@ const MAX_SOCKET_PATH = 100;
 
 /**
  * The editor's end of the FriedLiver tools: a local socket the tool servers
- * of agent sessions connect to. Each chat has its own random token, and a
- * request acts as the chat its token belongs to, so a tool server can only
- * speak for its own chat. Anything malformed, oversized or with an unknown
- * token closes the connection.
+ * of agent sessions connect to, and, for agents that take MCP over HTTP, the
+ * tools themselves on 127.0.0.1 (../bridge/http.ts), so those sessions need no
+ * tool server. Each chat has its own random token, and a request acts as the
+ * chat its token belongs to, so a tool server, or an agent, can only speak for
+ * its own chat. Anything malformed, oversized or with an unknown token closes
+ * the connection.
  */
 export class BridgeServer {
   private readonly tokens = new Map<string, string>();
   private readonly chats = new Map<string, string>();
   private readonly sockets = new Set<net.Socket>();
+  private http?: Promise<HttpTools>;
+  private disposed = false;
 
   private constructor(
     private readonly server: net.Server,
@@ -30,11 +36,13 @@ export class BridgeServer {
     private readonly dir: string | undefined,
     private readonly handler: BridgeHandler,
     private readonly log?: (line: string) => void,
+    private readonly omitFor?: (chatId: string) => string[],
   ) {
     server.on('connection', (socket) => this.accept(socket));
   }
 
-  static async start(handler: BridgeHandler, log?: (line: string) => void): Promise<BridgeServer> {
+  /** `omitFor`: the tools a chat's session isn't offered over HTTP (a tools server gets them in OMIT_ENV). */
+  static async start(handler: BridgeHandler, log?: (line: string) => void, omitFor?: (chatId: string) => string[]): Promise<BridgeServer> {
     let address: string;
     let dir: string | undefined;
     if (process.platform === 'win32') {
@@ -61,7 +69,7 @@ export class BridgeServer {
       if (dir) await rm(dir, { recursive: true, force: true });
       throw err;
     }
-    return new BridgeServer(server, address, dir, handler, log);
+    return new BridgeServer(server, address, dir, handler, log, omitFor);
   }
 
   /** The chat's token, made on first use. It lives only in memory and in that chat's tool server. */
@@ -75,6 +83,31 @@ export class BridgeServer {
     return token;
   }
 
+  /**
+   * The tools' streamable HTTP endpoint (`http://127.0.0.1:<port>/mcp`), listening from the first
+   * session that can use it. Requests carry the chat's token as `Authorization: Bearer <token>`.
+   */
+  async httpUrl(): Promise<string> {
+    if (this.disposed) throw new Error('FriedLiver closed its tools.');
+    this.http ??= HttpTools.start({
+      chatFor: (token) => this.tokens.get(hash(token)),
+      externalKey: () => this.chats.get(EXTERNAL_CLIENT),
+      call: (chatId, call, signal) =>
+        this.handler(chatId, call, signal).then(
+          (text) => ({ content: [{ type: 'text' as const, text: fit(text) }] }),
+          (err: unknown) => toolError(fit(err instanceof Error ? err.message : String(err))),
+        ),
+      omitFor: this.omitFor,
+      log: this.log,
+    });
+    try {
+      return (await this.http).url;
+    } catch (err) {
+      this.http = undefined;
+      throw err;
+    }
+  }
+
   /** The chat is gone: its tool server can no longer act for it. */
   revoke(chatId: string): void {
     const token = this.chats.get(chatId);
@@ -84,7 +117,9 @@ export class BridgeServer {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     for (const s of this.sockets) s.destroy();
+    await this.http?.then((h) => h.dispose(), () => {});
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     if (this.dir) await rm(this.dir, { recursive: true, force: true });
   }
@@ -113,7 +148,7 @@ export class BridgeServer {
         const req = parseRequest(line.toString('utf8'));
         if (!req) return close('malformed request');
         const chatId = this.tokens.get(hash(req.token));
-        if (!chatId) return close('unknown token');
+        if (!chatId || isExternal(chatId)) return close('unknown token');
         this.handler(chatId, req.call, gone.signal).then(
           (text) => reply({ id: req.id, ok: true, text: fit(text) }),
           (err: unknown) => reply({ id: req.id, ok: false, error: fit(err instanceof Error ? err.message : String(err)) }),

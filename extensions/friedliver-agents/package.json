@@ -1,7 +1,7 @@
 {
   "name": "friedliver-agents",
   "displayName": "FriedLiver Agents",
-  "description": "Claude, Codex and Gemini coding agents over ACP: chat, reviewed edits, approved commands and a task board.",
+  "description": "Claude, Codex and Gemini coding agents over ACP: chat, model and effort pickers, approvals, reviewed edits and a task board.",
   "version": "0.1.2",
   "publisher": "friedliver",
   "license": "UNLICENSED",
@@ -18,7 +18,8 @@
     "onStartupFinished",
     "onFileSystem:friedliver-proposed",
     "onWebviewPanel:friedliver.tasks",
-    "onWebviewPanel:friedliver.chatPanel"
+    "onWebviewPanel:friedliver.chatPanel",
+    "onWebviewPanel:friedliver.accountsPanel"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -35,8 +36,37 @@
     "test:integration": "node esbuild.mjs && node dist/test/run.js"
   },
   "contributes": {
+    "languages": [
+      {
+        "id": "friedliver-output",
+        "aliases": [
+          "Agent output"
+        ]
+      }
+    ],
+    "externalUriOpeners": [
+      {
+        "id": "friedliver.browser",
+        "label": "FriedLiver browser",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
+    "configurationDefaults": {
+      "[friedliver-output]": {
+        "editor.wordWrap": "on",
+        "editor.wrappingIndent": "same"
+      }
+    },
     "viewsContainers": {
       "activitybar": [
+        {
+          "id": "friedliver-chats",
+          "title": "Chats",
+          "icon": "$(comment-discussion)"
+        },
         {
           "id": "friedliver",
           "title": "FriedLiver Agents",
@@ -45,6 +75,13 @@
       ]
     },
     "views": {
+      "friedliver-chats": [
+        {
+          "type": "webview",
+          "id": "friedliver.chats",
+          "name": "Chats"
+        }
+      ],
       "friedliver": [
         {
           "type": "webview",
@@ -66,6 +103,36 @@
     },
     "commands": [
       {
+        "command": "friedliver.links.useBuiltin",
+        "title": "Open Links in FriedLiver Browser",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.links.useExternal",
+        "title": "Open Links in System Browser",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.remote.open",
+        "title": "Remote Control…",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.remote.stop",
+        "title": "Stop Remote Control",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.showVersion",
+        "title": "Show Version",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.checkForUpdates",
+        "title": "Check for Updates",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.newChat",
         "title": "New Chat",
         "category": "FriedLiver",
@@ -85,7 +152,7 @@
       },
       {
         "command": "friedliver.openTasks",
-        "title": "Agent Manager (Tasks)",
+        "title": "Agent Manager",
         "category": "FriedLiver",
         "icon": "$(checklist)"
       },
@@ -93,6 +160,12 @@
         "command": "friedliver.nextDecision",
         "title": "Go to Next Decision",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.openInbox",
+        "title": "Open Decision Inbox",
+        "category": "FriedLiver",
+        "icon": "$(inbox)"
       },
       {
         "command": "friedliver.review.accept",
@@ -108,8 +181,9 @@
       },
       {
         "command": "friedliver.accounts",
-        "title": "Accounts: Check Sign-in",
-        "category": "FriedLiver"
+        "title": "Agents & Accounts",
+        "category": "FriedLiver",
+        "icon": "$(account)"
       },
       {
         "command": "friedliver.accounts.check",
@@ -119,7 +193,7 @@
       },
       {
         "command": "friedliver.setApiKey",
-        "title": "Set API Key",
+        "title": "Set API Key…",
         "category": "FriedLiver",
         "icon": "$(key)"
       },
@@ -147,10 +221,138 @@
         "command": "friedliver.pipe",
         "title": "Pipe a Chat's Replies to Another Chat",
         "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.rewind",
+        "title": "Rewind Chat…",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.editSelection",
+        "title": "Edit with Agent",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.askSelection",
+        "title": "Ask About Selection",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.addSelectionToChat",
+        "title": "Add Selection to Chat",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.reviewChanges",
+        "title": "Review My Changes",
+        "category": "FriedLiver",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "friedliver.edit.stop",
+        "title": "Stop Editing with Agent",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.review.acceptAll",
+        "title": "Accept All Agent Edits",
+        "category": "FriedLiver",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "friedliver.review.rejectAll",
+        "title": "Reject All Agent Edits",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.managePermissions",
+        "title": "Manage Permissions",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.rules.open",
+        "title": "Rules",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.rules.openMemory",
+        "title": "Open Project Memory",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.rules.import",
+        "title": "Import Rules From CLAUDE.md / AGENTS.md / GEMINI.md",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.otherAgents",
+        "title": "Get Another Agent Extension…",
+        "category": "FriedLiver",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "friedliver.openBrowser",
+        "title": "Open Browser",
+        "category": "FriedLiver",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "friedliver.connectClaudeBrowser",
+        "title": "Connect Claude Code to the browser",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.toggleCodeAndChat",
+        "title": "Switch Between Code and Agent Chat",
+        "category": "FriedLiver",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "friedliver.inlineEdit",
+        "title": "Inline Edit",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.inlineEdit.accept",
+        "title": "Accept Inline Edit",
+        "category": "FriedLiver",
+        "icon": "$(check)"
+      },
+      {
+        "command": "friedliver.inlineEdit.reject",
+        "title": "Reject Inline Edit",
+        "category": "FriedLiver",
+        "icon": "$(close)"
+      },
+      {
+        "command": "friedliver.inlineEdit.retry",
+        "title": "Retry Inline Edit with Follow-up",
+        "category": "FriedLiver",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friedliver.index.rebuild",
+        "title": "Rebuild Project Index (full)",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.diagnoseClaudeSessions",
+        "title": "Diagnose Claude Code Sessions",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.system.showLog",
+        "title": "Show System Actions Log",
+        "category": "FriedLiver"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "friedliver.accounts",
+          "when": "view == friedliver.accounts",
+          "group": "navigation@0"
+        },
         {
           "command": "friedliver.newChat",
           "when": "view == friedliver.agents",
@@ -165,6 +367,16 @@
           "command": "friedliver.moveToCenter",
           "when": "view == friedliver.agents",
           "group": "navigation@3"
+        },
+        {
+          "command": "friedliver.openBrowser",
+          "when": "view == friedliver.agents",
+          "group": "navigation@4"
+        },
+        {
+          "command": "friedliver.otherAgents",
+          "when": "view == friedliver.accounts",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -181,14 +393,49 @@
       ],
       "editor/title": [
         {
+          "command": "friedliver.links.useExternal",
+          "when": "activeEditor == 'workbench.editor.browser' && config.friedliver.links.openIn != 'external'",
+          "group": "friedliver.links"
+        },
+        {
+          "command": "friedliver.links.useBuiltin",
+          "when": "activeEditor == 'workbench.editor.browser' && config.friedliver.links.openIn == 'external'",
+          "group": "friedliver.links"
+        },
+        {
           "command": "friedliver.review.accept",
-          "when": "resourceScheme == friedliver-proposed",
+          "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
           "group": "navigation@1"
         },
         {
           "command": "friedliver.review.reject",
-          "when": "resourceScheme == friedliver-proposed",
+          "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
           "group": "navigation@2"
+        },
+        {
+          "command": "friedliver.review.acceptAll",
+          "when": "resourceScheme == friedliver-proposed && friedliver.reviewActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "friedliver.toggleCodeAndChat",
+          "when": "browserEditorOpen && activeEditorGroupIndex == 1",
+          "group": "navigation@9"
+        },
+        {
+          "command": "friedliver.inlineEdit.accept",
+          "when": "resourceScheme == friedliver-inline && friedliver.inlineEdit.pending",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friedliver.inlineEdit.retry",
+          "when": "resourceScheme == friedliver-inline && friedliver.inlineEdit.pending",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friedliver.inlineEdit.reject",
+          "when": "resourceScheme == friedliver-inline",
+          "group": "navigation@3"
         }
       ],
       "commandPalette": [
@@ -203,10 +450,62 @@
         {
           "command": "friedliver.accounts.check",
           "when": "false"
+        },
+        {
+          "command": "friedliver.edit.stop",
+          "when": "false"
+        },
+        {
+          "command": "friedliver.inlineEdit.accept",
+          "when": "friedliver.inlineEdit.pending"
+        },
+        {
+          "command": "friedliver.inlineEdit.retry",
+          "when": "friedliver.inlineEdit.pending"
+        },
+        {
+          "command": "friedliver.inlineEdit.reject",
+          "when": "friedliver.inlineEdit.pending || friedliver.inlineEdit.running"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "friedliver.editSelection",
+          "when": "resourceScheme == file && !editorReadonly",
+          "group": "friedliver@1"
+        },
+        {
+          "command": "friedliver.askSelection",
+          "when": "resourceScheme == file",
+          "group": "friedliver@2"
+        },
+        {
+          "command": "friedliver.addSelectionToChat",
+          "when": "resourceScheme == file",
+          "group": "friedliver@3"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "friedliver.reviewChanges",
+          "when": "scmProvider == git",
+          "group": "navigation@9"
         }
       ]
     },
     "keybindings": [
+      {
+        "command": "friedliver.newChat",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "focusedView == 'friedliver.agents' || activeWebviewPanelId == 'friedliver.chatPanel'"
+      },
+      {
+        "command": "friedliver.inlineEdit",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorTextFocus && !editorReadonly && resourceScheme == file && !inlineChatHasProvider && !inlineChatHasEditsAgent"
+      },
       {
         "command": "friedliver.review.accept",
         "key": "ctrl+alt+y",
@@ -223,28 +522,75 @@
         "command": "friedliver.moveToCenter",
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a",
+        "when": "!terminalFocus && (isMac || !editorTextFocus || editorReadonly)"
+      },
+      {
+        "command": "friedliver.review.acceptAll",
+        "key": "ctrl+alt+shift+y",
+        "mac": "cmd+alt+shift+y",
+        "when": "friedliver.reviewActive"
+      },
+      {
+        "command": "friedliver.review.rejectAll",
+        "key": "ctrl+alt+shift+n",
+        "mac": "cmd+alt+shift+n",
+        "when": "friedliver.reviewActive"
+      },
+      {
+        "command": "friedliver.nextDecision",
+        "key": "ctrl+alt+d",
+        "mac": "ctrl+alt+d",
         "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.openInbox",
+        "key": "ctrl+alt+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.toggleCodeAndChat",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "friedliver.inlineEdit.accept",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "friedliver.inlineEdit.pending"
+      },
+      {
+        "command": "friedliver.inlineEdit.reject",
+        "key": "escape",
+        "when": "(friedliver.inlineEdit.pending || friedliver.inlineEdit.running) && !suggestWidgetVisible && !findWidgetVisible"
+      },
+      {
+        "command": "friedliver.inlineEdit.retry",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "friedliver.inlineEdit.pending"
       }
     ],
     "colors": [
       {
         "id": "friedliver.decision",
-        "description": "The one loud color: something waits for your decision (waiting badge, Accept, Run).",
+        "description": "The one loud color: something waits for your decision (waiting badge, needs-you dots). The theme's info blue, never the error red or the brand orange.",
         "defaults": {
-          "dark": "#7cc4ff",
-          "light": "#0a68c7",
-          "highContrast": "#ffffff",
-          "highContrastLight": "#0a68c7"
+          "dark": "notificationsInfoIcon.foreground",
+          "light": "notificationsInfoIcon.foreground",
+          "highContrast": "notificationsInfoIcon.foreground",
+          "highContrastLight": "notificationsInfoIcon.foreground"
         }
       },
       {
         "id": "friedliver.decisionForeground",
-        "description": "Text on the decision color.",
+        "description": "Text on the decision color: the page color (dark on the dark themes' light blue, white on the light themes' deep blue).",
         "defaults": {
-          "dark": "#03121f",
-          "light": "#ffffff",
-          "highContrast": "#000000",
-          "highContrastLight": "#ffffff"
+          "dark": "editor.background",
+          "light": "editor.background",
+          "highContrast": "editor.background",
+          "highContrastLight": "editor.background"
         }
       },
       {
@@ -276,11 +622,108 @@
           "highContrast": "#a9b4ff",
           "highContrastLight": "#4450c4"
         }
+      },
+      {
+        "id": "friedliver.agentEditBackground",
+        "description": "Background of the lines an agent is working on after Edit with Agent.",
+        "defaults": {
+          "dark": "#b6a6ff14",
+          "light": "#6447d10f",
+          "highContrast": "#b6a6ff26",
+          "highContrastLight": "#6447d11a"
+        }
       }
     ],
     "configuration": {
       "title": "FriedLiver Agents",
       "properties": {
+        "friedliver.discuss.maxRounds": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 5,
+          "markdownDescription": "Rounds a `/discuss` runs at most before it is summed up. It ends sooner when everyone agrees."
+        },
+        "friedliver.discuss.layout": {
+          "type": "string",
+          "default": "board+meter",
+          "enum": [
+            "board+meter",
+            "board",
+            "meter",
+            "timeline"
+          ],
+          "enumDescriptions": [
+            "A board with a column for each position and each agent under the one it holds, then a meter showing how sure each agent is and how far it moved.",
+            "Only the board: a column for each position, each agent under the one it holds.",
+            "Only the meter: each agent on a line between the two positions, nearer the end it is surer of.",
+            "A timeline: each round in order, with each agent's turn and whose point it answers."
+          ],
+          "markdownDescription": "How a `/discuss` card shows the discussion while it runs. Once it ends, every layout shows the same conclusion; open cards change as soon as you change this."
+        },
+        "friedliver.discuss.tokenBudget": {
+          "type": "integer",
+          "default": 60000,
+          "minimum": 5000,
+          "maximum": 500000,
+          "markdownDescription": "Tokens (estimated, sent and received) a `/discuss` may use; past it the discussion stops and is summed up."
+        },
+        "friedliver.chat.autoAllowLinkedReads": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Lets an agent read the chat that handed it its task, or that consulted it, without asking each time. Off by default: reading another chat waits for your OK. Read from your user settings only."
+        },
+        "friedliver.chat.fontFamily": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Font for the chat, the Agent Manager and the other FriedLiver views. Empty uses the editor's chat font (the system font). Takes effect when a view next opens."
+        },
+        "friedliver.chat.fontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 10,
+          "maximum": 20,
+          "markdownDescription": "Text size (px) a new chat tab starts at. In a tab, Cmd/Ctrl + `=` / `-` / `0` changes that tab only. Takes effect when a view next opens."
+        },
+        "friedliver.chat.accentColor": {
+          "type": "string",
+          "default": "#D97757",
+          "markdownDescription": "The chat's one accent colour, used only as the border of the recommended answer. Leave it empty to use the theme's button colour. Takes effect when a view next opens."
+        },
+        "friedliver.remote.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Lets phones you pair control your agents from the same Wi-Fi (FriedLiver Remote). Off by default; **FriedLiver: Remote Control…** starts it and shows the pairing QR code. Only your own user settings can turn it on, never a workspace's."
+        },
+        "friedliver.remote.tailscale": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Also listen on this Mac's Tailscale address, so paired phones on your tailnet reach FriedLiver Remote from anywhere. Never the public internet, never a relay. See docs/REMOTE.md."
+        },
+        "friedliver.voice.language": {
+          "type": "string",
+          "default": "auto",
+          "pattern": "^(auto|[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?)$",
+          "examples": [
+            "auto",
+            "en-US",
+            "en-IN",
+            "hi-IN"
+          ],
+          "scope": "application",
+          "markdownDescription": "Language the composer's mic (macOS) listens for, as a BCP-47 tag such as `en-IN` or `hi-IN`. `auto` uses the system language."
+        },
+        "friedliver.voice.silenceSeconds": {
+          "type": "number",
+          "default": 2.5,
+          "minimum": 0.5,
+          "maximum": 10,
+          "scope": "application",
+          "description": "The composer's mic stops after this many seconds without new words. It always stops after 60 seconds."
+        },
         "friedliver.agents.claude.command": {
           "scope": "machine",
           "type": "string",
@@ -328,18 +771,50 @@
           ],
           "description": "Arguments for the Gemini program."
         },
+        "friedliver.links.openIn": {
+          "scope": "application",
+          "type": "string",
+          "enum": [
+            "builtin",
+            "external"
+          ],
+          "enumItemLabels": [
+            "FriedLiver browser",
+            "System browser"
+          ],
+          "enumDescriptions": [
+            "Web links you click open in a tab of FriedLiver's browser, on the right. Hold Cmd/Ctrl in a chat to use the system browser.",
+            "Web links open in your system browser. Hold Cmd/Ctrl in a chat to use FriedLiver's browser."
+          ],
+          "default": "builtin",
+          "markdownDescription": "Where web links you click open: in a chat, the Agent Manager and Images, and (through the editor's link openers) in Markdown previews, hovers, the editor and the terminal. Per-site choices you made in `#workbench.externalUriOpeners#` still win."
+        },
+        "friedliver.showDemoAgent": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show the Demo agent in the agent pickers, New Chat and the Agent Manager. Demo is a fake agent that runs locally inside FriedLiver, with no account and no network, for trying the chat, reviews and approvals; it isn't an AI model. Chats you already have with it still open. Read from your user settings only."
+        },
         "friedliver.maxRunningAgents": {
           "type": "integer",
-          "default": 2,
+          "default": 3,
           "minimum": 1,
           "maximum": 6,
           "description": "How many agent processes may run at once. The least recently used idle one stops first."
         },
-        "friedliver.updates.check": {
-          "type": "boolean",
-          "default": true,
+        "friedliver.update.mode": {
+          "type": "string",
+          "enum": [
+            "notify",
+            "off"
+          ],
+          "enumDescriptions": [
+            "30 seconds after start and every 4 hours, ask GitHub whether a newer FriedLiver release is out, and offer to install it.",
+            "Never check."
+          ],
+          "default": "notify",
           "scope": "application",
-          "description": "In the FriedLiver app, once a week ask GitHub whether a newer FriedLiver build is out, and say so. Sends nothing but that request."
+          "description": "In the FriedLiver app, check GitHub for newer releases and offer to install them. Sends nothing but that request."
         },
         "friedliver.idleStopMinutes": {
           "type": "integer",
@@ -364,10 +839,223 @@
           "scope": "machine",
           "description": "Whether agents can reach other agents and chats through FriedLiver's tools. Applies to agent sessions started after the change."
         },
+        "friedliver.approvals.default": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "edits"
+          ],
+          "enumDescriptions": [
+            "Edits and commands wait for you.",
+            "Edits go through without asking (each turn can be undone); commands wait for you."
+          ],
+          "default": "ask",
+          "scope": "machine",
+          "description": "The approval level new chats start at. Full auto is chosen per chat, never here. Read from user settings only, so a repository can't make agents run without asking."
+        },
+        "friedliver.approvals.autoRoutineSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 60,
+          "scope": "machine",
+          "markdownDescription": "Routine requests (reads, `git status`, the project's tests, lint and build) allow themselves once after this many seconds, with a visible countdown you can stop (Esc). 0 turns it off. Review and careful requests always wait for you. Read from user settings only."
+        },
+        "friedliver.notify.decisions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification with buttons when an agent waits for you and its chat isn't on screen or the window isn't focused."
+        },
+        "friedliver.notify.finished": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when an agent finishes a task and its chat isn't on screen or the window isn't focused."
+        },
+        "friedliver.claudeSessions.showAll": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show every outside Claude Code session: keep greeting-only ones and don't move sessions idle for over a week to Archived."
+        },
+        "friedliver.showClaudeCodeSessions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show this folder's Claude Code sessions started outside FriedLiver (the claude CLI, the Claude Code extension) in the Agent Manager, read from ~/.claude/projects. FriedLiver only reads them."
+        },
+        "friedliver.images.storageLimitMB": {
+          "type": "integer",
+          "default": 1024,
+          "minimum": 50,
+          "markdownDescription": "How much space FriedLiver's copies of the images agents read, take and make may use, in MB. Past it, the oldest unpinned copies are removed. Pinned images are always kept."
+        },
+        "friedliver.images.keepDays": {
+          "type": "integer",
+          "default": 7,
+          "minimum": 1,
+          "markdownDescription": "Unpinned image copies, and FriedLiver's own screenshots, older than this many days are removed. **Done looking** in the Images view removes them sooner."
+        },
         "friedliver.restoreChats": {
           "type": "boolean",
           "default": true,
           "description": "Bring this folder's chats back when the window opens again. They are kept in the editor's storage for the folder, without images, API keys or tokens. Turning this off deletes the saved chats."
+        },
+        "friedliver.edit.defaultAgent": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "gemini",
+            "demo"
+          ],
+          "enumItemLabels": [
+            "Claude",
+            "Codex",
+            "Gemini",
+            "Demo"
+          ],
+          "default": "claude",
+          "scope": "machine",
+          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
+        },
+        "friedliver.browser.externalClients": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Opt-in: lets Claude Code (the VS Code extension, or `claude` in a terminal) use FriedLiver's browser tools only, through a stdio MCP server named `friedliver-browser` that FriedLiver adds to `~/.claude.json` (no secret in it; it reads a token that changes every launch from FriedLiver's storage). Off by default: FriedLiver writes nothing to `~/.claude.json` until you turn this on or run **FriedLiver: Connect Claude Code to the browser**; turning it off removes the entry FriedLiver added. Every action still asks you first. Read from your user settings only."
+        },
+        "friedliver.browser.externalAutoApprove": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Lets Claude Code act in FriedLiver's browser (open, click, type, back, reload) without asking each time. Off by default; Full auto in a FriedLiver chat does not cover it. Read from your user settings only."
+        },
+        "friedliver.browser.relaxLocalhostCors": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Adds permissive CORS response headers (the requesting origin, credentials allowed, and a 204 answer to preflights) to responses from `http://localhost`, `127.0.0.1` and `[::1]` in FriedLiver's browser only. Nothing else changes: other sites keep normal CORS and web security. Read from your user settings only."
+        },
+        "friedliver.usage.dailyTokenWarning": {
+          "scope": "machine",
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Warns once a day when the tokens the agents report for today, across the chats in a window, pass this many. Counted on this computer only; nothing is sent anywhere. `0` (the default) turns it off."
+        },
+        "friedliver.system.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Let agents ask to act on your Mac or Windows PC through the `system_*` tools: open apps, files and links, bring apps to the front, use the clipboard, show notifications, change the volume, run Shortcuts and screenshot a window. Each action asks you first and is logged in **FriedLiver: System Actions**. Not available on Linux. See docs/SYSTEM-CONTROL.md."
+        },
+        "friedliver.system.fullAutoAllowed": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Let chats on Full auto use the `system_*` tools without asking. Off: they still ask. Reading the clipboard, window screenshots and terminal-like apps ask every time either way. Only your user settings count."
+        },
+        "friedliver.system.tools": {
+          "type": "object",
+          "scope": "machine",
+          "markdownDescription": "Turn single `system_*` tools on or off.",
+          "properties": {
+            "system_open": {
+              "type": "boolean",
+              "default": true,
+              "description": "Open apps, files and links"
+            },
+            "system_apps": {
+              "type": "boolean",
+              "default": true,
+              "description": "List apps and windows"
+            },
+            "system_focus": {
+              "type": "boolean",
+              "default": true,
+              "description": "Bring an app to the front"
+            },
+            "system_shortcut": {
+              "type": "boolean",
+              "default": true,
+              "description": "Run an Apple Shortcut (macOS)"
+            },
+            "system_clipboard_read": {
+              "type": "boolean",
+              "default": true,
+              "description": "Read the clipboard (asked every time)"
+            },
+            "system_clipboard_write": {
+              "type": "boolean",
+              "default": true,
+              "description": "Copy text to the clipboard"
+            },
+            "system_notify": {
+              "type": "boolean",
+              "default": true,
+              "description": "Show a notification"
+            },
+            "system_volume": {
+              "type": "boolean",
+              "default": true,
+              "description": "Read or change the volume"
+            },
+            "system_screenshot_window": {
+              "type": "boolean",
+              "default": true,
+              "description": "Screenshot a window (asked every time)"
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "system_open": true,
+            "system_apps": true,
+            "system_focus": true,
+            "system_shortcut": true,
+            "system_clipboard_read": true,
+            "system_clipboard_write": true,
+            "system_notify": true,
+            "system_volume": true,
+            "system_screenshot_window": true
+          }
+        },
+        "friedliver.inlineEdit.agent": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "gemini",
+            "demo"
+          ],
+          "enumItemLabels": [
+            "Claude",
+            "Codex",
+            "Gemini",
+            "Demo"
+          ],
+          "default": "claude",
+          "scope": "machine",
+          "description": "The agent Inline Edit (Ctrl/Cmd+I) asks. It only proposes text; FriedLiver changes the file when you accept. Rebind the shortcut in Keyboard Shortcuts under FriedLiver: Inline Edit."
+        },
+        "friedliver.index.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Keep a local index of the workspace (file list, definitions, imports, keywords) that agents query with the `index_*` tools to find code faster. Nothing leaves the machine. Skips untrusted folders, `.gitignore`d and `files.exclude`d files, binaries, files over 1 MB, and secret-looking files (`.env*`, `*.pem`, `*.key`, `id_rsa*`)."
+        },
+        "friedliver.index.maxFiles": {
+          "type": "number",
+          "default": 200000,
+          "minimum": 100,
+          "markdownDescription": "Most files the project index holds per workspace folder."
+        },
+        "friedliver.index.maxMemoryMB": {
+          "type": "number",
+          "default": 150,
+          "minimum": 10,
+          "markdownDescription": "Roughly how much memory (MB) the project index may use per workspace folder before it stops adding files. A stopped index shows *Partial index* in the status bar; raise this to index a large repository in full (about 400 for 80,000 files, at roughly 1 GB of memory)."
+        },
+        "friedliver.index.primer": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start each new chat with a compact project map from the index: top-level folders with file counts and the files most likely relevant to the first message (at most 1,500 tokens, sharing the shared rules' 8 KB cap). Saves the agent exploring to find its way."
         }
       }
     },
@@ -375,7 +1063,7 @@
       {
         "id": "friedliver.gettingStarted",
         "title": "Get Started with Agents",
-        "description": "Agents propose, you decide. Every file an agent writes is a diff you accept, and every command waits for you.",
+        "description": "Agents propose, you decide. Pick how much an agent may do on its own; edits show as diffs, commands wait for you, and every turn can be undone.",
         "steps": [
           {
             "id": "openFolder",
@@ -392,8 +1080,8 @@
           },
           {
             "id": "demoAgent",
-            "title": "Try the Demo agent",
-            "description": "The Demo agent runs offline and needs no sign-in. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
+            "title": "Try it with the Demo agent (no account)",
+            "description": "The Demo agent is a fake local agent: no account, no network, not an AI. It shows how FriedLiver works. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Under the message box pick the model, the effort and how much it may do without asking (Shift+Tab switches). Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N. It stays out of the agent pickers unless you turn on `friedliver.showDemoAgent`.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
             "media": {
               "svg": "media/walkthrough/demo-agent.svg",
               "altText": "A Demo agent chat with a plan and an edit waiting for review, with Accept and Reject buttons."
@@ -404,14 +1092,15 @@
           },
           {
             "id": "signIn",
-            "title": "Sign in to Claude, GPT or Gemini",
-            "description": "Each agent signs in through its own official CLI, so your logins stay with the company that runs it. FriedLiver never sees your credentials.\n[Check Sign-in](command:friedliver.accounts)",
+            "title": "Sign in to Claude, Codex or Gemini",
+            "description": "**Agents & Accounts** has a card per agent: install it, sign in with its own login (Google, ChatGPT, Claude) or an API key kept in the editor's secret storage (Gemini also takes Vertex AI), see which account is in use, sign out, and pick the model and effort new chats start with. Your logins stay with the company that runs each agent. Prefer another agent extension, such as Claude Code or Cline? Get it from the gallery as it is.\n[Open Agents & Accounts](command:friedliver.accounts)\n[Get Another Agent Extension](command:friedliver.otherAgents)",
             "media": {
               "svg": "media/walkthrough/sign-in.svg",
               "altText": "The Agents accounts list: one agent signed in, one not installed, one waiting for sign-in."
             },
             "completionEvents": [
-              "onCommand:friedliver.accounts"
+              "onCommand:friedliver.accounts",
+              "onCommand:friedliver.otherAgents"
             ]
           },
           {
@@ -437,6 +1126,18 @@
             "completionEvents": [
               "onStepSelected"
             ]
+          },
+          {
+            "id": "editInPlace",
+            "title": "Edit code where it is",
+            "description": "Select code and press **Ctrl/Cmd+I** for an inline edit: describe the change, watch the proposal as a diff, then accept (Ctrl/Cmd+Enter) or reject (Esc). Right-click **Edit with Agent** lets the agent edit the file itself, as a diff you review. Right-click also has **Ask About Selection**, and Source Control has **Review My Changes**.\n[Edit with Agent](command:friedliver.editSelection)",
+            "media": {
+              "svg": "media/walkthrough/edit-in-place.svg",
+              "altText": "Lines selected in format.ts, the Edit with Claude box asking for the change, and the status bar saying Claude is editing format.ts."
+            },
+            "completionEvents": [
+              "onCommand:friedliver.editSelection"
+            ]
           }
         ]
       }
@@ -444,7 +1145,6 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.8.0",
-    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "^22.20.5",
     "@types/vscode": "~1.104.0",
     "@vscode/test-electron": "^3.1.0",
@@ -454,5 +1154,9 @@
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",
     "zod": "^4.6.7"
-  }
+  },
+  "enabledApiProposals": [
+    "browser",
+    "externalUriOpener"
+  ]
 }

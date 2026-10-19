@@ -88,7 +88,8 @@ warns "Only defaults for machine-overridable, window, resource and language
 overridable scoped settings are supported." Object-valued defaults merge with
 the registered default rather than replacing it
 (`src/vs/platform/configuration/common/configurationRegistry.ts:714-736`).
-Every key below was checked against its registration.
+Every key below was checked against its registration. User and workspace
+settings override all of them.
 
 | Setting | Value | Scope (source) | Why |
 |---|---|---|---|
@@ -107,7 +108,7 @@ Every key below was checked against its registration.
 | `editor.overviewRulerBorder` | `false` | language-overridable (`editorOptions.ts:6584`) | quieter |
 | `editor.guides.bracketPairs` | `active` | language-overridable (`editorOptions.ts:4915`) | a guide only for the bracket pair the cursor is in: shows structure where you work, nothing elsewhere |
 | `editor.renderLineHighlight` | `line` | language-overridable | pinned |
-| `editor.cursorBlinking` | `smooth` | language-overridable (`editorOptions.ts:6251`) | the caret fades instead of flashing; a CSS animation on one element |
+| `editor.cursorBlinking` | `smooth` | language-overridable (`editorOptions.ts:6251`) | the caret fades instead of flashing, **and it is the cheap one at idle** (measured, see below) |
 | `editor.cursorSmoothCaretAnimation` | `on` | language-overridable (`editorOptions.ts:6258`) | the caret glides to its new position; a CSS transition, no extra rendering |
 | `editor.smoothScrolling` | `true` | language-overridable (`editorOptions.ts:6780`) | animated scrolling; only runs while scrolling |
 | `editor.stickyScroll.enabled` | `true` | language-overridable (`editorOptions.ts:3204`) | keeps the enclosing scopes in view; already the upstream default, pinned |
@@ -121,10 +122,26 @@ Every key below was checked against its registration.
 | `workbench.tips.enabled` | `false` | window (`workbench.contribution.ts:823`) | quieter empty editor |
 | `extensions.ignoreRecommendations` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:197`) | no recommendation toasts |
 | `typescript.disableAutomaticTypeAcquisition` | `true` | window (`extensions/typescript-language-features/package.json`) | memory, see memory-plan.md item 5 |
-| `files.watcherExclude` | adds `**/node_modules/*/**` (merged with the upstream defaults) | resource (`contrib/files/browser/files.contribution.ts:294`) | memory, see memory-plan.md item 4 |
+| `files.watcherExclude` | adds `**/node_modules/*/**` and the tool caches `**/{.venv,venv,__pycache__,.mypy_cache,.pytest_cache,.next,.nuxt,.turbo,.parcel-cache,.gradle}/**` (each its own key) (merged with the upstream defaults) | resource (`contrib/files/browser/files.contribution.ts:294`) | memory, see memory-plan.md item 4; the caches: watcher and extension-host CPU during `pip install`, `next build` and the like (CORE-PERF C10). Build outputs (`dist`, `build`, `target`, `out`) and `node_modules` as a whole stay watched on purpose: extensions' recursive `createFileSystemWatcher` calls inherit `files.watcherExclude` (`api/common/extHostFileSystemEventService.ts:178-190`), and TypeScript watches through them (`tsServer/fileWatchingManager.ts:57`), so `tsc -b` project references, cargo and gradle outputs, and newly installed packages would go stale |
+| `typescript.tsserver.useSyntaxServer` | `never` | window (`extensions/typescript-language-features/package.json:2523`) | one tsserver per window instead of two, est. −40–80 MB and one Node process with TS/JS open (CORE-PERF C5). **Trade-off:** on large projects, syntax features (outline, folding, breadcrumbs, document highlights) wait for the semantic server's project load instead of answering at once. The key must be the `typescript.*` one: the extension reads `js/ts.tsserver.useSyntaxServer` first but only when a user or workspace set it (`src/utils/configuration.ts:23-37` ignores defaults there), then falls back to `typescript.*`, which sees this default. Either key in user settings wins |
+| `workbench.startupEditor` | `none` | resource (`contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts:317`) | no Welcome editor in a window with nothing to restore: est. −5–15 MB renderer and the time to restore it (CORE-PERF C8). Walkthroughs stay under Help |
+| `extensions.experimental.deferredStartupFinishedActivation` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:312`) | `onStartupFinished` extensions activate in 50 ms slices (`api/common/extHostExtensionService.ts:622-645`) instead of all in one extension-host task: fewer long tasks and less input lag in the first seconds. Each such extension may activate a few hundred ms later (CORE-PERF C7) |
+
+Why `editor.cursorBlinking` stays `smooth` and not upstream's `blink`
+(CORE-PERF C6 tried `blink` and measured it worse). `blink` toggles the caret
+from a 500 ms JS interval **for as long as an editor has focus**, a renderer DOM
+update plus a GPU composite each time
+(`editor/browser/viewParts/viewCursors/viewCursors.ts`, `_updateBlinking`).
+`smooth` is a CSS animation of 20 × 0.5 s (`viewCursors.css`) that stops 10 s
+after the last caret change and leaves the caret visible. Both stop when the
+editor loses focus. On editor-bench (macOS CI, a `.ts` file focused, idle),
+the release with `blink` idled at 5.97 % of a core against 2.56 % with
+`smooth` (+3.41 points: renderer +2.29, GPU +1.29); the perf build went from
+7.10 % to 2.38 % when `smooth` was put back. Beyond noise in five runs
+(2026-10-17 runs 2–5 and 7; `FriedLiver-Code-design/PERF-RESULTS.md`).
 
 The editor and list defaults above cost no memory: smooth scrolling and the
-caret animations only run while something moves, and sticky scroll and the
+caret glide only run while something moves, and sticky scroll and the
 command center were already on upstream. The memory-related defaults
 (minimap off, no automatic type acquisition, `node_modules` out of the file
 watcher) are unchanged. A comfortable row height is not among them: list and
@@ -135,6 +152,18 @@ The custom title bar is already upstream's default:
 `window.titleBarStyle` defaults to `custom` in 1.142
 (`src/vs/workbench/electron-browser/desktop.contribution.ts:243-248`). It is
 application-scoped, so the extension couldn't set it anyway.
+
+## Process and engine defaults (patches and the Agents extension)
+
+Not settings, but defaults that change what runs. Measured in
+[benchmarks.md, "Cutting memory at the app level"](benchmarks.md#cutting-memory-at-the-app-level).
+
+| Default | Value | Where | Why, and how to undo |
+|---|---|---|---|
+| Debug task labels for launch.json's schema | collected when the first JSON or JSONC model opens, not 5 s after the window opens | patch 0050, `debugAdapterManager.ts` | memory: collecting them made npm's task provider open `package.json`, which started the JSON language server, `configuration-editing` and `extension-editing` in every JavaScript folder. `preLaunchTask` completions in launch.json work as before |
+| Extension host's shell environment (`friedliver.fastShellEnv`, application scope) | `true`: on a launch from the Dock/desktop the extension host starts with the environment of the last launch instead of waiting for `$SHELL -i -l -c` (often 0.3–2 s with nvm, pyenv or conda; upstream waits, `localProcessExtensionHost.ts:221-226`). The real one is still resolved in the background; when it arrives, every changed variable is sent to the running extension host (applied to its `process.env`, so processes extensions spawn from then on get it) and the allow-listed part is saved for next time | patch 0200 | the extension host, git, language servers and agents start that much sooner. Terminals and tasks always wait for the real environment. The first launch (no cache yet) and launches from the CLI (the environment is already there) behave as upstream. An extension that copied `process.env` before the update keeps the old values for that session; `Developer: Restart Extension Host` picks up the new ones. Set `false` to always wait, as upstream |
+| Node.js compile cache on macOS and Linux (argv.json `"node-compile-cache"`) | on: the extension host, shared process and pty host keep a writable cache in `CachedData/<commit>/node/<kind>` in the user data folder; upstream has it on Windows only, as a read-only cache generated at build time (`base/node/nodeCompileCache.ts:64-72`) | patch 0210 | from the second launch on, those processes (and the extensions the extension host loads at startup: `git`, `friedliver-agents`, `github`, `npm`) skip compiling their JavaScript. The main process is not covered: its single bundle is compiled before the user data folder is known. Undo: `"node-compile-cache": false` in argv.json (Preferences: Configure Runtime Arguments) or `NODE_DISABLE_COMPILE_CACHE=1`, then restart |
+| How agents reach the FriedLiver tools | over MCP's streamable HTTP, at `http://127.0.0.1:<port>/mcp` in the extension host, for agents that advertise `mcpCapabilities.http`; otherwise a `dist/bridge.js` process per session | Agents extension (`src/bridge/http.ts`) | memory: no 19 MB process per chat. No setting of its own; `friedliver.connections.agentToAgent: off` still gives sessions no tools at all. Security: SECURITY.md, "The HTTP endpoint" |
 
 ## Settings an extension can't override (for the build owner)
 
@@ -156,13 +185,15 @@ field from `IProductService` and passes it to
 |---|---|---|---|
 | `telemetry.telemetryLevel` | `off` | application (`src/vs/platform/telemetry/common/telemetryService.ts:321-339`) | ship no `aiConfig`/`ariaKey` keys. Code-OSS has none, so telemetry is a no-op |
 | `workbench.enableExperiments` | `false` | application (`src/vs/workbench/services/assignment/common/assignmentService.ts:618`) | omit `tasConfig` |
-| `update.mode` | `manual` (or `none` until FriedLiver has an update feed) | application (`src/vs/platform/update/common/update.config.contribution.ts:19`) | omit `updateUrl` and the update service stays idle. `none` also stops the Agents extension's weekly release check |
+| `update.mode` | `manual` (or `none` until FriedLiver has an update feed) | application (`src/vs/platform/update/common/update.config.contribution.ts:19`) | omit `updateUrl` and the update service stays idle. `none` also stops the Agents extension's release check |
 | `update.showReleaseNotes` | `false` | application (`update.config.contribution.ts:74`) | omit `releaseNotesUrl` |
 | `extensions.autoCheckUpdates` | `false` | application (`contrib/extensions/browser/extensions.contribution.ts:190`) | follows `extensionsGallery`; with no gallery, nothing is checked |
 | `extensions.autoUpdate` | `false` | application (`extensions.contribution.ts:139`) | same |
 | `workbench.welcomePage.walkthroughs.openOnInstall` | `false` | machine (`contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts:311`) | patch default |
 | `window.titleBarStyle` | `custom` | application (`desktop.contribution.ts:243`) | already the upstream default |
-| `window.menuStyle` | leave | application (`desktop.contribution.ts:270`) | none |
+| `window.menuStyle` | `inherit` (custom menus on macOS too) | application (`desktop.contribution.ts:270`) | patch 0110 |
+| `window.dialogStyle` | `custom` | application (`desktop.contribution.ts:291`) | patch 0110 |
+| `workbench.modernUIFrostedGlassOpacity` | `84` (the spec's glass alpha) | application (`workbench.contribution.ts:853`) | patch 0110 |
 | `gulp.autoDetect`, `grunt.autoDetect`, `jake.autoDetect` | `off` | application (`extensions/{gulp,grunt,jake}/package.json`) | already `off` upstream |
 
 ## Security-relevant defaults
@@ -176,10 +207,12 @@ What the fork keeps or changes from upstream, for the threat model in
 | Renderer sandbox, context isolation | as upstream | no patch touches them. `scripts/dev.mjs` adds `--no-sandbox` only for dev runs as root on Linux |
 | Telemetry | off | `enableTelemetry: false`, no telemetry keys in product.json |
 | Update service | none | no `updateUrl` |
-| FriedLiver release check (`friedliver.updates.check`) | on, weekly, application scope | Agents extension, FriedLiver app only. One anonymous GET to `api.github.com/repos/MrArun005/FriedLiver-Code/releases/latest`; also off when `update.mode` is `none` |
+| FriedLiver release check (`friedliver.update.mode`) | `notify`: 30 s after start, then every 4 h; application scope | Agents extension, FriedLiver app only. One anonymous GET to `api.github.com/repos/MrArun005/FriedLiver-Code/releases/latest`; also off when `update.mode` is `none` |
+| Cached shell environment (`friedliver.fastShellEnv`) | only an allow-list is stored (`PATH`, `MANPATH`, `INFOPATH`, `LANG`, `LANGUAGE`, `LC_*`, `NVM_*`, `PYENV_*`, `RBENV_*`, `CONDA_*`, `ASDF_*`, `HOMEBREW_*`, `XDG_*`, `VIRTUAL_ENV`, `JAVA_HOME`, `GOPATH`, `GOROOT`, `GOBIN`, `CARGO_HOME`, `RUSTUP_HOME`, `VOLTA_HOME`, `BUN_INSTALL`, `PNPM_HOME`, `DENO_INSTALL`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `SDKMAN_DIR`, `NODE_PATH`), and any name containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `AUTH`, `COOKIE`, `SESSION`, `PRIVATE`, `CERT` or ending in `PASS` is refused even under an allowed prefix (`NVM_AUTH_HEADER`, `HOMEBREW_GITHUB_API_TOKEN`). Stored in the application storage database in the user data folder (`friedliver.shellEnvCache`). Secrets the shell exports reach the running extension host only in memory, as upstream | patch 0200, `test/shellEnvCache.test.ts` |
 | Extension signature checks (`extensions.verifySignature`) | off | patch 0040; the verifier is Microsoft-only |
 | Agent program (`friedliver.agents.*.command`, `.args`) | machine scope | Agents extension; read from user settings only |
 | Link protection (`linkProtectionTrustedDomains`) | `https://open-vsx.org` | product.json; other links ask before they open |
+| FriedLiver tools endpoint for agents that take MCP over HTTP | 127.0.0.1 only, random port, open from the first such session until the window closes; each request needs its chat's token (`Authorization: Bearer`), and another Host or Origin is refused | Agents extension, `src/bridge/http.ts`; SECURITY.md, "The HTTP endpoint" |
 
 ## Geist fonts: patch pending
 

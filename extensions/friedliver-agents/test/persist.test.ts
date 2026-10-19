@@ -2,7 +2,8 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseSaved, SAVE_LIMITS, settleRestored, StateFile, trimForSave, type SavedState } from '../src/host/persist';
+import { answered, inbox } from '../src/shared/inbox';
+import { parseSaved, SAVE_LIMITS, saveText, settleRestored, StateFile, trimForSave, type SavedState } from '../src/host/persist';
 import { EMPTY_STATE, lastReply, type ChatView, type Item } from '../src/shared/model';
 import { buildBridge, disposeCores, gitRepo, makeCore, waitFor } from './helpers';
 
@@ -33,6 +34,23 @@ const saved = (chats: ChatView[]): SavedState => ({
 });
 
 describe('saving chats', () => {
+  it('writes what JSON.stringify(trimForSave) would, turning only changed chats into text again', () => {
+    const odd = '"quotes", \\ back\u0000slash, ünïcode, \u2028 and ' + JSON.stringify(['\u0000friedliver:chats\u0000']);
+    const set = saved([
+      chat('chat-1', { title: odd, items: [{ kind: 'agent', text: odd }], lastActivity: 1 }),
+      chat('chat-2', { archived: true, items: [{ kind: 'agent', text: 'y'.repeat(1000) }], lastActivity: 2 }),
+      chat('chat-3', { items: [{ kind: 'user', text: 'z', images: ['img'] }], lastActivity: 3 }),
+    ]);
+    set.state.links = [{ id: 'link-1', kind: 'pipe', from: 'chat-1', to: 'chat-3', by: 'user', createdAt: 0, active: true, count: 0 }];
+    expect(saveText(set)).toBe(JSON.stringify(trimForSave(set)));
+    expect(saveText(set, 1600)).toBe(JSON.stringify(trimForSave(set, 1600)));
+    expect(JSON.parse(saveText(set)).state.chats[0].title).toBe(odd);
+    // One chat changes, as the reducer changes it: a new object; the others are the same.
+    const next = { ...set, state: { ...set.state, chats: [set.state.chats[0], set.state.chats[1], { ...set.state.chats[2], title: 'Renamed' }] } };
+    expect(saveText(next)).toBe(JSON.stringify(trimForSave(next)));
+    expect(saveText(saved([]))).toBe(JSON.stringify(trimForSave(saved([]))));
+  });
+
   it('keeps recent items, short output and no images, and drops the oldest archived chats when too big', () => {
     const many: Item[] = Array.from({ length: 450 }, (_, n) => ({ kind: 'agent', text: `m${n}` }));
     const big = chat('chat-1', {
@@ -68,14 +86,28 @@ describe('saving chats', () => {
     const [c, idle] = settleRestored({ ...EMPTY_STATE, chats: [chat('chat-1', { busy: true, items }), chat('chat-2', { items: [{ kind: 'agent', text: 'hi' }] })] }).chats;
     expect(c.busy).toBe(false);
     expect(c.items.map((i) => ('answer' in i ? i.answer : 'state' in i ? i.state : i.kind))).toEqual([
-      'Stopped when the window closed',
+      'Expired — the agent stopped',
       'rejected',
       'denied',
       'exited',
       'denied',
       'notice',
     ]);
+    // Nobody decided them: each says it expired, and the running command (which did start) doesn't.
+    expect(c.items.map((i) => 'expired' in i && i.expired === true)).toEqual([true, true, true, false, true, false]);
     expect(idle.items).toEqual([{ kind: 'agent', text: 'hi' }]);
+  });
+
+  it('keeps expired requests out of the decisions you made', () => {
+    const items: Item[] = [
+      { kind: 'user', text: 'make notes', images: [] },
+      { kind: 'review', reviewId: 'review-1', path: '/w/NOTES.md', added: 3, removed: 0, isNew: true, state: 'pending', at: 1 },
+      { kind: 'permission', requestId: 'perm-1', title: 'Create NOTES.md', options: [], at: 2 },
+      { kind: 'review', reviewId: 'review-2', path: '/w/b', added: 1, removed: 0, isNew: false, state: 'rejected', at: 3 },
+    ];
+    const restored = settleRestored({ ...EMPTY_STATE, chats: [chat('chat-1', { items })] });
+    expect(answered(restored).map((a) => [a.id, a.outcome])).toEqual([['review-2', 'Rejected']]);
+    expect(inbox(restored).entries).toEqual([]);
   });
 
   it('reads back only files that make sense', () => {
@@ -112,7 +144,7 @@ describe('restoring chats', () => {
     expect(second.snapshot.links).toEqual([expect.objectContaining({ kind: 'handoff', from: a.id, to: b.id })]);
     const restored = second.chat(a.id)!;
     expect(restored.busy).toBe(false);
-    expect(restored.items.find((i) => i.kind === 'permission')).toMatchObject({ answer: 'Stopped when the window closed' });
+    expect(restored.items.find((i) => i.kind === 'permission')).toMatchObject({ answer: 'Expired — the agent stopped', expired: true });
     expect(restored.items.at(-1)).toMatchObject({ kind: 'notice', text: 'Stopped when the window closed.' });
     expect(second.decisions()).toEqual([]);
 
@@ -125,7 +157,29 @@ describe('restoring chats', () => {
     expect(lastReply(second.chat(b.id)!)).toContain('taking over a task');
     const c = await second.createChat('demo');
     expect([a.id, b.id]).not.toContain(c.id);
-    expect(c.label).toBe('Demo 2');
+    // Counted on from the saved state, but never numbered: chats are named by topic.
+    expect(c.label).toBe('Demo');
+  });
+
+  it('continues a session started outside FriedLiver', async () => {
+    const before = process.env.FAKE_AGENT_LOAD_SESSION;
+    process.env.FAKE_AGENT_LOAD_SESSION = '1';
+    try {
+      const dir = await gitRepo();
+      const core = makeCore(dir);
+      const a = await core.createChat('demo', { resume: { sessionId: 'outside-1', cwd: dir }, title: 'From the CLI' });
+      expect(a.cwd).toBe(dir);
+      await core.send(a.id, 'again');
+      expect(lastReply(core.chat(a.id)!)).toBe('You said: again');
+      expect(core.exportState().chats[a.id].sessionId).toBe('outside-1');
+      // Only the "continues" notice: no "continues in a new session" one.
+      expect(core.chat(a.id)!.items.filter((i) => i.kind === 'notice').map((i) => (i.kind === 'notice' ? i.text : ''))).toEqual([
+        expect.stringContaining('Continues Claude Code session outside-1'),
+      ]);
+    } finally {
+      if (before === undefined) delete process.env.FAKE_AGENT_LOAD_SESSION;
+      else process.env.FAKE_AGENT_LOAD_SESSION = before;
+    }
   });
 
   it('reloads the old session when the agent can', async () => {

@@ -8,6 +8,7 @@ import { cmdCommandLine, findOnWindowsPath, quoteWindowsArg } from '@friedliver/
 import { allowedExternal, allowedSignInUrl } from '@friedliver/main/agents/signIn';
 import { MAX_OUTPUT_LIMIT, TerminalManager, visibleText, type TerminalInfo } from '@friedliver/main/agents/terminals';
 import * as git from '@friedliver/main/workspace/git';
+import { gitRepo } from './helpers';
 
 // ---- A model of how cmd.exe reads `cmd /d /s /c "<line>"` ----
 // Phase 1 expands %VAR% (an undefined name stays as written). Phase 2 handles ^ and quotes:
@@ -233,11 +234,11 @@ describe('agent terminals', () => {
     const { m } = manager(os.tmpdir(), () => true);
     const { terminalId } = await m.create({ sessionId: 's', command: process.execPath, args: ['-e', "process.stdout.write('x'.repeat(5000))"], outputByteLimit: 1e15 });
     await m.waitForExit({ sessionId: 's', terminalId });
-    expect(m.output({ sessionId: 's', terminalId }).output.length).toBe(5000);
+    expect((await m.output({ sessionId: 's', terminalId })).output.length).toBe(5000);
     expect(MAX_OUTPUT_LIMIT).toBeLessThanOrEqual(16_000_000);
     const small = await m.create({ sessionId: 's', command: process.execPath, args: ['-e', "process.stdout.write('y'.repeat(5000))"], outputByteLimit: 100 });
     await m.waitForExit({ sessionId: 's', terminalId: small.terminalId });
-    expect(m.output({ sessionId: 's', terminalId: small.terminalId })).toMatchObject({ truncated: true, output: 'y'.repeat(100) });
+    expect(await m.output({ sessionId: 's', terminalId: small.terminalId })).toMatchObject({ truncated: true, output: 'y'.repeat(100) });
     m.killAll();
   });
 });
@@ -279,5 +280,23 @@ describe.skipIf(process.platform === 'win32')('git helpers in a hostile reposito
     await git.mergeWorktree(dir, wt, 'task');
     await git.removeWorktree(dir, wt);
     expect(fs.existsSync(marker)).toBe(false);
+  });
+});
+
+describe('git snapshots', () => {
+  it('see a same-size edit made in the second the file was staged (racy git)', async () => {
+    const dir = await gitRepo();
+    const run = (...args: string[]) => execFileSync('git', args, { cwd: dir });
+    run('config', 'core.trustctime', 'false'); // only mtime and size then, so the test sets them exactly
+    const a = path.join(dir, 'a.txt');
+    const t = new Date('2020-01-01T00:00:00Z');
+    await writeFile(a, 'one\n');
+    fs.utimesSync(a, t, t);
+    run('add', 'a.txt');
+    fs.utimesSync(path.join(dir, '.git', 'index'), t, t); // staged in the same second as the file's mtime
+    const before = await git.snapshot(dir);
+    await writeFile(a, 'two\n');
+    fs.utimesSync(a, t, t);
+    expect(await git.snapshot(dir)).not.toBe(before);
   });
 });

@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1","sessionId":"x"}
+{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Hello! How can I help?"}]},"uuid":"a1","sessionId":"x"}
+{"type":"user","message":{"role":"user","content":"which IDE is this"},"uuid":"u2","sessionId":"x"}
+{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"VS Code."}]},"uuid":"a2","sessionId":"x"}
