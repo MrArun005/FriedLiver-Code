@@ -22,7 +22,7 @@ What changes from stock VS Code:
   on several agents and compare them side by side
   ([screenshots](docs/screenshots/agents/)).
 - **Any chat can reach any agent.** Hand a chat off to another agent, ask
-  another agent from a chat (`@gemini …`, `@gpt …`, `@claude …`), pipe one
+  another agent from a chat (`@gemini …`, `@codex …`, `@claude …`), pipe one
   chat's replies into another, or forward a reply. Agents can ask each other
   too, through FriedLiver's own tools, each time you allow it
   ([how it works](docs/CONNECTIONS.md)). Chats survive a reload.
@@ -117,7 +117,7 @@ check from install to two agents talking to each other.
    whenever macOS has the language on device (otherwise Apple's server does
    it). `friedliver.voice.language` (`auto` = the system language, or e.g.
    `en-IN`, `hi-IN`) and `friedliver.voice.silenceSeconds` tune it.
-5. Connect them. In a chat, start a message with `@gemini` (or `@gpt`,
+5. Connect them. In a chat, start a message with `@gemini` (or `@codex`,
    `@claude`, `@demo`) to ask that agent; the answer comes back as a card you
    can send on. **Hand off**, **Ask** and **Pipe to** in the chat's header and
    on Agent Manager cards do the rest. With the Demo agent, `ask demo <question>`
@@ -128,7 +128,8 @@ The command palette has the rest under "FriedLiver": Agent Manager, Run a Task
 on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a Chat's
 Replies to Another Chat, Go to Next Decision (Ctrl+Alt+D), Accept All Agent
 Edits, Manage Permissions, Get Another Agent Extension…, Move Agents to
-the Center (Ctrl/Cmd+Shift+A), Agents & Accounts, Set API Key…, Stop All Agents, and the editor
+the Center (Cmd+Shift+A; Ctrl+Shift+A outside the editor on Linux and Windows,
+where it stays Toggle Block Comment), Agents & Accounts, Set API Key…, Stop All Agents, and the editor
 commands below. `friedliver.connections.agentToAgent` (ask, allow or off) and
 `friedliver.approvals.default` (ask or edits) are read from your user settings
 only. `friedliver.notify.decisions` and `.finished` choose the notifications.
@@ -169,7 +170,7 @@ approved commands ([details](docs/EDITOR.md)):
 
 - **Edit with Agent** (Ctrl/Cmd+I, or right-click): select code, describe the
   change, and the edit opens there as a diff to accept or reject. Start with
-  `@claude`, `@gpt`, `@gemini` or `@demo` to pick the agent; otherwise it's
+  `@claude`, `@codex`, `@gemini` or `@demo` to pick the agent; otherwise it's
   the one you last used for edits. Errors and warnings get **Fix with Agent**
   in their quick fixes.
 - **Ask About Selection** sends your question with the code to a chat, and
@@ -220,7 +221,7 @@ Patches:
 | Patch | What it does |
 | --- | --- |
 | `0010-drop-builtin-copilot` | No built-in Copilot extension; runs without `defaultChatAgent` |
-| `0020-disable-builtin-ai-by-default` | `chat.disableAIFeatures` defaults to true, and the Chat view hides with it |
+| `0020-disable-builtin-ai-by-default` | `chat.disableAIFeatures` defaults to true, and the Chat view hides with it; without `defaultChatAgent` the setting still sets `chatSetupHidden`, so Copilot's Welcome entries, Agents-window banner and terminal hint stay hidden |
 | `0030-installers-without-microsoft-only-parts` | Installers build without the Windows appx package and the tunnel CLI |
 | `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
@@ -228,7 +229,7 @@ Patches:
 | `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |
 | `0200-fast-shell-env` | The extension host starts with the last launch's shell environment instead of waiting for the login shell, then gets the fresh one in the background; only non-secret variables are cached (`friedliver.fastShellEnv`, [DEFAULTS.md](docs/DEFAULTS.md)) |
 | `0210-node-compile-cache-posix` | macOS/Linux: the extension host, shared process and pty host keep a writable Node.js compile cache in `CachedData/<commit>/node` (upstream: Windows only, packaged); argv.json `"node-compile-cache": false` turns it off |
-| `0140-welcome-says-friedliver` | The welcome page and walkthroughs say FriedLiver, not VS Code |
+| `0140-welcome-says-friedliver` | The welcome page and walkthroughs say FriedLiver, not VS Code; the first launch opens the Agents walkthrough, never upstream's Copilot onboarding; a walkthrough step whose `onContext:` already holds (a folder is open) starts done |
 
 ### Writing a patch
 

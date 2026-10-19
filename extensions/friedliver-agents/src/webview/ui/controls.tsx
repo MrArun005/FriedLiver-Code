@@ -25,6 +25,8 @@ type ButtonBase = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'size' | 'icon' 
   block?: boolean;
   /** Text buttons: one line, cut with an ellipsis. */
   truncate?: boolean;
+  /** Link: the quiet grey link (one that repeats on every row), leaving the accent to the one action that matters. */
+  muted?: boolean;
   /** Extra classes for layout only (margin, flex); never for looks. */
   class?: string;
   ref?: Ref<HTMLButtonElement>;
@@ -35,12 +37,12 @@ function buttonClass(p: { variant?: Variant; size?: Size; block?: boolean; class
   return cx('fl-btn', v === 'quiet-danger' ? 'fl-btn--quiet fl-btn--danger' : `fl-btn--${v}`, p.size && p.size !== 'md' && `fl-btn--${p.size}`, p.block && 'fl-btn--block', extra, p.class);
 }
 
-export function Button({ variant, size, icon, iconEnd, kbd, loading, block, truncate, class: className, children, type = 'button', disabled, onClick, ...rest }: ButtonBase) {
+export function Button({ variant, size, icon, iconEnd, kbd, loading, block, truncate, muted, class: className, children, type = 'button', disabled, onClick, ...rest }: ButtonBase) {
   return (
     <button
       {...rest}
       type={type}
-      class={buttonClass({ variant, size, block, class: cx(truncate && 'fl-btn--truncate', className) })}
+      class={buttonClass({ variant, size, block, class: cx(truncate && 'fl-btn--truncate', muted && 'fl-btn--muted', className) })}
       disabled={disabled}
       aria-busy={loading ? 'true' : undefined}
       onClick={loading ? undefined : onClick}

@@ -45,6 +45,8 @@ import {
   subagentAnswer,
   transcriptGroups,
   switcherMeta,
+  needsYou,
+  turnsOf,
 } from '../src/shared/view';
 
 const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
@@ -98,7 +100,31 @@ describe('search and sorting', () => {
   });
 
   it('counts the columns, archived chats and decisions', () => {
-    expect(counts(state([...chats, chat('x', { archived: true, items: [said, waiting] })]))).toEqual({ needsYou: 1, working: 1, done: 3, archived: 1, decisions: 1 });
+    expect(counts(state([...chats, chat('x', { archived: true, items: [said, waiting] })]))).toEqual({ needsYou: 1, working: 1, problem: 0, done: 3, archived: 1, decisions: 1 });
+  });
+
+  it('counts a failed chat as a problem, not as needing you, the same in the header, the map and the Inbox', () => {
+    const failed = chat('f', { items: [said, { kind: 'notice', tone: 'error', text: 'Claude isn’t installed.' }], turns: 1 });
+    const s = state([failed]);
+    expect(needsYou(failed)).toBe(false);
+    expect(counts(s)).toMatchObject({ needsYou: 0, problem: 1, decisions: 0 });
+    const lane = mapLayout(s).lanes[0];
+    expect(lane).toMatchObject({ needsYou: 0, problem: 1 });
+    const asks = state([chat('w', { items: [said, waiting] })]);
+    expect(counts(asks)).toMatchObject({ needsYou: 1, decisions: 1 });
+    expect(mapLayout(asks).lanes[0].needsYou).toBe(1);
+  });
+
+  it('counts the turns the agent answered, not the turns that ended', () => {
+    const reply = (text: string): Item => ({ kind: 'agent', text });
+    // A Demo that replied, whose busy flag never flipped (turns 0), and a Claude that failed to start (turns 1).
+    expect(turnsOf(chat('demo', { agent: 'demo', items: [said, reply('Done.')], turns: 0 }))).toBe(1);
+    expect(turnsOf(chat('cl', { items: [said, { kind: 'notice', tone: 'error', text: 'not installed' }], turns: 1 }))).toBe(0);
+    expect(turnsOf(chat('two', { items: [said, reply('a'), said, reply('b'), said], turns: 2 }))).toBe(2);
+    // The reply streaming now is not a turn yet.
+    expect(turnsOf(chat('busy', { busy: true, items: [said, reply('partial')] }))).toBe(0);
+    // A consult the agent answered is one.
+    expect(turnsOf(chat('c', { items: [{ kind: 'link', role: 'consulted', linkId: 'l', chatId: 'a', agent: 'codex', label: 'Codex', text: 'q', by: 'agent' }, reply('a')] }))).toBe(1);
   });
 
   it('steps through decisions and wraps around', () => {
@@ -522,9 +548,9 @@ describe('"/" commands', () => {
   const agentCmds = [{ name: 'review', description: 'Agent review' }, { name: 'help', description: 'Help' }];
 
   it('lists FriedLiver’s own commands first, then the agent’s; the agent’s win a shared name', () => {
-    expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'review', 'new']);
+    expect(slashMenu([]).map((c) => c.name)).toEqual(['handoff', 'ask', 'discuss', 'pipe', 'review', 'new']);
     const menu = slashMenu(agentCmds);
-    expect(menu.map((c) => c.name)).toEqual(['handoff', 'ask', 'pipe', 'new', 'review', 'help']);
+    expect(menu.map((c) => c.name)).toEqual(['handoff', 'ask', 'discuss', 'pipe', 'new', 'review', 'help']);
     expect(menu.find((c) => c.name === 'review')?.description).toBe('Agent review');
   });
 

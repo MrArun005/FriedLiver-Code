@@ -128,6 +128,8 @@
   --t-80: 0.8em;
   --t-75: 0.75em;
   --t-title: 16px;
+  /* A conclusion's headline (/discuss §2.30: "Still split on one question"). */
+  --t-hero: 20px;
   --t-touch: 16px;
   --w-regular: 400;
   --w-medium: 500;
@@ -178,6 +180,13 @@
   --tab-h: 30px;
   /* A chat tab's widths (§2.18 Fit; TAB_MIN in src/shared/view.ts): most, least with its title, least squeezed, the open tab's least. */
   --tab-max: 220px;
+  /* /discuss (§2.30): B's meter, its name column, a lane's height (compact under a conclusion's headline) and
+     its marker (an Avatar, between md 20 and lg 32); C's folded round line, the tag column. */
+  --discuss-who-w: 96px;
+  --discuss-lane-h: 48px;
+  --discuss-lane-h-compact: 40px;
+  --discuss-marker: 28px;
+  --discuss-tag-w: 168px;
   --tab-min: 112px;
   --tab-min-compact: 88px;
   --tab-open-min: 184px;
