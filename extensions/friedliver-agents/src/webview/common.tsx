@@ -1,11 +1,16 @@
+import { linkTarget } from '../shared/links';
 import { createContext, createElement, type ComponentChildren, type FunctionComponent } from 'preact';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { Avatar } from './ui/display';
+import { Button, IconButton } from './ui/controls';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
+import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
-import { AGENT_FACES, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
+import { discussLayouts, type DiscussLayout } from '../shared/discussView';
+import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
-import { settleOrder, type Settled } from '../shared/view';
+import { TAB_MIN, markWindow, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -15,8 +20,59 @@ interface VsCodeApi {
 declare function acquireVsCodeApi(): VsCodeApi;
 const vscode = acquireVsCodeApi();
 
-export function send(message: WebviewMessage): void {
+export function send(message: WebviewMessage | AccountsMessage): void {
   vscode.postMessage(message);
+}
+
+// Links, in every view: a web link goes to the host, which opens it in FriedLiver's browser or the system's
+// (friedliver.links.openIn, the other way with Cmd/Ctrl); a file: link opens in the editor if it is in the
+// workspace; any other scheme (javascript:, data:, vscode:, …) opens nothing. In-page "#" links keep their own handlers.
+function onLink(e: MouseEvent): void {
+  if (e.button > 1) return;
+  const a = (e.target as Element | null)?.closest?.('a[href]');
+  const href = a?.getAttribute('href') ?? '';
+  if (!a || href.startsWith('#')) return;
+  e.preventDefault();
+  const t = linkTarget(href);
+  if (t?.kind === 'web') send({ type: 'openLink', url: t.url, modifier: e.metaKey || e.ctrlKey });
+  else if (t?.kind === 'file') send({ type: 'openFile', path: t.path });
+}
+document.addEventListener('click', onLink, true);
+document.addEventListener('auxclick', onLink, true);
+
+/** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
+let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
+const rosterWatchers = new Set<() => void>();
+
+function setRoster(next: AgentRoster): void {
+  roster = next;
+  for (const wake of rosterWatchers) wake();
+}
+
+/** The roster, drawing the component again when it changes (friedliver.showDemoAgent, a check, a sign-in). */
+export function useRoster(): AgentRoster {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    const wake = () => setN((n) => n + 1);
+    rosterWatchers.add(wake);
+    return () => void rosterWatchers.delete(wake);
+  }, []);
+  return roster;
+}
+
+/** friedliver.discuss.layout, drawing the card again when it changes. */
+export function useDiscussLayout(): DiscussLayout {
+  const [, setN] = useState(0);
+  useEffect(() => discussLayouts.watch(() => setN((n) => n + 1)), []);
+  return discussLayouts.get();
+}
+
+/** A small mark for an agent's last known sign-in; nothing while it was never checked. */
+export function SignInMark({ agent }: { agent: AgentKey }) {
+  const state = useRoster().signIn[agent];
+  if (!state || agent === 'demo') return null;
+  const label = `${AGENT_FACES[agent].name}: ${SIGN_IN_TEXT[state]}`;
+  return <span class="signin-mark" data-state={state} role="img" aria-label={label} title={label} />;
 }
 
 let viewState: Record<string, unknown> = {};
@@ -35,6 +91,18 @@ export function usePersisted<T>(key: string, initial: T): [T, (value: T) => void
     vscode.setState(viewState);
   };
   return [value, set];
+}
+
+// friedliver.chat.fontFamily: empty keeps the editor's chat font (the stylesheet's --font).
+{
+  const font = document.body?.dataset.font?.trim().replace(/["\\]/g, '');
+  if (font) document.documentElement.style.setProperty('--font', `"${font}", var(--vscode-chat-font-family, system-ui), sans-serif`);
+}
+
+// friedliver.chat.accentColor: any CSS colour; the stylesheet's default (Claude orange) otherwise.
+{
+  const accent = document.body?.dataset.accent?.trim();
+  if (accent && accent.toLowerCase() !== '#d97757' && CSS.supports('color', accent)) document.documentElement.style.setProperty('--fl-accent', accent);
 }
 
 /** The webview's width, for laying out by the room there is (side bar or editor). */
@@ -72,6 +140,28 @@ export function isTyping(target: EventTarget | null): boolean {
 }
 
 /** The host's state, kept in step by folding the same actions with the same reducer. */
+let nextKey = 0;
+
+/**
+ * Gives every transcript item a key that stays with it (`_k`): items the reducer updates are spread
+ * from the old one, so they keep it; new items get the next one. Lists key by it, never by position,
+ * so dropping the oldest items at the cap moves nothing on screen.
+ */
+function keyItems(prev: AppState | undefined, next: AppState): AppState {
+  for (const chat of next.chats) {
+    const before = prev?.chats.find((c) => c.id === chat.id);
+    if (before?.items === chat.items) continue;
+    for (const item of chat.items) {
+      const keyed = item as { _k?: number };
+      if (keyed._k === undefined) keyed._k = ++nextKey;
+    }
+  }
+  return next;
+}
+
+/** An item's stable key (keyItems). */
+export const itemKey = (item: object): number => (item as { _k?: number })._k ?? 0;
+
 export function useHost(onMessage?: (m: HostMessage) => void) {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [selected, setSelected] = useState<string | undefined>();
@@ -81,12 +171,18 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
     const listener = (e: MessageEvent) => {
       const m = e.data as HostMessage;
       if (m.type === 'snapshot') {
-        setState(m.state);
+        setState(keyItems(undefined, m.state));
         setSelected(m.selected);
+        if (m.roster) setRoster(m.roster);
+        if (m.discussLayout) discussLayouts.set(m.discussLayout);
+      } else if (m.type === 'discussLayout') {
+        discussLayouts.set(m.layout);
+      } else if (m.type === 'roster') {
+        setRoster(m.roster);
       } else if (m.type === 'action') {
-        setState((s) => reduce(s, m.action));
+        setState((s) => keyItems(s, reduce(s, m.action)));
       } else if (m.type === 'actions') {
-        setState((s) => m.actions.reduce(reduce, s));
+        setState((s) => keyItems(s, m.actions.reduce(reduce, s)));
       } else if (m.type === 'select') {
         setSelected(m.chatId);
       }
@@ -151,13 +247,9 @@ export function useNow(ms: number): number {
 }
 
 /** Every agent has a face: its letter on a 16% tint of its hue. */
+/** An agent's face: its letter on a 16% tint of its hue (the Avatar component). */
 export function Glyph({ agent, size }: { agent: AgentKey; size?: 'sm' | 'lg' }) {
-  const face = AGENT_FACES[agent];
-  return (
-    <span class={`glyph ${size ?? ''}`} data-agent={agent} title={face.name} aria-label={face.name} role="img">
-      {face.letter}
-    </span>
-  );
+  return <Avatar agent={agent} size={size} />;
 }
 
 export const DOT_LABEL: Record<string, string> = {
@@ -175,7 +267,7 @@ export const DOT_LABEL: Record<string, string> = {
  * an animation that never ends repaints the webview every frame.
  */
 export function Dot({ state, still }: { state: string; still?: boolean }) {
-  return <span class="dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
+  return <span class="fl-dot dot" data-state={state} data-still={still ? '' : undefined} role="img" aria-label={DOT_LABEL[state] ?? state} title={DOT_LABEL[state] ?? state} />;
 }
 
 /** Where a reply is shown: the chat (for Run in terminal) and its folder (for file links). */
@@ -209,9 +301,9 @@ export const Markdown = memo(function Markdown({ text, chatId, cwd, full }: { te
         ))}
       </div>
       {lines > COLLAPSE_LINES && (
-        <button class="link sm-link md-more" aria-expanded={all} onClick={() => setAll(!all)}>
+        <Button variant="link" size="sm" class="sm-link md-more" aria-expanded={all} onClick={() => setAll(!all)}>
           {all ? 'Show less' : `Show all ${lines} lines`}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -283,7 +375,8 @@ function List({ list, cwd }: { list: ListBlock; cwd?: string }) {
 export function Code({ code, lang, class: className }: { code: string; lang: string; class?: string }) {
   const tokens = useMemo(() => highlight(code, lang), [code, lang]);
   return (
-    <pre class={`code ${className ?? ''}`}>
+    // Focusable, so a line wider than the box can be scrolled from the keyboard.
+    <pre class={`code ${className ?? ''}`} tabIndex={0} aria-label={lang ? `${lang} code` : 'Code'}>
       <code>{tokens ? tokens.map((t, i) => (t.k ? <span key={i} class={`tk-${t.k}`}>{t.v}</span> : t.v)) : code}</code>
     </pre>
   );
@@ -296,17 +389,18 @@ export function Code({ code, lang, class: className }: { code: string; lang: str
  */
 export function RunButton({ chatId, command, cwd }: { chatId: string; command: string; cwd?: string }) {
   return (
-    <button
-      type="button"
-      class="ghost sm run-btn"
+    <Button
+      variant="secondary"
+      size="sm"
+      icon="terminal"
+      class="run-btn"
       aria-label="Run in terminal"
       title={`Type this into a new terminal and run it:\n${command.length > 600 ? `${command.slice(0, 600)}…` : command}`}
       onClick={() => send({ type: 'runInTerminal', chatId, command, ...(cwd ? { cwd } : {}) })}
     >
-      <Icon name="terminal" />
       <span class="run-long">Run in terminal</span>
       <span class="run-short">Run</span>
-    </button>
+    </Button>
   );
 }
 
@@ -328,21 +422,25 @@ export function StepLabel({ title, toolKind, cmd }: { title: string; toolKind?: 
 /** Whether a title reads badly as it is: several lines, or longer than a line. */
 export const longTitle = (title: string) => title.includes('\n') || title.length > 120;
 
-/** A fenced code block: its language, Copy, Insert, and Run in terminal for shell code. */
+/** A fenced code block: the code on its own tone; its language, Run in terminal (shell code), Insert and Copy show on hover. */
 function CodeBlock({ lang, code, chatId }: { lang: string; code: string; chatId?: string }) {
   const run = chatId ? runnableCode(lang, code) : undefined;
+  // Long lines wrap; Wrap off keeps them whole, to scroll sideways.
+  const [wrap, setWrap] = useState(true);
   return (
-    <div class="code-block">
-      <div class="code-head">
+    <div class="code-block" data-wrap={wrap ? '' : undefined}>
+      <Code code={code} lang={lang} />
+      <div class="code-tools">
         <span class="code-lang">{lang || 'code'}</span>
-        <span class="spacer" />
+        <Button variant="secondary" size="sm" class="wrap-btn" aria-pressed={wrap} title={wrap ? 'Long lines wrap: click to keep them whole' : 'Wrap long lines'} onClick={() => setWrap(!wrap)}>
+          Wrap
+        </Button>
         {run && chatId && <RunButton chatId={chatId} command={run} />}
-        <button type="button" class="ghost sm insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
+        <Button variant="secondary" size="sm" class="insert-btn" title="Insert at the cursor in the editor" onClick={() => send({ type: 'insert', text: code })}>
           Insert
-        </button>
+        </Button>
         <CopyButton text={code} label="Copy code" />
       </div>
-      <Code code={code} lang={lang} />
     </div>
   );
 }
@@ -419,7 +517,7 @@ function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
           </PathLink>
         );
       case 'link':
-        // VS Code opens webview links through its own link protection.
+        // A click goes through onLink above: the host opens it (FriedLiver's browser or the system's).
         return (
           <a key={i} href={p.href} title={p.href}>
             {p.v}
@@ -431,55 +529,39 @@ function inline(parts: Inline[], cwd?: string): ComponentChildren[] {
   });
 }
 
-const ICONS = {
-  plus: 'M8 3v10M3 8h10',
-  send: 'M3 8h9M8.5 4.5 12 8l-3.5 3.5',
-  stop: 'M4.5 4.5h7v7h-7z',
-  attach: 'M10.5 5.5 6 10a1.5 1.5 0 0 1-2.1-2.1l5-5a2.5 2.5 0 0 1 3.5 3.5l-5 5a3.5 3.5 0 0 1-5-5l4.5-4.5',
-  undo: 'M5 6H10a3 3 0 0 1 0 6H6M5 6l2.5-2.5M5 6l2.5 2.5',
-  check: 'M3.5 8.5l3 3 6-7',
-  close: 'M4 4l8 8M12 4l-8 8',
-  play: 'M5 3.5v9l7-4.5z',
-  merge: 'M5 3v10M5 6c0 3 6 2 6 6M11 12v1',
-  trash: 'M3.5 4.5h9M6.5 4.5v-1h3v1M5 4.5l.5 8h5l.5-8',
-  center: 'M2.5 3.5h11v9h-11zM5.5 3.5v9M10.5 3.5v9',
-  tasks: 'M2.5 3.5h3v9h-3zM6.5 3.5h3v6h-3zM10.5 3.5h3v4h-3z',
-  file: 'M4.5 2.5h4l3 3v8h-7zM8.5 2.5v3h3',
-  terminal: 'M3 4.5l3 3-3 3M7.5 11h5',
-  search: 'M7 2.75a4.25 4.25 0 1 1 0 8.5a4.25 4.25 0 0 1 0-8.5zM10.2 10.2l3.3 3.3',
-  list: 'M2.75 4.5h.5M5.5 4.5h7.75M2.75 8h.5M5.5 8h7.75M2.75 11.5h.5M5.5 11.5h7.75',
-  map: 'M2.5 3.5h3.5v3h-3.5zM10 3.5h3.5v3H10zM10 10.5h3.5v3H10zM6 5h4M4.25 6.5v3.75a1.75 1.75 0 0 0 1.75 1.75h4',
-  archive: 'M2.5 3.5h11v2.75h-11zM3.5 6.25v6.25h9V6.25M6.5 9h3',
-  unarchive: 'M2.5 3.5h11v2.75h-11zM3.5 6.25v6.25h9V6.25M8 11.5V8.25M6.5 9.75 8 8.25l1.5 1.5',
-  handoff: 'M2.5 8h7.5M7.5 5l3 3-3 3M13.25 3.5v9',
-  ask: 'M2.75 3.5h10.5v6.75H8L5 12.75v-2.5H2.75z',
-  pipe: 'M2.5 6.5h7.5M2.5 9.5h7.5M9.5 4.5 13 8l-3.5 3.5',
-  chevron: 'M5 6.5l3 3 3-3',
-  more: 'M3 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0M7 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0M11 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
-  branch: 'M5 2.75v10.5M11 6a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3zM11 6c0 3-6 2.25-6 5',
-  diff: 'M4.5 2.5h4l3 3v8h-7zM6.5 8.25h3M8 6.75v3M6.5 11.25h3',
-  open: 'M9.5 2.75h3.75V6.5M13.25 2.75 8 8M11.5 9.5v3.75h-8.75V4.5H6.5',
-  user: 'M8 7.75a2.5 2.5 0 1 0 0-5a2.5 2.5 0 0 0 0 5zM3.25 13.25c.6-2.4 2.4-3.5 4.75-3.5s4.15 1.1 4.75 3.5',
-  link: 'M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.5.5M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.5-.5',
-  compare: 'M2.75 3.5h4v9h-4zM9.25 3.5h4v9h-4z',
-  history: 'M2.75 8a5.25 5.25 0 1 0 1.55-3.7M2.75 2.75v2.5h2.5M8 5.25V8l2 1.5',
-  grid: 'M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z',
-  keep: 'M3.5 8.5l3 3 6-7',
-  code: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5',
-  bolt: 'M9 2.5 4 9h3.5L7 13.5 12 7H8.5z',
-  copy: 'M5.5 5.5h7v7h-7zM10.5 5.5v-2h-7v7h2',
-  gauge: 'M2.75 11a5.25 5.25 0 1 1 10.5 0M8 11l2.5-3.5',
-  model: 'M8 2.5l1.4 3.1 3.1 1.4-3.1 1.4L8 11.5 6.6 8.4 3.5 7l3.1-1.4zM12.5 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
-  shield: 'M8 2.5l4.75 1.75v3.5c0 3-2 5-4.75 5.75C5.25 12.75 3.25 10.75 3.25 7.75v-3.5z',
-  queue: 'M2.75 4.5h10.5M2.75 8h10.5M2.75 11.5h6M11 10v3l2-1.5z',
-};
-export type IconName = keyof typeof ICONS;
+export { Icon, type IconName } from './ui/icon';
 
-export function Icon({ name }: { name: IconName }) {
+/**
+ * A message's text clamped to three lines, with Show more at the box's bottom right when (and only when) it
+ * overflows them. `onMore` replaces expanding in place (the sticky copy sends you to the message instead).
+ * Another part can open it with an `expand` event on the element (see openMessage).
+ */
+export function ClampedText({ text, onMore }: { text: string; onMore?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [over, setOver] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setOver(open || el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const expand = () => setOpen(true);
+    el.addEventListener('expand', expand);
+    return () => (ro.disconnect(), el.removeEventListener('expand', expand));
+  }, [text, open]);
   return (
-    <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-      <path d={ICONS[name]} fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
+    <>
+      <div ref={box} class="bubble-text" data-clamped={open ? undefined : ''}>
+        {text}
+      </div>
+      {over && (
+        <Button variant="link" class="msg-more" aria-expanded={open && !onMore} onClick={() => (onMore ? onMore() : setOpen(!open))}>
+          {open && !onMore ? 'Show less' : 'Show more'}
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -487,19 +569,20 @@ export function Icon({ name }: { name: IconName }) {
 export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
-    <button
-      type="button"
-      class="ghost icon-btn sm copy-btn"
+    <IconButton
+      icon={done ? 'check' : 'copy'}
+      label={label}
       title={done ? 'Copied' : label}
-      aria-label={label}
+      size="sm"
+      variant="secondary"
+      muted
+      class="copy-btn"
       onClick={() => {
         send({ type: 'copy', text: text.slice(0, 1_000_000) });
         setDone(true);
         setTimeout(() => setDone(false), 1200);
       }}
-    >
-      <Icon name={done ? 'check' : 'copy'} />
-    </button>
+    />
   );
 }
 
@@ -511,132 +594,198 @@ export function Kbd({ children }: { children: ComponentChildren }) {
   return <kbd>{children}</kbd>;
 }
 
-const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';
+export { Popover } from './ui/menu';
+
+/** How much of each end of a strip to clip so that no tab shows in part (§2.18): a cut tab goes entirely. */
+function clipPartialTabs(el: HTMLElement) {
+  const s = el.getBoundingClientRect();
+  let left = 0;
+  let right = 0;
+  for (const tab of el.children) {
+    const r = tab.getBoundingClientRect();
+    if (r.left < s.left - 0.5 && r.right > s.left + 0.5) left = Math.max(left, r.right - s.left);
+    if (r.right > s.right + 0.5 && r.left < s.right - 0.5) right = Math.max(right, s.right - r.left);
+  }
+  el.style.setProperty('--clip-l', `${Math.ceil(left)}px`);
+  el.style.setProperty('--clip-r', `${Math.ceil(right)}px`);
+}
 
 /**
- * A button that opens a menu or a small form. Escape, Tab or a click outside
- * closes it; Escape returns focus to the button. Menus move with the arrows.
+ * Marks only, and still too many (§2.18): show a whole window of them beside the open tab, the open tab
+ * taking the room left over (--open-w, from --tab-open-min up), and scroll to that window, so the strip
+ * starts and ends on whole tabs with no gap. As close to where it was scrolled as the open tab allows.
  */
-export function Popover({
-  label,
-  title,
-  trigger,
-  kind = 'menu',
-  align = 'start',
-  buttonClass,
-  class: className,
-  disabled,
-  children,
-}: {
-  /** The panel's accessible name. */
-  label: string;
-  /** Tooltip and accessible name for a button that shows only an icon. */
-  title?: string;
-  trigger: ComponentChildren;
-  kind?: 'menu' | 'dialog';
-  align?: 'start' | 'end';
-  buttonClass?: string;
-  class?: string;
-  disabled?: boolean;
-  children: (close: (refocus?: boolean) => void) => ComponentChildren;
-}) {
-  const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState<{ up: boolean; dx: number }>({ up: false, dx: 0 });
-  const button = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const id = useId();
-  const close = (refocus = true) => {
-    setOpen(false);
-    if (refocus) button.current?.focus();
+function windowMarks(el: HTMLElement) {
+  const wraps = [...el.children] as HTMLElement[];
+  const at = wraps.findIndex((w) => w.hasAttribute('data-active'));
+  const mark = wraps.find((w) => !w.hasAttribute('data-active'));
+  const reset = () => {
+    el.removeAttribute('data-windowed');
+    el.style.removeProperty('--open-w');
   };
+  if (el.dataset.fit !== 'icon' || at < 0 || !mark) return reset();
+  const step = mark.getBoundingClientRect().width + (parseFloat(window.getComputedStyle(el).columnGap) || 0);
+  const { marks: k, openWidth } = markWindow(el.clientWidth, step, wraps.length);
+  // Everything fits with the open tab at its full minimum: no window needed.
+  if (k >= wraps.length - 1 && openWidth >= TAB_MIN.open) return reset();
+  el.setAttribute('data-windowed', '');
+  el.style.setProperty('--open-w', `${openWidth}px`);
+  const first = Math.max(Math.max(0, at - k), Math.min(Math.round(el.scrollLeft / step), at, wraps.length - 1 - k));
+  el.scrollLeft = first * step;
+}
 
+/**
+ * A strip of tabs: crowded, its tabs shrink (`fit`, tabFit()); with more than fit even then it scrolls sideways
+ * (`over`), snapping to whole tabs, with any tab an edge cuts clipped away; a mouse wheel steps it a tab at a
+ * time, and the open tab stays in view.
+ */
+export function useTabStrip(box: { current: HTMLElement | null }, count: number, active: string | undefined): { over: boolean; fit: TabFit } {
+  const [over, setOver] = useState(false);
+  const [fit, setFit] = useState<TabFit>('full');
   useLayoutEffect(() => {
-    if (!open) setPlace({ up: false, dx: 0 });
-    if (!open || !panel.current || !button.current) return;
-    // Open upward when there's no room below, and slide sideways to stay inside the webview.
-    const b = button.current.getBoundingClientRect();
-    const p = panel.current.getBoundingClientRect();
-    const dx = p.right > window.innerWidth - 8 ? window.innerWidth - 8 - p.right : 0;
-    setPlace({ up: b.bottom + p.height + 8 > window.innerHeight && b.top - p.height - 8 > 0, dx: p.left + dx < 8 ? 8 - p.left : dx });
-  }, [open]);
-
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      setFit(tabFit(el.clientWidth, count));
+      setOver(el.scrollWidth > el.clientWidth + 1);
+      clipPartialTabs(el);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => clipPartialTabs(el));
+    };
+    // A plain (vertical) wheel steps the strip a whole tab per notch; a trackpad's sideways swipe scrolls (and snaps) itself.
+    let pending = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      pending += e.deltaY;
+      if (Math.abs(pending) < 40) return;
+      const s = el.getBoundingClientRect();
+      const lefts = [...el.children].map((t) => t.getBoundingClientRect().left - s.left);
+      const to = pending > 0 ? lefts.find((x) => x > 1) : lefts.filter((x) => x < -1).at(-1);
+      pending = 0;
+      if (to !== undefined) el.scrollBy({ left: to, behavior: scrollBehavior() });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(frame);
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, [count]);
+  // The tabs' widths changed with the fit or the open tab: is it still too wide, and what does an edge cut now?
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    windowMarks(el);
+    setOver(el.scrollWidth > el.clientWidth + 1);
+    clipPartialTabs(el);
+  }, [fit, active, count]);
+  // After the tab is in the strip: a chat opened from the list or a notification gets its new tab shown (QA F04).
   useEffect(() => {
-    if (!open) return;
-    // Menus focus their first item; forms their text field first.
-    const first =
-      kind === 'menu'
-        ? panel.current?.querySelector<HTMLElement>(MENU_ITEMS)
-        : (panel.current?.querySelector<HTMLElement>('input, textarea') ?? panel.current?.querySelector<HTMLElement>('button:not(:disabled)'));
-    first?.focus();
-    const outside = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!panel.current?.contains(t) && !button.current?.contains(t)) setOpen(false);
-    };
-    document.addEventListener('mousedown', outside);
-    return () => document.removeEventListener('mousedown', outside);
-  }, [open]);
+    box.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active, count, fit]);
+  return { over, fit };
+}
 
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-      return;
-    }
-    if (e.key === 'Tab' && kind === 'menu') {
-      setOpen(false);
-      return;
-    }
-    if (kind !== 'menu' || !panel.current) return;
-    const items = [...panel.current.querySelectorAll<HTMLElement>(MENU_ITEMS)];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const go = (n: number) => {
-      e.preventDefault();
-      items[(n + items.length) % items.length]?.focus();
-    };
-    if (e.key === 'ArrowDown') go(at + 1);
-    else if (e.key === 'ArrowUp') go(at - 1);
-    else if (e.key === 'Home') go(0);
-    else if (e.key === 'End') go(items.length - 1);
-  };
+// ---- Images from files: the host hands out a data: URI per path, once it has checked the file. ----
 
+type HostImage = 'imageSrc' | 'imageThumb';
+/** undefined: not asked yet or waiting; null: not showable (outside the allowed folders, too big, missing). */
+const hostImages: Record<HostImage, Map<string, string | null>> = { imageSrc: new Map(), imageThumb: new Map() };
+/** Who waits for which path: an answer re-renders only them. */
+const imageWaiters: Record<HostImage, Map<string, Set<() => void>>> = { imageSrc: new Map(), imageThumb: new Map() };
+window.addEventListener('message', (e: MessageEvent<{ type?: string; path?: string; src?: string }>) => {
+  const kind = e.data?.type;
+  if ((kind !== 'imageSrc' && kind !== 'imageThumb') || typeof e.data.path !== 'string') return;
+  // Only raster data: URIs: never a URL or a file the webview could fetch.
+  const src = e.data.src;
+  hostImages[kind].set(e.data.path, typeof src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,/.test(src) ? src : null);
+  for (const w of imageWaiters[kind].get(e.data.path) ?? []) w();
+});
+
+/** The image at `path` from the host, asked for once `enabled` (a thumbnail: once its card is near the screen). */
+export function useHostImage(kind: HostImage, path: string, enabled = true): string | null | undefined {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const w = () => bump((n) => n + 1);
+    const waiting = imageWaiters[kind];
+    if (!waiting.has(path)) waiting.set(path, new Set());
+    waiting.get(path)!.add(w);
+    if (!asked[kind].has(path)) {
+      asked[kind].add(path);
+      send({ type: kind, path });
+    }
+    return () => {
+      waiting.get(path)?.delete(w);
+    };
+  }, [kind, path, enabled]);
+  return enabled ? hostImages[kind].get(path) : undefined;
+}
+/** Paths already asked for, so two cards of one file ask once. */
+const asked: Record<HostImage, Set<string>> = { imageSrc: new Set(), imageThumb: new Set() };
+
+export const useImageSrc = (path: string) => useHostImage('imageSrc', path);
+
+/** Calls `onVisible` once, when the element comes within a screen's reach (one observer for all). */
+const nearScreen = new Map<Element, () => void>();
+let observer: IntersectionObserver | undefined;
+export function useNearScreen(ref: { current: Element | null }): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    observer ??= new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          nearScreen.get(e.target)?.();
+          nearScreen.delete(e.target);
+          observer!.unobserve(e.target);
+        }
+      },
+      { rootMargin: '300px 0px' },
+    );
+    nearScreen.set(el, () => setNear(true));
+    observer.observe(el);
+    return () => {
+      nearScreen.delete(el);
+      observer?.unobserve(el);
+    };
+  }, [near]);
+  return near;
+}
+
+/** A step's image with its title; click opens the editor's image preview. Name only when it can't be shown. */
+/** Opens the image viewer on a file, with its chat's images around it; a surface without a viewer opens the editor's preview. */
+export const OpenImage = createContext<((path: string, from: HTMLElement) => void) | null>(null);
+
+export function ImageThumb({ path, title }: { path: string; title: string }) {
+  const src = useHostImage('imageThumb', path);
+  const viewer = useContext(OpenImage);
+  const open = (e: Event) => (viewer ? viewer(path, e.currentTarget as HTMLElement) : send({ type: 'openImage', path }));
+  if (src === null) {
+    return (
+      <span class="image-thumb missing" title={path}>
+        <span class="image-title">{title}</span>
+        <Button variant="link" onClick={open}>
+          Open
+        </Button>
+      </span>
+    );
+  }
   return (
-    <span class={`pop ${className ?? ''}`}>
-      <button
-        ref={button}
-        type="button"
-        class={buttonClass}
-        title={title}
-        disabled={disabled}
-        aria-label={title}
-        aria-haspopup={kind === 'menu' ? 'menu' : 'dialog'}
-        aria-expanded={open}
-        aria-controls={open ? id : undefined}
-        onClick={() => setOpen(!open)}
-        onKeyDown={(e) => {
-          if (kind === 'menu' && !open && e.key === 'ArrowDown') {
-            e.preventDefault();
-            setOpen(true);
-          }
-        }}
-      >
-        {trigger}
-      </button>
-      {open && (
-        <div
-          ref={panel}
-          id={id}
-          class={`popover ${kind}`}
-          role={kind}
-          aria-label={label}
-          data-up={place.up ? '' : undefined}
-          data-end={align === 'end' ? '' : undefined}
-          style={place.dx ? { transform: `translateX(${Math.round(place.dx)}px)` } : undefined}
-          onKeyDown={onKeyDown}
-        >
-          {children(close)}
-        </div>
-      )}
-    </span>
+    <button class="image-thumb" title={path} aria-label={`Open ${title}`} onClick={open}>
+      {src ? <img src={src} alt="" loading="lazy" /> : <span class="image-wait" />}
+      <span class="image-title">{title}</span>
+    </button>
   );
 }

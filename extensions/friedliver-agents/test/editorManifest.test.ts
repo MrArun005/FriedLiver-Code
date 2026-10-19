@@ -15,12 +15,17 @@ describe('agents in the editor: contributions', () => {
     for (const id of EDITOR_COMMANDS) expect((byId.get(id) as { category: string }).category).toBe('FriedLiver');
   });
 
-  it('binds Ctrl/Cmd+I in a text editor only while no other inline chat claims it', () => {
-    const binding = contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.editSelection');
+  it('binds Ctrl/Cmd+I to Inline Edit in a text editor only while no other inline chat claims it', () => {
+    const binding = contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.inlineEdit');
     expect(binding).toMatchObject({ key: 'ctrl+i', mac: 'cmd+i' });
     expect(binding.when).toContain('editorTextFocus');
     expect(binding.when).toContain('!inlineChatHasProvider');
     expect(binding.when).toContain('!inlineChatHasEditsAgent');
+  });
+
+  it('leaves Ctrl+Shift+A to Toggle Block Comment in a writable editor on Linux and Windows', () => {
+    const binding = contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.moveToCenter');
+    expect(binding).toMatchObject({ key: 'ctrl+shift+a', mac: 'cmd+shift+a', when: '!terminalFocus && (isMac || !editorTextFocus || editorReadonly)' });
   });
 
   it('puts the selection commands in the editor menu and the review in Source Control', () => {
@@ -32,6 +37,7 @@ describe('agents in the editor: contributions', () => {
 
   it('lets only the user, not a repository, choose which agent gets their code', () => {
     expect(contributes.configuration.properties['friedliver.edit.defaultAgent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'demo'] });
+    expect(contributes.configuration.properties['friedliver.inlineEdit.agent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'demo'] });
   });
 
   it('names no AI models', () => {
@@ -50,7 +56,7 @@ describe('approvals: contributions', () => {
 
   it('has the approval, review and other-agent commands', () => {
     const own = new Set(contributes.commands.map((c: { command: string }) => c.command));
-    for (const id of ['friedliver.approvals.rules', 'friedliver.review.acceptAll', 'friedliver.review.rejectAll', 'friedliver.otherAgents']) expect(own.has(id), id).toBe(true);
+    for (const id of ['friedliver.managePermissions', 'friedliver.review.acceptAll', 'friedliver.review.rejectAll', 'friedliver.otherAgents']) expect(own.has(id), id).toBe(true);
     expect(contributes.keybindings.find((k: { command: string }) => k.command === 'friedliver.nextDecision')).toMatchObject({ key: 'ctrl+alt+d' });
   });
 

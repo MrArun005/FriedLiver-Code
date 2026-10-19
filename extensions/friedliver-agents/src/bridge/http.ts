@@ -8,10 +8,11 @@
 // another Host or Origin (DNS rebinding), another path, a missing or unknown
 // token, a body that isn't JSON or is over 1 MB. GET and DELETE get 405: there
 // is no server stream and no session to end.
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PROTOCOL_VERSIONS, handle, progress, toolReply, type ToolResult } from './mcp';
-import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
+import { BRIDGE_LIMITS, EXTERNAL_CLIENT, isExternal, parseCall, type BridgeCall } from './protocol';
 
 export const MCP_PATH = '/mcp';
 
@@ -21,8 +22,12 @@ export const KEEPALIVE_MS = 15_000;
 export interface HttpToolsOptions {
   /** The chat a bearer token belongs to, if it belongs to one. */
   chatFor(token: string): string | undefined;
+  /** The external client's token (EXTERNAL_CLIENT), which it never sends: it signs requests with it instead. */
+  externalKey?(): string | undefined;
   /** Does a checked call for the chat. The signal aborts when the agent hangs up before the answer. */
   call(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<ToolResult>;
+  /** Tools the chat's session isn't offered (mcp.ts toolsFor): unsupported or turned-off system_*, index_* with the index off. */
+  omitFor?(chatId: string): string[];
   log?(line: string): void;
   /** For tests. */
   keepaliveMs?: number;
@@ -104,14 +109,50 @@ function body(req: IncomingMessage): Promise<Buffer | null> {
   });
 }
 
+/** HMAC-SHA256 hex of the parts, joined by newlines. Shared with the external stdio client. */
+export function sign(key: string, ...parts: string[]): string {
+  return createHmac('sha256', key).update(parts.join('\n')).digest('hex');
+}
+
+/** Nonces already used, so a captured request can't be replayed. ponytail: cleared at 10k; a replay then needs a 10k-request-old capture. */
+const seenNonces = new Set<string>();
+
+/**
+ * The external client (externalStdio.ts) never sends its token, so a process that grabs a stale port
+ * learns nothing: it signs a fresh nonce and its MCP session with it, and this server proves it has
+ * the token too by signing the nonce back (X-FriedLiver-Proof). Returns the caller id, or undefined.
+ */
+function externalCaller(req: IncomingMessage, res: ServerResponse, o: HttpToolsOptions): string | undefined {
+  const nonce = String(req.headers['x-friedliver-nonce'] ?? '');
+  const session = String(req.headers['x-friedliver-session'] ?? '');
+  const mac = /^FriedLiver-HMAC ([0-9a-f]{64})$/.exec(req.headers.authorization ?? '')?.[1];
+  const key = o.externalKey?.();
+  if (!key || !mac || !/^[0-9a-f]{32}$/.test(nonce) || !/^[0-9a-f]{32}$/.test(session) || seenNonces.has(nonce)) return undefined;
+  if (!timingSafeEqual(Buffer.from(mac, 'hex'), Buffer.from(sign(key, 'client', nonce, session), 'hex'))) return undefined;
+  if (seenNonces.size >= 10_000) seenNonces.clear();
+  seenNonces.add(nonce);
+  res.setHeader('X-FriedLiver-Proof', sign(key, 'server', nonce));
+  return `${EXTERNAL_CLIENT}:${session}`;
+}
+
 async function serve(req: IncomingMessage, res: ServerResponse, port: number, o: HttpToolsOptions): Promise<void> {
   try {
     if (!ownHost(req.headers.host, port)) return refuse(res, 403, 'wrong host', o.log);
     const origin = req.headers.origin;
     if (origin !== undefined && !ownHost(origin.replace(/^http:\/\//, ''), port)) return refuse(res, 403, 'wrong origin', o.log);
     if ((req.url ?? '').split('?')[0] !== MCP_PATH) return refuse(res, 404, 'unknown path', o.log);
+    // The external client's handshake (externalStdio.ts): it sends nothing but a nonce until this proves the token.
+    const probe = req.headers['x-friedliver-probe'];
+    if (probe !== undefined) {
+      const key = o.externalKey?.();
+      if (!key || typeof probe !== 'string' || !/^[0-9a-f]{32}$/.test(probe)) return refuse(res, 401, 'bad probe', o.log);
+      return send(res, 204, undefined, { 'X-FriedLiver-Proof': sign(key, 'probe', probe) });
+    }
     const token = bearer(req.headers.authorization);
-    const chatId = token ? o.chatFor(token) : undefined;
+    let chatId = token ? o.chatFor(token) : undefined;
+    // The external token works signed only (externalCaller), never as a bearer.
+    if (chatId && isExternal(chatId)) chatId = undefined;
+    chatId ??= req.headers['x-friedliver-nonce'] !== undefined ? externalCaller(req, res, o) : undefined;
     if (!chatId) return refuse(res, 401, 'unknown token', o.log, { 'WWW-Authenticate': 'Bearer' });
     if (req.method !== 'POST') return send(res, 405, undefined, { Allow: 'POST' });
     if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return refuse(res, 415, 'not JSON', o.log);
@@ -142,6 +183,9 @@ async function answer(req: IncomingMessage, res: ServerResponse, chatId: string,
   res.on('close', () => {
     if (!res.writableFinished) gone.abort();
   });
+  const external = isExternal(chatId);
+  const omit = o.omitFor?.(chatId) ?? [];
+  const handleOne = (m: unknown) => handle(m, external, omit);
   const run = async (handled: Exclude<ReturnType<typeof handle>, null>): Promise<object> => {
     if ('reply' in handled) return handled.reply;
     const call = parseCall(handled.call, handled.args);
@@ -149,11 +193,11 @@ async function answer(req: IncomingMessage, res: ServerResponse, chatId: string,
   };
 
   if (Array.isArray(parsed)) {
-    const handled = parsed.map(handle).filter((h) => h !== null);
+    const handled = parsed.map(handleOne).filter((h) => h !== null);
     if (!handled.length) return send(res, 202);
     return send(res, 200, await Promise.all(handled.map(run)));
   }
-  const handled = handle(parsed);
+  const handled = handleOne(parsed);
   // A notification or a response: nothing to say back.
   if (!handled) return send(res, 202);
   const streams = /\btext\/event-stream\b/.test(req.headers.accept ?? '');

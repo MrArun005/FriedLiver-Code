@@ -1,14 +1,13 @@
 // Pure helpers for the agent views: search, sorting, badges, the agent map's
 // layout and the @-mention picker. No DOM here, so all of it is unit tested.
 import {
-  AGENT_FACES,
   AGENT_KEYS,
   age,
-  boardColumn,
   bridgeTitle,
   chatStatus,
   decisions,
   fileConflicts,
+  formatDuration,
   stateLine,
   type AgentKey,
   type AppState,
@@ -19,14 +18,18 @@ import {
   type ChatView,
   type Decision,
   type FileConflict,
+  type Item,
   type LinkKind,
   type StateLine,
+  MAX_ITEMS,
   MENTIONS,
 } from './model';
 import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
 
-export const agentName = (agent: AgentKey) => AGENT_FACES[agent].name;
+import { agentName, chatTip } from './names';
+import { parseDiscuss } from './discuss';
+export { agentName };
 
 /** Shortens to `max` characters with an ellipsis. */
 export function clip(text: string, max: number): string {
@@ -41,6 +44,40 @@ export function excerpt(text: string, max: number): string {
     .replace(/[`*_#>]+/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
   return clip(plain, max);
+}
+
+/** When a message was sent (and a reply's last words came): your messages, replies and messages between chats only. */
+export interface MessageStamp {
+  at: number;
+  end?: number;
+}
+
+/** The time an item shows on hover, or none: steps, thinking, plans, cards that wait for you, and messages saved before times were kept. */
+export function messageStamp(item: Item): MessageStamp | undefined {
+  if (item.kind !== 'user' && item.kind !== 'agent' && item.kind !== 'link') return undefined;
+  if (!isTime(item.at)) return undefined;
+  const end = item.kind === 'agent' ? item.end : undefined;
+  return isTime(end) ? { at: item.at, end } : { at: item.at };
+}
+
+/** A number a Date can hold (saved files can say anything). */
+const isTime = (v: unknown): v is number => typeof v === 'number' && !Number.isNaN(new Date(v).getTime());
+
+/** "2:41 PM" today, "Oct 18, 2:41 PM" before, "Oct 18, 2025, 2:41 PM" in another year. */
+export function messageTime(at: number, now: number, locale?: string): string {
+  const d = new Date(at);
+  const n = new Date(now);
+  const today = d.toDateString() === n.toDateString();
+  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  if (!today) Object.assign(opts, { month: 'short', day: 'numeric' }, d.getFullYear() === n.getFullYear() ? {} : { year: 'numeric' });
+  // ICU puts a narrow no-break space before AM/PM; the element never wraps, so a plain space reads the same.
+  return d.toLocaleString(locale, opts).replace(/\s/g, ' ');
+}
+
+/** The tooltip: the exact time, and for a reply how long its words took to come. */
+export function messageTimeTitle(s: MessageStamp): string {
+  const iso = new Date(s.at).toISOString();
+  return s.end !== undefined && s.end > s.at ? `${iso} · took ${formatDuration(s.end - s.at)}` : iso;
 }
 
 /** "3s ago"; nothing yet reads "—". */
@@ -58,14 +95,75 @@ export function statusOf(chat: ChatView): ChatStatus {
   return status === 'idle' && chat.items.some((i) => i.kind === 'agent') ? 'done' : status;
 }
 
+/**
+ * The Manager's one definition of "needs you", used by the header, the map's lanes and the chat strip
+ * alike: a decision waits in the chat (what the Needs you column and the Inbox list). A chat that
+ * failed is a problem, counted on its own, not one that needs you.
+ */
+export function needsYou(chat: ChatView): boolean {
+  return statusOf(chat) === 'needs-you';
+}
+
+/**
+ * Turns, as the cards, the map and the comparison show them: the messages the agent was given that it
+ * answered. A turn that ended without a reply (the agent isn't installed, or failed to start) is not
+ * one; a consult or hand-off the agent answered is. Long chats drop their oldest replies (MAX_ITEMS),
+ * so the host's own tally of finished turns is the floor once the agent has replied at all.
+ */
+export function turnsOf(chat: ChatView): number {
+  let turns = 0;
+  let asked = false;
+  let answered = false;
+  for (const i of chat.items) {
+    if (i.kind === 'user' || (i.kind === 'link' && (i.role === 'piped-in' || i.role === 'consulted' || i.role === 'handoff-from'))) {
+      if (asked && answered) turns++;
+      asked = true;
+      answered = false;
+    } else if (i.kind === 'agent' && i.text.trim()) answered = true;
+  }
+  if (asked && answered && !chat.busy) turns++;
+  return turns > 0 && chat.items.length >= MAX_ITEMS ? Math.max(turns, chat.turns) : turns;
+}
+
+/**
+ * The chat's agent can't start because it isn't installed: the Accounts page last found it missing, or
+ * the chat's latest failure offers to install it. Its pickers say so (with Install) instead of "starting…".
+ */
+export function agentMissing(chat: Pick<ChatView, 'agent' | 'items' | 'session'>, signIn?: string): boolean {
+  if (chat.agent === 'demo' || chat.session?.live) return false;
+  if (signIn === 'not-installed') return true;
+  for (let n = chat.items.length - 1; n >= 0; n--) {
+    const i = chat.items[n];
+    if (i.kind === 'agent') return false;
+    if (i.kind === 'notice' && i.tone === 'error') return !!i.actions?.some((a) => a.do === 'install');
+  }
+  return false;
+}
+
+/** "3 turns". */
+export function turnsText(chat: ChatView): string {
+  const n = turnsOf(chat);
+  return `${n} turn${n === 1 ? '' : 's'}`;
+}
+
 /** A subagent a chat launched (Claude's Task/Agent tool): a card under its chat, not a chat of its own. */
 export interface Subagent {
   /** The tool call's id, to scroll the chat to. */
   id: string;
   title: string;
-  state: 'working' | 'done' | 'failed';
+  /** `quiet`: no completion evidence, but nothing written for a long while (Claude Code sessions from outside FriedLiver). */
+  state: 'working' | 'done' | 'failed' | 'quiet';
   /** Tool calls the subagent made, when the agent says which call they ran in. */
   tools: number;
+  /** Its latest step's title. */
+  last?: string;
+  /** Its agent type and model, when its transcript says (Claude Code sessions from outside FriedLiver). */
+  about?: string;
+  /** Why it reads Quiet, e.g. "No activity for 32m", for its tooltip. */
+  note?: string;
+  /** When it started running, and how long it took once it ended. */
+  startedAt?: number;
+  ms?: number;
 }
 
 const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
@@ -75,12 +173,34 @@ export function subagents(chat: ChatView): Subagent[] {
   const tools = chat.items.filter((i) => i.kind === 'tool');
   return tools
     .filter((t) => t.tool && SUBAGENT_TOOLS.has(t.tool))
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      state: t.status === 'failed' ? 'failed' : chat.busy && (t.status === 'pending' || t.status === 'in_progress' || !t.status) ? 'working' : 'done',
-      tools: tools.filter((i) => i.parent === t.id).length,
-    }));
+    .map((t) => {
+      const own = tools.filter((i) => i.parent === t.id);
+      return {
+        id: t.id,
+        title: t.title,
+        state: t.status === 'failed' ? 'failed' : chat.busy && (t.status === 'pending' || t.status === 'in_progress' || !t.status) ? 'working' : 'done',
+        tools: own.length,
+        ...(own.length ? { last: own.at(-1)!.title } : {}),
+        ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
+        ...(t.ms !== undefined ? { ms: t.ms } : {}),
+      };
+    });
+}
+
+/**
+ * What every surface lists of a chat's subagents: the running and failed ones, then the done ones, which
+ * fold into one "N done · show" row (a node on the map) until opened. A session can run dozens.
+ */
+export function foldSubs(subs: Subagent[]): { live: Subagent[]; done: Subagent[] } {
+  return { live: subs.filter((s) => s.state !== 'done'), done: subs.filter((s) => s.state === 'done') };
+}
+
+export const isSubagentCall = (t: Item): boolean => t.kind === 'tool' && !!t.tool && SUBAGENT_TOOLS.has(t.tool);
+
+/** What a subagent answered: the text of its call's result. */
+export function subagentAnswer(t: ToolItem): string | undefined {
+  const text = (t.out ?? []).flatMap((o) => (o.t === 'text' ? [o.text] : [])).join('\n\n').trim();
+  return text || undefined;
 }
 
 // ---- Claude Code sessions from outside FriedLiver ----
@@ -92,10 +212,70 @@ export function claudeColumn(s: ClaudeSession, now: number): 'working' | 'done' 
   return now - s.lastActivity < CLAUDE_WORKING_MS ? 'working' : 'done';
 }
 
-/** Its subagents as the Manager draws a chat's: one with no result yet works only while the session does. */
+const SUB_FRESH_MS = 60_000;
+// ponytail: a tool call that writes nothing for 30 min reads Quiet; raise it if long silent builds show up wrong.
+const SUB_STALE_MS = 30 * 60_000;
+
+const idleFor = (ms: number) => {
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+};
+
+/**
+ * Its subagents as the Manager draws a chat's. A settled one is Done or Problem. An unsettled one with its own transcript
+ * works while that changed in the last minute, or while a tool call is still in flight (for up to 30 minutes). One with no
+ * transcript works while the session does. Otherwise it is Quiet: silent, but nothing says it finished.
+ */
 export function claudeSubagents(s: ClaudeSession, now: number): Subagent[] {
-  const working = claudeColumn(s, now) === 'working';
-  return s.subagents.map((a) => ({ id: a.id, title: a.title, state: a.done || !working ? 'done' : 'working', tools: 0 }));
+  const sessionWorking = claudeColumn(s, now) === 'working';
+  return s.subagents.map((a) => {
+    const quiet = a.lastActivity === undefined ? undefined : now - a.lastActivity;
+    const working = !a.end && (quiet === undefined ? sessionWorking : quiet < SUB_FRESH_MS || (!a.idle && quiet < SUB_STALE_MS));
+    // Done and Problem only on evidence: silence alone is Quiet.
+    const state = working ? 'working' : a.end === 'failed' ? 'failed' : a.end === 'done' ? 'done' : 'quiet';
+    return {
+      id: a.id,
+      title: a.title,
+      state,
+      ...(state === 'quiet' ? { note: `No activity for ${idleFor(quiet ?? now - s.lastActivity)}` } : {}),
+      tools: a.tools ?? 0,
+      ...(a.last ? { last: a.last } : {}),
+      ...(a.agentType || a.model ? { about: [a.agentType, a.model].filter(Boolean).join(' · ') } : {}),
+      ...(a.startedAt !== undefined ? { startedAt: a.startedAt } : {}),
+      ...(!working && a.startedAt !== undefined && a.lastActivity !== undefined ? { ms: Math.max(0, a.lastActivity - a.startedAt) } : {}),
+    };
+  });
+}
+
+/** What the host knows of FriedLiver's chats: their views, and the agent session each continues. */
+interface ChatSessions {
+  state: { chats: ChatView[] };
+  chats: Record<string, { sessionId?: string }>;
+}
+
+/** The FriedLiver chat that continues this agent session, if any. */
+export function chatOfSession(saved: ChatSessions, sessionId: string): string | undefined {
+  return Object.entries(saved.chats).find(([, c]) => c.sessionId === sessionId)?.[0];
+}
+
+/**
+ * Ties each outside session to the FriedLiver chat that only resumed it: no turn run, none running. The reader lists
+ * such a session only while something else (the Claude Code extension, the CLI) wrote to it last, so the chat holds none
+ * of its work. The newest such chat wins; a chat that ran a turn keeps its own card.
+ */
+export function linkResumeChats(sessions: ClaudeSession[], saved: ChatSessions): ClaudeSession[] {
+  const idle = new Map<string, string>();
+  for (const c of saved.state.chats) {
+    const sid = saved.chats[c.id]?.sessionId;
+    if (sid && c.turns === 0 && !c.busy) idle.set(sid, c.id);
+  }
+  return sessions.map((s) => (idle.has(s.id) ? { ...s, chatId: idle.get(s.id) } : s));
+}
+
+/** The chats with their own card: a chat tied to an outside session shows in that session's card instead. Never removes one. */
+export function withoutLinkedChats(chats: ChatView[], sessions: ClaudeSession[]): ChatView[] {
+  const linked = new Set(sessions.flatMap((s) => (s.chatId ? [s.chatId] : [])));
+  return linked.size ? chats.filter((c) => !linked.has(c.id)) : chats;
 }
 
 /** Every word of the query must appear in the title or "claude code". */
@@ -137,8 +317,8 @@ export interface Sort {
   dir: 'asc' | 'desc';
 }
 
-/** Waiting on you first, then failed, working, not started, done. */
-const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, error: 1, working: 2, idle: 3, done: 4 };
+/** STATUS_ORDER: waiting on you, working, failed, not started, done. */
+const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, working: 1, error: 2, idle: 3, done: 4 };
 const AGENT_RANK = Object.fromEntries(AGENT_KEYS.map((a, i) => [a, i])) as Record<AgentKey, number>;
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
@@ -188,23 +368,29 @@ export function settleOrder(prev: Settled | undefined, next: string[], sort: str
 }
 
 export interface Counts {
+  /** Chats with a decision waiting: the Needs you column, the same chats the Inbox lists. */
   needsYou: number;
   working: number;
+  /** Chats whose last turn failed: the Problem column. */
+  problem: number;
+  /** Not started and done. */
   done: number;
   archived: number;
   decisions: number;
 }
 
+/** The Manager's counts, from statusOf: each open chat in exactly one of needs you, working, problem, done. */
 export function counts(state: Pick<AppState, 'chats'>): Counts {
-  const out: Counts = { needsYou: 0, working: 0, done: 0, archived: 0, decisions: 0 };
+  const out: Counts = { needsYou: 0, working: 0, problem: 0, done: 0, archived: 0, decisions: 0 };
   for (const chat of state.chats) {
     if (chat.archived) {
       out.archived++;
       continue;
     }
-    const col = boardColumn(statusOf(chat));
-    if (col === 'needs-you') out.needsYou++;
-    else if (col === 'working') out.working++;
+    const status = statusOf(chat);
+    if (status === 'needs-you') out.needsYou++;
+    else if (status === 'working') out.working++;
+    else if (status === 'error') out.problem++;
     else out.done++;
   }
   out.decisions = decisions({ chats: openChats(state.chats) }).length;
@@ -232,7 +418,7 @@ export function cardLine(state: Pick<AppState, 'chats'>, chat: ChatView): CardLi
   const first = all[0];
   if (first?.kind === 'bridge') {
     const item = chat.items.find((i): i is BridgeItem => i.kind === 'bridge' && i.requestId === first.id);
-    if (item) return { text: bridgeTitle(state, chat, item), code: item.text || undefined, decision: first, bridge: item, waiting: all.length };
+    if (item) return { text: bridgeTitle(state, chat, item, true), code: item.text || undefined, decision: first, bridge: item, waiting: all.length };
   }
   const line = stateLine(chat);
   if (line.text === 'Not started' && statusOf(chat) === 'done') return { text: 'Done', waiting: all.length };
@@ -269,29 +455,31 @@ export interface Badge {
   chatId?: string;
   /** Pipes can be stopped from the badge. */
   linkId?: string;
+  /** The other chat's label and topic, for the tooltip: the badge names it by topic only. */
+  tip?: string;
   group?: string;
 }
 
-/** "from Claude 2", "asking Gemini", "pipes to Codex 3", "1 of 3 · compare". */
+/** "from Fix formatCents", "Asking Gemini: Is the minus right?", "pipes to Add CSV export", "1 of 3 · compare": other chats by their topic. */
 export function linkBadges(state: Pick<AppState, 'chats' | 'links'>, chat: ChatView): Badge[] {
   const byId = new Map(state.chats.map((c) => [c.id, c]));
   const out: Badge[] = [];
+  const to = (other: ChatView, text: string, extra: Partial<Badge> & Pick<Badge, 'kind'>): Badge => ({ text, chatId: other.id, tip: chatTip(other), ...extra });
   const parent = chat.origin && byId.get(chat.origin.chatId);
-  if (chat.origin && parent) {
-    out.push({ kind: 'origin', text: `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.label}`, chatId: parent.id });
-  }
+  if (chat.origin && parent) out.push(to(parent, `${chat.origin.kind === 'handoff' ? 'from' : 'asked by'} ${parent.title}`, { kind: 'origin' }));
   for (const l of state.links) {
     if (l.from === chat.id) {
-      const to = byId.get(l.to);
-      if (!to) continue;
-      if (l.kind === 'consult') out.push({ kind: 'consult', text: `${to.busy ? 'asking' : 'asked'} ${to.label}`, chatId: to.id });
-      else if (l.kind === 'handoff') out.push({ kind: 'handoff', text: `handed to ${to.label}`, chatId: to.id });
-      else out.push({ kind: 'pipe', text: l.active ? `pipes to ${to.label}` : `pipe to ${to.label} paused`, chatId: to.id, linkId: l.id });
+      const other = byId.get(l.to);
+      if (!other) continue;
+      // A consult's topic is the question itself: say who was asked, then the question.
+      if (l.kind === 'consult') out.push(to(other, `${other.busy ? 'Asking' : 'Asked'} ${agentName(other.agent)}: ${other.title}`, { kind: 'consult' }));
+      else if (l.kind === 'handoff') out.push(to(other, `handed to ${other.title}`, { kind: 'handoff' }));
+      else out.push(to(other, l.active ? `pipes to ${other.title}` : `pipe to ${other.title} paused`, { kind: 'pipe', linkId: l.id }));
     } else if (l.to === chat.id && l.from !== chat.origin?.chatId) {
-      const from = byId.get(l.from);
-      if (!from) continue;
-      if (l.kind === 'pipe') out.push({ kind: 'pipe', text: `piped from ${from.label}`, chatId: from.id, linkId: l.id });
-      else out.push({ kind: 'origin', text: `${l.kind === 'handoff' ? 'from' : 'asked by'} ${from.label}`, chatId: from.id });
+      const other = byId.get(l.from);
+      if (!other) continue;
+      if (l.kind === 'pipe') out.push(to(other, `piped from ${other.title}`, { kind: 'pipe', linkId: l.id }));
+      else out.push(to(other, `${l.kind === 'handoff' ? 'from' : 'asked by'} ${other.title}`, { kind: 'origin' }));
     }
   }
   if (chat.group) {
@@ -315,9 +503,9 @@ export function conflictsOf(state: Pick<AppState, 'chats'>, chatId: string, all:
     .map((f) => ({ file: f.file, others: f.chats.filter((id) => id !== chatId).flatMap((id) => byId.get(id) ?? []) }));
 }
 
-/** "also in Codex 2: src/format.ts". */
+/** "also in Add tests for formatCents: src/format.ts": the other chats by their topic. */
 export function conflictText(c: ChatConflict): string {
-  return `also in ${c.others.map((o) => o.label).join(', ')}: ${c.file}`;
+  return `also in ${c.others.map((o) => o.title).join(', ')}: ${c.file}`;
 }
 
 /** A path relative to the chat's folder, with forward slashes, as `files` keeps them. */
@@ -360,7 +548,7 @@ export function cardModel(state: Pick<AppState, 'chats' | 'links'>, chat: ChatVi
     chat.busy,
     chat.files.length,
     chat.changedFiles,
-    chat.turns,
+    turnsOf(chat),
     status,
     started,
     line.text,
@@ -426,20 +614,186 @@ export function recentChats(chats: ChatView[], activeId: string | undefined, n: 
   return recent.sort((a, b) => a.createdAt - b.createdAt || collator.compare(a.id, b.id));
 }
 
-export interface ChatGroup {
-  column: BoardColumn;
-  title: string;
-  chats: ChatView[];
+/** What a fresh chat suggests: a few first messages, by agent (the demo's are the words it knows). */
+export function starters(agent: AgentKey): string[] {
+  if (agent === 'demo') return ['tour', 'project', 'help'];
+  return ['Explain how this project is laid out', 'Find a failing test and fix it', 'Review my uncommitted changes', 'Plan a change before writing any code'];
+}
+
+/** The editor tab of a chat panel: the topic of the chat it shows (VS Code cuts it) and whose face is its icon. */
+export function panelTitle(chat: ChatView | undefined): { title: string; agent?: AgentKey } {
+  return chat ? { title: chat.title.trim() || 'New chat', agent: chat.agent } : { title: 'New chat' };
+}
+
+/** The chat tabs, as a browser keeps them: the chats you opened, in the order you opened them. */
+export const openTab = (tabs: readonly string[], id: string): string[] => (tabs.includes(id) ? [...tabs] : [...tabs, id]);
+/** Closing a tab takes it out; nothing takes its place. */
+export const closeTab = (tabs: readonly string[], id: string): string[] => tabs.filter((t) => t !== id);
+
+/** A tab's least width with its title (`full`), squeezed (`compact`), the open tab's (`open`); the gap between tabs. Mirrors --tab-*min in tokens.css. */
+export const TAB_MIN = { full: 112, compact: 88, open: 184, gap: 4, narrowOpen: 120 } as const;
+export type TabFit = 'full' | 'compact' | 'icon';
+/**
+ * How tabs fit a strip `width` wide: titles while each keeps its minimum, then squeezed, then marks only.
+ * The open tab always keeps its title (TAB_MIN.open: at least 110 of it), so it is counted at that.
+ */
+export function tabFit(width: number, count: number): TabFit {
+  if (width <= 0 || count === 0) return 'full';
+  const need = (min: number) => (count - 1) * (min + TAB_MIN.gap) + TAB_MIN.open;
+  return need(TAB_MIN.full) <= width ? 'full' : need(TAB_MIN.compact) <= width ? 'compact' : 'icon';
+}
+
+/**
+ * Marks only (`fit` icon) in a strip `width` wide, `step` per mark, `total` tabs: how many marks show beside the
+ * open tab, and the open tab's width (the rest). The open tab keeps TAB_MIN.open while that leaves room for
+ * three marks; a side bar narrower than that (its default ~260-290px) gives the open tab less, down to
+ * TAB_MIN.narrowOpen (a title of about 70 still), so the other open chats still show instead of the open
+ * tab alone. The rest scroll.
+ */
+export function markWindow(width: number, step: number, total: number): { marks: number; openWidth: number } {
+  const others = Math.max(0, total - 1);
+  if (width <= 0 || step <= 0) return { marks: others, openWidth: TAB_MIN.open };
+  const want = Math.min(others, 3) * step;
+  const openMin = Math.max(TAB_MIN.narrowOpen, Math.min(TAB_MIN.open, width - want));
+  const marks = Math.max(0, Math.min(others, Math.floor((width - openMin) / step)));
+  return { marks, openWidth: width - marks * step };
+}
+
+/** A mark-only tab's tooltip: the title, the agent, the status, and Auto when on. */
+export const tabTip = (chat: ChatView): string => `${chatTip(chat)} · ${STATUS_TITLES[statusOf(chat)]}${chat.approval === 'full' ? ' · Auto' : ''}`;
+
+/** The tab a key goes to: Ctrl+Tab / Ctrl+Shift+Tab cycle (as browsers do, on every platform); Cmd+1..8 (Ctrl elsewhere) pick that tab, 9 the last. */
+export function tabForKey(
+  strip: readonly string[],
+  active: string | undefined,
+  e: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean },
+  mac: boolean,
+): string | undefined {
+  if (!strip.length || e.altKey) return undefined;
+  if (e.key === 'Tab' && e.ctrlKey && !e.metaKey) {
+    const at = Math.max(0, strip.indexOf(active ?? ''));
+    return strip[(at + (e.shiftKey ? -1 : 1) + strip.length) % strip.length];
+  }
+  const cmd = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  if (!cmd || e.shiftKey || !/^[1-9]$/.test(e.key)) return undefined;
+  return e.key === '9' ? strip.at(-1) : strip[Number(e.key) - 1];
+}
+
+/** The tab to show after closing `closing` in `strip` (ids in order): the active one stays, else the right neighbour, else the left. */
+export function tabAfterClose(strip: readonly string[], closing: string, active: string | undefined): string | undefined {
+  if (active !== closing) return active;
+  const at = strip.indexOf(closing);
+  return strip[at + 1] ?? (at > 0 ? strip[at - 1] : undefined);
 }
 
 export const COLUMN_TITLES: Record<BoardColumn, string> = { 'needs-you': 'Needs you', working: 'Working', done: 'Done' };
 
-/** Open chats matching the query, by where they stand, most recent first. */
-export function switcherGroups(chats: ChatView[], query: string): ChatGroup[] {
-  const shown = sortChats(filterChats(openChats(chats), query), { key: 'activity', dir: 'asc' });
-  return (['needs-you', 'working', 'done'] as const)
-    .map((column) => ({ column, title: COLUMN_TITLES[column], chats: shown.filter((c) => boardColumn(statusOf(c)) === column) }))
-    .filter((g) => g.chats.length > 0);
+/** The order chats are grouped in: what waits on you first, finished work last. */
+export const STATUS_ORDER: ChatStatus[] = ['needs-you', 'working', 'error', 'idle', 'done'];
+export const STATUS_TITLES: Record<ChatStatus, string> = { 'needs-you': 'Needs you', working: 'Working', error: 'Problem', idle: 'Idle', done: 'Done' };
+
+export interface StatusGroup {
+  status: ChatStatus;
+  title: string;
+  chats: ChatView[];
+}
+
+/** Chats by where they stand, in STATUS_ORDER, most recent activity first; empty groups only with `all`. */
+export function statusGroups(chats: ChatView[], all = false): StatusGroup[] {
+  const shown = sortChats(chats, { key: 'activity', dir: 'asc' });
+  return STATUS_ORDER.map((status) => ({ status, title: STATUS_TITLES[status], chats: shown.filter((c) => statusOf(c) === status) })).filter((g) => all || g.chats.length > 0);
+}
+
+/**
+ * Open chats matching the query, grouped by status; starred ones first, in a group of their own.
+ * With `tabs` (the strip, in order) the open tabs come first, archived ones too, and aren't listed again below.
+ */
+export function switcherGroups(chats: ChatView[], query: string, tabs: readonly string[] = []): (StatusGroup | { status: 'starred' | 'tabs'; title: string; chats: ChatView[] })[] {
+  const open = filterChats(tabs.flatMap((id) => chats.find((c) => c.id === id) ?? []), query);
+  const shown = filterChats(openChats(chats), query).filter((c) => !tabs.includes(c.id));
+  const starred = sortChats(shown.filter((c) => c.starred), { key: 'activity', dir: 'asc' });
+  return [
+    ...(open.length ? [{ status: 'tabs' as const, title: 'Open tabs', chats: open }] : []),
+    ...(starred.length ? [{ status: 'starred' as const, title: 'Starred', chats: starred }] : []),
+    ...statusGroups(shown.filter((c) => !c.starred)),
+  ];
+}
+
+/** "Needs you · 42s ago" under a chat's title in the switcher. */
+export function switcherMeta(chat: ChatView, now: number): string {
+  return `${STATUS_TITLES[statusOf(chat)]} · ${ago(chat.lastActivity, now)}`;
+}
+
+// ---- The transcript ----
+
+export type ToolItem = Extract<Item, { kind: 'tool' }>;
+export type TranscriptGroup =
+  | { kind: 'steps'; items: ToolItem[]; at: number }
+  | { kind: 'one'; item: Item; at: number }
+  /** A subagent's card, where it was spawned, with the steps it took. */
+  | { kind: 'subagent'; item: ToolItem; steps: ToolItem[]; at: number };
+
+/**
+ * Consecutive tool calls read as one card of numbered steps; `at` is where each group starts.
+ * A subagent (Claude's Task/Agent call) is a card of its own, and the steps it took go in it, not in the boxes around it.
+ */
+export function transcriptGroups(items: Item[]): TranscriptGroup[] {
+  const out: TranscriptGroup[] = [];
+  const cards = new Map<string, Extract<TranscriptGroup, { kind: 'subagent' }>>();
+  items.forEach((item, at) => {
+    const last = out.at(-1);
+    const card = item.kind === 'tool' && item.parent ? cards.get(item.parent) : undefined;
+    if (card) card.steps.push(item as ToolItem);
+    else if (isSubagentCall(item)) {
+      const g = { kind: 'subagent' as const, item: item as ToolItem, steps: [] as ToolItem[], at };
+      cards.set(g.item.id, g);
+      out.push(g);
+    } else if (item.kind === 'tool' && last?.kind === 'steps') last.items.push(item);
+    else if (item.kind === 'tool') out.push({ kind: 'steps', items: [item], at });
+    else out.push({ kind: 'one', item, at });
+  });
+  return out;
+}
+
+/** A step box's heading: "Used the browser · 4 steps · 7s". */
+export function stepsHeading(tools: ToolItem[]): string {
+  const browser = tools.every((t) => /(^|__)browser_/.test(t.tool ?? t.title));
+  const shell = tools.every((t) => !!t.cmd || t.toolKind === 'execute');
+  const what = browser ? 'Used the browser' : shell ? 'Ran commands' : 'Used tools';
+  const ms = tools.reduce((sum, t) => sum + (t.ms ?? 0), 0);
+  return [what, `${tools.length} step${tools.length === 1 ? '' : 's'}`, ...(ms ? [shortDuration(ms)] : [])].join(' · ');
+}
+
+/** "340ms", "1s", "2m 5s": a step's time at a glance. */
+export function shortDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+// ---- The map's hover card ----
+
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Where a hover card goes, in viewport pixels: beside the node (right, else
+ * left) so it never covers the node's column, else above or below it; always
+ * inside the viewport, shrunk to fit a narrow one.
+ */
+export function tipPlace(node: Box, tip: { w: number; h: number }, view: { w: number; h: number }, gap = 12, margin = 4): { left: number; top: number; width: number; side: 'right' | 'left' | 'above' | 'below' } {
+  const width = Math.min(tip.w, view.w - 2 * margin);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
+  const sideTop = clamp(node.top - 6, margin, view.h - tip.h - margin);
+  if (node.right + gap + width <= view.w - margin) return { left: node.right + gap, top: sideTop, width, side: 'right' };
+  if (node.left - gap - width >= margin) return { left: node.left - gap - width, top: sideTop, width, side: 'left' };
+  const left = clamp(node.left, margin, view.w - width - margin);
+  if (node.top - gap - tip.h >= margin) return { left, top: node.top - gap - tip.h, width, side: 'above' };
+  return { left, top: Math.max(margin, Math.min(node.bottom + gap, view.h - tip.h - margin)), width, side: 'below' };
 }
 
 // ---- @-mentions ----
@@ -472,9 +826,10 @@ export function mentionQuery(text: string, caret: number): string | null {
   return caret >= start && caret <= m[0].length ? m[2].toLowerCase() : null;
 }
 
-export function mentionOptions(query: string): MentionOption[] {
+/** `shown`: the agents pickers offer (Demo only when turned on); typing @demo still works without the picker. */
+export function mentionOptions(query: string, shown?: readonly AgentKey[]): MentionOption[] {
   const q = query.toLowerCase();
-  return MENTION_OPTIONS.filter((o) => o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q));
+  return MENTION_OPTIONS.filter((o) => (!shown || shown.includes(o.agent)) && (o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q)));
 }
 
 /** Replaces the leading @word with the option's, followed by one space. */
@@ -490,15 +845,19 @@ export function applyMention(text: string, option: MentionOption): { text: strin
 export const FRIEDLIVER_COMMANDS: SlashCommand[] = [
   { name: 'handoff', description: 'Continue this chat with another agent', hint: 'agent' },
   { name: 'ask', description: 'Ask another agent; the reply comes back here', hint: 'agent and question' },
-  { name: 'pipe', description: "Send each finished turn to that agent's latest chat", hint: 'agent' },
+  { name: 'discuss', description: 'Let agents talk a question through and agree on a next step (read-only)', hint: '@agents and question' },
+  { name: 'pipe', description: "Pipe each reply to that agent's latest chat", hint: 'agent' },
   { name: 'review', description: "Review this chat's changes" },
   { name: 'new', description: 'Start a new chat', hint: 'agent (optional)' },
 ];
 
-/** The agent's commands, then FriedLiver's; the agent's win a name both have. */
+/** FriedLiver's commands, then the agent's: one list for the / button and a typed /. The agent's win a name both have. */
 export function slashMenu(agentCommands: SlashCommand[]): SlashCommand[] {
-  return [...agentCommands, ...FRIEDLIVER_COMMANDS.filter((f) => !agentCommands.some((c) => c.name === f.name))];
+  return [...FRIEDLIVER_COMMANDS.filter((f) => !agentCommands.some((c) => c.name === f.name)), ...agentCommands];
 }
+
+/** A command as the menus show it: its arguments in ‹›, not as a trailing word of the description. */
+export const commandLabel = (c: SlashCommand): string => `/${c.name}${c.hint ? ` ‹${c.hint}›` : ''}`;
 
 /**
  * The action a FriedLiver command typed in `chat` asks for, "incomplete" when it
@@ -507,6 +866,10 @@ export function slashMenu(agentCommands: SlashCommand[]): SlashCommand[] {
 export function slashAction(text: string, chat: ChatView, chats: ChatView[], agentCommands: SlashCommand[]): WebviewMessage | 'incomplete' | null {
   const m = /^\/([a-z]+)(?:\s+([a-z]+))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
   if (!m || !FRIEDLIVER_COMMANDS.some((c) => c.name === m[1]) || agentCommands.some((c) => c.name === m[1])) return null;
+  if (m[1] === 'discuss') {
+    const d = parseDiscuss(text, chat.agent);
+    return d && d !== 'incomplete' ? { type: 'discuss', chatId: chat.id, agents: d.agents, text: d.question } : 'incomplete';
+  }
   const agent: AgentKey | undefined = m[2] ? MENTIONS[m[2].toLowerCase()] : undefined;
   const rest = m[3].trim();
   switch (m[1]) {
@@ -581,15 +944,34 @@ export interface MapSub {
   x: number;
   y: number;
   cy: number;
+  /** Of a Claude Code session from outside FriedLiver: `chatId` is `cc:<session id>`. */
+  outside?: boolean;
+  /** The folded done subagents of `chatId` (`item` is "done"): how many; a click opens them. */
+  count?: number;
+}
+
+/** A Claude Code session from outside FriedLiver that has subagents, drawn so they have a parent. */
+export interface MapOutside {
+  /** The session id. */
+  id: string;
+  title: string;
+  state: 'working' | 'done';
+  x: number;
+  y: number;
+  cy: number;
 }
 
 export interface MapLane {
+  /** The lane of Claude Code sessions from outside FriedLiver. */
+  outside?: boolean;
   agent: AgentKey;
   y: number;
   h: number;
   chats: number;
   working: number;
   needsYou: number;
+  /** Chats whose last turn failed. */
+  problem?: number;
 }
 
 export interface MapEdge {
@@ -642,6 +1024,7 @@ export interface MapLayout {
   lanes: MapLane[];
   nodes: MapNode[];
   subs: MapSub[];
+  outside: MapOutside[];
   edges: MapEdge[];
   groups: MapGroup[];
   conflicts: MapConflict[];
@@ -652,8 +1035,9 @@ export interface MapLayout {
  * the same, so the map is laid out again only when a chat starts, stops,
  * changes status or files, or a link changes, not on every streamed chunk.
  */
-export function mapKey(state: Pick<AppState, 'chats' | 'links'>): string {
+export function mapKey(state: Pick<AppState, 'chats' | 'links'>, outside: ClaudeSession[] = [], now = 0): string {
   return JSON.stringify([
+    mapSessions(outside).map((s) => [s.id, s.title, claudeColumn(s, now), claudeSubagents(s, now)]),
     openChats(state.chats).map((c) => [c.id, c.agent, c.label, c.title, c.createdAt, c.origin, c.group, c.merged, c.busy, statusOf(c), c.files, subagents(c)]),
     state.links,
   ]);
@@ -673,7 +1057,11 @@ const COLUMN_TITLES_MAP = ['Started by you', '1 link away', '2 links away', '3 l
  * its target's column: no line ever crosses a node. Deterministic: the same
  * state draws the same map.
  */
-export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
+/** Only outside sessions that launched subagents go on the map: the rest are on the board and the list. */
+const mapSessions = (outside: ClaudeSession[]) => outside.filter((s) => s.subagents.length && !s.archived);
+
+/** `expanded`: the chats (and `cc:<session id>`s) whose done subagents are shown one by one, not folded. */
+export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessions: ClaudeSession[] = [], now = 0, expanded: ReadonlySet<string> = new Set()): MapLayout {
   const M = MAP;
   const chats = openChats(state.chats);
   const byId = new Map(chats.map((c) => [c.id, c]));
@@ -711,8 +1099,17 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     return fa - fb || collator.compare(ka, kb) || colOf(a) - colOf(b) || a.createdAt - b.createdAt || collator.compare(a.id, b.id);
   };
 
-  const subsOf = new Map(chats.map((c) => [c.id, subagents(c)]));
-  const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), 0);
+  // Running and failed subagents, then the done ones: one by one when opened, else one node with their count.
+  const fold = (parent: string, list: Subagent[]): (Subagent & { count?: number })[] => {
+    const { live, done } = foldSubs(list);
+    if (!done.length) return live;
+    const open = expanded.has(parent);
+    const toggle = { id: 'done', title: `${done.length} done · ${open ? 'hide' : 'show'}`, state: 'done' as const, tools: 0, count: done.length };
+    return open ? [...live, ...done, toggle] : [...live, toggle];
+  };
+  const subsOf = new Map(chats.map((c) => [c.id, fold(c.id, subagents(c))]));
+  const sessions = mapSessions(outsideSessions);
+  const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), sessions.length ? 1 : 0);
   const colX = (col: number) => M.col0 + col * (M.nodeW + M.gutter);
   const nodesRight = colX(maxCol) + M.nodeW;
 
@@ -732,15 +1129,32 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
       for (const sub of subsOf.get(chat.id)!) {
         const sy = top + M.laneHead + row++ * M.row;
         const sx = colX(Math.min(colOf(chat) + 1, M.maxCol));
-        subs.push({ id: `${chat.id}:${sub.id}`, chatId: chat.id, item: sub.id, agent, state: sub.state, title: clip(sub.title, 27), x: sx, y: sy, cy: sy + M.nodeH / 2 });
+        subs.push({ id: `${chat.id}:${sub.id}`, chatId: chat.id, item: sub.id, agent, state: sub.state, title: clip(sub.title, 27), x: sx, y: sy, cy: sy + M.nodeH / 2, ...(sub.count ? { count: sub.count } : {}) });
       }
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
-    const statuses = inLane.map((c) => boardColumn(statusOf(c)));
-    lanes.push({ agent, y: top, h, chats: inLane.length, working: statuses.filter((s) => s === 'working').length, needsYou: statuses.filter((s) => s === 'needs-you').length });
+    const lane = counts({ chats: inLane });
+    lanes.push({ agent, y: top, h, chats: inLane.length, working: lane.working, needsYou: lane.needsYou, problem: lane.problem });
+    y = top + h + M.laneGap;
+  }
+  const outside: MapOutside[] = [];
+  if (sessions.length) {
+    const top = y;
+    let row = 0;
+    for (const s of sessions) {
+      const ny = top + M.laneHead + row++ * M.row;
+      outside.push({ id: s.id, title: clip(s.title, 27), state: claudeColumn(s, now), x: colX(0), y: ny, cy: ny + M.nodeH / 2 });
+      for (const sub of fold(`cc:${s.id}`, claudeSubagents(s, now))) {
+        const sy = top + M.laneHead + row++ * M.row;
+        subs.push({ id: `cc:${s.id}:${sub.id}`, chatId: `cc:${s.id}`, item: sub.id, agent: 'claude', state: sub.state, title: clip(sub.title, 27), x: colX(1), y: sy, cy: sy + M.nodeH / 2, outside: true, ...(sub.count ? { count: sub.count } : {}) });
+      }
+    }
+    const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
+    lanes.push({ agent: 'claude', outside: true, y: top, h, chats: sessions.length, working: outside.filter((o) => o.state === 'working').length, needsYou: 0 });
     y = top + h + M.laneGap;
   }
   const node = new Map(nodes.map((n) => [n.chat.id, n]));
+  const anchor = new Map<string, { x: number; cy: number }>([...nodes.map((n) => [n.chat.id, n] as const), ...outside.map((o) => [`cc:${o.id}`, o] as const)]);
 
   // Links, plus an edge for any origin whose link is gone, so no chat floats.
   const links: ChatLink[] = state.links.filter((l) => node.has(l.from) && node.has(l.to) && l.from !== l.to);
@@ -836,7 +1250,7 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     };
   });
   for (const sub of subs) {
-    const a = node.get(sub.chatId)!;
+    const a = anchor.get(sub.chatId)!;
     const xs = a.x + M.nodeW;
     const gx = Math.max(xs, sub.x - M.gutter);
     edges.push({
@@ -915,8 +1329,35 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>): MapLayout {
     lanes,
     nodes,
     subs,
+    outside,
     edges,
     groups,
     conflicts,
   };
+}
+
+// ---- The composer's controls redraw only when what they show changes, not per streamed chunk. ----
+
+type Controls = { chat: ChatView; samples?: number[]; bare?: boolean; compact?: boolean };
+
+/** Mode icon and usage/settings button: the session, level, name and usage samples. */
+export function sameControls<T extends Controls>(a: T, b: T): boolean {
+  return (
+    a.chat.id === b.chat.id &&
+    a.chat.session === b.chat.session &&
+    a.chat.approval === b.chat.approval &&
+    a.chat.label === b.chat.label &&
+    a.chat.agent === b.chat.agent &&
+    a.samples === b.samples &&
+    a.bare === b.bare &&
+    a.compact === b.compact
+  );
+}
+
+const agentsKey = (chat: ChatView, linked: ChatView[]) =>
+  JSON.stringify([chat.id, chat.busy, subagents(chat).map((s) => [s.id, s.state, s.title, s.last, s.startedAt, s.ms]), linked.map((c) => [c.id, c.busy, c.label, c.title, c.createdAt, c.origin?.kind])]);
+
+/** Agents button: its subagents' and linked chats' state, not the transcript text. */
+export function sameAgents<T extends { chat: ChatView; linked: ChatView[] }>(a: T, b: T): boolean {
+  return agentsKey(a.chat, a.linked) === agentsKey(b.chat, b.linked);
 }

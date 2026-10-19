@@ -20,12 +20,12 @@ node scripts/build.mjs --package   # minified app in <VSCODE_DIR>/../VSCode-<os>
 node scripts/build.mjs --package --installer   # plus the installer in <VSCODE_DIR>/../installers
 ```
 
-Installers, all unsigned:
+Installers (none notarized; macOS signed with FriedLiver's own certificate when CI has it, see [macOS signing](#macos-signing-and-privacy-prompts)):
 
 | OS | File | Made by |
 | --- | --- | --- |
 | Windows | `FriedLiverUserSetup-<arch>-<version>.exe`, installs per user | `gulp vscode-win32-<arch>-inno-updater` and `-user-setup` (Inno Setup from upstream's `innosetup` package) |
-| macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | an ad-hoc `codesign`, then `hdiutil` |
+| macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | `codesign` (the self-signed certificate, or ad-hoc without it), then `hdiutil` |
 | Linux | `friedliver_<version>_amd64.deb` | `gulp vscode-linux-<arch>-prepare-deb` and `-build-deb` |
 
 CI (`.github/workflows/build.yml`) builds all three with the portable apps on
@@ -34,9 +34,36 @@ version, then FriedLiver's own build number) it also publishes a GitHub
 release with every installer, the portable apps and `SHA256SUMS.txt`. Only that
 release job gets a token that can write (`contents: write`).
 
-To release: `git tag v1.142.0-1 && git push origin v1.142.0-1`. The tag is
-stamped into the app's `product.json` as `friedliverVersion`, which the Agents
-extension's weekly update check compares with the latest release.
+### Releasing an update
+
+1. Run **Actions → Release → Run workflow** on `main` ([RELEASING.md](RELEASING.md)).
+   It refuses unless CI passed on main's head, picks the next version (the
+   pinned upstream version, then FriedLiver's own build number one higher than
+   the last tag, e.g. `1.142.0-8`) and writes the notes. (By hand still works:
+   `git tag v1.142.0-8 && git push origin v1.142.0-8`.)
+2. It calls `build.yml`, which builds all three OSes with `FRIEDLIVER_VERSION` set from the tag
+   (stamped into `product.json` as `friedliverVersion`), then the release job
+   writes `SHA256SUMS.txt` over every asset (it fails if the macOS arm64 DMG is
+   missing) and publishes the GitHub release, creating the tag. Then a Mac
+   downloads the published DMG and zip and checks them against
+   `SHA256SUMS.txt` and the signing certificate.
+3. Running apps see it: the Agents extension asks
+   `api.github.com/repos/MrArun005/FriedLiver-Code/releases/latest` 30 s after
+   start and every 4 h. When the release is newer than `friedliverVersion`, a
+   bottom-right toast says "FriedLiver X.Y.Z is available" with **Install**,
+   **Release notes** and **Later** (each version once per launch).
+   - **Install** on macOS arm64 downloads `FriedLiver-darwin-arm64-*.dmg`
+     (https, only from this repo's release downloads and GitHub's asset hosts,
+     every redirect checked), checks its size and its SHA-256 against
+     `SHA256SUMS.txt` (missing or different: it refuses), then offers
+     **Restart to update**. A detached script in a private temp folder waits
+     for the app to exit, mounts the DMG, swaps the running `.app` (wherever it
+     is), and reopens it. If the `.app` or its folder isn't writable, the
+     verified DMG is opened instead.
+   - On Windows and Linux, Install opens the release page.
+   - `friedliver.update.mode: "off"` (or `update.mode: "none"`) turns this off.
+
+Drafts and pre-releases are ignored.
 
 `.github/workflows/upstream.yml` runs every Monday. When
 `update.code.visualstudio.com/api/releases/stable` lists a newer stable VS Code
@@ -55,8 +82,35 @@ Environment variables:
 | `VSCODE_DIR` | `vscode` | Upstream checkout |
 | `FRIEDLIVER_EXTENSIONS_DIR` | `extensions` | Where `prepare.mjs` takes the FriedLiver built-ins from |
 | `FRIEDLIVER_CACHE_DIR` | `.cache` | Downloaded Node toolchain |
-| `FRIEDLIVER_VERSION` | upstream tag | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag |
+| `FRIEDLIVER_VERSION` | newest release tag in the checkout's history | Version stamped into `product.json` as `friedliverVersion` (`v1.142.0` or `v1.142.0-2`); release builds set it from the tag. Other builds take the newest `vX.Y.Z[-N]` tag that HEAD contains (the pinned upstream version when git has no tags), so the update check only offers a newer release, and stamp `friedliverBuild` as e.g. `1.142.0-7+3.gd0cca9f1ae` (3 commits past it) |
 | `FRIEDLIVER_REQUIRE_PINS` | unset | When set, a download with no SHA-256 pin in `scripts/checksums.json` fails the build (release builds set it) |
+| `FRIEDLIVER_KEEP_LOCALES` | `en,en-GB` | Chromium locale packs `--package` keeps (`<lang>.lproj` in macOS's Electron Framework, `locales/<lang>.pak` elsewhere); English is always kept as Chromium's fallback, `all` keeps every pack. The others are about 45 MB on macOS. Only Chromium's own strings (spellcheck and webview context menus, a few native dialogs) are affected; FriedLiver's UI language comes from VS Code language packs |
+
+### The dictation helper (macOS)
+
+The composer's mic runs `friedliver-dictate`, a small Swift program
+(`extensions/friedliver-agents/native/friedliver-dictate.swift`) that listens
+with AVAudioEngine and SFSpeechRecognizer (on-device when macOS has the
+language) and writes JSON lines (`{"partial":…}`, `{"final":…}`,
+`{"error":…,"code":…}`, and `{"level":0…1}` about 20 times a second for the
+listening mic's visualizer) that the extension streams into the message box.
+The host checks every line (levels must be finite; they are clamped to 0…1)
+and forwards levels at most 30 times a second, to the dictating chat only.
+
+- `extensions/friedliver-agents/native/build.sh` builds it into the
+  extension's `bin/` (gitignored, shipped by `.vscodeignore`), with its
+  `Info.plist` embedded, ad-hoc signed. `build.yml` runs it on macOS before
+  `prepare.mjs`, which copies it into the app; `ci.yml` type-checks it on
+  every push (`build.sh --check`). For a local macOS build, run it before
+  `prepare.mjs`. Needs Xcode or the Command Line Tools.
+- `build.mjs` (macOS installer step) adds `NSMicrophoneUsageDescription`
+  and `NSSpeechRecognitionUsageDescription` to the app's `Info.plist` and
+  signs the helper before it signs the app, so macOS asks for permission
+  once, for FriedLiver (the helper runs as the app's child).
+- The extension only runs the helper at its fixed path inside the
+  extension folder (in the app, inside `FriedLiver.app`), never from `PATH`
+  or the workspace. Without it (a dev build, stock VS Code) the mic shows
+  the old "Press Fn twice" hint.
 
 ### What the scripts handle for you
 
@@ -107,8 +161,76 @@ use LF line endings. CI does both (`.github/workflows/build.yml`).
 Install the Xcode command line tools (`xcode-select --install`) and Python 3,
 then run the same commands. `dev.mjs` runs `scripts/code.sh`. `--package` runs
 `gulp vscode-darwin-<arch>-min`. Built on CI for Apple silicon; the app is
-ad-hoc signed, not notarized, so macOS asks once under System Settings →
+signed with FriedLiver's self-signed certificate (ad-hoc on forks and local
+builds), not notarized, so macOS asks once under System Settings →
 Privacy & Security → Open Anyway.
+
+### macOS signing and privacy prompts
+
+macOS keeps privacy grants (Desktop, Documents and Downloads folders,
+Microphone, Speech Recognition, Automation) per app, keyed by the app's
+*designated requirement*. An ad-hoc signature (`codesign --sign -`) has no
+certificate, so its requirement is the build's `cdhash`, which changes with
+every build: after each update macOS treats FriedLiver as a new app and asks
+again. A signature from a certificate gives a requirement that names the
+bundle id and the certificate, the same for every build:
+
+```
+designated => identifier "com.friedliver.app" and certificate root = H"b96aa277…"
+```
+
+What CI does (`build.yml`, macOS job):
+
+1. **Signing keychain (macOS)**: when the secrets `MACOS_SIGN_P12` (base64
+   PKCS#12), `MACOS_SIGN_P12_PASSWORD` and `MACOS_SIGN_IDENTITY` are set, it
+   makes a throwaway keychain under `$RUNNER_TEMP` with a random password,
+   imports the certificate for `codesign` only (`-T /usr/bin/codesign`,
+   `set-key-partition-list`), puts it on the search list and exports
+   `MACOS_SIGN_IDENTITY` and `MACOS_SIGN_KEYCHAIN`. Without the secrets (forks)
+   it does nothing and the app stays ad-hoc signed. Secrets reach the script
+   only through `env:`; the keychain password is masked.
+2. `build.mjs` signs the dictation helper, then the app with `--deep`
+   (helpers and frameworks inside it), using that identity
+   (`codesignArgs` in `scripts/lib.mjs`: `--timestamp=none --keychain …`, no
+   hardened runtime, which Electron would need entitlements for). The bundle
+   id stays `com.friedliver.app` (`product.json`).
+3. **Check the signature (macOS)**: `codesign --verify --deep --strict`, and
+   prints `codesign -d -r-`; with a certificate the step fails unless the
+   requirement contains `certificate root = H"…"` and no `cdhash`.
+4. **Remove the signing keychain (macOS)** runs `if: always()`.
+
+`test/scripts.test.ts` checks the argument logic and the workflow's order;
+the signing itself only runs on CI's macOS runner.
+
+**After the first signed release**, macOS asks one last time (the
+requirement changed from a cdhash to the certificate); from then on updates
+keep the grants. Gatekeeper still shows "Open Anyway" on first launch: the
+certificate is not Apple-issued and the app is not notarized.
+
+**Rotating the certificate.** The owner keeps it in `~/Private/friedliver-signing`.
+To replace it, make a new self-signed code-signing certificate (Keychain
+Access → Certificate Assistant → Create a Certificate, type *Code Signing*,
+or `openssl` with `extendedKeyUsage = codeSigning`), export it with its key as
+a `.p12` (with `-legacy` for OpenSSL 3, so `security import` reads it), then
+set `MACOS_SIGN_P12` (`base64 -i cert.p12`), `MACOS_SIGN_P12_PASSWORD` and
+`MACOS_SIGN_IDENTITY` (its common name) in the repository's Actions secrets.
+A new certificate has a new root hash, so macOS asks once more after that
+release; put the new hash in `CERT_ROOT` in `.github/workflows/release.yml`
+(the release check fails until then). Keep it valid for years: an expired certificate still verifies (no
+timestamp is needed for a self-signed one), but rotate before it leaks, not
+on a schedule.
+
+**Apple Developer ID instead** ($99/year): import the Developer ID
+Application certificate the same way (same three secrets), add
+`--options runtime` with an entitlements file allowing JIT and unsigned
+executable memory for Electron, then notarize the DMG (`xcrun notarytool
+submit … --wait` with an App Store Connect API key in further secrets) and
+`xcrun stapler staple` it. That also removes the Gatekeeper warning.
+
+FriedLiver itself avoids prompting where it can: with no folder open,
+agents start in an empty folder of FriedLiver's (global storage
+`no-folder/`) rather than the home folder, so an agent's start-up scan
+doesn't reach Desktop, Documents or Downloads.
 
 ### Icons and branding
 
@@ -145,42 +267,74 @@ again after changing the artwork.
   defaults to true. This stops the agent host process and its
   `copilot-runtime` child. The patch also hides the built-in Chat view in that
   case, so the secondary side bar belongs to FriedLiver Agents.
-- **`0110-modern-workbench.patch`**: adds
-  `src/vs/workbench/browser/media/friedliver.css` and imports it from
-  `src/vs/workbench/browser/style.ts`, right after upstream's `style.css`. Dev
-  and transpile builds copy it to `out/` and load it through the CSS import
-  map; `--package` bundles it into `workbench.desktop.main.css`, so no build
-  script changes. It builds on upstream's Modern UI
-  (`workbench.experimental.modernUI`, on by default) and works with it off.
-  Every rule is scoped to `.monaco-workbench:not(.hc-black):not(.hc-light)`,
-  uses only `--vscode-*` theme colors and size tokens, and avoids `:has()`
-  and class-substring selectors (upstream's
-  `contrib/modernUI/CSS_PERFORMANCE.md`). What it does: redefines
-  `--vscode-shadow-lg` and `--vscode-shadow-xl` from `widget.shadow`, so every
-  overlay (palette, hovers, suggest, menus, notifications, dialogs, find,
-  peek) gets a soft deep shadow; rounds the palette and dialogs at 12px,
-  menus, hovers and suggest at 8px, rows, inputs and buttons at 6px; makes the
-  command center a pill; draws the selected activity item's
-  `activityBar.activeBorder` as a short pill at the bar's edge; narrows
-  scrollbar sliders with a transparent border (the hit area stays the same);
-  gives buttons a 2px focus ring; fades hover colors only when motion is
-  enabled and never under `prefers-reduced-motion`. The colors that make
-  regions separate by tone (transparent borders, no resting sash grips) are
-  in the themes, see [DEFAULTS.md](DEFAULTS.md).
+- **`0110-modern-workbench.patch`** and **`workbench/friedliver.css`**: the
+  workbench built from the design system (`~/code/FriedLiver-Code-design/COMPONENTS.md`,
+  plan in `WORKBENCH-MODERN-PLAN.md`). The patch imports two stylesheets from
+  `src/vs/workbench/browser/style.ts`, right after upstream's `style.css`;
+  `prepare.mjs` writes both into the checkout:
+  - `friedliver-tokens.css`, generated by `scripts/workbench-tokens.mjs` from
+    the Agents extension's `media/tokens.css`: every token prefixed `--fl-`,
+    `:root` scoped to `.monaco-workbench`, the light and high-contrast blocks to
+    the workbench's theme classes. One set of numbers for the webviews and the
+    workbench.
+  - `friedliver.css`, copied from `workbench/friedliver.css`. Each block names
+    the spec component it renders (Button, Input, Select, Checkbox, Count, Kbd,
+    Menu and its palette variant, Tooltip, Toast, Dialog, …). Upstream widgets
+    paint their colours inline from `--vscode-*` variables, so a block re-points
+    those variables on the widget itself. Every rule is scoped to
+    `.monaco-workbench:not(.hc-black):not(.hc-light)`; no `:has()` and no
+    class-substring selectors (upstream's `contrib/modernUI/CSS_PERFORMANCE.md`).
+    `test/workbench-css.test.ts` fails on any raw size, colour, shadow or duration.
 
-  To iterate on the stylesheet without a full compile, edit the file in the
-  prepared checkout, copy it to `out/vs/workbench/browser/media/` and reload
-  the window (Developer: Reload Window). Then regenerate the patch, adding
-  the new file to the diff:
+  The patch's code changes, each where CSS can't reach:
+  - `base/browser/ui/menu/menu.ts` (menus render in a shadow root): row height,
+    row radius, separator margin and the glass blur read the tokens, with
+    upstream's values as fallbacks.
+  - `notificationsViewer.ts`, `notificationsToasts.ts`, `notificationsCenter.ts`:
+    toasts 400 wide with 38px rows (Toast §2.15: 8 + 22 + 8).
+  - `electron-browser/desktop.contribution.ts`: `window.menuStyle` defaults to
+    `inherit` and `window.dialogStyle` to `custom` on every platform, so macOS
+    shows the styled menus and dialogs instead of native ones.
+  - `services/layout/browser/layoutService.ts`: the frosted-glass opacity
+    defaults to the spec's 84%.
 
-  ```bash
-  git -C vscode add -N src/vs/workbench/browser/media/friedliver.css
-  git -C vscode diff -- src/vs/workbench/browser/style.ts src/vs/workbench/browser/media/friedliver.css > patches/0110-modern-workbench.patch
-  git -C vscode reset -q -- src/vs/workbench/browser/media/friedliver.css
-  ```
+  To iterate without a full compile, edit `workbench/friedliver.css`, copy it to
+  `out/vs/workbench/browser/media/` in the prepared checkout and reload the
+  window (Developer: Reload Window). For the TypeScript parts, edit the checkout
+  and regenerate the patch from the diff of those files.
 
+  The look is checked in CI: a manual Build FriedLiver run (`workflow_dispatch`)
+  also runs `scripts/workbench-shots.mjs` on its macOS app (the `shots` job,
+  artifact `workbench-shots`): every workbench surface in Black Blue, Light Blue
+  and Dark 2026 at 1440×900, and the approved composer against its baseline.
   A clean dev rebuild of `out/` is `npm run transpile-client` in the
   checkout (about 20 s, no type check).
+- **`0200-fast-shell-env.patch`**: the extension host no longer waits for the
+  login shell (`friedliver.fastShellEnv`, see [DEFAULTS.md](DEFAULTS.md)). It
+  adds `src/vs/workbench/services/extensions/common/shellEnvCache.ts` (no
+  imports: the allow-list, the cache and a raw protocol message `0xFE
+  'FLSHENV'` + JSON beside Initialized/Ready/Terminate), uses it in
+  `localProcessExtensionHost.ts` and applies the message in
+  `api/node/extensionHostProcess.ts`. `test/shellEnvCache.test.ts` runs that
+  new file straight out of the patch (`test/patchedFile.ts`), so the filter is
+  tested without an upstream checkout.
+- **`0210-node-compile-cache-posix.patch`**: Node.js compile cache for the
+  utility processes on macOS and Linux. Upstream turned POSIX off with a TODO
+  that blames its *packaged* cache (portable + read-only/eager, generated at
+  build time, `build/lib/nodeCompileCache.ts` makes it for win32-x64 only).
+  This uses the plain Node API instead (`module.enableCompileCache({ directory })`:
+  writable, not portable, not eager), the same call upstream makes on Windows
+  in Electron's Node, documented for CommonJS and ESM since Node 22.1. Node
+  validates entries against the module's source and its own version; the
+  folder is `CachedData/<commit>/node/<kind>`, so the shared process's
+  `CodeCacheCleaner` deletes old versions. `mainImpl.ts` sets
+  `FRIEDLIVER_NODE_COMPILE_CACHE` once the user data folder is known (unless
+  argv.json says `"node-compile-cache": false`, schema in
+  `desktop.contribution.ts`); utility processes inherit it. Node only writes
+  the cache when a process exits normally, so each one also flushes 20 s after
+  it starts. Check: the extension host's log says
+  `[node-compile-cache] extension-host: … (status: enabled, configured: …/CachedData/<commit>/node/extension-host …)`
+  and that folder fills after the first launch.
 - **Built-in extensions**: `friedliver-agents` (`npm ci` + `npm run build`
   first) and `friedliver-theme` are copied without `node_modules` and
   `.vscode-test`. On the copy, the Agents view container moves from
@@ -291,9 +445,11 @@ Packaged build, `bench/fixture`, 1440×900, under xvfb with software rendering
   `extensions.verifySignature`, because the verifier (`@vscode/vsce-sign`) ships
   only with Microsoft's builds. Extensions come over HTTPS from Open VSX, whose
   list of malicious extensions still applies. See [SECURITY.md](../SECURITY.md).
-- **Unsigned builds.** Windows SmartScreen and macOS Gatekeeper warn on first
-  launch. Signing needs a Windows code-signing certificate and an Apple
-  Developer ID (for notarization), both bought in the publisher's name.
+- **No Apple- or Microsoft-issued signatures.** Windows SmartScreen and macOS
+  Gatekeeper warn on first launch. macOS builds carry a self-signed
+  certificate (stable privacy grants, see above); removing the warnings needs
+  a Windows code-signing certificate and an Apple Developer ID (for
+  notarization), both bought in the publisher's name.
 - **No Windows 11 context-menu entry.** That package is built by Microsoft's
   pipeline; the setup leaves it out (patch 0030), and the classic
   "Open with FriedLiver" entry still works.

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { EXTERNAL_CLIENT } from '../src/bridge/protocol';
 import { BridgeRequests, MAX_WAITING_PER_CHAT, type ToolHost } from '../src/host/bridgeRequests';
 import { EMPTY_STATE, reduce, type Action, type AppState, type ChatView } from '../src/shared/model';
+import { memoryPermissions, memoryStore } from './helpers';
 
 const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
   id,
@@ -181,5 +183,255 @@ describe('browser requests whose world changed while the user decided', () => {
     s.requests.answer(s.id, 'allow');
     await expect(s.pending).rejects.toThrow(/closed/);
     expect(s.done).toEqual([]);
+  });
+});
+
+describe('the external client (Claude Code outside FriedLiver)', () => {
+  const S1 = `${EXTERNAL_CLIENT}:${'1'.repeat(32)}`;
+  const S2 = `${EXTERNAL_CLIENT}:${'2'.repeat(32)}`;
+  const ext = (auto = false) => {
+    const h = host();
+    const done: string[] = [];
+    const asks: { requestId: string; title: string; detail?: string }[] = [];
+    const page = { origin: 'http://localhost:3000', password: false };
+    h.browser = async (_c, call) => (done.push(call.tool), 'ok');
+    h.notify = (a) => void asks.push(a);
+    h.externalAutoApprove = () => auto;
+    h.browserPage = async () => ({ ...page });
+    return { h, done, asks, page, requests: new BridgeRequests(h), signal: new AbortController().signal };
+  };
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('reaches only the browser tools: not the chats, not the computer (system_*)', async () => {
+    const { requests, signal } = ext(true);
+    for (const call of [{ tool: 'list_chats' }, { tool: 'list_agents' }, { tool: 'read_chat', chatId: 'chat-1' }, { tool: 'system_clipboard_read' }] as const) {
+      await expect(requests.call(S1, call, signal)).rejects.toThrow(/Only the browser_\* tools/);
+    }
+  });
+
+  it('asks before acting, saying what and where, and does nothing when denied', async () => {
+    const { done, asks, requests, signal } = ext();
+    await expect(requests.call(S1, { tool: 'browser_snapshot' }, signal)).resolves.toBe('ok');
+    const click = requests.call(S1, { tool: 'browser_click', text: 'Buy\u202enow\n' + 'x'.repeat(300) }, signal);
+    await tick();
+    expect(asks[0].title).toBe('Claude Code wants to click in the browser');
+    expect(asks[0].detail).toMatch(/^http:\/\/localhost:3000: click "Buy now x+…"$/);
+    expect(asks[0].detail!.length).toBeLessThan(160);
+    requests.answer(asks[0].requestId, 'deny');
+    await expect(click).rejects.toThrow(/did not allow/);
+    expect(done).toEqual(['browser_snapshot']);
+  });
+
+  it('shows the URL it opens and the text it types, but never a password', async () => {
+    const { asks, page, requests, signal } = ext();
+    void requests.call(S1, { tool: 'browser_open', url: 'https://bank.example/pay' }, signal).catch(() => {});
+    void requests.call(S1, { tool: 'browser_type', selector: '#q', text: 'hello' }, signal).catch(() => {});
+    await tick();
+    page.password = true;
+    void requests.call(S2, { tool: 'browser_type', selector: '#pw', text: 'hunter2' }, signal).catch(() => {});
+    await tick();
+    expect(asks.map((a) => a.detail)).toEqual([
+      'https://bank.example: open https://bank.example/pay',
+      'http://localhost:3000: type "hello" into #q',
+      'http://localhost:3000: type •••••••• (a password field) into #pw',
+    ]);
+    expect(JSON.stringify(asks)).not.toContain('hunter2');
+  });
+
+  it('"Allow for this session" holds for that MCP session on that origin only', async () => {
+    const { done, asks, page, requests, signal } = ext();
+    const first = requests.call(S1, { tool: 'browser_reload' }, signal);
+    await tick();
+    requests.answer(asks[0].requestId, 'allowChat');
+    await first;
+    await expect(requests.call(S1, { tool: 'browser_back' }, signal)).resolves.toBe('ok');
+    expect(asks).toHaveLength(1);
+    void requests.call(S2, { tool: 'browser_back' }, signal).catch(() => {});
+    await tick();
+    expect(asks).toHaveLength(2);
+    page.origin = 'https://other.example';
+    void requests.call(S1, { tool: 'browser_back' }, signal).catch(() => {});
+    await tick();
+    expect(asks).toHaveLength(3);
+    expect(done).toEqual(['browser_reload', 'browser_back']);
+    requests.forgetExternal();
+    page.origin = 'http://localhost:3000';
+    void requests.call(S1, { tool: 'browser_back' }, signal).catch(() => {});
+    await tick();
+    expect(asks).toHaveLength(4);
+  });
+
+  it('never acts on another origin than the one approved, once or for the session', async () => {
+    const { h, done, asks, page, requests, signal } = ext();
+    const origins: (string | undefined)[] = [];
+    h.browser = async (_c, call, _s, expect) => (done.push(call.tool), origins.push(expect), 'ok');
+    const click = requests.call(S1, { tool: 'browser_click', text: 'Next' }, signal);
+    await tick();
+    page.origin = 'https://evil.example';
+    requests.answer(asks[0].requestId, 'allowChat');
+    await expect(click).rejects.toThrow('The page changed to https://evil.example after you approved; ask again.');
+    page.origin = 'http://localhost:3000';
+    await expect(requests.call(S1, { tool: 'browser_type', selector: '#q', text: 'x' }, signal)).resolves.toBe('ok');
+    expect(origins).toEqual(['http://localhost:3000']);
+    expect(done).toEqual(['browser_type']);
+  });
+
+  it('auto-approves only by setting, and URL rules still apply', async () => {
+    const auto = ext(true);
+    await expect(auto.requests.call(S1, { tool: 'browser_open', url: 'localhost:3000' }, auto.signal)).resolves.toBe('ok');
+    await expect(auto.requests.call(S1, { tool: 'browser_open', url: 'file:///etc/passwd' }, auto.signal)).rejects.toThrow(/only http and https/);
+    expect(auto.asks).toEqual([]);
+  });
+});
+
+describe('"Always allow", remembered for every chat and later session', () => {
+  const S1 = `${EXTERNAL_CLIENT}:${'1'.repeat(32)}`;
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  function setup(store = memoryPermissions()) {
+    const h = host();
+    const done: { tool: string; chatId: string; expect?: string }[] = [];
+    const asks: { chatId: string; requestId: string; title: string; detail?: string; always?: string }[] = [];
+    const page = { origin: 'https://www.irctc.co.in', password: false };
+    h.browser = async (chatId, call, _s, expect) => (done.push({ tool: call.tool, chatId, expect }), 'ok');
+    h.browserPage = async () => ({ ...page });
+    h.notify = (a) => void asks.push(a);
+    h.permissions = store;
+    return { h, done, asks, page, store, requests: new BridgeRequests(h), signal: new AbortController().signal };
+  }
+  const bridgeItems = (h: ToolHost, chatId = 'chat-1') => h.state.chats.find((c) => c.id === chatId)!.items.filter((i) => i.kind === 'bridge');
+
+  it('remembers a website by its exact origin, for every chat, and rechecks the origin when acting', async () => {
+    const { h, done, page, store, requests, signal } = setup();
+    const open = requests.call('chat-1', { tool: 'browser_open', url: 'https://www.irctc.co.in/nget/train-search' }, signal);
+    const [item] = bridgeItems(h);
+    expect(item).toMatchObject({ state: 'awaiting', always: 'https://www.irctc.co.in' });
+    if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
+    await open;
+    expect(store.site('https://www.irctc.co.in')).toMatchObject({ agent: 'Demo' });
+
+    // Another chat, another action on the same site: no question, and browser.ts checks the origin just before it acts.
+    await expect(requests.call('chat-2', { tool: 'browser_click', text: 'Book' }, signal)).resolves.toBe('ok');
+    expect(bridgeItems(h, 'chat-2')).toEqual([expect.objectContaining({ state: 'allowed', auto: 'Always allowed: https://www.irctc.co.in' })]);
+    expect(done.at(-1)).toEqual({ tool: 'browser_click', chatId: 'chat-2', expect: 'https://www.irctc.co.in' });
+
+    // Another origin, even a lookalike, still asks.
+    page.origin = 'https://www.irctc.co.in.evil.example';
+    void requests.call('chat-2', { tool: 'browser_click', text: 'Pay' }, signal).catch(() => {});
+    await tick();
+    expect(bridgeItems(h, 'chat-2').at(-1)).toMatchObject({ state: 'awaiting', always: 'https://www.irctc.co.in.evil.example' });
+    // And file:, chrome: and the rest are refused before anything is asked or remembered.
+    await expect(requests.call('chat-1', { tool: 'browser_open', url: 'file:///etc/passwd' }, signal)).rejects.toThrow(/only http and https/);
+    await expect(requests.call('chat-1', { tool: 'browser_open', url: 'chrome://settings' }, signal)).rejects.toThrow(/only http and https/);
+  });
+
+  it('holds after a restart: a new store over the same storage answers', async () => {
+    const user = memoryStore();
+    const first = setup(memoryPermissions({ user }));
+    const open = first.requests.call('chat-1', { tool: 'browser_open', url: 'https://www.irctc.co.in' }, first.signal);
+    const [item] = bridgeItems(first.h);
+    if (item.kind === 'bridge') first.requests.answer(item.requestId, 'allowAlways');
+    await open;
+    const second = setup(memoryPermissions({ user }));
+    await expect(second.requests.call('chat-1', { tool: 'browser_reload' }, second.signal)).resolves.toBe('ok');
+    expect(bridgeItems(second.h)).toEqual([expect.objectContaining({ state: 'allowed' })]);
+  });
+
+  it('remembers agent-to-agent tools and project memory', async () => {
+    const { h, store, requests, signal } = setup();
+    const read = requests.call('chat-1', { tool: 'read_chat', chatId: 'chat-2' }, signal);
+    const [item] = bridgeItems(h);
+    expect(item).toMatchObject({ always: 'in every chat' });
+    if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
+    await read;
+    expect(store.tool('read_chat')).toBeDefined();
+    await expect(requests.call('chat-2', { tool: 'read_chat', chatId: 'chat-1' }, signal)).resolves.toContain('chat-1');
+    expect(bridgeItems(h, 'chat-2')).toEqual([expect.objectContaining({ state: 'allowed', auto: 'Always allowed' })]);
+    // Only that tool: messaging another chat still asks.
+    void requests.call('chat-2', { tool: 'send_to_chat', chatId: 'chat-1', message: 'hi' }, signal).catch(() => {});
+    expect(bridgeItems(h, 'chat-2').at(-1)).toMatchObject({ state: 'awaiting' });
+
+    h.remember = async (fact) => fact;
+    const first = requests.call('chat-1', { tool: 'remember', fact: 'Tests run with vitest' }, signal);
+    const memo = bridgeItems(h).at(-1)!;
+    expect(memo).toMatchObject({ tool: 'remember', always: 'in every chat' });
+    if (memo.kind === 'bridge') requests.answer(memo.requestId, 'allowAlways');
+    await expect(first).resolves.toContain('Tests run with vitest');
+    await expect(requests.call('chat-1', { tool: 'remember', fact: 'Use pnpm' }, signal)).resolves.toContain('Use pnpm');
+    expect(bridgeItems(h).at(-1)).toMatchObject({ state: 'allowed', auto: 'Always allowed' });
+  });
+
+  it('allows once when nothing can be remembered, and offers nothing without a store', async () => {
+    const { h, requests, signal } = setup();
+    h.permissions = undefined;
+    const open = requests.call('chat-1', { tool: 'browser_open', url: 'https://a.example' }, signal);
+    const [item] = bridgeItems(h);
+    expect(item).not.toHaveProperty('always');
+    if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
+    await expect(open).resolves.toBe('ok');
+  });
+
+  it('never remembers for a read-only chat: its tools are off', async () => {
+    const { h, store, requests, signal } = setup();
+    h.dispatch({ t: 'created', chat: chat('chat-ro', { readOnly: true }) });
+    await expect(requests.call('chat-ro', { tool: 'browser_open', url: 'https://a.example' }, signal)).rejects.toThrow(/only proposes text/);
+    expect(store.list()).toEqual([]);
+  });
+
+  it('Claude Code outside FriedLiver honours a site remembered in a chat, and remembers one itself', async () => {
+    const { asks, done, page, store, requests, signal } = setup();
+    store.add({ kind: 'site', origin: 'https://www.irctc.co.in' }, 'Claude');
+    await expect(requests.call(S1, { tool: 'browser_click', text: 'Book' }, signal)).resolves.toBe('ok');
+    expect(asks).toEqual([]);
+    expect(done.at(-1)).toMatchObject({ tool: 'browser_click', expect: 'https://www.irctc.co.in' });
+
+    page.origin = 'https://example.org';
+    const click = requests.call(S1, { tool: 'browser_click', text: 'More' }, signal);
+    await tick();
+    expect(asks[0]).toMatchObject({ always: 'https://example.org' });
+    requests.answer(asks[0].requestId, 'allowAlways');
+    await click;
+    expect(store.site('https://example.org')).toMatchObject({ agent: 'Claude Code (outside FriedLiver)' });
+    requests.forgetExternal();
+    await expect(requests.call(S1, { tool: 'browser_reload' }, signal)).resolves.toBe('ok');
+    expect(asks).toHaveLength(1);
+  });
+
+  it('still refuses when the page moved to another origin after the rule matched', async () => {
+    const { h, page, store, requests, signal } = setup();
+    store.add({ kind: 'site', origin: 'https://www.irctc.co.in' });
+    let calls = 0;
+    // The page is on the allowed site when asked, and somewhere else by the time it would act.
+    h.browserPage = async () => ({ ...page, origin: calls++ === 0 ? 'https://www.irctc.co.in' : 'https://evil.example' });
+    await expect(requests.call(S1, { tool: 'browser_click', text: 'Next' }, signal)).rejects.toThrow(/page changed to https:\/\/evil.example/);
+  });
+
+  it('a purchase or a form submit asks every time, once only: no remembered site or "this chat" lets it through', async () => {
+    const { h, asks, store, requests, signal } = setup();
+    store.add({ kind: 'site', origin: 'https://www.irctc.co.in' });
+    const pay = requests.call('chat-1', { tool: 'browser_click', text: 'Pay now' }, signal);
+    await tick();
+    const [item] = bridgeItems(h);
+    expect(item).toMatchObject({ state: 'awaiting' });
+    expect(asks.at(-1)).toMatchObject({ careful: true });
+    // The wider answers do nothing for it; a plain allow, once, does.
+    if (item.kind === 'bridge') {
+      requests.answer(item.requestId, 'allowChat');
+      requests.answer(item.requestId, 'allowAlways');
+      expect(bridgeItems(h)[0]).toMatchObject({ state: 'awaiting' });
+      requests.answer(item.requestId, 'allow');
+    }
+    await expect(pay).resolves.toBe('ok');
+    // Nothing was remembered for the chat: the next one asks again.
+    void requests.call('chat-1', { tool: 'browser_click', selector: 'button#place-order' }, signal).catch(() => {});
+    await tick();
+    expect(bridgeItems(h).at(-1)).toMatchObject({ state: 'awaiting' });
+  });
+
+  it('offers nothing for a page whose origin is unknown', async () => {
+    const { h, asks, requests, signal } = setup();
+    h.browserPage = async () => ({ password: true });
+    void requests.call(S1, { tool: 'browser_reload' }, signal).catch(() => {});
+    await tick();
+    expect(asks[0]).not.toHaveProperty('always');
   });
 });

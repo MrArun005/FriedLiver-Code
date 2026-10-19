@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyUpdate, type Item } from '../src/shared/model';
 import {
+  foldApprovals,
   MAX_COMMAND,
   argvLine,
   commandSummary,
@@ -108,7 +109,7 @@ describe('step summaries', () => {
     expect(stepSummary({ title: 'Fetch https://example.com', toolKind: 'fetch' })).toMatchObject({ verb: 'Fetch', text: 'https://example.com' });
     expect(stepSummary({ title: 'Check the edge cases', toolKind: 'think' })).toMatchObject({ verb: 'Think', text: 'Check the edge cases' });
     expect(stepSummary({ title: 'Ready to code?', toolKind: 'switch_mode' })).toMatchObject({ verb: 'Plan', text: 'Ready to code?' });
-    expect(stepSummary({ title: 'mcp__friedliver__list_chats', toolKind: 'other' })).toMatchObject({ verb: 'Tool' });
+    expect(stepSummary({ title: 'mcp__friedliver__list_chats', toolKind: 'other' })).toMatchObject({ verb: 'FriedLiver', text: 'list chats' });
     expect(stepSummary({ title: 'Delete old.txt' })).toMatchObject({ verb: 'Delete', text: 'old.txt' });
     expect(stepSummary({ title: 'Something\nwith lines', toolKind: 'think' }).text).toBe('Something with lines');
   });
@@ -220,5 +221,41 @@ describe('paths in the chat folder', () => {
     expect(inFolder('/home/dev/app', '/home/dev/app')).toBeUndefined();
     expect(inFolder('C:\\work\\app', 'src\\a.ts')).toBe('C:\\work\\app\\src\\a.ts');
     expect(inFolder('C:\\work\\app', 'c:\\Work\\App\\b.ts')).toBe('c:\\Work\\App\\b.ts');
+  });
+});
+
+describe('friendly tool names and folded approvals', () => {
+  it('names MCP tools without their mcp__server__ prefix, FriedLiver browser tools in plain words', () => {
+    expect(stepSummary({ title: 'mcp__friedliver__browser_click', toolKind: 'other', input: '{"text":"Add to bag"}' })).toMatchObject({ verb: 'Clicked', text: '‘Add to bag’' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_screenshot' })).toMatchObject({ verb: 'Took a screenshot', text: '' });
+    expect(stepSummary({ title: 'Tool mcp__friedliver__browser_open', input: '{"url":"https://www.myntra.com/puma"}' })).toMatchObject({ verb: 'Opened', text: 'myntra.com/puma' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_type', input: '{"selector":"#q","text":"puma"}' })).toMatchObject({ verb: 'Typed', text: '‘puma’' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_snapshot' })).toMatchObject({ verb: 'Read page', text: '' });
+    expect(stepSummary({ title: 'mcp__friedliver__browser_take_screenshot' })).toMatchObject({ verb: 'Browser', text: 'take screenshot' });
+    expect(stepSummary({ title: 'mcp__github__create_issue' })).toMatchObject({ verb: 'github', text: 'create issue' });
+    expect(stepSummary({ title: 'mcp__friedliver__ask_agent' })).toMatchObject({ verb: 'FriedLiver', text: 'ask agent' });
+  });
+
+  it('shows a long path by its last part', () => {
+    const p = '/Users/a/Library/Application Support/FriedLiver/User/globalStorage/x/screenshot-6.png';
+    expect(stepSummary({ title: `Read ${p}`, toolKind: 'read' })).toMatchObject({ verb: 'Read', text: 'screenshot-6.png', full: `Read ${p}` });
+  });
+
+  const tool = (id: string, title: string): Item => ({ kind: 'tool', id, title, locations: [] }) as Item;
+  const bridge = (requestId: string, t: string, state: 'awaiting' | 'allowed' | 'denied'): Item =>
+    ({ kind: 'bridge', requestId, tool: t, target: { browser: true }, text: '', state }) as Item;
+
+  it('folds an answered approval into the tool row it approved, keeps pending and unmatched ones', () => {
+    const items = [
+      tool('t1', 'mcp__friedliver__browser_click'),
+      bridge('r1', 'browser_click', 'allowed'),
+      tool('t2', 'mcp__friedliver__browser_open'),
+      bridge('r2', 'browser_open', 'awaiting'),
+      bridge('r3', 'browser_type', 'denied'),
+      { kind: 'permission', requestId: 'p1', toolCallId: 't2', title: 'x', options: [], answer: 'Allow' } as Item,
+    ];
+    const { items: out, approvals } = foldApprovals(items);
+    expect(out.map((i) => ('requestId' in i ? i.requestId : 'id' in i ? i.id : ''))).toEqual(['t1', 't2', 'r2', 'r3']);
+    expect(approvals).toEqual({ t1: { text: 'allowed', ok: true }, t2: { text: 'Allow', ok: true } });
   });
 });

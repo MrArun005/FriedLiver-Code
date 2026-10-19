@@ -1,9 +1,14 @@
 import { spawn } from 'node:child_process';
+import { mkdtemp } from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { HttpTools } from '../src/bridge/http';
-import { BRIDGE_ENV, TOKEN_ENV } from '../src/bridge/protocol';
+import { EXTERNAL_TOOLS } from '../src/bridge/mcp';
+import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV } from '../src/bridge/protocol';
 import { BridgeServer, type BridgeHandler } from '../src/host/bridge';
+import { writeTokenFile } from '../src/host/externalBrowser';
 import { lastReply } from '../src/shared/model';
 import { buildBridge, disposeCores, gitRepo, makeCore } from './helpers';
 
@@ -62,6 +67,15 @@ describe('the FriedLiver tools over HTTP', () => {
     const { url } = await start();
     expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
     expect(await server!.httpUrl()).toBe(url);
+  });
+
+  it('refuses the external token as a bearer, and a missing or wrong token', async () => {
+    const { url } = await start();
+    const ext = server!.token(EXTERNAL_CLIENT);
+    for (const authorization of ['', `Bearer ${'0'.repeat(64)}`, `Bearer ${ext}`, `FriedLiver-HMAC ${'0'.repeat(64)}`]) {
+      const a = await request(url, { headers: { ...auth(ext), authorization, 'x-friedliver-nonce': '1'.repeat(32), 'x-friedliver-session': '2'.repeat(32) }, body: JSON.stringify(rpc(4, 'tools/list')) });
+      expect(a !== 'closed' && a.status, authorization).toBe(401);
+    }
   });
 
   it('answers what the stdio server answers, byte for byte', async () => {
@@ -236,5 +250,98 @@ describe('the FriedLiver tools, by transport', () => {
     const a = await core.createChat('demo');
     await core.send(a.id, 'ask demo hello');
     expect(lastReply(core.chat(a.id)!)).toMatch(/^Demo says: You said: [\s\S]*hello$/);
+  });
+});
+
+describe('the external stdio server Claude Code starts (externalStdio.ts)', () => {
+  let script: string;
+  beforeAll(async () => {
+    script = await buildBridge('externalStdio.ts');
+  });
+  let server: BridgeServer | undefined;
+  afterEach(async () => {
+    await server?.dispose();
+    server = undefined;
+  });
+
+  /** Runs the script with these messages; resolves with its replies, stderr and exit code. */
+  function run(tokenFile: string, messages: object[]): Promise<{ replies: { id: number; result?: { tools?: { name: string }[]; content?: { text: string }[]; isError?: boolean }; error?: { message: string } }[]; stderr: string; code: number | null }> {
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, [script, tokenFile], { stdio: ['pipe', 'pipe', 'pipe'] });
+      let out = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d));
+      child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
+      const lines = () => out.split('\n').filter(Boolean);
+      const want = messages.filter((m) => 'id' in m).length;
+      const timer = setInterval(() => {
+        if (lines().length >= want) child.stdin.end();
+      }, 20);
+      child.on('exit', (code) => {
+        clearInterval(timer);
+        resolve({ replies: lines().map((l) => JSON.parse(l)), stderr, code });
+      });
+      for (const m of messages) child.stdin.write(`${JSON.stringify(m)}\n`);
+    });
+  }
+
+  it('reaches the browser and system tools only, as its own MCP session, without ever sending the token', async () => {
+    const calls: string[] = [];
+    server = await BridgeServer.start(async (chatId, call) => (calls.push(`${chatId} ${call.tool}`), 'ok'));
+    const url = await server.httpUrl();
+    const file = await writeTokenFile(await mkdtemp(path.join(os.tmpdir(), 'flx-')), url, server.token(EXTERNAL_CLIENT));
+    const { replies } = await run(file, [rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {} }), rpc(2, 'tools/list'), rpc(3, 'tools/call', { name: 'list_chats' }), rpc(4, 'tools/call', { name: 'browser_snapshot' })]);
+    const byId = new Map(replies.map((r) => [r.id, r]));
+    expect(byId.get(2)!.result!.tools!.map((t) => t.name)).toEqual(EXTERNAL_TOOLS.map((t) => t.name));
+    expect(byId.get(3)!.result).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/not found/) }] });
+    expect(byId.get(4)!.result).toMatchObject({ content: [{ text: 'ok' }] });
+    expect(calls).toEqual([expect.stringMatching(new RegExp(`^${EXTERNAL_CLIENT}:[0-9a-f]{32} browser_snapshot$`))]);
+  });
+
+  it('fails closed when FriedLiver is not running: no token file, or a stale one', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'flx-'));
+    const missing = await run(path.join(dir, 'nope.json'), [rpc(1, 'tools/list')]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toMatch(/FriedLiver isn't running/);
+    const closed = await BridgeServer.start(async () => 'ok');
+    const staleUrl = await closed.httpUrl();
+    const token = closed.token(EXTERNAL_CLIENT);
+    await closed.dispose();
+    const stale = await run(await writeTokenFile(dir, staleUrl, token), [rpc(1, 'tools/list')]);
+    expect(stale.replies).toEqual([{ jsonrpc: '2.0', id: 1, error: { code: -32000, message: expect.stringMatching(/FriedLiver isn't running/) } }]);
+  });
+
+  it('sends an impostor on the port no payload: the handshake fails before any message', async () => {
+    const seen: { headers: http.IncomingHttpHeaders; body: string }[] = [];
+    let connections = 0;
+    const impostor = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c));
+      req.on('end', () => {
+        seen.push({ headers: req.headers, body });
+        res.writeHead(204, { 'x-friedliver-proof': 'f'.repeat(64) });
+        res.end();
+      });
+    });
+    impostor.on('connection', () => connections++);
+    await new Promise<void>((r) => impostor.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${(impostor.address() as { port: number }).port}/mcp`;
+    const token = 'c'.repeat(64);
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'flx-'));
+    const { replies } = await run(await writeTokenFile(dir, url, token), [rpc(1, 'tools/call', { name: 'browser_type', arguments: { selector: '#pw', text: 'hunter2' } })]);
+    expect(replies).toEqual([{ jsonrpc: '2.0', id: 1, error: { code: -32000, message: expect.stringMatching(/FriedLiver isn't running/) } }]);
+    expect(seen.map((r) => r.body)).toEqual(['']);
+    expect(JSON.stringify(seen)).not.toMatch(/hunter2|tools\/call/);
+    expect(JSON.stringify(seen)).not.toContain(token);
+
+    // A dead FriedLiver pid: no connection at all.
+    const dead = spawn(process.execPath, ['-e', '']);
+    await new Promise((r) => dead.on('exit', r));
+    const before = connections;
+    const gone = await run(await writeTokenFile(dir, url, token, dead.pid!), [rpc(2, 'tools/list')]);
+    impostor.close();
+    expect(gone.code).toBe(1);
+    expect(gone.stderr).toMatch(/FriedLiver isn't running/);
+    expect(connections).toBe(before);
   });
 });

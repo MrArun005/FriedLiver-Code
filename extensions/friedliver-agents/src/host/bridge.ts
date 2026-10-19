@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { HttpTools } from '../bridge/http';
 import { toolError } from '../bridge/mcp';
-import { BRIDGE_LIMITS, parseRequest, type BridgeCall, type BridgeResponse } from '../bridge/protocol';
+import { BRIDGE_LIMITS, EXTERNAL_CLIENT, isExternal, parseRequest, type BridgeCall, type BridgeResponse } from '../bridge/protocol';
 
 /** Does what a chat's agent asked; throwing sends the message back to the agent as the tool's error. */
 export type BridgeHandler = (chatId: string, call: BridgeCall, signal: AbortSignal) => Promise<string>;
@@ -36,11 +36,13 @@ export class BridgeServer {
     private readonly dir: string | undefined,
     private readonly handler: BridgeHandler,
     private readonly log?: (line: string) => void,
+    private readonly omitFor?: (chatId: string) => string[],
   ) {
     server.on('connection', (socket) => this.accept(socket));
   }
 
-  static async start(handler: BridgeHandler, log?: (line: string) => void): Promise<BridgeServer> {
+  /** `omitFor`: the tools a chat's session isn't offered over HTTP (a tools server gets them in OMIT_ENV). */
+  static async start(handler: BridgeHandler, log?: (line: string) => void, omitFor?: (chatId: string) => string[]): Promise<BridgeServer> {
     let address: string;
     let dir: string | undefined;
     if (process.platform === 'win32') {
@@ -67,7 +69,7 @@ export class BridgeServer {
       if (dir) await rm(dir, { recursive: true, force: true });
       throw err;
     }
-    return new BridgeServer(server, address, dir, handler, log);
+    return new BridgeServer(server, address, dir, handler, log, omitFor);
   }
 
   /** The chat's token, made on first use. It lives only in memory and in that chat's tool server. */
@@ -89,11 +91,13 @@ export class BridgeServer {
     if (this.disposed) throw new Error('FriedLiver closed its tools.');
     this.http ??= HttpTools.start({
       chatFor: (token) => this.tokens.get(hash(token)),
+      externalKey: () => this.chats.get(EXTERNAL_CLIENT),
       call: (chatId, call, signal) =>
         this.handler(chatId, call, signal).then(
           (text) => ({ content: [{ type: 'text' as const, text: fit(text) }] }),
           (err: unknown) => toolError(fit(err instanceof Error ? err.message : String(err))),
         ),
+      omitFor: this.omitFor,
       log: this.log,
     });
     try {
@@ -144,7 +148,7 @@ export class BridgeServer {
         const req = parseRequest(line.toString('utf8'));
         if (!req) return close('malformed request');
         const chatId = this.tokens.get(hash(req.token));
-        if (!chatId) return close('unknown token');
+        if (!chatId || isExternal(chatId)) return close('unknown token');
         this.handler(chatId, req.call, gone.signal).then(
           (text) => reply({ id: req.id, ok: true, text: fit(text) }),
           (err: unknown) => reply({ id: req.id, ok: false, error: fit(err instanceof Error ? err.message : String(err)) }),

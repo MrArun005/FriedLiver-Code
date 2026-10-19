@@ -1,5 +1,6 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentConnection, isAuthRequired, type ClientHost, type SessionSetup } from './agentConnection';
+import type { AuthStatus } from './signIn';
 import type { AgentId, AgentSpec } from './registry';
 import type { TerminalListener } from './terminals';
 
@@ -21,6 +22,8 @@ export interface SessionStart extends SessionSetup {
   /** The agent takes a message while it works (`_session/steering`). */
   steering: boolean;
   agentInfo?: { name: string; version: string };
+  /** Which shared rules files this new session got (HubOptions.rulesFor). */
+  rules?: string[];
 }
 
 /** No session to change: the chat's agent hasn't started one yet, or was restarted since. */
@@ -43,10 +46,12 @@ export interface HubEvents {
   notice(chatId: string, text: string): void;
   agentsChanged(): void;
   agentStderr?(agentId: AgentId, line: string): void;
+  /** The identity an agent says it runs as, whenever it says so. */
+  authStatus?(agentId: AgentId, status: AuthStatus): void;
 }
 
 export interface FileHost {
-  read(req: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse>;
+  read(req: acp.ReadTextFileRequest, chatId?: string): Promise<acp.ReadTextFileResponse>;
   write(chatId: string | undefined, req: acp.WriteTextFileRequest): Promise<void>;
 }
 
@@ -66,6 +71,18 @@ export interface HubOptions {
    * `agent.http` says whether its agent takes HTTP servers.
    */
   mcpServersFor?(chatId: string, agent: { http: boolean }): acp.McpServer[] | Promise<acp.McpServer[]>;
+  /**
+   * Shared rules for a new session: `text` goes to Claude as an appended system prompt
+   * (claude-agent-acp's `_meta.systemPrompt.append`); agents without such a way get it in
+   * front of the session's first message. `files` names what it came from.
+   */
+  rulesFor?(chatId: string, agentId: AgentId): Promise<{ text: string; files: string[] } | undefined>;
+  /** Text put in front of a new session's first message, made from that message (a project map); none when absent. */
+  primerFor?(chatId: string, agentId: AgentId, text: string): Promise<string | undefined>;
+  /** Extra `_meta` for a chat's session/new (e.g. a read-only chat's tool limits). */
+  sessionMetaFor?(chatId: string, agentId: AgentId): Record<string, unknown> | undefined;
+  /** Chats that never load or resume a session: each start is a fresh session/new (read-only chats). */
+  freshSessionFor?(chatId: string): boolean;
   log?(line: string): void;
 }
 
@@ -87,6 +104,10 @@ interface ChatState extends Chat {
   cancelled?: boolean;
   /** A session on its way: a prompt and an early start share it. */
   starting?: Promise<void>;
+  /** Rules for an agent without a system prompt, sent with the session's first message. */
+  pendingRules?: string;
+  /** A new session whose first message still gets the primer (HubOptions.primerFor). */
+  primePending?: boolean;
 }
 
 interface RunningAgent {
@@ -161,6 +182,21 @@ export class AgentHub {
     if (chat.sessionId) this.sessionToChat.delete(sessionKey(chat.agentId, chat.sessionId));
   }
 
+  /**
+   * Forgets the chat's session (closing it when the agent can), so the next
+   * prompt starts a new one. ACP has no way to cut a session back to an
+   * earlier turn, so a rewound conversation continues this way.
+   */
+  resetSession(chatId: string): void {
+    const chat = this.chats.get(chatId);
+    if (!chat?.sessionId) return;
+    const live = this.live(chat);
+    if (live?.agent.conn.supportsCloseSession) void live.agent.conn.closeSession(live.sessionId).catch(() => {});
+    this.sessionToChat.delete(sessionKey(chat.agentId, chat.sessionId));
+    chat.sessionId = undefined;
+    chat.sessionGeneration = undefined;
+  }
+
   getChat(chatId: string): Chat | undefined {
     return this.chats.get(chatId);
   }
@@ -187,7 +223,17 @@ export class AgentHub {
       this.clearIdleStop(agent);
       await this.ensureSession(chat, agent);
       if (chat.cancelled) return { stopReason: 'cancelled' };
-      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, blocks));
+      const rules = chat.pendingRules;
+      chat.pendingRules = undefined;
+      let primer: string | undefined;
+      if (chat.primePending) {
+        chat.primePending = false;
+        const text = blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n');
+        primer = await this.options.primerFor?.(chat.id, chat.agentId, text).catch((err: unknown) => void this.options.log?.(`Couldn't make the project map: ${String(err)}`));
+      }
+      // Rules first, then the map: the same order every session, so a cached prefix stays the same.
+      const front = [rules, primer].flatMap((t): acp.ContentBlock[] => (t ? [{ type: 'text', text: t }] : []));
+      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, [...front, ...blocks]));
     } catch (err) {
       if (agent && isAuthRequired(err)) throw new AuthRequiredError(agent.conn.spec, agent.conn.authMethods);
       throw err;
@@ -272,17 +318,33 @@ export class AgentHub {
    * Whether the agent is signed in, by asking for a session (no model call).
    * The probe session is never used.
    */
-  async checkSignIn(agentId: AgentId): Promise<{ signedIn: true } | { signedIn: false; methods: acp.AuthMethod[] }> {
+  async checkSignIn(agentId: AgentId): Promise<{ signedIn: true; setup: SessionSetup } | { signedIn: false; methods: acp.AuthMethod[] }> {
     const agent = await this.ensureAgent(agentId);
     try {
       const probe = await agent.conn.newSession(this.options.cwd);
       // Claude lists every session in its history; don't leave a probe there when it can be closed.
       if (agent.conn.supportsCloseSession) await agent.conn.closeSession(probe.sessionId).catch(() => {});
-      return { signedIn: true };
+      const { configOptions, modes, models } = probe;
+      return { signedIn: true, setup: { configOptions, modes, models } };
     } catch (err) {
       if (isAuthRequired(err)) return { signedIn: false, methods: agent.conn.authMethods };
       throw err;
+    } finally {
+      // An agent started only to check stops again after the idle time, like one a chat left.
+      this.scheduleIdleStop(agent);
     }
+  }
+
+  /** Whether the agent signs out itself (ACP `logout`). Starts it. */
+  async supportsLogout(agentId: AgentId): Promise<boolean> {
+    return (await this.ensureAgent(agentId)).conn.supportsLogout;
+  }
+
+  /** The agent's own sign-out; its sessions need a sign-in again afterwards. */
+  async logout(agentId: AgentId): Promise<void> {
+    const agent = await this.ensureAgent(agentId);
+    if (!agent.conn.supportsLogout) throw new Error(`${agent.conn.spec.label} can't sign out from here. Use its own CLI.`);
+    await agent.conn.logout();
   }
 
   /** The running adapter's name and version, from `initialize`. */
@@ -415,12 +477,13 @@ export class AgentHub {
     const previous = chat.sessionId;
     const { cwd } = chat;
     const mcpServers = (await this.options.mcpServersFor?.(chat.id, { http: agent.conn.supportsHttpMcp })) ?? [];
+    const meta = this.options.sessionMetaFor?.(chat.id, chat.agentId);
 
-    if (previous && agent.conn.supportsLoadSession) {
+    if (previous && agent.conn.supportsLoadSession && !this.options.freshSessionFor?.(chat.id)) {
       chat.loading = true;
       let setup: SessionSetup | undefined;
       try {
-        setup = await agent.conn.loadSession(previous, cwd, mcpServers);
+        setup = await agent.conn.loadSession(previous, cwd, mcpServers, meta);
         chat.sessionGeneration = agent.generation;
       } catch (err) {
         if (isAuthRequired(err)) throw err;
@@ -434,7 +497,13 @@ export class AgentHub {
       }
     }
 
-    const session = await agent.conn.newSession(cwd, mcpServers);
+    const rules = await this.options.rulesFor?.(chat.id, chat.agentId).catch((err: unknown) => void this.options.log?.(`Couldn't read the shared rules: ${String(err)}`));
+    const system = rules && chat.agentId === 'claude';
+    // Both kinds of _meta coexist: a read-only chat's tool limits and the shared rules' system prompt.
+    const newMeta = system ? { ...meta, systemPrompt: { append: rules.text } } : meta;
+    const session = await agent.conn.newSession(cwd, mcpServers, newMeta);
+    chat.pendingRules = rules && !system ? rules.text : undefined;
+    chat.primePending = true;
     if (previous) {
       this.sessionToChat.delete(sessionKey(chat.agentId, previous));
       this.options.events.notice(
@@ -445,7 +514,7 @@ export class AgentHub {
     chat.sessionId = session.sessionId;
     chat.sessionGeneration = agent.generation;
     this.sessionToChat.set(sessionKey(chat.agentId, session.sessionId), chat.id);
-    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined });
+    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined, ...(rules ? { rules: rules.files } : {}) });
   }
 
   /** Tells the editor what the session offers. Its handler may set options; a failure there doesn't stop the turn. */
@@ -491,8 +560,9 @@ export class AgentHub {
         if (!chat || !events.elicit || req.mode !== 'form') return { action: 'decline' };
         return events.elicit(chat.id, req, signal);
       },
-      readTextFile: (req) => files.read(req),
+      readTextFile: (req) => files.read(req, chatFor(req.sessionId)?.id),
       writeTextFile: (req) => files.write(chatFor(req.sessionId)?.id, req),
+      authStatus: (status) => events.authStatus?.(agentId, status),
       terminalListener: this.options.terminalListener?.(agentId),
     };
   }

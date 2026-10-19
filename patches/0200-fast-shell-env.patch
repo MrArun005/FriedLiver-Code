@@ -1,0 +1,253 @@
+diff --git a/src/vs/workbench/api/node/extensionHostProcess.ts b/src/vs/workbench/api/node/extensionHostProcess.ts
+index 06a165e7..8acdf388 100644
+--- a/src/vs/workbench/api/node/extensionHostProcess.ts
++++ b/src/vs/workbench/api/node/extensionHostProcess.ts
+@@ -24,6 +24,7 @@ import { IHostUtils } from '../common/extHostExtensionService.js';
+ import { createURITransformer } from '../../../base/common/uriTransformer.js';
+ import { ExtHostConnectionType, readExtHostConnection } from '../../services/extensions/common/extensionHostEnv.js';
+ import { ExtensionHostExitCode, IExtHostReadyMessage, IExtHostReduceGraceTimeMessage, IExtHostSocketMessage, IExtensionHostInitData, MessageType, createMessageOfType, isMessageOfType } from '../../services/extensions/common/extensionHostProtocol.js';
++import { applyShellEnvChanges, parseShellEnvMessage } from '../../services/extensions/common/shellEnvCache.js';
+ import { IDisposable } from '../../../base/common/lifecycle.js';
+ import '../common/extHost.common.services.js';
+ import './extHost.node.services.js';
+@@ -305,10 +306,14 @@ async function createExtHostProtocol(): Promise<IMessagePassingProtocol> {
+ 		constructor() {
+ 			this._terminating = false;
+ 			this._protocolListener = protocol.onMessage((msg) => {
++				const shellEnvChanges = parseShellEnvMessage(msg.buffer);
+ 				if (isMessageOfType(msg, MessageType.Terminate)) {
+ 					this._terminating = true;
+ 					this._protocolListener.dispose();
+ 					onTerminate('received terminate message from renderer');
++				} else if (shellEnvChanges) {
++					// FriedLiver (friedliver.fastShellEnv): this host started with the cached shell environment
++					applyShellEnvChanges(process.env, shellEnvChanges);
+ 				} else {
+ 					this._onMessage.fire(msg);
+ 				}
+diff --git a/src/vs/workbench/services/extensions/common/shellEnvCache.ts b/src/vs/workbench/services/extensions/common/shellEnvCache.ts
+new file mode 100644
+index 00000000..24366398
+--- /dev/null
++++ b/src/vs/workbench/services/extensions/common/shellEnvCache.ts
+@@ -0,0 +1,122 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) FriedLiver. Licensed under the MIT License.
++ *--------------------------------------------------------------------------------------------*/
++
++// FriedLiver: start the extension host with the last resolved shell environment instead of
++// waiting for `$SHELL -i -l -c` (0.3-2 s with nvm/pyenv/conda), then refresh it in the
++// background. Only an allow-list of non-secret variables is ever written to disk; the running
++// extension host then gets the full fresh environment in memory, as upstream would have given it.
++// No imports on purpose: used by the renderer and the extension host, and tested from the
++// FriedLiver repo (test/shellEnvCache.test.ts) straight out of this patch.
++
++export const SHELL_ENV_CACHE_KEY = 'friedliver.shellEnvCache';
++
++// HOME, USER, SHELL, TMPDIR come from the process itself (launchd/the desktop), so they are not cached.
++const SAFE_NAMES = new Set([
++	'PATH', 'MANPATH', 'INFOPATH', 'LANG', 'LANGUAGE',
++	'VIRTUAL_ENV', 'JAVA_HOME', 'GOPATH', 'GOROOT', 'GOBIN', 'CARGO_HOME', 'RUSTUP_HOME', 'VOLTA_HOME',
++	'BUN_INSTALL', 'PNPM_HOME', 'DENO_INSTALL', 'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'SDKMAN_DIR', 'NODE_PATH',
++]);
++const SAFE_PREFIXES = ['LC_', 'NVM_', 'PYENV_', 'RBENV_', 'CONDA_', 'ASDF_', 'HOMEBREW_', 'XDG_'];
++// Wins over the allow-list: e.g. NVM_AUTH_HEADER, HOMEBREW_GITHUB_API_TOKEN.
++const SECRET = /TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS$|CREDENTIAL|AUTH|COOKIE|SESSION|PRIVATE|CERT/i;
++
++export function isSafeShellEnvName(name: string): boolean {
++	return !SECRET.test(name) && (SAFE_NAMES.has(name) || SAFE_PREFIXES.some(p => name.startsWith(p)));
++}
++
++export function pickSafeShellEnv(env: { [key: string]: string | undefined | null }): Record<string, string> {
++	const result: Record<string, string> = {};
++	for (const name of Object.keys(env)) {
++		const value = env[name];
++		if (typeof value === 'string' && isSafeShellEnvName(name)) {
++			result[name] = value;
++		}
++	}
++	return result;
++}
++
++/** The cached environment, or undefined when there is none or it is unreadable. */
++export function readShellEnvCache(get: (key: string) => string | undefined): Record<string, string> | undefined {
++	try {
++		const parsed: unknown = JSON.parse(get(SHELL_ENV_CACHE_KEY) ?? '');
++		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
++			const env = pickSafeShellEnv(parsed as Record<string, string>);
++			return env['PATH'] ? env : undefined;
++		}
++	} catch {
++		// no cache yet, or garbage
++	}
++	return undefined;
++}
++
++export function writeShellEnvCache(store: (key: string, value: string) => void, env: { [key: string]: string | undefined }): void {
++	const safe = pickSafeShellEnv(env);
++	if (safe['PATH']) {
++		store(SHELL_ENV_CACHE_KEY, JSON.stringify(safe));
++	}
++}
++
++/**
++ * What turns the environment the extension host started with into the fresh one: every changed or
++ * added variable (secrets included: they only travel in memory, to the host upstream would have
++ * given them to), and null for a cached variable the shell no longer sets.
++ */
++export function diffShellEnv(started: { [key: string]: string | undefined }, fresh: { [key: string]: string | undefined }): Record<string, string | null> {
++	const changes: Record<string, string | null> = {};
++	for (const [name, value] of Object.entries(fresh)) {
++		if (typeof value === 'string' && started[name] !== value) {
++			changes[name] = value;
++		}
++	}
++	for (const name of Object.keys(started)) {
++		if (typeof fresh[name] !== 'string') {
++			changes[name] = null;
++		}
++	}
++	return changes;
++}
++
++// Raw message on the extension host's protocol, beside Initialized/Ready/Terminate (1 byte each)
++// and RPC frames (first byte 1-12): 0xFE, 'FLSHENV', then the JSON changes.
++const MAGIC = [0xFE, 0x46, 0x4C, 0x53, 0x48, 0x45, 0x4E, 0x56];
++
++export function createShellEnvMessage(changes: Record<string, string | null>): Uint8Array {
++	const body = new TextEncoder().encode(JSON.stringify(changes));
++	const message = new Uint8Array(MAGIC.length + body.length);
++	message.set(MAGIC, 0);
++	message.set(body, MAGIC.length);
++	return message;
++}
++
++/** The changes in a shell-env message, or undefined when `message` is any other message. */
++export function parseShellEnvMessage(message: Uint8Array): Record<string, string | null> | undefined {
++	if (message.byteLength < MAGIC.length || MAGIC.some((byte, i) => message[i] !== byte)) {
++		return undefined;
++	}
++	try {
++		const parsed: unknown = JSON.parse(new TextDecoder().decode(message.subarray(MAGIC.length)));
++		const changes: Record<string, string | null> = {};
++		if (parsed && typeof parsed === 'object') {
++			for (const [name, value] of Object.entries(parsed)) {
++				if (typeof value === 'string' || value === null) {
++					changes[name] = value;
++				}
++			}
++		}
++		return changes;
++	} catch {
++		return {};
++	}
++}
++
++/** Apply changes to an environment (the extension host's `process.env`), for processes spawned from now on. */
++export function applyShellEnvChanges(env: { [key: string]: string | undefined }, changes: Record<string, string | null>): void {
++	for (const [name, value] of Object.entries(changes)) {
++		if (value === null) {
++			delete env[name];
++		} else {
++			env[name] = value;
++		}
++	}
++}
+diff --git a/src/vs/workbench/services/extensions/electron-browser/localProcessExtensionHost.ts b/src/vs/workbench/services/extensions/electron-browser/localProcessExtensionHost.ts
+index 4f9b5871..34860732 100644
+--- a/src/vs/workbench/services/extensions/electron-browser/localProcessExtensionHost.ts
++++ b/src/vs/workbench/services/extensions/electron-browser/localProcessExtensionHost.ts
+@@ -39,6 +39,12 @@ import { IHostService } from '../../host/browser/host.js';
+ import { ILifecycleService, WillShutdownEvent } from '../../lifecycle/common/lifecycle.js';
+ import { parseExtensionDevOptions } from '../common/extensionDevOptions.js';
+ import { IDefaultLogLevelsService } from '../../log/common/defaultLogLevels.js';
++import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
++import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
++import { Registry } from '../../../../platform/registry/common/platform.js';
++import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
++import { process } from '../../../../base/parts/sandbox/electron-browser/globals.js';
++import { createShellEnvMessage, diffShellEnv, readShellEnvCache, writeShellEnvCache } from '../common/shellEnvCache.js';
+ 
+ export interface ILocalProcessExtensionHostInitData {
+ 	readonly extensions: ExtensionHostExtensions;
+@@ -138,6 +144,8 @@ export class NativeLocalProcessExtensionHost extends Disposable implements IExte
+ 		@IShellEnvironmentService private readonly _shellEnvironmentService: IShellEnvironmentService,
+ 		@IExtensionHostStarter private readonly _extensionHostStarter: IExtensionHostStarter,
+ 		@IDefaultLogLevelsService private readonly _defaultLogLevelsService: IDefaultLogLevelsService,
++		@IConfigurationService private readonly _configurationService: IConfigurationService,
++		@IStorageService private readonly _storageService: IStorageService,
+ 	) {
+ 		super();
+ 		const devOpts = parseExtensionDevOptions(this._environmentService);
+@@ -218,11 +226,51 @@ export class NativeLocalProcessExtensionHost extends Disposable implements IExte
+ 		return this._messageProtocol;
+ 	}
+ 
++	/**
++	 * FriedLiver (friedliver.fastShellEnv): when the shell environment is still being resolved
++	 * (`$SHELL -i -l -c`, often 0.3-2 s), start with the last resolved one instead. Once the real one
++	 * arrives it is cached for the next launch (allow-listed variables only), and every changed
++	 * variable is sent to the extension host for the processes it spawns from then on. Terminals and tasks always wait for the real one.
++	 * First launch (no cache) and launches from the CLI (resolves at once) behave as upstream.
++	 */
++	private async _getShellEnvForExtensionHost(): Promise<platform.IProcessEnvironment> {
++		const shellEnv = this._shellEnvironmentService.getShellEnv();
++		// Only a PATH the shell changed is worth keeping: an equal one means a launch from the CLI or a
++		// failed resolution (timeout), which must not replace a good cache.
++		const save = (env: platform.IProcessEnvironment) => {
++			if (env['PATH'] !== process.env['PATH']) {
++				writeShellEnvCache((key, value) => this._storageService.store(key, value, StorageScope.APPLICATION, StorageTarget.MACHINE), env);
++			}
++		};
++		const cached = this._configurationService.getValue<boolean>('friedliver.fastShellEnv') !== false
++			? readShellEnvCache(key => this._storageService.get(key, StorageScope.APPLICATION))
++			: undefined;
++		const settled = await Promise.race([shellEnv.then(env => env, () => undefined), timeout(50).then(() => null)]);
++		if (settled !== null || !cached) {
++			const env = settled ?? await shellEnv;
++			save(env);
++			return env;
++		}
++		this._logService.info('Extension host: starting with the cached shell environment; resolving the current one in the background');
++		const started = { ...process.env, ...cached };
++		shellEnv.then(async fresh => {
++			save(fresh);
++			const changes = diffShellEnv(started, fresh);
++			removeDangerousEnvVariables(changes as platform.IProcessEnvironment);
++			const names = Object.keys(changes);
++			if (names.length && this._messageProtocol && !this._terminating) {
++				this._logService.info(`Extension host: shell environment changed since last launch (${names.join(', ')}); updating it for new processes`);
++				(await this._messageProtocol).send(VSBuffer.wrap(createShellEnvMessage(changes)));
++			}
++		}).catch(err => this._logService.warn('Extension host: could not update the shell environment', err));
++		return { ...started };
++	}
++
+ 	private async _start(): Promise<IMessagePassingProtocol> {
+ 		const [extensionHostCreationResult, portNumber, processEnv] = await Promise.all([
+ 			this._extensionHostStarter.createExtensionHost(),
+ 			this._tryFindDebugPort(),
+-			this._shellEnvironmentService.getShellEnv(),
++			this._getShellEnvForExtensionHost(),
+ 		]);
+ 
+ 		this._extensionHostProcess = new ExtensionHostProcess(extensionHostCreationResult.id, this._extensionHostStarter);
+@@ -653,3 +701,18 @@ export class NativeLocalProcessExtensionHost extends Disposable implements IExte
+ 		}
+ 	}
+ }
++
++// FriedLiver: see _getShellEnvForExtensionHost.
++Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
++	id: 'friedliver',
++	title: 'FriedLiver',
++	type: 'object',
++	properties: {
++		'friedliver.fastShellEnv': {
++			type: 'boolean',
++			default: true,
++			scope: ConfigurationScope.APPLICATION,
++			description: nls.localize('friedliver.fastShellEnv', "Start the extension host with the shell environment from the last launch (PATH, LANG, NVM_*, PYENV_*, JAVA_HOME and similar; never tokens or keys) instead of waiting for your login shell, then refresh it in the background. Terminals and tasks always use the freshly resolved environment."),
++		}
++	}
++});

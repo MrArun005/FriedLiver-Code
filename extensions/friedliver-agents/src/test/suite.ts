@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import type { Controller } from '../extension';
 import type { EditOutcome } from '../host/editFlow';
 import type { Surface } from '../host/webviews';
+import type { HostMessage } from '../shared/messages';
 import { lastReply, type ChatView } from '../shared/model';
 
 const shots = process.env.FRIEDLIVER_SCREENSHOTS;
@@ -24,7 +25,7 @@ export async function run(): Promise<void> {
   const c = await ext.activate();
   const step = (text: string) => console.log(`[suite] ${text}`);
   // Webview messages go through the same handler the views use.
-  const fake: Surface = { kind: 'chat', webview: undefined as never, ready: false, visible: () => true, reveal: () => {} };
+  const fake: Surface = { kind: 'chat', webview: undefined as never, ready: false, visible: () => true };
 
   await vscode.commands.executeCommand('friedliver.agents.focus');
   // Startup toasts ("running as root", "extensions disabled") would cover the view.
@@ -161,6 +162,43 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('friedliver.images.focus');
   await pause(1200);
   await screenshot('08-images');
+
+  step('Open on a notification or in the Agent Manager: the chat tab, opened when there is none');
+  // The Agents view in a closed side bar, as the fork starts it; Open used to show the chat there instead.
+  await vscode.commands.executeCommand('workbench.action.closeSidebar');
+  await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+  await pause(500);
+  const host = c as unknown as { chatPanel?: vscode.WebviewPanel; surfaces: Set<Surface>; replay: { message: HostMessage }[]; turnEnded(t: object): void };
+  if (host.chatPanel) throw new Error('The chat tab is still open');
+  const manager: Surface = { kind: 'tasks', webview: undefined as never, ready: false, visible: () => true };
+  await c.handle(manager, { type: 'openChat', chatId, item: command.commandId });
+  const tabShows = (id: string) => {
+    const tab = [...host.surfaces].find((s) => s.webview === host.chatPanel?.webview);
+    return !!host.chatPanel?.visible && !!tab?.ready && tab.selected === id;
+  };
+  await waitFor(() => tabShows(chatId), 'the chat tab to open with the chat');
+  // The tab loaded after Open posted to it, so the item goes again once it's ready.
+  if (!host.replay.some((r) => r.message.type === 'reveal' && r.message.id === command.commandId)) throw new Error('The item to reveal is not kept for a view that loads');
+  host.chatPanel!.dispose();
+  await vscode.commands.executeCommand('notifications.clearAll');
+  host.turnEnded({ chatId: controls, label: 'Demo 2', title: 'done', stopReason: 'end_turn', files: 0, byUser: true });
+  await pause(500);
+  await vscode.commands.executeCommand('notifications.focusToasts');
+  await vscode.commands.executeCommand('notification.acceptPrimaryAction');
+  await waitFor(() => tabShows(controls), "the notification's Open to show the chat in the chat tab");
+
+  step('Agents & Accounts: Demo hidden until turned on, a check that caches models, the page');
+  const settings = vscode.workspace.getConfiguration('friedliver');
+  if (c.accountsPage.view().cards.some((card) => card.agent === 'demo')) throw new Error('Demo shows while friedliver.showDemoAgent is off');
+  await settings.update('showDemoAgent', true, vscode.ConfigurationTarget.Global);
+  await waitFor(() => c.accountsPage.view().cards.some((card) => card.agent === 'demo'), 'Demo to show once turned on');
+  const demo = await c.accounts.check('demo');
+  if (demo?.status !== 'signed-in') throw new Error(`The Demo check said ${demo?.status}`);
+  if (!c.accountsPage.view().cards.find((card) => card.agent === 'demo')?.model) throw new Error("The check didn't keep Demo's models");
+  await vscode.commands.executeCommand('friedliver.accounts', 'demo');
+  await pause(1500);
+  await screenshot('13-accounts');
+  await settings.update('showDemoAgent', undefined, vscode.ConfigurationTarget.Global);
   step('all passed');
 }
 

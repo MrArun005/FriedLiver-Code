@@ -2,6 +2,8 @@
 // short, never markup. And what a permission request asks to approve.
 import type * as acp from '@agentclientprotocol/sdk';
 import { diffPreview, type DiffLine } from './diff';
+import type { Grant } from './permissions';
+import type { DroppedCommits } from './risk';
 
 export type ToolOut =
   | { t: 'diff'; path: string; added: number; removed: number; lines: DiffLine[]; more: number; isNew: boolean }
@@ -140,4 +142,10 @@ export interface PermissionDetail {
   /** Other content the agent sent with the request, e.g. why. */
   text?: string;
   locations?: string[];
+  /** The page a fetch asks for. */
+  url?: string;
+  /** What "Always allow" offers besides a command rule: the request's folders, most specific first, or its website. */
+  always?: Grant[];
+  /** A force push: the remote's commits it would drop. */
+  dropped?: DroppedCommits;
 }

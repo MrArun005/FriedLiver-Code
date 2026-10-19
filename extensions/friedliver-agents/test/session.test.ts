@@ -252,9 +252,21 @@ describe('messages for the session controls', () => {
     expect(parseWebviewMessage({ type: 'setOption', chatId: 'chat-1', optionId: 'model', value: 3 })).toBeNull();
     expect(parseWebviewMessage({ type: 'approval', chatId: 'chat-1', level: 'full' })).toMatchObject({ level: 'full' });
     expect(parseWebviewMessage({ type: 'approval', chatId: 'chat-1', level: 'yolo' })).toBeNull();
-    expect(parseWebviewMessage({ type: 'allowAlways', commandId: 'cmd-1', rule: { kind: 'exact', command: 'npm test' } })).toMatchObject({ rule: { kind: 'exact' } });
-    expect(parseWebviewMessage({ type: 'allowAlways', commandId: 'cmd-1', rule: { kind: 'exact', command: 'npm test; rm -rf ~' } })).toBeNull();
-    expect(parseWebviewMessage({ type: 'allowAlways', rule: { kind: 'exact', command: 'npm test' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'allowAlways', commandId: 'cmd-1', grant: { kind: 'exact', command: 'npm test' } })).toMatchObject({ grant: { kind: 'exact' } });
+    expect(parseWebviewMessage({ type: 'allowAlways', commandId: 'cmd-1', grant: { kind: 'exact', command: 'npm test; rm -rf ~' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'allowAlways', grant: { kind: 'exact', command: 'npm test' } })).toBeNull();
+    // Folders and websites too, with nothing extra carried along; never file: or a relative path.
+    expect(parseWebviewMessage({ type: 'allowAlways', requestId: 'perm-1', grant: { kind: 'folder', folder: '/Users/a/Desktop', access: 'read', extra: 1 } })).toEqual({
+      type: 'allowAlways',
+      requestId: 'perm-1',
+      grant: { kind: 'folder', folder: '/Users/a/Desktop', access: 'read' },
+    });
+    expect(parseWebviewMessage({ type: 'allowAlways', requestId: 'perm-1', grant: { kind: 'site', origin: 'https://www.irctc.co.in' } })).toMatchObject({ grant: { kind: 'site' } });
+    expect(parseWebviewMessage({ type: 'allowAlways', requestId: 'perm-1', grant: { kind: 'site', origin: 'file://' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'allowAlways', requestId: 'perm-1', grant: { kind: 'folder', folder: 'Desktop', access: 'read' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'bridge', requestId: 'bridge-1', answer: 'allowAlways' })).toMatchObject({ answer: 'allowAlways' });
+    expect(parseWebviewMessage({ type: 'revokePermission', id: 'site https://www.irctc.co.in' })).toEqual({ type: 'revokePermission', id: 'site https://www.irctc.co.in' });
+    expect(parseWebviewMessage({ type: 'revokeAllPermissions', extra: true })).toEqual({ type: 'revokeAllPermissions' });
     expect(parseWebviewMessage({ type: 'createTask', agent: 'demo', prompt: 'x', worktree: false, choices: { demo: { model: 'demo-small' } }, approval: 'edits' })).toMatchObject({ choices: { demo: { model: 'demo-small' } }, approval: 'edits' });
     expect(parseWebviewMessage({ type: 'createTask', agent: 'demo', prompt: 'x', worktree: false, choices: { nobody: {} } })).toBeNull();
     expect(parseWebviewMessage({ type: 'copy', text: '' })).toBeNull();

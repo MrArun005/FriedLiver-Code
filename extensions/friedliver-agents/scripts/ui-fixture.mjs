@@ -7,14 +7,21 @@
 const ROOT = '/home/dev/inventory-app';
 const tree = (branch) => `${ROOT}/.worktrees/${branch.replace('/', '-')}`;
 
-const user = (text) => ({ kind: 'user', text, images: [] });
-const agent = (text) => ({ kind: 'agent', text });
+let turnN = 0;
+// When each message was sent (COMPONENTS.md §2.32): from two hours ago, a minute and a half apart.
+let sent = 0;
+const stamp = () => (sent += 97_000);
+const user = (text) => ({ kind: 'user', text, images: [], checkpoint: `turn-${++turnN}`, at: stamp() });
+const agent = (text) => {
+  const at = stamp();
+  return { kind: 'agent', text, at, end: at + 2_000 + (text.length % 50) * 1_000 };
+};
 const plan = (entries, at) => ({
   kind: 'plan',
   entries: entries.map((content, i) => ({ content, status: i < at ? 'completed' : i === at ? 'in_progress' : 'pending' })),
 });
 const tool = (id, title, status, locations = [], toolKind) => ({ kind: 'tool', id, title, toolKind, status, locations });
-const link = (linkId, role, other, text, by = 'user') => ({ kind: 'link', linkId, role, chatId: other.id, agent: other.agent, label: other.label, text, by });
+const link = (linkId, role, other, text, by = 'user') => ({ kind: 'link', linkId, role, chatId: other.id, agent: other.agent, label: other.label, text, by, at: stamp() });
 const dl = (op, text) => ({ op, text });
 
 // What each agent's session offers, shaped like its adapter's config options (model names are placeholders).
@@ -68,6 +75,7 @@ function session(agentKey, mode, { model = 'default', effort, used, fast } = {})
 }
 
 export function fixture(now = Date.now()) {
+  sent = now - 2 * 3600_000;
   const min = (m) => now - m * 60_000;
   const sec = (s) => now - s * 1000;
   const chat = (id, agentKey, label, title, over) => ({
@@ -100,6 +108,11 @@ export function fixture(now = Date.now()) {
 
   const chats = [
     chat('chat-c1', 'claude', 'Claude 1', 'Fix formatCents for negative amounts', {
+      // The agent's own token counts per turn: the Agent Manager's "tokens today".
+      usageLog: [
+        { at: min(40), input: 18_400, output: 2_100, cacheRead: 412_000, cacheWrite: 9_800 },
+        { at: min(12), input: 6_200, output: 1_300, cacheRead: 438_000, cacheWrite: 2_400 },
+      ],
       createdAt: min(42),
       lastActivity: sec(20),
       busy: true,
@@ -226,6 +239,13 @@ export function fixture(now = Date.now()) {
       items: [
         user('How does the auth middleware decide a session is valid?'),
         agent('It reads the `sid` cookie on every request and looks it up in the in-memory map in `src/auth/sessions.ts`. Expired entries are swept every minute.'),
+        user('Does the login page still look right?'),
+        {
+          ...tool('img-shot', 'mcp__friedliver__browser_screenshot', 'completed', [], 'other'),
+          out: [{ t: 'text', text: 'Screenshot of localhost:3000/login\nSaved to /tmp/friedliver-shots/screenshot-1.png. Read that file to see it.' }],
+        },
+        tool('img-read', `Read ${ROOT}/docs/login-page_mockup.png`, 'completed', [`${ROOT}/docs/login-page_mockup.png`], 'read'),
+        agent('Yes: the form matches the mockup.'),
         link('link-handoff-1', 'handoff-to', c.x3, ''),
       ],
       session: session('claude', 'default', { effort: 'medium', used: 12_000 }),
@@ -306,7 +326,7 @@ export function fixture(now = Date.now()) {
           'link-handoff-1',
           'handoff-from',
           c.c5,
-          "**Where Claude 5 got to.** The middleware reads the `sid` cookie on every request and looks it up in the in-memory map in `src/auth/sessions.ts`; expired entries are swept every minute.\n\n**Next:** put sessions behind an interface so another store can replace the map.",
+          "**Where Claude got to.** The middleware reads the `sid` cookie on every request and looks it up in the in-memory map in `src/auth/sessions.ts`; expired entries are swept every minute.\n\n**Next:** put sessions behind an interface so another store can replace the map.",
         ),
         user('Refactor the middleware so the session store can be swapped. Keep the tests green.'),
         plan(['Read the middleware', 'Add a SessionStore interface', 'Move the map behind it', 'Pick a store for serverless'], 3),
@@ -342,7 +362,7 @@ export function fixture(now = Date.now()) {
       lastActivity: min(2),
       turns: 3,
       items: [
-        user('Review every change Claude 6 sends you for regressions. Be brief.'),
+        user('Review every change the session-store chat sends you for regressions. Be brief.'),
         link('link-pipe-1', 'piped-in', c.c6, 'Added a trigram index on products.name and switched the query to use it.'),
         agent('Looks safe. The index adds about 40 MB on the big catalog; worth noting in the release notes.'),
       ],

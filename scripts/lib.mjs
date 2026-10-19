@@ -34,21 +34,76 @@ export function upstream() {
 	return readJson(path.join(ROOT_DIR, 'upstream.json'));
 }
 
+const RELEASE_TAG = /^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:-(\d{1,6}))?$/;
+
+/** Release versions in the update check's order (X.Y.Z, then FriedLiver's build number N of X.Y.Z-N, 0 when absent). */
+export function compareReleaseVersions(a, b) {
+	const x = RELEASE_TAG.exec(a).slice(1).map(n => Number(n ?? 0));
+	const y = RELEASE_TAG.exec(b).slice(1).map(n => Number(n ?? 0));
+	for (let i = 0; i < x.length; i++) {
+		if (x[i] !== y[i]) {
+			return x[i] - y[i];
+		}
+	}
+	return 0;
+}
+
+/** The newest release tag (vX.Y.Z or vX.Y.Z-N) in a list, by version rather than by name or date; null when none is one. */
+export function newestReleaseTag(tags) {
+	const releases = tags.map(t => String(t).trim()).filter(t => /^v/.test(t) && RELEASE_TAG.test(t));
+	return releases.sort((a, b) => compareReleaseVersions(b, a))[0] ?? null;
+}
+
 /**
- * The FriedLiver version stamped into product.json (friedliverVersion), which the
- * agents extension's update check compares with the latest GitHub release. Release
- * builds set FRIEDLIVER_VERSION from their tag (v1.142.0, v1.142.0-2); other builds
- * use the pinned upstream version.
+ * Where this checkout stands against FriedLiver's releases: the newest release tag HEAD contains, how many
+ * commits HEAD is past it, and HEAD's short hash. Null when git, the tags or the history aren't there
+ * (a source archive, or a shallow clone without tags).
  */
-export function friedliverVersion(env = process.env) {
+export function gitReleaseState(cwd = ROOT_DIR) {
+	const out = args => {
+		const result = run('git', args, { cwd, capture: true, allowFail: true });
+		return result.status === 0 ? String(result.stdout).trim() : null;
+	};
+	const tag = newestReleaseTag((out(['tag', '--merged', 'HEAD', '--list', 'v*']) ?? '').split(/\r?\n/));
+	const ahead = tag && out(['rev-list', '--count', `${tag}..HEAD`]);
+	const sha = out(['rev-parse', '--short=10', 'HEAD']);
+	if (!tag || !/^\d+$/.test(ahead ?? '') || !/^[0-9a-f]{7,40}$/.test(sha ?? '')) {
+		return null;
+	}
+	return { tag, ahead: Number(ahead), sha };
+}
+
+/**
+ * What prepare.mjs stamps into product.json. `version` (friedliverVersion) is what the agents extension's update
+ * check compares with the latest GitHub release; `build` (friedliverBuild) says exactly which build this is.
+ *
+ * - Release builds set FRIEDLIVER_VERSION from their tag (v1.142.0, v1.142.0-2): both are that version.
+ * - Other builds (pushes to main, local builds) contain the newest release tag they descend from, so `version` is
+ *   that release: the update check then offers only a newer release, not the one this build already has (main used to
+ *   say 1.142.0 and was offered 1.142.0-7 on every launch). `build` adds the commits since it and the commit:
+ *   1.142.0-7+3.gd0cca9f1ae. Without git tags (a shallow clone, an archive) both are the pinned upstream version.
+ */
+export function friedliverStamp(env = process.env, releaseState = gitReleaseState) {
 	const fromEnv = (env.FRIEDLIVER_VERSION || '').trim();
-	if (!fromEnv) {
-		return upstream().tag;
+	if (fromEnv) {
+		if (!RELEASE_TAG.test(fromEnv)) {
+			fail(`FRIEDLIVER_VERSION ${JSON.stringify(fromEnv)} is not X.Y.Z or X.Y.Z-N`);
+		}
+		const version = fromEnv.replace(/^v/, '');
+		return { version, build: version };
 	}
-	if (!/^v?\d+\.\d+\.\d+(-\d+)?$/.test(fromEnv)) {
-		fail(`FRIEDLIVER_VERSION ${JSON.stringify(fromEnv)} is not X.Y.Z or X.Y.Z-N`);
+	const state = releaseState();
+	if (!state) {
+		const version = upstream().tag;
+		return { version, build: version };
 	}
-	return fromEnv.replace(/^v/, '');
+	const version = state.tag.replace(/^v/, '');
+	return { version, build: state.ahead === 0 ? version : `${version}+${state.ahead}.g${state.sha}` };
+}
+
+/** product.json's friedliverVersion; see friedliverStamp. */
+export function friedliverVersion(env = process.env, releaseState = gitReleaseState) {
+	return friedliverStamp(env, releaseState).version;
 }
 
 // ---- Download integrity ----
@@ -250,4 +305,42 @@ export function nodeEnv() {
 		env: { ...process.env, [pathKey]: `${bin}${sep}${process.env[pathKey] || ''}` },
 		version: required,
 	};
+}
+
+/**
+ * codesign's arguments for one macOS target. With an identity (MACOS_SIGN_IDENTITY: the
+ * self-signed certificate CI imports, or later a Developer ID) the signature's designated
+ * requirement names that certificate, so macOS keeps Desktop, Documents, mic and speech grants
+ * across updates; without one it is ad-hoc ('-'), whose requirement is the build's cdhash and
+ * changes every build. No hardened runtime: Electron needs entitlements for that.
+ */
+export function codesignArgs(target, { identity = '', keychain = '', identifier = '', deep = false } = {}) {
+	const signed = identity.trim() !== '';
+	return [
+		'--force',
+		...(deep ? ['--deep'] : []),
+		'--sign', signed ? identity : '-',
+		...(signed ? ['--timestamp=none'] : []),
+		...(signed && keychain ? ['--keychain', keychain] : []),
+		...(identifier ? ['--identifier', identifier] : []),
+		target,
+	];
+}
+
+/**
+ * Whether a Chromium locale pack stays in the packaged app: `<lang>.lproj` in macOS's Electron
+ * Framework, `locales/<lang>.pak` on Windows and Linux. Chromium's own strings (spellcheck and
+ * webview context menus, some dialogs) fall back to English without theirs; FriedLiver's UI
+ * language comes from VS Code language packs and is unaffected. English is always kept, as
+ * Chromium's fallback. FRIEDLIVER_KEEP_LOCALES (comma-separated, `en_GB` or `en-GB`) overrides
+ * the keep-list; `all` keeps everything. Anything that isn't a locale pack is kept.
+ */
+export function keepChromiumLocale(entry, keep = (process.env.FRIEDLIVER_KEEP_LOCALES || 'en,en-GB')) {
+	const match = /^([a-z]{2,3}(?:[_-][A-Za-z0-9]{2,4})?)\.(lproj|pak)$/.exec(entry); // a locale code, not resources.pak or Base.lproj
+	if (!match || keep.trim() === 'all') {
+		return true;
+	}
+	const norm = s => s.trim().replace(/_/g, '-').toLowerCase();
+	const name = norm(match[1]);
+	return name === 'en' || name === 'en-us' || keep.split(',').map(norm).includes(name);
 }

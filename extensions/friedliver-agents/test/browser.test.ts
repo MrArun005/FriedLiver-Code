@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BROWSER_WIDTH, browserNeedsApproval, checkBrowserUrl, clampBrowserWidth, isLocalhost, relaxLocalhostCors } from '../src/host/browserRules';
+import { BROWSER_WIDTH, CONSOLE_BUDGET, ConsoleLog, browserNeedsApproval, checkBrowserUrl, clampBrowserWidth, isLocalhost, relaxLocalhostCors } from '../src/host/browserRules';
 import { handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall } from '../src/bridge/protocol';
 
@@ -162,5 +162,58 @@ describe('security: only FriedLiver-opened tabs, local-only CORS, private screen
     if (process.platform !== 'win32') expect((await fs.stat(path.dirname(a))).mode & 0o777).toBe(0o700);
     expect(await fs.readFile(a, 'utf8')).toBe('a');
     await fs.rm(base, { recursive: true });
+  });
+});
+
+describe('screenshots sized for tokens', () => {
+  it('prices an image as Claude does: w×h/750 after its own downscale', async () => {
+    const { imageTokens } = await import('../src/host/browserRules');
+    expect(imageTokens(1024, 640)).toBe(874);
+    // 2560×1600 (a retina viewport) is scaled to fit 1568 px and 1.15 MP first.
+    expect(imageTokens(2560, 1600)).toBeGreaterThan(1500);
+    expect(imageTokens(2560, 1600)).toBeLessThanOrEqual(1600);
+  });
+
+  it('captures the viewport at most max_width CSS px wide at 1x, or one element with a margin, as JPEG', async () => {
+    const { shotParams } = await import('../src/host/browserRules');
+    const view = shotParams({ width: 1280, height: 800, dpr: 2 }, {});
+    expect(view).toMatchObject({ format: 'jpeg', clip: { x: 0, y: 0, width: 1280, height: 800 } });
+    expect(view.clip.scale * 2 * 1280).toBeCloseTo(1024);
+    expect(view.size).toEqual({ width: 1024, height: 640 });
+    const el = shotParams({ width: 1280, height: 800, dpr: 2, scrollX: 0, scrollY: 300 }, { rect: { x: 100, y: 50, width: 300, height: 40 } });
+    expect(el.clip).toMatchObject({ x: 92, y: 342, width: 316, height: 56 });
+    expect(el.size).toEqual({ width: 316, height: 56 });
+    expect(shotParams({ width: 1280, height: 800, dpr: 1 }, { maxWidth: 400 }).size).toEqual({ width: 400, height: 250 });
+    expect(parseCall('browser_screenshot', { selector: 'e3', max_width: 600 })).toEqual({ tool: 'browser_screenshot', selector: 'e3', maxWidth: 600 });
+    expect(parseCall('browser_screenshot', { max_width: 50 })).toBeNull();
+  });
+});
+
+describe('browser_console', () => {
+  it('gives each chat only the lines since it last asked', () => {
+    const log = new ConsoleLog();
+    expect(log.take('a')).toBe('No console messages since FriedLiver attached to the page.');
+    log.push('[log] one');
+    log.push('[log] two');
+    expect(log.take('a')).toBe('[log] one\n[log] two');
+    expect(log.take('a')).toBe('No new console messages since your last browser_console.');
+    log.push('[error] three');
+    expect(log.take('a')).toBe('[error] three');
+    // Another chat starts from the beginning of what is kept.
+    expect(log.take('b')).toBe('[log] one\n[log] two\n[error] three');
+  });
+
+  it('collapses repeats and keeps to its budget, newest first, saying what it left out', () => {
+    const log = new ConsoleLog();
+    for (let i = 0; i < 50; i++) log.push('[warn] React key missing');
+    log.push('[error] boom');
+    expect(log.take('a')).toBe('[repeats collapsed]\n[warn] React key missing (×50)\n[error] boom');
+    for (let i = 0; i < 400; i++) log.push(`[log] line ${i} ${'x'.repeat(80)}`);
+    const out = log.take('a');
+    expect(out.length).toBeLessThanOrEqual(CONSOLE_BUDGET + 200);
+    expect(out).toMatch(/^\[\d+ older lines left out \(over the 6,000-character budget\); 100 earlier lines no longer kept\]/);
+    expect(out.endsWith(`[log] line 399 ${'x'.repeat(80)}`)).toBe(true);
+    log.push('y'.repeat(9000));
+    expect(log.take('a').length).toBeLessThanOrEqual(2000);
   });
 });

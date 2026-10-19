@@ -104,14 +104,107 @@ let shots = 0;
  * Writes a screenshot into a folder only this user can open, made fresh (mkdtemp, 0700) under
  * `base` once per session, with 'wx' so an existing file is never overwritten or followed.
  */
-export async function saveScreenshot(base: string, png: Buffer): Promise<string> {
+export async function saveScreenshot(base: string, png: Buffer, ext = 'png'): Promise<string> {
+  const file = await screenshotFile(base, 'screenshot', ext);
+  await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+  return file;
+}
+
+/** A new file name in that private folder, for a program that writes the screenshot itself (system.ts). */
+export async function screenshotFile(base: string, name = 'screenshot', ext = 'png'): Promise<string> {
   let dir = shotDirs.get(base);
   if (!dir) {
     dir = mkdtemp(path.join(base, 'shots-'));
     shotDirs.set(base, dir);
     dir.catch(() => shotDirs.delete(base));
   }
-  const file = path.join(await dir, `screenshot-${++shots}.png`);
-  await writeFile(file, png, { flag: 'wx', mode: 0o600 });
-  return file;
+  return path.join(await dir, `${name}-${++shots}.${ext}`);
+}
+
+/** Screenshot sizing: the widest a capture is by default, the range an agent may ask for, JPEG quality, margin around an element. */
+export const SHOT = { maxWidth: 1024, minWidth: 200, maxMaxWidth: 1568, quality: 75, margin: 8 };
+
+/** About what an image costs Claude: width×height/750 tokens, after its own fit to 1568 px on the long edge and 1.15 MP. */
+export function imageTokens(width: number, height: number): number {
+  let s = Math.min(1, 1568 / Math.max(width, height));
+  s = Math.min(s, Math.sqrt(1_150_000 / (width * height * s * s)) * s);
+  return Math.round((Math.round(width * s) * Math.round(height * s)) / 750);
+}
+
+/**
+ * Page.captureScreenshot parameters: the viewport, or one element (`rect`, viewport coordinates)
+ * with a margin, at most `maxWidth` image pixels wide whatever the device pixel ratio, as JPEG.
+ */
+export function shotParams(
+  view: { width: number; height: number; dpr: number; scrollX?: number; scrollY?: number },
+  opts: { rect?: { x: number; y: number; width: number; height: number }; maxWidth?: number },
+): { format: 'jpeg'; quality: number; clip: { x: number; y: number; width: number; height: number; scale: number }; size: { width: number; height: number } } {
+  const m = SHOT.margin;
+  const r = opts.rect;
+  const x = r ? Math.max(0, r.x - m) : 0;
+  const y = r ? Math.max(0, r.y - m) : 0;
+  const width = r ? Math.min(view.width - x, r.width + 2 * m) : view.width;
+  const height = r ? Math.min(view.height - y, r.height + 2 * m) : view.height;
+  const css = Math.min(1, (opts.maxWidth ?? SHOT.maxWidth) / width);
+  // The capture comes out at width × scale × dpr pixels: undo the ratio so a retina screen doesn't double it.
+  return {
+    format: 'jpeg',
+    quality: SHOT.quality,
+    clip: { x: x + (view.scrollX ?? 0), y: y + (view.scrollY ?? 0), width, height, scale: css / view.dpr },
+    size: { width: Math.round(width * css), height: Math.round(height * css) },
+  };
+}
+
+/** browser_console's answer, at most this many characters (~1.5k tokens) unless the agent asks for less. */
+export const CONSOLE_BUDGET = 6000;
+/** Console lines a page keeps for its readers, each cut to 2,000 characters. */
+const CONSOLE_KEEP = 300;
+
+/**
+ * A page's console for browser_console: each reader (a chat) gets only the lines since it last asked,
+ * repeats collapsed ("… ×12"), the newest that fit CONSOLE_BUDGET, and a note of what was left out,
+ * so polling a chatty page doesn't send the same hundred lines every time.
+ */
+export class ConsoleLog {
+  private lines: string[] = [];
+  /** Lines pushed since the page was attached; `lines` holds the newest of them. */
+  private total = 0;
+  private readonly read = new Map<string, number>();
+
+  push(line: string): void {
+    this.lines.push(line.slice(0, 2000));
+    this.total++;
+    if (this.lines.length > CONSOLE_KEEP) this.lines.splice(0, this.lines.length - CONSOLE_KEEP);
+  }
+
+  take(reader = '', budget = CONSOLE_BUDGET): string {
+    const from = this.read.get(reader) ?? 0;
+    this.read.set(reader, this.total);
+    const fresh = this.total - from;
+    if (!fresh) return from ? 'No new console messages since your last browser_console.' : 'No console messages since FriedLiver attached to the page.';
+    const kept = this.lines.slice(-Math.min(fresh, this.lines.length));
+    const lost = fresh - kept.length;
+    // Repeats, wherever they are, as one line with a count, at the place of their latest occurrence.
+    const count = new Map<string, number>();
+    for (const l of kept) count.set(l, (count.get(l) ?? 0) + 1);
+    const last = new Map<string, number>();
+    kept.forEach((l, n) => last.set(l, n));
+    const rows = kept.flatMap((l, n) => (last.get(l) === n ? [count.get(l)! > 1 ? `${l} (×${count.get(l)})` : l] : []));
+    // The newest lines that fit the budget.
+    const out: string[] = [];
+    let size = 0;
+    for (let n = rows.length - 1; n >= 0; n--) {
+      const add = Math.min(rows[n].length, budget) + 1;
+      if (out.length && size + add > budget) break;
+      out.unshift(rows[n].length > budget ? `${rows[n].slice(0, budget - 1)}…` : rows[n]);
+      size += add;
+    }
+    const older = rows.length - out.length;
+    const notes = [
+      older ? `${older} older line${older === 1 ? '' : 's'} left out (over the ${budget.toLocaleString('en-US')}-character budget)` : '',
+      lost ? `${lost} earlier line${lost === 1 ? '' : 's'} no longer kept` : '',
+      count.size < kept.length ? 'repeats collapsed' : '',
+    ].filter(Boolean);
+    return `${notes.length ? `[${notes.join('; ')}]\n` : ''}${out.join('\n')}`;
+  }
 }

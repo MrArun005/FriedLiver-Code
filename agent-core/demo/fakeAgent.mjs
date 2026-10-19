@@ -6,6 +6,9 @@
 //                     permission request (Ask mode) and in the tool call, no fs/write_text_file
 //   "native-run"      runs a command itself, like Claude and Codex: no terminal/create, the output
 //                     arrives in the tool call
+//   "native-read <p>" / "native-fetch <url>"  a permission request to read a file or fetch a page,
+//                     like Claude outside its folder and its WebFetch
+//   "native-perm <kind> <json>"  a permission request of any kind with that rawInput (and `locations`)
 //   "perm-edit <p>"   like Codex: a tool call with the diff, then a permission request that names
 //                     only its toolCallId, then a native write
 //   "perm-plan"       a plan approval (kind switch_mode, the plan in rawInput.plan), like Claude's
@@ -13,6 +16,10 @@
 //   "plan"            switches to Plan mode, sends a plan, then asks as perm-plan does
 //   "question"        asks a multiple-choice question as a form (elicitation/create), like
 //                     Claude's AskUserQuestion, when the client takes forms
+//   "ask-user [n]"    asks n questions (default 1) exactly as claude-agent-acp sends Claude's
+//                     AskUserQuestion: question_<k> (oneOf, the pick marked "(Recommended)") and its
+//                     free-text question_<k>_custom ("Other"), nothing required; says what came back
+//   "session"         says the session id and the _meta its session/new or session/load carried
 //   "links"           says which files the message linked (resource_link blocks)
 //   "read-image <p>"  reports a read tool call on an image file
 //   "wait"            keeps working until cancelled
@@ -26,6 +33,8 @@
 //   "ask <agent> <q>" asks another agent through the session's FriedLiver tools (MCP) and
 //                     replies "<Agent> says: <answer>"; "ask demo hello" needs no sign-in
 //   "chats"           lists FriedLiver's chats through the same tools
+//   "system"          says what session/new appended to its system prompt (_meta.systemPrompt.append,
+//                     as claude-agent-acp takes it), or "no system prompt"
 //   an editor request (Edit with Agent, Review My Changes): see editorRequests.mjs
 //   "busy <s> [stamp]" works like a busy real agent for <s> seconds, for stress tests
 //                     (scripts/stress-demo.mjs): markdown in small chunks, four a second,
@@ -33,6 +42,7 @@
 //                     file read now and then. Never asks for anything. "stamp" ends each
 //                     sentence and the plan's current step with `t=<ms since epoch>`.
 //   "/help", "/compact" slash commands (advertised in available_commands_update)
+//   "fill <tokens>"   sets the context usage the turn reports (a nearly full context)
 //   anything else     echoes the text back in two chunks, with the model and effort when they
 //                     aren't the defaults: "You said: hi (demo-small · low)"
 // Only the last text block is read as one of these, so context a client puts
@@ -42,6 +52,8 @@
 // ("thought_level") and a Fast toggle ("model_config"; boolean only for clients that say they
 // take boolean options). session/set_mode, session/set_config_option and session/set_model work.
 // Every turn ends with a usage_update. Steering (_session/steering) works while "wait" runs.
+// FAKE_AGENT_REFUSE_MODES=acceptEdits,bypassPermissions refuses those modes as Gemini does in an untrusted folder;
+// the prompts `refuse-model` and `say-refuse-model` answer as Codex does for a model the account can't use.
 // FAKE_AGENT_LEGACY=1 sends only the older `modes` and Gemini's unstable `models`, and takes the
 // model through session/set_model, as Gemini does.
 // FAKE_AGENT_LOAD_SESSION=1 makes it offer session/load (it remembers nothing, so
@@ -52,7 +64,8 @@
 // It takes MCP servers over HTTP as well as stdio, as Claude's, Codex's and Gemini's
 // adapters do; FAKE_AGENT_MCP_HTTP=0 makes it take stdio servers only.
 // FAKE_AGENT_AUTH=1 makes session/new require authenticate("fake-login") first;
-// that browser-style sign-in prints a sign-in link to stderr, like Gemini's.
+// that browser-style sign-in prints a sign-in link to stderr, like Gemini's. It
+// then also offers `logout` and sends `_auth/status_update`, like Claude's and Codex's.
 // --require-login makes it need a terminal login instead, like Claude's: the
 // client runs this script with --cli, which asks for Enter and saves a marker.
 import { spawn } from 'node:child_process';
@@ -64,6 +77,7 @@ import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { editorRequest, handleEditorRequest } from './editorRequests.mjs';
 
+const systemAppend = new Map();
 const LOGIN_MARKER = process.env.FAKE_AGENT_LOGIN_MARKER ?? path.join(os.tmpdir(), 'friedliver-demo-login');
 
 if (process.argv.includes('--cli')) {
@@ -90,6 +104,7 @@ let authenticated = false;
 let nextSession = 1;
 const cancels = new Map();
 const sessionCwd = new Map();
+const sessionMeta = new Map();
 const sessionMcp = new Map();
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
 const legacy = process.env.FAKE_AGENT_LEGACY === '1';
@@ -125,7 +140,7 @@ const COMMANDS = [
 ];
 const HELP = [
   '`tour`, `project`, `heavy` (long shell steps and a plain-text summary, like Claude), `edit <path>`, `run`, `read-image <path>`, `wait`, `ask <agent> <question>`, `chats`,',
-  '`native-edit <path>` and `native-run` (the agent acts itself, like Claude and Codex), `perm-edit <path>` (a Codex-style',
+  '`native-edit <path>` and `native-run` (the agent acts itself, like Claude and Codex), `native-read <path>` and `native-fetch <url>` (it asks first), `perm-edit <path>` (a Codex-style',
   'permission that names only its tool call), `plan` and `perm-plan` (a plan to approve), `/compact`.',
 ].join(' ');
 
@@ -187,8 +202,12 @@ function setModel(state, id) {
   if (!model.efforts.includes(state.effort)) state.effort = model.efforts.includes('medium') ? 'medium' : model.efforts[0];
 }
 
+/** Modes it refuses the way Gemini refuses Auto Edit and YOLO in a folder it doesn't trust (FAKE_AGENT_REFUSE_MODES=a,b). */
+const refusedModes = (process.env.FAKE_AGENT_REFUSE_MODES ?? '').split(',').filter(Boolean);
+
 function setMode(state, id) {
   if (!MODES.some((m) => m.id === id)) throw acp.RequestError.invalidParams(undefined, `Unknown mode ${id}`);
+  if (refusedModes.includes(id)) throw new acp.RequestError(-32603, 'Internal error', { details: 'Cannot enable privileged approval modes in an untrusted folder.' });
   state.mode = id;
 }
 
@@ -271,6 +290,35 @@ async function permEdit(client, sessionId, file) {
   if (ok) writeNative(file, change.after);
   await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: ok ? 'completed' : 'failed' });
   await say(client, sessionId, ok ? `Patched \`${path.basename(file)}\`.` : 'Not patched.');
+}
+
+/** Like Claude reading a file outside its folder, or its WebFetch: a permission request, nothing else. */
+async function nativeAsk(client, sessionId, kind, target) {
+  const toolCallId = `native-${kind}-1`;
+  const call =
+    kind === 'read'
+      ? { toolCallId, title: `Read ${path.basename(target)}`, kind: 'read', locations: [{ path: target }], rawInput: { file_path: target } }
+      : { toolCallId, title: `Fetch ${target}`, kind: 'fetch', rawInput: { url: target, prompt: 'Summarize the page' } };
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', ...call, status: 'pending' });
+  const ok = await allowed(client, sessionId, kind, call, ASK_OPTIONS);
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: ok ? 'completed' : 'failed' });
+  await say(client, sessionId, ok ? `Allowed to ${kind} ${target}.` : `Not allowed to ${kind} ${target}.`);
+}
+
+/**
+ * "native-perm <kind> <json>": a permission request of that kind with the JSON as its rawInput,
+ * and its `locations` (paths) as the tool call's, the way other agents' tools shape them.
+ */
+async function nativePerm(client, sessionId, args) {
+  const space = args.indexOf(' ');
+  const kind = args.slice(0, space);
+  const { locations = [], ...rawInput } = JSON.parse(args.slice(space + 1));
+  const toolCallId = 'native-perm-1';
+  const call = { toolCallId, title: `${kind} ${JSON.stringify(rawInput)}`, kind, locations: locations.map((p) => ({ path: p })), rawInput };
+  await tool(client, sessionId, { sessionUpdate: 'tool_call', ...call, status: 'pending' });
+  const ok = await allowed(client, sessionId, kind, call, ASK_OPTIONS);
+  await tool(client, sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: ok ? 'completed' : 'failed' });
+  await say(client, sessionId, ok ? 'Allowed.' : 'Not allowed.');
 }
 
 /** Like Claude's Bash tool: asks (in Ask mode), runs the command itself, and reports its output in the tool call. */
@@ -1034,7 +1082,13 @@ acp
     forms = params.clientCapabilities?.elicitation?.form != null;
     return {
     protocolVersion: acp.PROTOCOL_VERSION,
-    agentCapabilities: { loadSession, promptCapabilities: { image: images }, mcpCapabilities: { http: httpMcp } },
+    agentCapabilities: {
+      loadSession,
+      promptCapabilities: { image: images },
+      mcpCapabilities: { http: httpMcp },
+      // Like Claude's and Codex's adapters: it signs out itself, and says which account it runs as.
+      ...(needsAuth ? { auth: { logout: {} }, _meta: { authStatus: {} } } : {}),
+    },
     authMethods: needsTerminalLogin
       ? [{ id: 'demo-login', name: 'Log in with Demo', description: 'Run the demo login in the terminal', type: 'terminal', args: ['--cli'] }]
       : needsAuth
@@ -1045,11 +1099,17 @@ acp
     _meta: { steering: { supported: true } },
     };
   })
-  .onRequest(acp.methods.agent.authenticate, async ({ params }) => {
+  .onRequest(acp.methods.agent.authenticate, async ({ params, client }) => {
     if (params.methodId !== 'fake-login') throw acp.RequestError.invalidParams();
     process.stderr.write('Open https://accounts.google.com/o/oauth2/v2/auth?client_id=demo to sign in\n');
     await new Promise((r) => setTimeout(r, 300));
     authenticated = true;
+    void client.notify('_auth/status_update', { authStatus: { kind: 'account', label: 'Demo account', account: { email: 'you@example.com', plan: 'demo' } } }).catch(() => {});
+    return {};
+  })
+  .onRequest(acp.methods.agent.logout, ({ client }) => {
+    authenticated = false;
+    void client.notify('_auth/status_update', { authStatus: { kind: 'none', label: 'Not logged in' } }).catch(() => {});
     return {};
   })
   .onRequest(acp.methods.agent.session.new, ({ params, client }) => {
@@ -1058,6 +1118,8 @@ acp
     const sessionId = `fake-session-${nextSession++}`;
     sessionCwd.set(sessionId, params.cwd);
     sessionMcp.set(sessionId, params.mcpServers ?? []);
+    systemAppend.set(sessionId, params._meta?.systemPrompt?.append);
+    sessionMeta.set(sessionId, params._meta);
     if (startMcp) for (const server of params.mcpServers ?? []) if (typeof server.command === 'string' || server.type === 'http') keepMcp(server);
     const state = { ...DEFAULTS, used: 0 };
     choices.set(sessionId, state);
@@ -1068,6 +1130,7 @@ acp
     if (!loadSession) throw acp.RequestError.methodNotFound('session/load');
     sessionCwd.set(params.sessionId, params.cwd);
     sessionMcp.set(params.sessionId, params.mcpServers ?? []);
+    sessionMeta.set(params.sessionId, params._meta);
     const state = choices.get(params.sessionId) ?? { ...DEFAULTS, used: 0 };
     choices.set(params.sessionId, state);
     announceSession(client, params.sessionId);
@@ -1153,6 +1216,13 @@ acp
     }
     const busyFor = command.match(/^busy\s+(\d+(?:\.\d+)?)(\s+stamp)?\s*$/);
     if (busyFor) return { stopReason: await busy(client, sessionId, Math.min(Number(busyFor[1]), 3600), !!busyFor[2]) };
+    // An account that can't use the model: as codex-acp 0.16 fails the turn, and as codex-acp 2 says it in its reply.
+    const refusal = `The '${stateOf(sessionId).model}' model is not supported when using Codex with a ChatGPT account.`;
+    if (command === 'refuse-model') throw new acp.RequestError(-32603, 'Internal error', { message: JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: refusal } }), codex_error_info: 'other' });
+    if (command === 'say-refuse-model') {
+      await say(client, sessionId, refusal);
+      return { stopReason: 'end_turn' };
+    }
     if (command === 'chats') {
       try {
         await say(client, sessionId, await useTool(sessionId, 'list_chats', {}));
@@ -1166,6 +1236,9 @@ acp
     else if (command.startsWith('native-edit ')) await nativeEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(12).trim()));
     else if (command.startsWith('perm-edit ')) await permEdit(client, sessionId, path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(10).trim()));
     else if (command === 'native-run') await nativeRun(client, sessionId);
+    else if (command.startsWith('native-read ')) await nativeAsk(client, sessionId, 'read', path.resolve(sessionCwd.get(sessionId) ?? process.cwd(), command.slice(12).trim()));
+    else if (command.startsWith('native-fetch ')) await nativeAsk(client, sessionId, 'fetch', command.slice(13).trim());
+    else if (command.startsWith('native-perm ')) await nativePerm(client, sessionId, command.slice(12).trim());
     else if (command === 'perm-plan') await permPlan(client, sessionId);
     else if (command === 'plan') await planMode(client, sessionId);
     else if (command === 'question') {
@@ -1186,12 +1259,42 @@ acp
         });
         await say(client, sessionId, answer.action === 'accept' ? `You picked ${answer.content?.db}${answer.content?.note ? ` (${answer.content.note})` : ''}.` : `You ${answer.action === 'decline' ? 'skipped' : 'cancelled'} the question.`);
       }
+    } else if (command === 'ask-user' || command.startsWith('ask-user ')) {
+      if (!forms) await say(client, sessionId, "This client can't show questions as forms, so I'd ask in a message.");
+      else {
+        const n = Math.max(1, Math.min(4, Number(command.slice(9)) || 1));
+        const asks = [
+          ['Store', 'Which store should the sessions use?', ['Redis (Recommended)', 'SQLite', 'Memory']],
+          ['Cache', 'Which cache in front of it?', ['None', 'LRU']],
+          ['Auth', 'Which auth method?', ['Cookies', 'Tokens']],
+          ['Logs', 'Where do logs go?', ['stdout', 'File']],
+        ].slice(0, n);
+        const properties = {};
+        asks.forEach(([header, question, options], k) => {
+          properties[`question_${k}`] = { type: 'string', title: header, ...(n > 1 ? { description: question } : {}), oneOf: options.map((o) => ({ const: o, title: o, description: `${o.replace(/ \(Recommended\)$/, '')} because it fits` })) };
+          properties[`question_${k}_custom`] = { type: 'string', title: 'Other', description: 'Type your own answer, or add a note to the option you chose above (optional).' };
+        });
+        const answer = await client.request(acp.methods.client.elicitation.create, {
+          mode: 'form',
+          sessionId,
+          message: n > 1 ? 'Please answer the following questions.' : asks[0][1],
+          requestedSchema: { type: 'object', properties },
+        });
+        const got = asks.map((_, k) => answer.content?.[`question_${k}_custom`] || answer.content?.[`question_${k}`] || '-');
+        await say(client, sessionId, answer.action === 'accept' ? `You answered: ${got.join(', ')}.` : `You ${answer.action === 'decline' ? 'skipped' : 'cancelled'} the question.`);
+      }
+    } else if (command === 'session') {
+      await say(client, sessionId, `Session ${sessionId}, meta ${JSON.stringify(sessionMeta.get(sessionId) ?? null)}`);
     } else if (command.startsWith('links')) {
       const links = params.prompt.filter((b) => b.type === 'resource_link').map((b) => b.name);
       await say(client, sessionId, links.length ? `Linked: ${links.join(', ')}` : 'No files linked.');
     }
     else if (command === '/help') await say(client, sessionId, HELP);
-    else if (command === '/compact') {
+    else if (command.startsWith('fill ')) {
+      // Sets the context usage, to test what a nearly full context does.
+      stateOf(sessionId).used = Math.min(200_000, Number(command.slice(5)) || 0);
+      await say(client, sessionId, `Context at ${stateOf(sessionId).used} tokens.`);
+    } else if (command === '/compact') {
       stateOf(sessionId).used = 0;
       await say(client, sessionId, 'Context cleared.');
     } else if (command.startsWith('/review')) await say(client, sessionId, `Reviewed ${command.slice(7).trim() || 'nothing'}: looks fine.`);
@@ -1206,6 +1309,8 @@ acp
         status: 'completed',
         locations: [{ path }],
       });
+    } else if (command === 'system') {
+      await say(client, sessionId, systemAppend.get(sessionId) ?? 'no system prompt');
     } else {
       const state = stateOf(sessionId);
       // The model and effort show when they aren't the defaults, so tests can see a choice arrive.
@@ -1214,7 +1319,8 @@ acp
       await say(client, sessionId, `${text}${imageCount ? ` (+${imageCount} image)` : ''}${chosen}`);
     }
     if (choices.has(sessionId)) await reportUsage(client, sessionId, stateOf(sessionId), text);
-    return { stopReason: 'end_turn' };
+    // The turn's own token counts, as Claude's adapter reports them (fixed, so tests can check them).
+    return { stopReason: 'end_turn', usage: { inputTokens: 1200, outputTokens: 300, cachedReadTokens: 800, cachedWriteTokens: 100, totalTokens: 2400 } };
   })
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 

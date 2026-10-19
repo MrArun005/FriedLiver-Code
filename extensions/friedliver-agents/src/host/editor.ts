@@ -6,9 +6,10 @@
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef } from '../shared/model';
+import { agentName, chatName, chatRef } from '../shared/names';
 import type { AgentCore, PendingReview, SendOptions } from './core';
 import { EditChats, runEdit, type EditOutcome } from './editFlow';
-import { editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
+import { EDIT_AGENT_HINT, editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
 import { branchName, collectChanges, reviewMessage, reviewPrompt } from './gitChanges';
 import { insideRoots } from './paths';
 import type { ReviewPlacement } from './review';
@@ -30,6 +31,8 @@ export interface EditorHost {
   currentChat(): string | undefined;
   /** Puts a code reference into a chat's composer without sending it. */
   addToComposer(chatId: string, ref: CodeRef): void;
+  /** The agents pickers offer (Demo only when turned on); every agent when absent. */
+  shownAgents?(): AgentKey[];
   error(err: unknown): void;
 }
 
@@ -170,7 +173,7 @@ export class EditorAgent implements vscode.Disposable {
       box.title = `Edit with ${AGENT_FACES[parseEditInput(box.value).agent ?? chosen].name} · ${where}`;
     };
     box.placeholder = 'Describe the change';
-    box.prompt = 'Start with @claude, @gpt, @gemini or @demo to pick another agent.';
+    box.prompt = EDIT_AGENT_HINT;
     box.buttons = [change];
     refresh();
     return new Promise((resolve) => {
@@ -308,7 +311,7 @@ export class EditorAgent implements vscode.Disposable {
     let target = chat;
     let switching = false;
     const refresh = () => {
-      box.title = `Ask ${target.label} about ${where}`;
+      box.title = `Ask ${chatRef(target)} about ${where}`;
     };
     box.placeholder = 'Ask a question';
     box.prompt = `Goes to “${target.title}” with the code.`;
@@ -464,10 +467,10 @@ export class EditorAgent implements vscode.Disposable {
   }
 
   private async pickAgent(title: string, current?: AgentKey): Promise<AgentKey | undefined> {
-    const order = [...AGENT_KEYS].sort((a, b) => Number(b === current) - Number(a === current));
+    const order = [...(this.host.shownAgents?.() ?? AGENT_KEYS)].sort((a, b) => Number(b === current) - Number(a === current));
     const items = order.map((a) => ({
       label: AGENT_FACES[a].name,
-      description: [a === 'codex' ? 'GPT' : '', a === current ? 'last used' : '', a === 'demo' ? 'offline, no sign-in' : ''].filter(Boolean).join(' · ') || undefined,
+      description: [a === 'codex' ? 'GPT' : '', a === current ? 'last used' : '', a === 'demo' ? 'fake local agent, no account' : ''].filter(Boolean).join(' · ') || undefined,
       agent: a,
     }));
     return (await vscode.window.showQuickPick(items, { title }))?.agent;
@@ -489,15 +492,15 @@ export class EditorAgent implements vscode.Disposable {
       .sort((a, b) => Number(b.id === current) - Number(a.id === current) || b.lastActivity - a.lastActivity);
     type Pick = vscode.QuickPickItem & { chat?: ChatView; agent?: AgentKey };
     const items: Pick[] = [
-      ...open.map((c) => ({ label: c.title, description: [c.label, c.busy ? 'working' : ''].filter(Boolean).join(' · '), chat: c })),
+      ...open.map((c) => ({ label: chatName(c), description: [agentName(c.agent), c.busy ? 'working' : ''].filter(Boolean).join(' · '), chat: c })),
       { label: 'New chat', kind: vscode.QuickPickItemKind.Separator },
-      ...AGENT_KEYS.map((a) => ({ label: `$(add) New Chat with ${AGENT_FACES[a].name}`, description: a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
+      ...(this.host.shownAgents?.() ?? AGENT_KEYS).map((a) => ({ label: `$(add) New Chat with ${AGENT_FACES[a].name}`, description: a === 'demo' ? 'fake local agent, no account' : undefined, agent: a })),
     ];
     const picked = await vscode.window.showQuickPick(items, { title, matchOnDescription: true });
     if (picked?.chat) {
       const chat = core.chat(picked.chat.id);
       if (chat && needIdle && chat.busy) {
-        void vscode.window.showInformationMessage(`${chat.label} is still working. Ask when it's done, or pick another chat.`);
+        void vscode.window.showInformationMessage(`${chatRef(chat)} is still working. Ask when it's done, or pick another chat.`);
         return undefined;
       }
       return chat;

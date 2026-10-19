@@ -23,6 +23,9 @@ mkdirSync(`${ws}/src`, { recursive: true });
 writeFileSync(`${ws}/package.json`, '{ "name": "prices", "private": true }\n');
 writeFileSync(`${ws}/README.md`, '# Prices\n\nFormats prices in cents.\n');
 writeFileSync(`${ws}/src/format.ts`, 'export function formatCents(cents: number): string {\n  return `$${(cents / 100).toFixed(2)}`;\n}\n');
+// The Demo agent is hidden from pickers unless turned on.
+mkdirSync(`${dir}/ud/User`, { recursive: true });
+writeFileSync(`${dir}/ud/User/settings.json`, JSON.stringify({ 'friedliver.showDemoAgent': true }, null, 2));
 
 const app = await electron.launch({
   executablePath: exe,
@@ -76,21 +79,27 @@ await shot('02-consult-reply');
 // 2. The agent itself asks another agent through the FriedLiver tools; the user allows it.
 await box().fill('ask demo Which file formats the prices?');
 await box().press('Enter');
-const request = chat.locator('section.ask.bridge').first();
+// The request is an approval card (webview/approval.tsx), id item-<request id>: Deny, and "Allow once ⏎" with its scope menu.
+const request = chat.locator('.apv[id^="item-bridge"]').first();
 await request.waitFor({ timeout: 60000 });
 await win.waitForTimeout(800);
 await shot('03-agent-asks-agent');
-await request.getByRole('button', { name: 'Allow', exact: true }).click();
+await request.getByRole('button', { name: /^Allow once/ }).click();
 await chat.getByText(/says:/).first().waitFor({ timeout: 60000 });
 await win.waitForTimeout(800);
 await shot('04-answer-after-allow');
 
 // 3. The Agent Manager: board, then the map of how the chats are connected.
-await chat.getByRole('button', { name: 'Agent Manager' }).first().click();
+// From the command palette: in a narrow side bar the chat header folds its Agent Manager button into All chats.
+await win.keyboard.press('Control+Shift+P');
+await win.waitForTimeout(600);
+await win.keyboard.type('FriedLiver: Agent Manager');
+await win.waitForTimeout(800);
+await win.keyboard.press('Enter');
 const tasks = await surface('tasks');
 await win.waitForTimeout(2500);
 await shot('05-manager-board');
-await tasks.getByText('Map', { exact: true }).first().click();
+await tasks.getByRole('tab', { name: /Map/ }).first().click();
 await win.waitForTimeout(1500);
 await shot('06-manager-map');
 

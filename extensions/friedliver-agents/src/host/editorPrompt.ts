@@ -38,6 +38,9 @@ export type SpanKind = 'selection' | 'function' | 'line' | 'problem';
  * what is left never starts with one (core.send would read that as asking
  * another agent).
  */
+/** The Edit with Agent box's hint: the agents by the names the rest of FriedLiver mentions them with. */
+export const EDIT_AGENT_HINT = 'Start with @claude, @codex, @gemini or @demo to pick another agent.';
+
 export function parseEditInput(text: string): { agent?: AgentKey; instruction: string } {
   let rest = text.trim();
   let agent: AgentKey | undefined;

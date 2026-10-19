@@ -272,7 +272,30 @@ export function isShell(step: { toolKind?: string; cmd?: StepCommand }): boolean
 }
 
 /** The verb and one-line summary for a tool step. */
-export function stepSummary(step: { title: string; toolKind?: string; cmd?: StepCommand }, max = MAX_SUMMARY): StepSummary {
+const quoted = (v: unknown) => (typeof v === 'string' && v ? `‘${v}’` : '');
+/** FriedLiver's browser tools in plain words: "Opened myntra.com/puma", "Clicked ‘Add to bag’". */
+const BROWSER_SAID: Record<string, { verb: string; text(input: Record<string, unknown>): string }> = {
+  open: { verb: 'Opened', text: (i) => (typeof i.url === 'string' ? i.url.replace(/^https?:\/\/(www\.)?/, '') : '') },
+  click: { verb: 'Clicked', text: (i) => quoted(i.text) || quoted(i.selector) },
+  type: { verb: 'Typed', text: (i) => quoted(i.text) },
+  screenshot: { verb: 'Took a screenshot', text: () => '' },
+  snapshot: { verb: 'Read page', text: () => '' },
+  console: { verb: 'Read console', text: () => '' },
+  back: { verb: 'Went back', text: () => '' },
+  reload: { verb: 'Reloaded page', text: () => '' },
+};
+
+/** A tool's input as an object; input cut short or not JSON reads as empty. */
+function inputOf(input: string | undefined): Record<string, unknown> {
+  try {
+    const v: unknown = input ? JSON.parse(input) : {};
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function stepSummary(step: { title: string; toolKind?: string; cmd?: StepCommand; input?: string }, max = MAX_SUMMARY): StepSummary {
   const kind = step.toolKind ?? '';
   const command = isShell(step) ? (step.cmd?.line ?? plainTitle(step.title).replace(/^Run\s+/, '')) : undefined;
   if (command?.trim()) {
@@ -281,12 +304,23 @@ export function stepSummary(step: { title: string; toolKind?: string; cmd?: Step
   }
   const title = plainTitle(step.title).replace(/\s+/g, ' ');
   const full = cut(title, MAX_TOOLTIP);
+  const mcp = title.match(/^(?:Tool\s+)?mcp__(.+?)__(\w+)$/);
+  if (mcp) {
+    const browser = mcp[1] === 'friedliver' && mcp[2].match(/^browser_(.+)$/);
+    const said = browser && BROWSER_SAID[browser[1]];
+    if (said) return { verb: said.verb, text: cut(said.text(inputOf(step.input)), max), mono: false, full };
+    return browser
+      ? { verb: 'Browser', text: browser[1].replace(/_/g, ' '), mono: false, full }
+      : { verb: mcp[1] === 'friedliver' ? 'FriedLiver' : mcp[1], text: mcp[2].replace(/_/g, ' '), mono: false, full };
+  }
   const word = title.match(/^([A-Za-z]+)\s+(\S.*)$/);
   const allowed = TITLE_VERBS[kind];
   if (word && (allowed ? allowed.includes(word[1].toLowerCase()) : !kind && ANY_VERBS.has(word[1].toLowerCase()))) {
     const verb = word[1].toLowerCase() === 'grep' ? KIND_VERB.search : capital(word[1]);
     const mono = word[1] === 'grep' || word[1] === 'rg';
-    return { verb, text: cut(mono ? title : word[2], max), mono, full };
+    // A whole path reads by its last part; the tooltip keeps it all.
+    const target = !mono && /^(~|[A-Za-z]:)?[\\/]/.test(word[2]) ? basename(word[2]) : word[2];
+    return { verb, text: cut(mono ? title : target, max), mono, full };
   }
   return { verb: KIND_VERB[kind] ?? 'Tool', text: cut(title, max), mono: false, full };
 }
@@ -396,4 +430,33 @@ export function inFolder(folder: string, file: string): string | undefined {
   const same = (a: string, b: string) => (win ? a.toLowerCase() === b.toLowerCase() : a === b);
   if (parts.length <= root.length || !root.every((r, n) => same(r, parts[n]))) return undefined;
   return win ? parts.join(sep) : `/${parts.join('/')}`;
+}
+
+// ---- Approvals ----
+
+export type Approval = { text: string; ok: boolean };
+
+/**
+ * Answered approvals folded into the tool rows they approved, so each action shows once:
+ * a permission by its tool call id, a FriedLiver tool request by the nearest earlier unclaimed row of that tool.
+ * Pending approvals and ones that match no row stay in the transcript.
+ */
+export function foldApprovals(items: Item[]): { items: Item[]; approvals: Record<string, Approval> } {
+  const approvals: Record<string, Approval> = {};
+  const out: Item[] = [];
+  for (const i of items) {
+    if (i.kind === 'permission' && i.answer && i.toolCallId && !i.detail && items.some((t) => t.kind === 'tool' && t.id === i.toolCallId) && !approvals[i.toolCallId]) {
+      approvals[i.toolCallId] = { text: i.answer, ok: !/^(no|reject|deny|cancel|stopped)/i.test(i.answer) };
+      continue;
+    }
+    if (i.kind === 'bridge' && i.state !== 'awaiting') {
+      const row = out.findLast((t) => t.kind === 'tool' && !approvals[t.id] && (t.tool ?? t.title).endsWith(`__${i.tool}`));
+      if (row?.kind === 'tool') {
+        approvals[row.id] = { text: i.state, ok: i.state === 'allowed' };
+        continue;
+      }
+    }
+    out.push(i);
+  }
+  return { items: out, approvals };
 }

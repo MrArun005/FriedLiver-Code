@@ -18,6 +18,17 @@ describe('webview message validation', () => {
     });
     expect(parseWebviewMessage({ type: 'permission', requestId: 'perm-1', optionId: null })).toEqual({ type: 'permission', requestId: 'perm-1', optionId: null });
     expect(parseWebviewMessage({ type: 'notice', chatId: 'chat-1', action: { label: 'Log in', do: 'signIn', agent: 'claude', methodId: 'claude-login' } })).toBeTruthy();
+    expect(parseWebviewMessage({ type: 'imageThumb', path: '/w/a.png', extra: 1 })).toEqual({ type: 'imageThumb', path: '/w/a.png' });
+    expect(parseWebviewMessage({ type: 'revealImage', path: '/w/a.png' })).toEqual({ type: 'revealImage', path: '/w/a.png' });
+    // Done looking names a scope, never files: the host picks the files from its own state.
+    expect(parseWebviewMessage({ type: 'imagesDone', paths: ['/etc/passwd'] })).toEqual({ type: 'imagesDone' });
+    expect(parseWebviewMessage({ type: 'imagesDone', chatId: 'claude:abc-1' })).toEqual({ type: 'imagesDone', chatId: 'claude:abc-1' });
+    expect(parseWebviewMessage({ type: 'imagesUndo' })).toEqual({ type: 'imagesUndo' });
+    expect(parseWebviewMessage({ type: 'imagesCommit' })).toEqual({ type: 'imagesCommit' });
+    expect(parseWebviewMessage({ type: 'imagePin', key: 'c1\u0000/w/a.png', pinned: true })).toEqual({ type: 'imagePin', key: 'c1\u0000/w/a.png', pinned: true });
+    expect(parseWebviewMessage({ type: 'imagesDone', chatId: '../x y' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'imagePin', key: '', pinned: true })).toBeNull();
+    expect(parseWebviewMessage({ type: 'imagePin', key: 'k', pinned: 'yes' })).toBeNull();
   });
 
   it('drops extra fields', () => {
@@ -43,6 +54,9 @@ describe('webview message validation', () => {
       { type: 'notice', chatId: 'chat-1', action: { label: 'x', do: 'install', command: '' } },
       { type: 'createTask', agent: 'demo', prompt: '   ', worktree: false },
       { type: 'createTask', agent: 'demo', prompt: 'go', worktree: 'yes' },
+      { type: 'imageThumb', path: '' },
+      { type: 'imageThumb', path: 'x'.repeat(5000) },
+      { type: 'revealImage', path: 42 },
     ];
     for (const m of bad) expect(parseWebviewMessage(m), JSON.stringify(m)).toBeNull();
   });

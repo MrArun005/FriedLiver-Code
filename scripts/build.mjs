@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CACHE_DIR, VSCODE_DIR, checkSha256, fail, isWindows, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
+import { CACHE_DIR, VSCODE_DIR, checkSha256, codesignArgs, fail, isWindows, keepChromiumLocale, log, matchesIntegrity, nodeEnv, pinnedSha256, readJson, run, sha256File, vscodeSysrootAsset } from './lib.mjs';
 
 const args = new Set(process.argv.slice(2));
 const wantPackage = args.has('--package');
@@ -162,7 +162,8 @@ if (args.has('--no-compile')) {
  * Removes what a FriedLiver user never runs, before installers and signing: source maps
  * (about 300 MB; Microsoft's release pipeline uploads them elsewhere) and the Copilot SDK
  * runtime (about 150 MB; packaged because the agent-host code imports it, but built-in AI
- * features are off and Copilot is gone, see patches 0010 and 0020).
+ * features are off and Copilot is gone, see patches 0010 and 0020), and Chromium's locale
+ * packs except English (about 45 MB on macOS; keepChromiumLocale, FRIEDLIVER_KEEP_LOCALES).
  */
 function trimPackagedApp(appDir) {
 	const app = process.platform === 'darwin'
@@ -187,7 +188,17 @@ function trimPackagedApp(appDir) {
 			remove(path.join(unpackedGithub, name));
 		}
 	}
-	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps and the Copilot SDK runtime from the app`);
+	const locales = process.platform === 'darwin'
+		? path.join(app, '..', '..', 'Frameworks', 'Electron Framework.framework', 'Versions', 'A', 'Resources')
+		: path.join(appDir, 'locales');
+	if (fs.existsSync(locales)) {
+		for (const name of fs.readdirSync(locales).filter(n => !keepChromiumLocale(n))) {
+			remove(path.join(locales, name));
+		}
+	} else {
+		log(`no Chromium locale folder at ${locales}; locale packs not trimmed`);
+	}
+	log(`trimmed ${Math.round(bytes / 1048576)} MB of source maps, the Copilot SDK runtime and Chromium locale packs from the app`);
 }
 
 /**
@@ -229,6 +240,38 @@ function seedVSCodeSysroot(arch) {
 }
 
 /**
+ * Before the app is signed: the usage descriptions macOS shows when the composer's mic first asks
+ * for the microphone and speech recognition (Electron's Info.plist has no speech one), and the
+ * dictation helper (extensions/friedliver-agents/native/build.sh, built by CI) executable and
+ * signed first, so the app's signature seals it. Without the helper the mic shows the Fn Fn hint.
+ */
+function finishMacApp(appPath, signing) {
+	const plist = path.join(appPath, 'Contents', 'Info.plist');
+	for (const [key, text] of [
+		['NSMicrophoneUsageDescription', 'FriedLiver listens while you dictate a message with the mic button.'],
+		['NSSpeechRecognitionUsageDescription', 'FriedLiver turns what you say into text when you dictate a message.'],
+	]) {
+		run('plutil', ['-replace', key, '-string', text, plist]);
+	}
+	const helper = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-dictate');
+	if (fs.existsSync(helper)) {
+		fs.chmodSync(helper, 0o755);
+		run('codesign', codesignArgs(helper, { ...signing, identifier: 'com.friedliver.dictate' }));
+		log('dictation helper signed');
+	} else {
+		log('no dictation helper in the app (native/build.sh not run): the mic falls back to the Fn Fn hint');
+	}
+	const journal = path.join(appPath, 'Contents', 'Resources', 'app', 'extensions', 'friedliver-agents', 'bin', 'friedliver-fsevents');
+	if (fs.existsSync(journal)) {
+		fs.chmodSync(journal, 0o755);
+		run('codesign', codesignArgs(journal, { ...signing, identifier: 'com.friedliver.fsevents' }));
+		log('change journal helper signed');
+	} else {
+		log('no change journal helper in the app (native/build.sh not run): the project index checks every file on open');
+	}
+}
+
+/**
  * The installer for this OS, into installers/: a per-user setup .exe on Windows (no admin
  * rights needed), a .dmg on macOS, a .deb on Linux. Unsigned: signing needs certificates.
  */
@@ -247,8 +290,12 @@ function buildInstaller(arch, appDir) {
 		if (!app) {
 			fail(`no .app in ${appDir}`);
 		}
-		// Not notarized: an ad-hoc signature is the minimum Apple silicon runs.
-		run('codesign', ['--force', '--deep', '--sign', '-', path.join(appDir, app)], { cwd: appDir });
+		// MACOS_SIGN_IDENTITY / MACOS_SIGN_KEYCHAIN come from build.yml's signing keychain; without them
+		// (forks, local builds) ad-hoc, the minimum Apple silicon runs. Not notarized either way.
+		const signing = { identity: process.env.MACOS_SIGN_IDENTITY ?? '', keychain: process.env.MACOS_SIGN_KEYCHAIN ?? '' };
+		log(signing.identity ? 'signing with the certificate from the signing keychain' : 'no signing identity: ad-hoc signature');
+		finishMacApp(path.join(appDir, app), signing);
+		run('codesign', codesignArgs(path.join(appDir, app), { ...signing, deep: true }), { cwd: appDir });
 		file = path.join(dest, `FriedLiver-darwin-${arch}-${version}.dmg`);
 		run('hdiutil', ['create', '-volname', 'FriedLiver', '-srcfolder', path.join(appDir, app), '-ov', '-format', 'UDZO', file], { cwd: appDir });
 	} else if (process.platform === 'linux') {

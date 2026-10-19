@@ -8,10 +8,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CoreOptions, CoreUi } from '../src/host/core';
-import type { CommandRule } from '../src/shared/rules';
 import type { AgentDefaults } from '../src/shared/session';
 import { lastReply, type AgentKey, type Item } from '../src/shared/model';
-import { disposeCores, gitRepo, makeCore, waitFor } from './helpers';
+import { disposeCores, gitRepo, makeCore, memoryPermissions, waitFor } from './helpers';
 
 afterEach(disposeCores);
 
@@ -22,10 +21,6 @@ function memoryDefaults(): NonNullable<CoreOptions['defaults']> & { all: Partial
   return { all, get: (a) => all[a], set: (a, v) => (all[a] = v) };
 }
 
-function memoryRules(start: CommandRule[] = []): NonNullable<CoreOptions['rules']> & { list: CommandRule[] } {
-  const list = [...start];
-  return { list, get: () => list, add: (r) => list.push(r) };
-}
 
 /** A core whose UI records what it was asked and decides nothing by itself. */
 function core(folder: string, over: Partial<CoreOptions> = {}, ui: Partial<CoreUi> = {}) {
@@ -37,7 +32,7 @@ function core(folder: string, over: Partial<CoreOptions> = {}, ui: Partial<CoreU
       closeReview: () => {},
       askCommand: (a) => seen.commands.push(a.commandLine),
       showProposal: (p) => seen.proposals.push({ path: p.path, after: p.after }),
-      turnEnded: (t) => seen.ended.push(`${t.label}:${t.stopReason}:${t.files}`),
+      turnEnded: (t) => seen.ended.push(`${t.agent}:${t.stopReason}:${t.files}`),
       confirmFullAuto: async () => {
         seen.confirms++;
         return true;
@@ -77,6 +72,16 @@ describe('what the agent advertises', () => {
     expect(c.chat(chat.id)!.session!.usage!.used).toBeGreaterThan(0);
   });
 
+  it('keeps the commands the agent sends while FriedLiver is still reading which models the account may use', async () => {
+    const dir = await gitRepo();
+    // The Demo agent sends its commands right after the session answer; the account's models arrive later.
+    const { core: c } = core(dir, { modelVisibility: () => new Promise((r) => setTimeout(() => r(undefined), 200)) });
+    const chat = await c.createChat('demo');
+    await waitFor(() => live(c, chat.id), 5_000);
+    await waitFor(() => (c.chat(chat.id)!.session!.commands.length ?? 0) > 0, 2_000);
+    expect(c.chat(chat.id)!.session!.commands.map((x) => x.name)).toEqual(['help', 'compact', 'review']);
+  });
+
   it('sets the model and effort, and the effort levels follow the model', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);
@@ -114,26 +119,45 @@ describe('what the agent advertises', () => {
     }
   });
 
-  it('remembers the last choices per agent and applies them to new chats', async () => {
+  it('keeps a chat\'s model and effort to that chat; only the Accounts page sets new chats\' defaults', async () => {
     const dir = await gitRepo();
     const defaults = memoryDefaults();
     const { core: c } = core(dir, { defaults });
     const first = await c.createChat('demo');
     await waitFor(() => live(c, first.id));
-    await c.setOption(first.id, 'model', 'demo-small');
-    await c.setOption(first.id, 'effort', 'low');
+    await c.setOption(first.id, 'effort', 'max');
     await c.setApproval(first.id, 'edits');
-    expect(defaults.all.demo?.chosen).toEqual({ model: 'demo-small', thought_level: 'low' });
+    // Not the agent's default: the next chat (an inline edit, a consultation) starts at the agent's own.
+    expect(defaults.all.demo?.chosen ?? {}).toEqual({});
     expect(defaults.all.demo?.approval).toBe('edits');
     expect(defaults.all.demo?.options.map((o) => o.id)).toEqual(['model', 'effort', 'fast']);
+    await c.send(first.id, 'hi');
+    expect(lastReply(c.chat(first.id)!)).toBe('You said: hi (demo-smart · max)');
 
     const second = await c.createChat('demo');
     // The pickers show the remembered options before the session answers.
     expect(c.chat(second.id)!.session?.options.length).toBeGreaterThan(0);
     expect(c.chat(second.id)!.approval).toBe('edits');
-    await waitFor(() => live(c, second.id) && option(c, second.id, 'effort')?.current === 'low');
-    expect(option(c, second.id, 'model')!.current).toBe('demo-small');
-    expect(option(c, second.id, 'mode')!.current).toBe('acceptEdits');
+    await waitFor(() => live(c, second.id) && option(c, second.id, 'mode')?.current === 'acceptEdits');
+    expect(option(c, second.id, 'effort')!.current).toBe('medium');
+
+    // Set on the Accounts page: new chats start with it.
+    expect(c.setDefaultChoice('demo', 'thought_level', 'low')).toBe(true);
+    expect(defaults.all.demo).toMatchObject({ chosen: { thought_level: 'low' }, explicit: true });
+    const third = await c.createChat('demo');
+    await waitFor(() => live(c, third.id) && option(c, third.id, 'effort')?.current === 'low');
+  });
+
+  it('ignores model and effort an older version saved from a chat as the agent\'s default', async () => {
+    const dir = await gitRepo();
+    const defaults = memoryDefaults();
+    const { core: c } = core(dir, { defaults });
+    const probe = await c.createChat('demo');
+    await waitFor(() => live(c, probe.id));
+    defaults.set('demo', { ...defaults.all.demo!, chosen: { thought_level: 'max' } });
+    const next = await c.createChat('demo');
+    await waitFor(() => live(c, next.id));
+    expect(option(c, next.id, 'effort')!.current).toBe('medium');
   });
 
   it('remembers the agent’s commands and shows them in a new chat before its session starts', async () => {
@@ -231,7 +255,7 @@ describe('approval levels and the agent’s own modes', () => {
     await turn;
     expect(seen.reviews).toEqual([]);
     const review = c.chat(chat.id)!.items.find((i) => i.kind === 'review');
-    expect(review).toMatchObject({ state: 'accepted', auto: 'Auto-accept edits' });
+    expect(review).toMatchObject({ state: 'accepted', auto: 'Edit automatically' });
     const changes = c.chat(chat.id)!.items.find((i) => i.kind === 'changes');
     expect(changes).toMatchObject({ files: [path.join(dir, 'NOTES.md')] });
     await c.undo(chat.id, changes!.kind === 'changes' ? changes!.turnId : '');
@@ -246,8 +270,8 @@ describe('approval levels and the agent’s own modes', () => {
     expect(seen.reviews).toEqual([]);
     expect(seen.commands).toEqual([]);
     const command = c.chat(chat.id)!.items.find((i) => i.kind === 'command');
-    expect(command).toMatchObject({ state: 'exited', exitCode: 0, auto: 'Full auto' });
-    expect(c.chat(chat.id)!.items.some((i) => i.kind === 'review' && i.auto === 'Full auto')).toBe(true);
+    expect(command).toMatchObject({ state: 'exited', exitCode: 0, auto: 'Auto' });
+    expect(c.chat(chat.id)!.items.some((i) => i.kind === 'review' && i.auto === 'Auto')).toBe(true);
   });
 });
 
@@ -279,8 +303,8 @@ describe('the permission request is the review', () => {
 
   it('shows the command and its folder, and an "Always allow" rule answers the next one', async () => {
     const dir = await gitRepo();
-    const rules = memoryRules();
-    const { core: c } = core(dir, { rules });
+    const permissions = memoryPermissions();
+    const { core: c } = core(dir, { permissions });
     const chat = await c.createChat('demo');
     let turn = c.send(chat.id, 'native-run');
     await waitFor(() => !!permission(c, chat.id));
@@ -288,7 +312,8 @@ describe('the permission request is the review', () => {
     expect(p.detail?.command).toEqual({ line: 'node --version', cwd: dir });
     await c.allowAlways({ requestId: p.requestId }, { kind: 'exact', command: p.detail!.command!.line });
     await turn;
-    expect(rules.list).toHaveLength(1);
+    expect(permissions.commands()).toMatchObject([{ kind: 'exact', command: 'node --version' }]);
+    expect(permissions.list()[0].agent).toBe('Demo');
     const tool = c.chat(chat.id)!.items.find((i) => i.kind === 'tool' && i.id === 'native-run-1');
     expect(tool?.kind === 'tool' && tool.out?.[0]).toMatchObject({ t: 'text', text: expect.stringMatching(/^v\d+\./) });
 
@@ -402,7 +427,7 @@ describe('messages while the agent works', () => {
     const { core: c, seen } = core(dir);
     const chat = await c.createChat('demo');
     await c.send(chat.id, 'hi');
-    expect(seen.ended).toEqual(['Demo:end_turn:0']);
+    expect(seen.ended).toEqual(['demo:end_turn:0']);
   });
 });
 
@@ -429,6 +454,29 @@ describe('questions and file references', () => {
     expect(c.chat(chat.id)!.items.find((i) => i.kind === 'question')).toMatchObject({ state: 'answered', summary: 'Database: SQLite · Other: keep it simple' });
   });
 
+  it("gets Claude's real AskUserQuestion answer back to the agent: a click's option, or the typed Other (owner bug)", async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir);
+    const chat = await c.createChat('demo');
+    for (const [values, said] of [
+      [{ question_0: 'SQLite' }, 'You answered: SQLite.'],
+      [{ question_0_custom: 'Postgres' }, 'You answered: Postgres.'],
+    ] as const) {
+      const turn = c.send(chat.id, 'ask-user');
+      await waitFor(() => c.decisions()[0]?.kind === 'question');
+      const q = c.chat(chat.id)!.items.findLast((i) => i.kind === 'question');
+      expect(q?.kind === 'question' && q.fields.map((f) => f.key)).toEqual(['question_0', 'question_0_custom']);
+      c.answerQuestion(c.decisions()[0].id, 'accept', values);
+      await turn;
+      expect(lastReply(c.chat(chat.id)!)).toBe(said);
+    }
+    const turn = c.send(chat.id, 'ask-user 2');
+    await waitFor(() => c.decisions()[0]?.kind === 'question');
+    c.answerQuestion(c.decisions()[0].id, 'accept', { question_0: 'Memory', question_1: 'LRU' });
+    await turn;
+    expect(lastReply(c.chat(chat.id)!)).toBe('You answered: Memory, LRU.');
+  });
+
   it('declines a question when the turn is stopped', async () => {
     const dir = await gitRepo();
     const { core: c } = core(dir);
@@ -450,3 +498,59 @@ describe('questions and file references', () => {
   });
 });
 
+
+describe('rewind', () => {
+  const userTurns = (c: ReturnType<typeof core>['core'], chatId: string) =>
+    c.chat(chatId)!.items.flatMap((i) => (i.kind === 'user' && i.checkpoint ? [i.checkpoint] : []));
+
+  it('restores code and conversation to before a message, and says the agent starts a new session', async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir, { approvalDefault: () => 'edits' });
+    const chat = await c.createChat('demo');
+    const file = path.join(dir, 'README.md');
+    await c.send(chat.id, 'native-edit README.md');
+    await c.send(chat.id, 'native-edit README.md');
+    expect(await readFile(file, 'utf8')).toBe('# test\nedited by the demo agent itself\nedited by the demo agent itself\n');
+    const [first] = userTurns(c, chat.id);
+    expect(c.checkpointList(chat.id)).toHaveLength(2);
+    const plan = await c.rewindPlan(chat.id, first);
+    expect(plan.files).toEqual([{ file: 'README.md', added: 0, removed: 2, conflict: false }]);
+
+    await c.rewind(chat.id, first, 'both');
+    expect(await readFile(file, 'utf8')).toBe('# test\n');
+    const items = c.chat(chat.id)!.items;
+    expect(items.some((i) => i.kind === 'user')).toBe(false);
+    expect(items.at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('new session') });
+    expect(c.checkpointList(chat.id)).toEqual([]);
+  });
+
+  it('restores code only and keeps a file you changed unless you pick the checkpoint', async () => {
+    const dir = await gitRepo();
+    const { core: c } = core(dir, { approvalDefault: () => 'edits' });
+    const chat = await c.createChat('demo');
+    await c.send(chat.id, 'native-edit README.md');
+    const file = path.join(dir, 'README.md');
+    await writeFile(file, 'mine now\n');
+    const [first] = userTurns(c, chat.id);
+    expect((await c.rewindPlan(chat.id, first)).files[0]).toMatchObject({ file: 'README.md', conflict: true });
+    const kept = await c.rewind(chat.id, first, 'code');
+    expect(kept.kept).toEqual([file]);
+    expect(await readFile(file, 'utf8')).toBe('mine now\n');
+    // The conversation stays; the turn's card says it was undone.
+    expect(c.chat(chat.id)!.items.some((i) => i.kind === 'user')).toBe(true);
+    expect(c.chat(chat.id)!.items.find((i) => i.kind === 'changes')).toMatchObject({ undone: true });
+  });
+
+  it('rewinds a folder outside git from snapshots in the checkpoint folder', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'fl-nogit-'));
+    const file = path.join(dir, 'a.txt');
+    await writeFile(file, 'one\n');
+    const { core: c } = core(dir, { approvalDefault: () => 'edits', checkpointDir: await mkdtemp(path.join(os.tmpdir(), 'fl-cpdir-')) });
+    const chat = await c.createChat('demo');
+    await c.send(chat.id, 'native-edit a.txt');
+    const [first] = userTurns(c, chat.id);
+    expect(first).toBeTruthy();
+    await c.rewind(chat.id, first, 'code', []);
+    expect(await readFile(file, 'utf8')).toBe('one\n');
+  });
+});
