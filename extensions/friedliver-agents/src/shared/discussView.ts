@@ -2,8 +2,7 @@
 // the question's parts, the positions as they emerged, who holds what after each round, the moves and
 // trends, B's stance meter, and the outcome every layout's conclusion shows. Old saved discussions
 // (no side, reply or trend on their stances) degrade to what their prose and options allow.
-import { speakerName, type DiscussTurn, type DiscussionItem, type Stance, type Trend } from './discuss';
-import type { AgentKey } from './model';
+import { namesOf, speakerOf, type DiscussTurn, type DiscussionItem, type Speaker, type Stance, type Trend } from './discuss';
 
 // ---- The layout setting (friedliver.discuss.layout) ----
 
@@ -97,7 +96,7 @@ function optionsOf(title: string): string[] | undefined {
 export interface TurnView {
   /** Its index in d.turns. */
   n: number;
-  agent: AgentKey;
+  agent: Speaker;
   round: number;
   /** Index into positions. */
   side?: number;
@@ -106,7 +105,7 @@ export interface TurnView {
   /** One line: the stance's position, else the turn's first sentence. */
   claim: string;
   body: string;
-  re?: { agent: AgentKey; quote: string };
+  re?: { agent: Speaker; quote: string };
   failed?: true;
 }
 
@@ -116,12 +115,12 @@ export interface RoundView {
   /** What the user added before it. */
   points: DiscussTurn[];
   /** Who holds which position once the round is over (or so far, while it runs). */
-  holds: Partial<Record<AgentKey, number>>;
-  conf: Partial<Record<AgentKey, number>>;
+  holds: Partial<Record<Speaker, number>>;
+  conf: Partial<Record<Speaker, number>>;
   /** Agents whose position changed in this round. */
-  moved: AgentKey[];
+  moved: Speaker[];
   /** Agents who kept their position but are less sure than the round before. */
-  lessSure: AgentKey[];
+  lessSure: Speaker[];
   /** "2 to 1", "split", "agreed"; empty when nobody holds a position. */
   tally: string;
   trend?: Trend;
@@ -134,10 +133,10 @@ export interface Outcome {
   headline: string;
   /** The question they still split on. */
   dispute?: string;
-  sides: { position: string; agents: AgentKey[]; why: string }[];
+  sides: { position: string; agents: Speaker[]; why: string }[];
   /** Agreed: "Claude and Codex, 85% sure each". */
   who?: string;
-  whoAgents?: AgentKey[];
+  whoAgents?: Speaker[];
   /** The agreed list's label. */
   agreedLabel: string;
 }
@@ -148,13 +147,16 @@ export interface DiscussView {
   /** No options in the question: the positions are named as they emerge. */
   open: boolean;
   positions: string[];
-  agents: AgentKey[];
+  /** The participants' keys, in speaking order (an agent, or agent/model). */
+  agents: Speaker[];
+  /** A participant's name: "Claude · Opus 4.5", or "Claude" on its default model. */
+  name(s: Speaker | 'you'): string;
   rounds: RoundView[];
-  speaking?: AgentKey;
+  speaking?: Speaker;
   /** Each agent's newest turn up to a round. */
-  latest(agent: AgentKey, upTo?: number): TurnView | undefined;
+  latest(agent: Speaker, upTo?: number): TurnView | undefined;
   /** Agents who held a position at some point. */
-  everHeld(position: number): AgentKey[];
+  everHeld(position: number): Speaker[];
   outcome?: Outcome;
 }
 
@@ -191,8 +193,8 @@ function firstSentence(text: string): string {
   return (m ? m[0] : plain).trim().slice(0, 200);
 }
 
-const names = (agents: AgentKey[]) => {
-  const n = agents.map(speakerName);
+const names = (agents: Speaker[], name: (s: Speaker) => string) => {
+  const n = agents.map(name);
   return n.length <= 1 ? (n[0] ?? '') : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`;
 };
 const pct = (c: number) => `${Math.round(c * 100)}%`;
@@ -200,7 +202,8 @@ const cut = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max
 
 export function discussView(d: DiscussionItem): DiscussView {
   const { title, context, options } = questionParts(d.question);
-  const agents = d.participants.map((p) => p.agent);
+  const agents = d.participants.map(speakerOf);
+  const nameOf = namesOf(d.participants);
   const positions = [...(options ?? [])];
   const keys = positions.map(norm);
   const indexOf = (name: string) => {
@@ -256,7 +259,7 @@ export function discussView(d: DiscussionItem): DiscussView {
         : points.length
           ? `You added: ${cut(points[0].text, 64)}`
           : moved.length
-            ? `${names(moved)} moved over`
+            ? `${names(moved, nameOf)} moved over`
             : r === d.maxRounds
               ? 'Last round'
               : 'Replies';
@@ -268,6 +271,7 @@ export function discussView(d: DiscussionItem): DiscussView {
     open: !options,
     positions,
     agents,
+    name: nameOf,
     rounds,
     ...(d.state !== 'done' && d.speaking ? { speaking: d.speaking } : {}),
     latest: (agent, upTo = Infinity) => turns.findLast((t) => t.agent === agent && t.round <= upTo),
@@ -277,7 +281,7 @@ export function discussView(d: DiscussionItem): DiscussView {
   return view;
 }
 
-function tallyOf(holds: Partial<Record<AgentKey, number>>): string {
+function tallyOf(holds: Partial<Record<Speaker, number>>): string {
   const counts = new Map<number, number>();
   for (const i of Object.values(holds)) if (i !== undefined) counts.set(i, (counts.get(i) ?? 0) + 1);
   const sizes = [...counts.values()].sort((a, b) => b - a);
@@ -289,8 +293,8 @@ function tallyOf(holds: Partial<Record<AgentKey, number>>): string {
 }
 
 /** Without the summary's word for it: fewer camps or a bigger one is converging, the reverse diverging, no move stuck. */
-function trendOf(before: Partial<Record<AgentKey, number>>, now: Partial<Record<AgentKey, number>>, moves: number): Trend | undefined {
-  const shape = (h: Partial<Record<AgentKey, number>>) => {
+function trendOf(before: Partial<Record<Speaker, number>>, now: Partial<Record<Speaker, number>>, moves: number): Trend | undefined {
+  const shape = (h: Partial<Record<Speaker, number>>) => {
     const counts = new Map<number, number>();
     for (const i of Object.values(h)) if (i !== undefined) counts.set(i, (counts.get(i) ?? 0) + 1);
     return { camps: counts.size, biggest: Math.max(0, ...counts.values()) };
@@ -316,14 +320,14 @@ function outcomeOf(d: DiscussionItem, v: DiscussView): Outcome {
     const sure = who.map((a) => conf[a]).filter((x): x is number => x !== undefined);
     const same = sure.length === who.length && sure.every((x) => x === sure[0]);
     const line = sure.length ? (same ? `${pct(sure[0])} sure each` : `${pct(Math.min(...sure))} to ${pct(Math.max(...sure))} sure`) : '';
-    return { kind: 'agreed', headline: one ? `Agreed: ${one.position}` : 'Agreed', sides: [], who: `${names(who)}${line ? `, ${line}` : ''}`, whoAgents: who, agreedLabel: 'What they settled on' };
+    return { kind: 'agreed', headline: one ? `Agreed: ${one.position}` : 'Agreed', sides: [], who: `${names(who, v.name)}${line ? `, ${line}` : ''}`, whoAgents: who, agreedLabel: 'What they settled on' };
   }
   const point = dis[0];
-  const caseOf = (agent: AgentKey) => point?.sides.find((s) => s.agent === agent)?.view;
+  const caseOf = (agent: Speaker) => point?.sides.find((s) => s.agent === agent)?.view;
   const sides =
     groups.length >= 2
       ? groups.map((g) => ({ ...g, why: g.agents.map(caseOf).find(Boolean) ?? v.latest(g.agents[0])?.claim ?? '' }))
-      : (point?.sides ?? []).map((s) => ({ position: speakerName(s.agent), agents: [s.agent], why: s.view }));
+      : (point?.sides ?? []).map((s) => ({ position: v.name(s.agent), agents: [s.agent], why: s.view }));
   return {
     kind: 'split',
     headline: dis.length > 1 ? `Still split on ${dis.length} questions` : dis.length ? 'Still split on one question' : 'Still split',
@@ -336,7 +340,7 @@ function outcomeOf(d: DiscussionItem, v: DiscussView): Outcome {
 // ---- B's stance meter ----
 
 export interface MeterLane {
-  agent: AgentKey;
+  agent: Speaker;
   /** 0..100 across the track: an end at full confidence, the middle unsure. */
   x: number;
   /** Earlier rounds' places, left behind as hollow dots. */

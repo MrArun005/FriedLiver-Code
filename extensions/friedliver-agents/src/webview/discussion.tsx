@@ -4,9 +4,9 @@
 // and the board layouts keep the board folded. Drawn only with the design system's components.
 import { Fragment, type ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
-import { discussMeta, speakerName, type DiscussionItem } from '../shared/discuss';
+import { agentOf, discussMeta, speakerOf, type DiscussionItem, type Speaker } from '../shared/discuss';
 import { discussSections, discussView, meterOf, pointPlaceholder, type DiscussSection, type DiscussView, type Outcome, type RoundView, type TurnView } from '../shared/discussView';
-import type { AgentKey, ChatView } from '../shared/model';
+import type { ChatView } from '../shared/model';
 import { Dot, Markdown, send, useDiscussLayout } from './common';
 import { Avatar, Button, Card, Icon, Input, MenuItem, MenuTitle, Pill, Popover, Segmented, SplitButton, cx } from './ui';
 
@@ -39,11 +39,11 @@ export function DiscussionCard({ item: d, chat }: { item: DiscussionItem; chat: 
       case 'outcome':
         return <OutcomeHead o={v.outcome!} />;
       case 'sides':
-        return <Sides o={v.outcome!} />;
+        return <Sides o={v.outcome!} name={v.name} />;
       case 'conclusion':
         return <Conclusion d={d} o={v.outcome!} />;
       case 'actions':
-        return <Actions d={d} />;
+        return <Actions d={d} v={v} />;
       case 'board-folded':
         return (
           <details class="fl-discuss__fold">
@@ -142,14 +142,14 @@ function AddPoint({ d }: { d: DiscussionItem }) {
   );
 }
 
-/** C's quote link: whose words a turn answers. Pressing it shows that turn. */
-function Quote({ re, prefix, onPress }: { re: NonNullable<TurnView['re']>; prefix?: string; onPress?: () => void }) {
+/** C's quote link: whose words a turn answers (`name`: theirs). Pressing it shows that turn. */
+function Quote({ re, name, prefix, onPress }: { re: NonNullable<TurnView['re']>; name: string; prefix?: string; onPress?: () => void }) {
   return (
-    <Button variant="text" class="fl-discuss__quote" onClick={onPress} title={`Show ${speakerName(re.agent)}'s turn`}>
+    <Button variant="text" class="fl-discuss__quote" onClick={onPress} title={`Show ${name}'s turn`}>
       <Icon name="reply" size={12} />
       <span>
         {prefix}
-        <b>{speakerName(re.agent)}</b> “{re.quote}”
+        <b>{name}</b> “{re.quote}”
       </span>
     </Button>
   );
@@ -244,7 +244,7 @@ function Board({ ctx, round, onQuote }: { ctx: Ctx; round: number; onQuote(r: nu
                 <span class="fl-discuss__col-name">{name}</span>
                 <span class="fl-discuss__stack">
                   {mine.map((a) => (
-                    <Avatar key={a} agent={a} size="sm" mark />
+                    <Avatar key={a} agent={agentOf(a)} size="sm" mark />
                   ))}
                 </span>
                 <span class="fl-discuss__count">
@@ -256,7 +256,7 @@ function Board({ ctx, round, onQuote }: { ctx: Ctx; round: number; onQuote(r: nu
           );
         })}
       </div>
-      {waiting.length > 0 && <span class="fl-discuss__hint">No position yet: {waiting.map(speakerName).join(', ')}</span>}
+      {waiting.length > 0 && <span class="fl-discuss__hint">No position yet: {waiting.map(v.name).join(', ')}</span>}
     </>
   );
 }
@@ -267,13 +267,13 @@ function nobody(v: DiscussView, i: number, round: number): string {
   for (const a of v.agents)
     for (let r = 2; r <= round; r++)
       if (v.rounds[r - 2]?.holds[a] === i && v.rounds[r - 1]?.holds[a] !== i) {
-        left.add(speakerName(a));
+        left.add(v.name(a));
         when = r;
       }
   return left.size ? `Nobody holds this now. ${[...left].join(' and ')} moved off it in round ${when}.` : 'Nobody holds this yet.';
 }
 
-function Tile({ ctx: { d, v, chat }, agent, round, live, onQuote }: { ctx: Ctx; agent: AgentKey; round: number; live: boolean; onQuote(r: number): void }) {
+function Tile({ ctx: { d, v, chat }, agent, round, live, onQuote }: { ctx: Ctx; agent: Speaker; round: number; live: boolean; onQuote(r: number): void }) {
   const [open, setOpen] = useState(false);
   const t = v.latest(agent, round)!;
   const r = v.rounds[round - 1];
@@ -287,8 +287,8 @@ function Tile({ ctx: { d, v, chat }, agent, round, live, onQuote }: { ctx: Ctx; 
   return (
     <article class="fl-discuss__tile" id={`${d.id}-turn-${t.n}`} tabIndex={-1} data-speaking={speaking ? '' : undefined}>
       <div class="fl-discuss__tile-head">
-        <Avatar agent={agent} mark />
-        <b>{speakerName(agent)}</b>
+        <Avatar agent={agentOf(agent)} mark />
+        <b>{v.name(agent)}</b>
         {speaking && (
           <span class="fl-discuss__speaking">
             <Dot state="working" />
@@ -309,6 +309,7 @@ function Tile({ ctx: { d, v, chat }, agent, round, live, onQuote }: { ctx: Ctx; 
           {t.re && (
             <Quote
               re={t.re}
+              name={v.name(t.re.agent)}
               prefix="re: "
               onPress={
                 target &&
@@ -333,7 +334,7 @@ function Tile({ ctx: { d, v, chat }, agent, round, live, onQuote }: { ctx: Ctx; 
 function Meter({ v, round, compact }: { v: DiscussView; round: number; compact?: boolean }) {
   if (!v.positions.length) return null;
   const m = meterOf(v, round);
-  const said = m.lanes.map((l) => `${speakerName(l.agent)}: ${l.side !== undefined ? v.positions[l.side] : 'no position'}${l.label && !l.speaking ? `, ${l.label}` : ''}`).join('; ');
+  const said = m.lanes.map((l) => `${v.name(l.agent)}: ${l.side !== undefined ? v.positions[l.side] : 'no position'}${l.label && !l.speaking ? `, ${l.label}` : ''}`).join('; ');
   return (
     <div class="fl-discuss__meter" data-compact={compact ? '' : undefined} role="img" aria-label={`Where each agent stands. ${said}`}>
       <div class="fl-discuss__axis">
@@ -356,8 +357,8 @@ function Meter({ v, round, compact }: { v: DiscussView; round: number; compact?:
         return (
           <div key={l.agent} class="fl-discuss__lane">
             <div class="fl-discuss__who">
-              <Avatar agent={l.agent} mark />
-              <span>{speakerName(l.agent)}</span>
+              <Avatar agent={agentOf(l.agent)} mark />
+              <span>{v.name(l.agent)}</span>
             </div>
             <div class="fl-discuss__track">
               <i class="fl-discuss__mid" />
@@ -366,7 +367,7 @@ function Meter({ v, round, compact }: { v: DiscussView; round: number; compact?:
                 <i key={x} class="fl-discuss__ghost" style={{ '--x': `${x}%` }} />
               ))}
               <span class="fl-discuss__marker" style={{ '--x': `${l.x}%` }} data-speaking={l.speaking ? '' : undefined}>
-                <Avatar agent={l.agent} size="marker" mark />
+                <Avatar agent={agentOf(l.agent)} size="marker" mark />
               </span>
               <span class="fl-discuss__val" style={{ '--x': `${l.x}%` }} data-end={l.x < 50 ? 'start' : l.x > 50 ? 'end' : undefined} data-speaking={l.speaking ? '' : undefined}>
                 {l.label}
@@ -415,7 +416,7 @@ function Rows({ ctx }: { ctx: Ctx }) {
               Round {r.round} · {r.turns.length} turn{r.turns.length === 1 ? '' : 's'} ·
               <span class="fl-discuss__stack">
                 {r.turns.map((t) => (
-                  <Avatar key={t.n} agent={t.agent} size="sm" mark />
+                  <Avatar key={t.n} agent={agentOf(t.agent)} size="sm" mark />
                 ))}
               </span>
             </summary>
@@ -438,7 +439,7 @@ function Rows({ ctx }: { ctx: Ctx }) {
             {r.turns.map((t) => (
               <Row key={t.n} ctx={ctx} t={t} />
             ))}
-            {v.speaking && <SpeakingRow agent={v.speaking} />}
+            {v.speaking && <SpeakingRow agent={v.speaking} name={v.name(v.speaking)} />}
             {(d.points ?? []).map((p, i) => (
               <YouRow key={`q${i}`} text={p} queued={`before ${queuedFor(d)}`} />
             ))}
@@ -458,10 +459,10 @@ const YouRow = ({ text, queued }: { text: string; queued?: string }) => (
   </div>
 );
 
-const SpeakingRow = ({ agent }: { agent: AgentKey }) => (
+const SpeakingRow = ({ agent, name }: { agent: Speaker; name: string }) => (
   <div class="fl-discuss__row" data-speaking="">
-    <Avatar agent={agent} size="sm" mark />
-    <b>{speakerName(agent)}</b>
+    <Avatar agent={agentOf(agent)} size="sm" mark />
+    <b>{name}</b>
     <Pill tone="working" dot>
       speaking
     </Pill>
@@ -474,11 +475,11 @@ function Row({ ctx: { d, v, chat }, t }: { ctx: Ctx; t: TurnView }) {
   return (
     <details class="fl-discuss__row-wrap" id={`${d.id}-turn-${t.n}`} tabIndex={-1}>
       <summary class="fl-discuss__row">
-        <Avatar agent={t.agent} size="sm" mark />
-        <b>{speakerName(t.agent)}</b>
+        <Avatar agent={agentOf(t.agent)} size="sm" mark />
+        <b>{v.name(t.agent)}</b>
         {t.failed ? <Pill tone="failed">couldn’t answer</Pill> : stance && <Pill>{stance}</Pill>}
         <span class="fl-discuss__row-text">
-          {t.re && <span class="fl-discuss__re">re {speakerName(t.re.agent)}: </span>}
+          {t.re && <span class="fl-discuss__re">re {v.name(t.re.agent)}: </span>}
           <Inline text={t.claim} />
         </span>
         <Icon name="forward" size={12} />
@@ -515,12 +516,12 @@ function Thread({ ctx }: { ctx: Ctx }) {
               <Icon name="chevronDown" size={12} />
               <b>Round {r.round}</b>
               <span class="fl-discuss__round-label">{r.round === 1 ? 'Opening positions' : 'Replies'}</span>
-              {tagOf(r) && <span class="fl-discuss__tag">{tagOf(r)}</span>}
+              {tagOf(r, v.name) && <span class="fl-discuss__tag">{tagOf(r, v.name)}</span>}
             </div>
             {r.turns.map((t) => (
               <TurnCard key={t.n} ctx={ctx} t={t} />
             ))}
-            {v.speaking && <SpeakingCard agent={v.speaking} />}
+            {v.speaking && <SpeakingCard agent={v.speaking} name={v.name(v.speaking)} />}
           </Fragment>
         ),
       )}
@@ -532,7 +533,7 @@ function Thread({ ctx }: { ctx: Ctx }) {
           <Icon name="forward" size={12} />
           <b>Round {d.round + 1}</b>
           <span class="fl-discuss__round-label">
-            {d.round + 1 === d.maxRounds ? 'Last round' : 'Next'} · {v.agents.map(speakerName).join(', ')}
+            {d.round + 1 === d.maxRounds ? 'Last round' : 'Next'} · {v.agents.map(v.name).join(', ')}
           </span>
         </div>
       )}
@@ -541,8 +542,8 @@ function Thread({ ctx }: { ctx: Ctx }) {
 }
 
 /** A round's tag: how it moved (the summary's word, else worked out) and on what; else its tally. */
-const tagOf = (r: RoundView): string =>
-  r.trend ? (r.on ? `${r.trend} on ${r.on}` : r.trend) : [r.tally, r.lessSure.length ? `${r.lessSure.map(speakerName).join(' and ')} less sure` : ''].filter(Boolean).join(', ');
+const tagOf = (r: RoundView, name: (s: Speaker) => string): string =>
+  r.trend ? (r.on ? `${r.trend} on ${r.on}` : r.trend) : [r.tally, r.lessSure.length ? `${r.lessSure.map(name).join(' and ')} less sure` : ''].filter(Boolean).join(', ');
 
 function TurnCard({ ctx: { d, v, chat }, t }: { ctx: Ctx; t: TurnView }) {
   const [open, setOpen] = useState(false);
@@ -552,14 +553,14 @@ function TurnCard({ ctx: { d, v, chat }, t }: { ctx: Ctx; t: TurnView }) {
   return (
     <article class="fl-discuss__turn" id={`${d.id}-turn-${t.n}`} tabIndex={-1}>
       <span class="fl-discuss__node">
-        <Avatar agent={t.agent} mark />
+        <Avatar agent={agentOf(t.agent)} mark />
       </span>
       <div class="fl-discuss__turn-card">
         <div class="fl-discuss__turn-head">
-          <b>{speakerName(t.agent)}</b>
+          <b>{v.name(t.agent)}</b>
           {t.failed ? <Pill tone="failed">couldn’t answer</Pill> : stance && <Pill>{stance}</Pill>}
         </div>
-        {t.re && <Quote re={t.re} onPress={target && (() => reveal(d, target.n))} />}
+        {t.re && <Quote re={t.re} name={v.name(t.re.agent)} onPress={target && (() => reveal(d, target.n))} />}
         <p class="fl-discuss__claim" data-strong="">
           <Inline text={t.claim} />
         </p>
@@ -584,14 +585,14 @@ function TurnCard({ ctx: { d, v, chat }, t }: { ctx: Ctx; t: TurnView }) {
   );
 }
 
-const SpeakingCard = ({ agent }: { agent: AgentKey }) => (
+const SpeakingCard = ({ agent, name }: { agent: Speaker; name: string }) => (
   <article class="fl-discuss__turn" data-speaking="">
     <span class="fl-discuss__node">
-      <Avatar agent={agent} mark />
+      <Avatar agent={agentOf(agent)} mark />
     </span>
     <div class="fl-discuss__turn-card">
       <div class="fl-discuss__turn-head">
-        <b>{speakerName(agent)}</b>
+        <b>{name}</b>
         <Pill tone="working" dot>
           speaking
         </Pill>
@@ -604,7 +605,7 @@ const SpeakingCard = ({ agent }: { agent: AgentKey }) => (
 /** A round, folded to one line: its label, each agent's stance and the round's tag; open, its turns. */
 function RoundFold({ ctx, r }: { ctx: Ctx; r: RoundView }) {
   const { d, v } = ctx;
-  const tag = tagOf(r);
+  const tag = tagOf(r, v.name);
   return (
     <details class="fl-discuss__round-fold">
       <summary class="fl-discuss__round">
@@ -616,7 +617,7 @@ function RoundFold({ ctx, r }: { ctx: Ctx; r: RoundView }) {
             .filter((t) => !t.failed)
             .map((t) => (
               <span key={t.n} class="fl-discuss__chip">
-                <Avatar agent={t.agent} size="sm" mark />
+                <Avatar agent={agentOf(t.agent)} size="sm" mark />
                 {[t.side !== undefined ? v.positions[t.side] : '', pct(t.confidence)].filter(Boolean).join(' ') || 'no stance'}
               </span>
             ))}
@@ -649,7 +650,7 @@ function OutcomeHead({ o }: { o: Outcome }) {
         <p class="fl-discuss__hero-sub">
           <span class="fl-discuss__stack">
             {o.whoAgents?.map((a) => (
-              <Avatar key={a} agent={a} size="sm" mark />
+              <Avatar key={a} agent={agentOf(a)} size="sm" mark />
             ))}
           </span>
           {o.who}
@@ -659,7 +660,7 @@ function OutcomeHead({ o }: { o: Outcome }) {
   );
 }
 
-function Sides({ o }: { o: Outcome }) {
+function Sides({ o, name }: { o: Outcome; name(s: Speaker): string }) {
   return (
     <div class="fl-discuss__sides" data-n={String(o.sides.length)}>
       {o.sides.map((s, i) => (
@@ -669,11 +670,11 @@ function Sides({ o }: { o: Outcome }) {
             <div class="fl-discuss__side-head">
               <span class="fl-discuss__stack">
                 {s.agents.map((a) => (
-                  <Avatar key={a} agent={a} size="sm" mark />
+                  <Avatar key={a} agent={agentOf(a)} size="sm" mark />
                 ))}
               </span>
               <b>{s.position}</b>
-              <span class="fl-discuss__side-who">{s.agents.map(speakerName).join(' and ')}</span>
+              <span class="fl-discuss__side-who">{s.agents.map(name).join(' and ')}</span>
             </div>
             <p>
               <Inline text={s.why} />
@@ -733,9 +734,9 @@ function Conclusion({ d, o }: { d: DiscussionItem; o: Outcome }) {
   );
 }
 
-function Actions({ d }: { d: DiscussionItem }) {
+function Actions({ d, v }: { d: DiscussionItem; v: DiscussView }) {
   if (d.continued) return null;
-  const carry = (agent: AgentKey) => send({ type: 'discussion', id: d.id, act: 'carry', agent });
+  const carry = (agent: Speaker) => send({ type: 'discussion', id: d.id, act: 'carry', agent });
   return (
     <div class="fl-discuss__actions">
       {d.conclusion?.by === 'friedliver' && <span class="fl-discuss__hint">Summed up by FriedLiver</span>}
@@ -744,10 +745,10 @@ function Actions({ d }: { d: DiscussionItem }) {
       </Button>
       {d.carried ? (
         <Pill tone="done" icon="check">
-          Carried out with {speakerName(d.carried)}
+          Carried out with {v.name(d.carried)}
         </Pill>
       ) : (
-        <CarryOut d={d} carry={carry} />
+        <CarryOut d={d} name={v.name} carry={carry} />
       )}
     </div>
   );
@@ -763,8 +764,8 @@ function History({ ctx }: { ctx: Ctx }) {
   );
 }
 
-function CarryOut({ d, carry }: { d: DiscussionItem; carry(agent: AgentKey): void }) {
-  const agents = d.participants.map((p) => p.agent);
+function CarryOut({ d, name, carry }: { d: DiscussionItem; name(s: Speaker): string; carry(agent: Speaker): void }) {
+  const agents = d.participants.map(speakerOf);
   const pick = d.conclusion?.carryOut && agents.includes(d.conclusion.carryOut) ? d.conclusion.carryOut : agents[0];
   return (
     <SplitButton
@@ -778,8 +779,8 @@ function CarryOut({ d, carry }: { d: DiscussionItem; carry(agent: AgentKey): voi
               {agents.map((a) => (
                 <MenuItem
                   key={a}
-                  lead={<Avatar agent={a} size="sm" mark />}
-                  label={speakerName(a)}
+                  lead={<Avatar agent={agentOf(a)} size="sm" mark />}
+                  label={name(a)}
                   checked={a === pick}
                   onSelect={() => {
                     close();
@@ -792,7 +793,7 @@ function CarryOut({ d, carry }: { d: DiscussionItem; carry(agent: AgentKey): voi
         </Popover>
       )}
     >
-      Carry out with {speakerName(pick)}
+      Carry out with {name(pick)}
     </SplitButton>
   );
 }

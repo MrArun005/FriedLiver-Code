@@ -78,10 +78,10 @@ export type WebviewMessage =
   | { type: 'handoff'; chatId: string; agent: AgentKey; fresh?: boolean }
   /** Ask another agent from this chat; its reply comes back here. A message starting "@gemini" does the same. `fresh` asks in a new chat. */
   | { type: 'consult'; chatId: string; agent: AgentKey; text: string; fresh?: boolean }
-  /** /discuss: this chat's agent and `agents` talk `text` through, then sum it up (host/discuss.ts). */
-  | { type: 'discuss'; chatId: string; agents: AgentKey[]; text: string }
-  /** A discussion card's buttons: Stop, Continue discussing, Carry out with `agent`; `point`: the user's point, heard from the next round. */
-  | { type: 'discussion'; id: string; act: 'stop' | 'continue' | 'carry' | 'point'; agent?: AgentKey; text?: string }
+  /** /discuss: this chat's agent and `participants` (agents, each on `model` when named) talk `text` through, then sum it up (host/discuss.ts). */
+  | { type: 'discuss'; chatId: string; participants: { agent: AgentKey; model?: string }[]; text: string }
+  /** A discussion card's buttons: Stop, Continue discussing, Carry out with `agent` (a participant's key, "claude/opus"); `point`: the user's point, heard from the next round. */
+  | { type: 'discussion'; id: string; act: 'stop' | 'continue' | 'carry' | 'point'; agent?: string; text?: string }
   /** Forward each finished turn of `from` to the chat `to`. */
   | { type: 'pipe'; from: string; to: string }
   | { type: 'unlink'; linkId: string }
@@ -247,6 +247,8 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const id = (v: unknown): v is string => typeof v === 'string' && ID.test(v);
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
+/** A model's id as agents report them ("opus", "gpt-5.6-terra", "opus[1m]", "models/gemini-3.1-pro"); the host checks it is offered. */
+const modelId = (v: unknown): v is string => typeof v === 'string' && /^[\w.:/@+[\]-]{1,128}$/.test(v);
 
 function attachment(v: unknown): Attachment | null {
   if (!isObj(v)) return null;
@@ -414,14 +416,26 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return id(m.chatId) && isAgentKey(m.agent) && str(m.text, LIMITS.text) && m.text.trim()
         ? { type: 'consult', chatId: m.chatId, agent: m.agent, text: m.text, ...(m.fresh === true ? { fresh: true } : {}) }
         : null;
-    case 'discuss':
-      return id(m.chatId) && Array.isArray(m.agents) && m.agents.length >= 1 && m.agents.length <= LIMITS.fanout && m.agents.every(isAgentKey) && str(m.text, LIMITS.text) && m.text.trim()
-        ? { type: 'discuss', chatId: m.chatId, agents: [...new Set(m.agents as AgentKey[])], text: m.text }
-        : null;
+    case 'discuss': {
+      if (!id(m.chatId) || !Array.isArray(m.participants) || m.participants.length < 1 || m.participants.length > LIMITS.fanout || !str(m.text, LIMITS.text) || !m.text.trim()) return null;
+      const participants: { agent: AgentKey; model?: string }[] = [];
+      for (const p of m.participants as unknown[]) {
+        const r = (p ?? {}) as Record<string, unknown>;
+        if (!isAgentKey(r.agent) || (r.model !== undefined && !modelId(r.model))) return null;
+        const one = { agent: r.agent, ...(typeof r.model === 'string' ? { model: r.model } : {}) };
+        if (!participants.some((x) => x.agent === one.agent && x.model === one.model)) participants.push(one);
+      }
+      return { type: 'discuss', chatId: m.chatId, participants, text: m.text };
+    }
     case 'discussion':
       if (!id(m.id) || (m.act !== 'stop' && m.act !== 'continue' && m.act !== 'carry' && m.act !== 'point')) return null;
       if (m.act === 'point') return str(m.text, LIMITS.text) && m.text.trim() ? { type: 'discussion', id: m.id, act: 'point', text: m.text.trim() } : null;
-      if (m.act === 'carry') return isAgentKey(m.agent) ? { type: 'discussion', id: m.id, act: 'carry', agent: m.agent } : null;
+      if (m.act === 'carry') {
+        // A participant's key: an agent, or agent/model.
+        const slash = typeof m.agent === 'string' ? m.agent.indexOf('/') : -1;
+        const ok = typeof m.agent === 'string' && (slash < 0 ? isAgentKey(m.agent) : isAgentKey(m.agent.slice(0, slash)) && modelId(m.agent.slice(slash + 1)));
+        return ok ? { type: 'discussion', id: m.id, act: 'carry', agent: m.agent as string } : null;
+      }
       return { type: 'discussion', id: m.id, act: m.act };
     case 'pipe':
       return id(m.from) && id(m.to) && m.from !== m.to ? { type: 'pipe', from: m.from, to: m.to } : null;
