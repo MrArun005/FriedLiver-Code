@@ -1,0 +1,613 @@
+diff --git a/src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts b/src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts
+index 53be55bd..2d382029 100644
+--- a/src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts
++++ b/src/vs/platform/extensionManagement/common/extensionGalleryManifestService.ts
+@@ -220,7 +220,10 @@ export class ExtensionGalleryManifestService extends Disposable implements IExte
+ 					flags,
+ 				},
+ 				signing: {
+-					allPublicRepositorySigned: true,
++					// FriedLiver: Open VSX publishes no gallery manifest and doesn't promise every extension is signed.
++					// Its signatures are still checked; one that's missing asks first (extensionSignaturePolicy.ts).
++					// A marketplace whose own manifest requires signatures is enforced.
++					allPublicRepositorySigned: false,
+ 				}
+ 			}
+ 		};
+diff --git a/src/vs/platform/extensionManagement/common/extensionGalleryService.ts b/src/vs/platform/extensionManagement/common/extensionGalleryService.ts
+index a1dad7ef..3fdc0612 100644
+--- a/src/vs/platform/extensionManagement/common/extensionGalleryService.ts
++++ b/src/vs/platform/extensionManagement/common/extensionGalleryService.ts
+@@ -117,7 +117,8 @@ const AssetType = {
+ 	VSIX: 'Microsoft.VisualStudio.Services.VSIXPackage',
+ 	License: 'Microsoft.VisualStudio.Services.Content.License',
+ 	Repository: 'Microsoft.VisualStudio.Services.Links.Source',
+-	Signature: 'Microsoft.VisualStudio.Services.VsixSignature'
++	Signature: 'Microsoft.VisualStudio.Services.VsixSignature',
++	PublicKey: 'Microsoft.VisualStudio.Services.PublicKey'
+ };
+ 
+ const PropertyType = {
+@@ -321,6 +322,12 @@ function getRepositoryAsset(version: IRawGalleryExtensionVersion): IGalleryExten
+ 	return getVersionAsset(version, AssetType.Repository);
+ }
+ 
++// FriedLiver: the file's own source, which ends in the key's id (the asset route doesn't carry it).
++function getPublicKeyAsset(version: IRawGalleryExtensionVersion): IGalleryExtensionAsset | null {
++	const source = version.files.find(f => f.assetType === AssetType.PublicKey)?.source;
++	return source ? { uri: source, fallbackUri: source } : null;
++}
++
+ function getDownloadAsset(version: IRawGalleryExtensionVersion): IGalleryExtensionAsset {
+ 	return {
+ 		// always use fallbackAssetUri for download asset to hit the Marketplace API so that downloads are counted
+@@ -524,6 +531,7 @@ function toExtension(galleryExtension: IRawGalleryExtension, version: IRawGaller
+ 		download: getDownloadAsset(version),
+ 		icon: getVersionAsset(version, AssetType.Icon),
+ 		signature: getVersionAsset(version, AssetType.Signature),
++		publicKey: getPublicKeyAsset(version),
+ 		coreTranslations: getCoreTranslationAssets(version)
+ 	};
+ 
+diff --git a/src/vs/platform/extensionManagement/common/extensionManagement.ts b/src/vs/platform/extensionManagement/common/extensionManagement.ts
+index 52729ea6..0f96c8a6 100644
+--- a/src/vs/platform/extensionManagement/common/extensionManagement.ts
++++ b/src/vs/platform/extensionManagement/common/extensionManagement.ts
+@@ -189,6 +189,8 @@ export interface IGalleryExtensionAssets {
+ 	download: IGalleryExtensionAsset;
+ 	icon: IGalleryExtensionAsset | null;
+ 	signature: IGalleryExtensionAsset | null;
++	/** FriedLiver: Open VSX's Microsoft.VisualStudio.Services.PublicKey, naming the registry key that signed it. */
++	publicKey?: IGalleryExtensionAsset | null;
+ 	coreTranslations: [string, IGalleryExtensionAsset][];
+ }
+ 
+diff --git a/src/vs/platform/extensionManagement/common/extensionSignaturePolicy.ts b/src/vs/platform/extensionManagement/common/extensionSignaturePolicy.ts
+new file mode 100644
+index 00000000..a7741550
+--- /dev/null
++++ b/src/vs/platform/extensionManagement/common/extensionSignaturePolicy.ts
+@@ -0,0 +1,41 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) FriedLiver. Licensed under the MIT License.
++ *--------------------------------------------------------------------------------------------*/
++
++// FriedLiver: what happens to a gallery extension once its signature has been checked
++// (node/openVsxSignature.ts). Kept free of imports so the fork's own tests can run it.
++
++/** Extension ids you chose to install although their signature couldn't be checked. Application scope. */
++export const AllowUnsignedExtensionsConfigKey = 'extensions.allowUnsigned';
++
++/** Install-options context flag set by "Install Anyway", for that one install. */
++export const ALLOW_UNSIGNED_CONTEXT = 'friedliver.allowUnsigned';
++
++// Results that say the package isn't what the registry signed. Never installed, whatever was allowed.
++const TAMPERED = new Set([
++	'SignatureIsNotValid', 'SignatureIsInvalid', 'SignatureManifestIsInvalid', 'SignatureIntegrityCheckFailed',
++	'PackageIntegrityCheckFailed', 'EntryIsMissing', 'EntryIsTampered', 'CertificateRevoked',
++]);
++
++export type SignatureDecision = 'install' | 'ask' | 'refuse';
++
++/**
++ * @param status the check's ExtensionSignatureVerificationCode, or undefined when the check couldn't run.
++ * @param required the marketplace's manifest says all its extensions are signed.
++ * @param allowed you answered "Install Anyway" for this extension.
++ */
++export function decideSignature(status: string | undefined, required: boolean, allowed: boolean): SignatureDecision {
++	if (status === 'Success') {
++		return 'install';
++	}
++	if ((status !== undefined && TAMPERED.has(status)) || required) {
++		return 'refuse';
++	}
++	// Not signed, signed with a key FriedLiver doesn't know, or the check couldn't run.
++	return allowed ? 'install' : 'ask';
++}
++
++export function isUnsignedAllowed(setting: unknown, extensionId: string): boolean {
++	const id = extensionId.toLowerCase();
++	return Array.isArray(setting) && setting.some(entry => typeof entry === 'string' && entry.toLowerCase() === id);
++}
+diff --git a/src/vs/platform/extensionManagement/node/extensionDownloader.ts b/src/vs/platform/extensionManagement/node/extensionDownloader.ts
+index 249e7058..f79285da 100644
+--- a/src/vs/platform/extensionManagement/node/extensionDownloader.ts
++++ b/src/vs/platform/extensionManagement/node/extensionDownloader.ts
+@@ -19,6 +19,7 @@ import { ExtensionManagementError, ExtensionManagementErrorCode, ExtensionSignat
+ import { ExtensionKey, groupByExtension } from '../common/extensionManagementUtil.js';
+ import { fromExtractError } from './extensionManagementUtil.js';
+ import { IExtensionSignatureVerificationService } from './extensionSignatureVerificationService.js';
++import { checkOpenVsxSignature } from './openVsxSignature.js';
+ import { TargetPlatform } from '../../extensions/common/extensions.js';
+ import { FileOperationResult, IFileService, IFileStatWithMetadata, toFileOperationResult } from '../../files/common/files.js';
+ import { ILogService } from '../../log/common/log.js';
+@@ -71,13 +72,14 @@ export class ExtensionsDownloader extends Disposable {
+ 		}
+ 
+ 		if (!extension.isSigned) {
+-			return { location, verificationStatus: ExtensionSignatureVerificationCode.NotSigned };
++			// FriedLiver: no signature where the gallery names a pinned Open VSX key is a mismatch, not "unsigned".
++			return { location, verificationStatus: checkOpenVsxSignature(new Uint8Array(0), undefined, extension.assets.publicKey?.uri) as ExtensionSignatureVerificationCode };
+ 		}
+ 
+ 		let signatureArchiveLocation;
+ 		try {
+ 			signatureArchiveLocation = await this.downloadSignatureArchive(extension);
+-			const verificationStatus = (await this.extensionSignatureVerificationService.verify(extension.identifier.id, extension.version, location.fsPath, signatureArchiveLocation.fsPath, clientTargetPlatform))?.code;
++			const verificationStatus = (await this.extensionSignatureVerificationService.verify(extension.identifier.id, extension.version, location.fsPath, signatureArchiveLocation.fsPath, clientTargetPlatform, extension.assets.publicKey?.uri))?.code;
+ 			if (verificationStatus === ExtensionSignatureVerificationCode.PackageIsInvalidZip || verificationStatus === ExtensionSignatureVerificationCode.SignatureArchiveIsInvalidZip) {
+ 				try {
+ 					// Delete the downloaded vsix if VSIX or signature archive is invalid
+diff --git a/src/vs/platform/extensionManagement/node/extensionManagementService.ts b/src/vs/platform/extensionManagement/node/extensionManagementService.ts
+index 6eefd716..0ec7028e 100644
+--- a/src/vs/platform/extensionManagement/node/extensionManagementService.ts
++++ b/src/vs/platform/extensionManagement/node/extensionManagementService.ts
+@@ -56,6 +56,7 @@ import { IUriIdentityService } from '../../uriIdentity/common/uriIdentity.js';
+ import { IUserDataProfilesService } from '../../userDataProfile/common/userDataProfile.js';
+ import { IConfigurationService } from '../../configuration/common/configuration.js';
+ import { IExtensionGalleryManifestService } from '../common/extensionGalleryManifest.js';
++import { ALLOW_UNSIGNED_CONTEXT, AllowUnsignedExtensionsConfigKey, decideSignature, isUnsignedAllowed } from '../common/extensionSignaturePolicy.js';
+ 
+ export const INativeServerExtensionManagementService = refineServiceDecorator<IExtensionManagementService, INativeServerExtensionManagementService>(IExtensionManagementService);
+ export interface INativeServerExtensionManagementService extends IExtensionManagementService {
+@@ -297,7 +298,7 @@ export class ExtensionManagementService extends AbstractExtensionManagementServi
+ 	}
+ 
+ 	private async downloadAndExtractGalleryExtension(extensionKey: ExtensionKey, gallery: IGalleryExtension, operation: InstallOperation, options: InstallExtensionTaskOptions, token: CancellationToken): Promise<ExtractExtensionResult> {
+-		const { verificationStatus, location } = await this.downloadExtension(gallery, operation, !options.donotVerifySignature, options.context?.[EXTENSION_INSTALL_CLIENT_TARGET_PLATFORM_CONTEXT] as TargetPlatform | undefined);
++		const { verificationStatus, location } = await this.downloadExtension(gallery, operation, !options.donotVerifySignature, options.context?.[EXTENSION_INSTALL_CLIENT_TARGET_PLATFORM_CONTEXT] as TargetPlatform | undefined, options.context?.[ALLOW_UNSIGNED_CONTEXT] === true);
+ 		try {
+ 
+ 			if (token.isCancellationRequested) {
+@@ -337,51 +338,44 @@ export class ExtensionManagementService extends AbstractExtensionManagementServi
+ 		}
+ 	}
+ 
+-	private async downloadExtension(extension: IGalleryExtension, operation: InstallOperation, verifySignature: boolean, clientTargetPlatform?: TargetPlatform): Promise<{ readonly location: URI; readonly verificationStatus: ExtensionSignatureVerificationCode | undefined }> {
++	private async downloadExtension(extension: IGalleryExtension, operation: InstallOperation, verifySignature: boolean, clientTargetPlatform?: TargetPlatform, allowUnsigned?: boolean): Promise<{ readonly location: URI; readonly verificationStatus: ExtensionSignatureVerificationCode | undefined }> {
+ 		if (verifySignature) {
+ 			const value = this.configurationService.getValue(VerifyExtensionSignatureConfigKey);
+ 			verifySignature = isBoolean(value) ? value : true;
+ 		}
+-		const { location, verificationStatus } = await this.extensionsDownloader.download(extension, operation, verifySignature, clientTargetPlatform);
++		// FriedLiver: a marketplace that says all its extensions are signed is checked whatever the setting or the install options say.
+ 		const shouldRequireSignature = shouldRequireRepositorySignatureFor(extension.private, await this.extensionGalleryManifestService.getExtensionGalleryManifest());
++		verifySignature ||= shouldRequireSignature;
++		const { location, verificationStatus } = await this.extensionsDownloader.download(extension, operation, verifySignature, clientTargetPlatform);
++		if (!verifySignature) {
++			return { location, verificationStatus };
++		}
+ 
+-		if (
+-			verificationStatus !== ExtensionSignatureVerificationCode.Success
+-			&& !(verificationStatus === ExtensionSignatureVerificationCode.NotSigned && !shouldRequireSignature)
+-			&& verifySignature
+-			&& this.environmentService.isBuilt
+-			&& (await this.getTargetPlatform()) !== TargetPlatform.LINUX_ARMHF
+-		) {
+-			try {
+-				await this.extensionsDownloader.delete(location);
+-			} catch (e) {
+-				/* Ignore */
+-				this.logService.warn(`Error while deleting the downloaded file`, location.toString(), getErrorMessage(e));
+-			}
+-
+-			if (!verificationStatus) {
+-				throw new ExtensionManagementError(nls.localize('signature verification not executed', "Signature verification was not executed."), ExtensionManagementErrorCode.SignatureVerificationInternal);
+-			}
+-
+-			switch (verificationStatus) {
+-				case ExtensionSignatureVerificationCode.PackageIntegrityCheckFailed:
+-				case ExtensionSignatureVerificationCode.SignatureIsInvalid:
+-				case ExtensionSignatureVerificationCode.SignatureManifestIsInvalid:
+-				case ExtensionSignatureVerificationCode.SignatureIntegrityCheckFailed:
+-				case ExtensionSignatureVerificationCode.EntryIsMissing:
+-				case ExtensionSignatureVerificationCode.EntryIsTampered:
+-				case ExtensionSignatureVerificationCode.Untrusted:
+-				case ExtensionSignatureVerificationCode.CertificateRevoked:
+-				case ExtensionSignatureVerificationCode.SignatureIsNotValid:
+-				case ExtensionSignatureVerificationCode.SignatureArchiveHasTooManyEntries:
+-				case ExtensionSignatureVerificationCode.NotSigned:
+-					throw new ExtensionManagementError(nls.localize('signature verification failed', "Signature verification failed with '{0}' error.", verificationStatus), ExtensionManagementErrorCode.SignatureVerificationFailed);
+-			}
+-
+-			throw new ExtensionManagementError(nls.localize('signature verification failed', "Signature verification failed with '{0}' error.", verificationStatus), ExtensionManagementErrorCode.SignatureVerificationInternal);
++		// FriedLiver: Open VSX signatures are checked in every build on every platform (node/openVsxSignature.ts),
++		// so upstream's exceptions for dev builds and linux-armhf are gone. A signature that doesn't match is never
++		// installed. Not signed, or not checkable, asks you first ("Install Anyway" is remembered per extension).
++		const allowed = allowUnsigned || isUnsignedAllowed(this.configurationService.getValue(AllowUnsignedExtensionsConfigKey), extension.identifier.id);
++		const decision = decideSignature(verificationStatus, shouldRequireSignature, allowed);
++		if (decision === 'install') {
++			return { location, verificationStatus };
+ 		}
+ 
+-		return { location, verificationStatus };
++		try {
++			await this.extensionsDownloader.delete(location);
++		} catch (e) {
++			/* Ignore */
++			this.logService.warn(`Error while deleting the downloaded file`, location.toString(), getErrorMessage(e));
++		}
++		const status = verificationStatus === ExtensionSignatureVerificationCode.NotSigned ? nls.localize('signature none', "it has no signature")
++			: verificationStatus === ExtensionSignatureVerificationCode.Untrusted ? nls.localize('signature unknown key', "it's signed with a key FriedLiver doesn't know")
++				: verificationStatus ?? nls.localize('signature not checked', "the check couldn't run");
++		if (decision === 'ask') {
++			throw new ExtensionManagementError(nls.localize('signature unverified', "'{0}' isn't signed by Open VSX: {1}. Extensions listed in the setting {2} install anyway.", extension.identifier.id, status, AllowUnsignedExtensionsConfigKey), ExtensionManagementErrorCode.PackageNotSigned);
++		}
++		if (verificationStatus === ExtensionSignatureVerificationCode.SignatureIsNotValid || !shouldRequireSignature) {
++			throw new ExtensionManagementError(nls.localize('signature mismatch', "'{0}' doesn't match its Open VSX signature, so it may have been changed after it was published. It wasn't installed.", extension.identifier.id), ExtensionManagementErrorCode.SignatureVerificationFailed);
++		}
++		throw new ExtensionManagementError(nls.localize('signature required', "'{0}' wasn't installed: this marketplace accepts only signed extensions, and {1}.", extension.identifier.id, status), ExtensionManagementErrorCode.SignatureVerificationFailed);
+ 	}
+ 
+ 	private async extractVSIX(extensionKey: ExtensionKey, location: URI, options: InstallExtensionTaskOptions, token: CancellationToken): Promise<ExtractExtensionResult> {
+diff --git a/src/vs/platform/extensionManagement/node/extensionSignatureVerificationService.ts b/src/vs/platform/extensionManagement/node/extensionSignatureVerificationService.ts
+index 98535c5e..009e80a6 100644
+--- a/src/vs/platform/extensionManagement/node/extensionSignatureVerificationService.ts
++++ b/src/vs/platform/extensionManagement/node/extensionSignatureVerificationService.ts
+@@ -3,13 +3,14 @@
+  *  Licensed under the MIT License. See License.txt in the project root for license information.
+  *--------------------------------------------------------------------------------------------*/
+ 
++import { promises as fs } from 'fs';
+ import { getErrorMessage } from '../../../base/common/errors.js';
+-import { isDefined } from '../../../base/common/types.js';
++import { buffer } from '../../../base/node/zip.js';
+ import { TargetPlatform } from '../../extensions/common/extensions.js';
+ import { createDecorator } from '../../instantiation/common/instantiation.js';
+-import { ILogService, LogLevel } from '../../log/common/log.js';
+-import { ITelemetryService } from '../../telemetry/common/telemetry.js';
++import { ILogService } from '../../log/common/log.js';
+ import { ExtensionSignatureVerificationCode } from '../common/extensionManagement.js';
++import { checkOpenVsxSignature } from './openVsxSignature.js';
+ 
+ export const IExtensionSignatureVerificationService = createDecorator<IExtensionSignatureVerificationService>('IExtensionSignatureVerificationService');
+ 
+@@ -29,108 +30,33 @@ export interface IExtensionSignatureVerificationService {
+ 	 * @param version The extension version.
+ 	 * @param vsixFilePath The extension file path.
+ 	 * @param signatureArchiveFilePath The signature archive file path.
++	 * @param publicKeyUri FriedLiver: the gallery's PublicKey asset, which names the registry key that signed it.
+ 	 * @returns returns the verification result or undefined if the verification was not executed.
+ 	 */
+-	verify(extensionId: string, version: string, vsixFilePath: string, signatureArchiveFilePath: string, clientTargetPlatform?: TargetPlatform): Promise<IExtensionSignatureVerificationResult | undefined>;
+-}
+-
+-declare namespace vsceSign {
+-	export function verify(vsixFilePath: string, signatureArchiveFilePath: string, verbose: boolean): Promise<ExtensionSignatureVerificationResult>;
+-}
+-
+-/**
+- * Extension signature verification result
+- */
+-export interface ExtensionSignatureVerificationResult {
+-	readonly code: ExtensionSignatureVerificationCode;
+-	readonly didExecute: boolean;
+-	readonly internalCode?: number;
+-	readonly output?: string;
++	verify(extensionId: string, version: string, vsixFilePath: string, signatureArchiveFilePath: string, clientTargetPlatform?: TargetPlatform, publicKeyUri?: string): Promise<IExtensionSignatureVerificationResult | undefined>;
+ }
+ 
++// FriedLiver: Open VSX signatures, checked with the registry key pinned in openVsxSignature.ts,
++// instead of Microsoft's @vscode/vsce-sign (which forks may not ship).
+ export class ExtensionSignatureVerificationService implements IExtensionSignatureVerificationService {
+ 	declare readonly _serviceBrand: undefined;
+ 
+-	private moduleLoadingPromise: Promise<typeof vsceSign> | undefined;
+-
+ 	constructor(
+ 		@ILogService private readonly logService: ILogService,
+-		@ITelemetryService private readonly telemetryService: ITelemetryService,
+ 	) { }
+ 
+-	private vsceSign(): Promise<typeof vsceSign> {
+-		if (!this.moduleLoadingPromise) {
+-			this.moduleLoadingPromise = this.resolveVsceSign();
+-		}
+-
+-		return this.moduleLoadingPromise;
+-	}
+-
+-	private async resolveVsceSign(): Promise<typeof vsceSign> {
+-		const mod = '@vscode/vsce-sign';
+-		return import(mod);
+-	}
+-
+-	public async verify(extensionId: string, version: string, vsixFilePath: string, signatureArchiveFilePath: string, clientTargetPlatform?: TargetPlatform): Promise<IExtensionSignatureVerificationResult | undefined> {
+-		let module: typeof vsceSign;
+-
++	public async verify(extensionId: string, version: string, vsixFilePath: string, signatureArchiveFilePath: string, _clientTargetPlatform?: TargetPlatform, publicKeyUri?: string): Promise<IExtensionSignatureVerificationResult | undefined> {
++		let code: ExtensionSignatureVerificationCode;
+ 		try {
+-			module = await this.vsceSign();
++			// An archive without `.signature.sig` holds no Open VSX signature.
++			const signature = await buffer(signatureArchiveFilePath, '.signature.sig').catch(() => undefined);
++			code = checkOpenVsxSignature(await fs.readFile(vsixFilePath), signature, publicKeyUri) as ExtensionSignatureVerificationCode;
+ 		} catch (error) {
+-			this.logService.error('Could not load vsce-sign module', getErrorMessage(error));
+-			this.logService.info(`Extension signature verification is not done: ${extensionId}`);
++			// The check couldn't run: reported as not executed, which asks before installing.
++			this.logService.error(`Could not check the signature of ${extensionId}`, getErrorMessage(error));
+ 			return undefined;
+ 		}
+-
+-		const startTime = new Date().getTime();
+-		let result: ExtensionSignatureVerificationResult;
+-
+-		try {
+-			this.logService.trace(`Verifying extension signature for ${extensionId}...`);
+-			result = await module.verify(vsixFilePath, signatureArchiveFilePath, this.logService.getLevel() === LogLevel.Trace);
+-		} catch (e) {
+-			result = {
+-				code: ExtensionSignatureVerificationCode.UnknownError,
+-				didExecute: false,
+-				output: getErrorMessage(e)
+-			};
+-		}
+-
+-		const duration = new Date().getTime() - startTime;
+-
+-		this.logService.info(`Extension signature verification result for ${extensionId}: ${result.code}. ${isDefined(result.internalCode) ? `Internal Code: ${result.internalCode}. ` : ''}Executed: ${result.didExecute}. Duration: ${duration}ms.`);
+-		this.logService.trace(`Extension signature verification output for ${extensionId}:\n${result.output}`);
+-
+-		type ExtensionSignatureVerificationClassification = {
+-			owner: 'sandy081';
+-			comment: 'Extension signature verification event';
+-			extensionId: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'extension identifier' };
+-			extensionVersion: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'extension version' };
+-			code: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'result code of the verification' };
+-			internalCode?: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; 'isMeasurement': true; comment: 'internal code of the verification' };
+-			duration: { classification: 'SystemMetaData'; purpose: 'PerformanceAndHealth'; 'isMeasurement': true; comment: 'amount of time taken to verify the signature' };
+-			didExecute: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'whether the verification was executed' };
+-			clientTargetPlatform?: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'target platform of the client' };
+-		};
+-		type ExtensionSignatureVerificationEvent = {
+-			extensionId: string;
+-			extensionVersion: string;
+-			code: string;
+-			internalCode?: number;
+-			duration: number;
+-			didExecute: boolean;
+-			clientTargetPlatform?: string;
+-		};
+-		this.telemetryService.publicLog2<ExtensionSignatureVerificationEvent, ExtensionSignatureVerificationClassification>('extensionsignature:verification', {
+-			extensionId,
+-			extensionVersion: version,
+-			code: result.code,
+-			internalCode: result.internalCode,
+-			duration,
+-			didExecute: result.didExecute,
+-			clientTargetPlatform,
+-		});
+-
+-		return { code: result.code };
++		this.logService.info(`Extension signature verification result for ${extensionId}@${version}: ${code}.`);
++		return { code };
+ 	}
+ }
+diff --git a/src/vs/platform/extensionManagement/node/openVsxSignature.ts b/src/vs/platform/extensionManagement/node/openVsxSignature.ts
+new file mode 100644
+index 00000000..6147b18f
+--- /dev/null
++++ b/src/vs/platform/extensionManagement/node/openVsxSignature.ts
+@@ -0,0 +1,56 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) FriedLiver. Licensed under the MIT License.
++ *--------------------------------------------------------------------------------------------*/
++
++// FriedLiver: checks Open VSX registry signatures. Microsoft's verifier (@vscode/vsce-sign) may only be
++// used with Microsoft's products, so forks can't ship it. Open VSX signs the raw .vsix bytes with one
++// Ed25519 key per registry and serves the 64-byte signature as `.signature.sig` in the .sigzip
++// (eclipse-openvsx/openvsx ExtensionVersionIntegrityService). The `.signature.manifest` beside it isn't
++// signed, so it's not read; the empty `.signature.p7s` is only there for VS Code's zip check.
++// Kept free of VS Code imports so the fork's own tests can run it.
++
++import { createPublicKey, verify } from 'crypto';
++
++/**
++ * Registry keys, pinned: never fetched. Keyed by the id in the gallery's
++ * Microsoft.VisualStudio.Services.PublicKey asset; values are SPKI DER, base64.
++ * When Open VSX renews its key, add the new one here (build.yml's install check fails until then).
++ */
++export const OPEN_VSX_PUBLIC_KEYS: Readonly<Record<string, string>> = {
++	// open-vsx.org. Fetched 2026-10-20 from https://open-vsx.org/api/-/public-key/14ccb407-4e79-41ed-be5a-6d608325c45a;
++	// the same as the Wayback Machine's copy of 2026-02-18, and it verifies redhat.vscode-yaml 2.1.2026102008.
++	'14ccb407-4e79-41ed-be5a-6d608325c45a': 'MCowBQYDK2VwAyEAje+vAaSS1zHV5WHCJSa5UXvxRo6+yerEU3IEmtuEuF4=',
++};
++
++/** The key id at the end of a PublicKey asset URL (`.../api/-/public-key/<id>`). */
++export function openVsxPublicKeyId(uri: string | undefined): string | undefined {
++	return uri ? /\/public-key\/([0-9a-f-]{1,64})\/?$/i.exec(uri)?.[1]?.toLowerCase() : undefined;
++}
++
++/** The ExtensionSignatureVerificationCode values this check gives. */
++export type OpenVsxSignatureCode = 'Success' | 'SignatureIsNotValid' | 'NotSigned' | 'Untrusted';
++
++/**
++ * Success: one of the pinned keys signed exactly these bytes.
++ * SignatureIsNotValid: the gallery names a pinned key, but the signature is missing, malformed or doesn't
++ * match. Treated as tampering, so a stripped signature can't turn a refusal into a prompt.
++ * NotSigned: no signature, and the gallery names no pinned key.
++ * Untrusted: a signature no pinned key matches, and the gallery names none of them (another registry,
++ * or a key FriedLiver doesn't know yet), so nothing can be said either way.
++ * Throws when the check itself can't run (a broken pinned key); the caller treats that as unchecked.
++ */
++export function checkOpenVsxSignature(vsix: Uint8Array, signature: Uint8Array | undefined, publicKeyUri: string | undefined, keys: Readonly<Record<string, string>> = OPEN_VSX_PUBLIC_KEYS): OpenVsxSignatureCode {
++	if (signature?.length === 64) {
++		for (const der of Object.values(keys)) {
++			const key = createPublicKey({ key: Buffer.from(der, 'base64'), format: 'der', type: 'spki' });
++			if (verify(null, vsix, key, signature)) {
++				return 'Success';
++			}
++		}
++	}
++	const keyId = openVsxPublicKeyId(publicKeyUri);
++	if (keyId !== undefined && Object.prototype.hasOwnProperty.call(keys, keyId)) {
++		return 'SignatureIsNotValid';
++	}
++	return signature === undefined ? 'NotSigned' : 'Untrusted';
++}
+diff --git a/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts b/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts
+index 695859ca..9012a8e0 100644
+--- a/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts
++++ b/src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts
+@@ -26,6 +26,7 @@ import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../p
+ import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+ import { ExtensionGalleryManifestStatus, ExtensionGalleryResourceType, ExtensionGalleryAuthProviderConfigKey, ExtensionGalleryServiceUrlConfigKey, getExtensionGalleryManifestResourceUri, IExtensionGalleryManifest, IExtensionGalleryManifestService } from '../../../../platform/extensionManagement/common/extensionGalleryManifest.js';
+ import { IExtensionGalleryAccountService } from '../../../services/extensionManagement/common/extensionGalleryAccount.js';
++import { AllowUnsignedExtensionsConfigKey } from '../../../../platform/extensionManagement/common/extensionSignaturePolicy.js';
+ import { EXTENSION_INSTALL_SOURCE_CONTEXT, ExtensionInstallSource, ExtensionRequestsTimeoutConfigKey, ExtensionsLocalizedLabel, FilterType, IExtensionGalleryService, IExtensionManagementService, PreferencesLocalizedLabel, SortBy, VerifyExtensionSignatureConfigKey } from '../../../../platform/extensionManagement/common/extensionManagement.js';
+ import { areSameExtensions, getIdAndVersion } from '../../../../platform/extensionManagement/common/extensionManagementUtil.js';
+ import { ExtensionStorageService } from '../../../../platform/extensionManagement/common/extensionStorage.js';
+@@ -335,6 +336,15 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
+ 				scope: ConfigurationScope.APPLICATION,
+ 				included: isNative
+ 			},
++			// FriedLiver: your "Install Anyway" answers. Never covers a signature that doesn't match.
++			[AllowUnsignedExtensionsConfigKey]: {
++				type: 'array',
++				items: { type: 'string' },
++				description: localize('extensions.allowUnsigned', "Extensions you chose to install although Open VSX's signature for them couldn't be checked (not signed, or signed with a key FriedLiver doesn't know). Remove an extension to be asked again. An extension whose signature doesn't match is never installed."),
++				default: [],
++				scope: ConfigurationScope.APPLICATION,
++				included: isNative
++			},
+ 			[AutoRestartConfigurationKey]: {
+ 				type: 'boolean',
+ 				description: localize('autoRestart', "If activated, extensions will automatically restart following an update if the window is not in focus. There can be a data loss if you have open Notebooks or Custom Editors."),
+diff --git a/src/vs/workbench/contrib/extensions/browser/extensionsActions.ts b/src/vs/workbench/contrib/extensions/browser/extensionsActions.ts
+index 79468b8c..db2a31bc 100644
+--- a/src/vs/workbench/contrib/extensions/browser/extensionsActions.ts
++++ b/src/vs/workbench/contrib/extensions/browser/extensionsActions.ts
+@@ -77,6 +77,7 @@ import { IExtensionGalleryManifestService } from '../../../../platform/extension
+ import { IWorkbenchIssueService } from '../../issue/common/issue.js';
+ import { IUserDataProfilesService } from '../../../../platform/userDataProfile/common/userDataProfile.js';
+ import { getWorkbenchMenuMotionContextMenuOptions } from '../../../browser/actions/menuMotion.js';
++import { ALLOW_UNSIGNED_CONTEXT, AllowUnsignedExtensionsConfigKey, isUnsignedAllowed } from '../../../../platform/extensionManagement/common/extensionSignaturePolicy.js';
+ 
+ export class PromptExtensionInstallFailureAction extends Action {
+ 
+@@ -97,6 +98,7 @@ export class PromptExtensionInstallFailureAction extends Action {
+ 		@IExtensionGalleryService private readonly galleryService: IExtensionGalleryService,
+ 		@IExtensionManifestPropertiesService private readonly extensionManifestPropertiesService: IExtensionManifestPropertiesService,
+ 		@IWorkbenchIssueService private readonly workbenchIssueService: IWorkbenchIssueService,
++		@IConfigurationService private readonly configurationService: IConfigurationService,
+ 	) {
+ 		super('extension.promptExtensionInstallFailure');
+ 	}
+@@ -145,15 +147,21 @@ export class PromptExtensionInstallFailureAction extends Action {
+ 			return;
+ 		}
+ 
++		// FriedLiver: the extension isn't signed by Open VSX, or its signature couldn't be checked. "Install Anyway"
++		// still checks it (a signature that doesn't match is refused), and is remembered for this extension.
+ 		if (ExtensionManagementErrorCode.PackageNotSigned === (<ExtensionManagementErrorCode>this.error.name)) {
+ 			await this.dialogService.prompt({
+-				type: 'error',
+-				message: localize('not signed', "'{0}' is an extension from an unknown source. Are you sure you want to install?", this.extension.displayName),
+-				detail: getErrorMessage(this.error),
++				type: 'warning',
++				message: localize('not signed by open vsx', "This extension isn't signed by Open VSX. Install anyway?"),
++				detail: localize('not signed by open vsx detail', "{0}\n\nInstall Anyway adds {1} to that list.", getErrorMessage(this.error), this.extension.identifier.id),
+ 				buttons: [{
+ 					label: localize('install anyway', "Install Anyway"),
+-					run: () => {
+-						const installAction = this.instantiationService.createInstance(InstallAction, { ...this.options, donotVerifySignature: true, });
++					run: async () => {
++						const allowed = this.configurationService.getValue<unknown>(AllowUnsignedExtensionsConfigKey);
++						if (!isUnsignedAllowed(allowed, this.extension.identifier.id)) {
++							await this.configurationService.updateValue(AllowUnsignedExtensionsConfigKey, [...(Array.isArray(allowed) ? allowed : []), this.extension.identifier.id], ConfigurationTarget.USER);
++						}
++						const installAction = this.instantiationService.createInstance(InstallAction, { ...this.options, context: { ...this.options?.context, [ALLOW_UNSIGNED_CONTEXT]: true } });
+ 						installAction.extension = this.extension;
+ 						return installAction.run();
+ 					}
+@@ -163,29 +171,15 @@ export class PromptExtensionInstallFailureAction extends Action {
+ 			return;
+ 		}
+ 
++		// FriedLiver: no "Install Anyway" (or "Learn More" about Microsoft's verifier). This is a signature that
++		// doesn't match, or a marketplace that requires one.
+ 		if (ExtensionManagementErrorCode.SignatureVerificationFailed === (<ExtensionManagementErrorCode>this.error.name)) {
+-			await this.dialogService.prompt({
+-				type: 'error',
+-				message: localize('verification failed', "Cannot install '{0}' extension because {1} cannot verify the extension signature", this.extension.displayName, this.productService.nameLong),
+-				detail: getErrorMessage(this.error),
+-				buttons: [{
+-					label: localize('learn more', "Learn More"),
+-					run: () => this.openerService.open('https://code.visualstudio.com/docs/editor/extension-marketplace#_the-extension-signature-cannot-be-verified-by-vs-code')
+-				}, {
+-					label: localize('install donot verify', "Install Anyway (Don't Verify Signature)"),
+-					run: () => {
+-						const installAction = this.instantiationService.createInstance(InstallAction, { ...this.options, donotVerifySignature: true, });
+-						installAction.extension = this.extension;
+-						return installAction.run();
+-					}
+-				}],
+-				cancelButton: true
+-			});
++			await this.dialogService.error(localize('verification failed', "Cannot install '{0}' extension because {1} cannot verify the extension signature", this.extension.displayName, this.productService.nameLong), getErrorMessage(this.error));
+ 			return;
+ 		}
+ 
+ 		if (ExtensionManagementErrorCode.SignatureVerificationInternal === (<ExtensionManagementErrorCode>this.error.name)) {
+-			await this.dialogService.prompt({
++			await this.dialogService.prompt<unknown>({
+ 				type: 'error',
+ 				message: localize('verification failed', "Cannot install '{0}' extension because {1} cannot verify the extension signature", this.extension.displayName, this.productService.nameLong),
+ 				detail: getErrorMessage(this.error),
+@@ -198,14 +192,8 @@ export class PromptExtensionInstallFailureAction extends Action {
+ 						issueTitle: localize('report issue title', "Extension Signature Verification Failed: {0}", this.extension.displayName),
+ 						issueBody: localize('report issue body', "Please include following log `F1 > Open View... > Shared` below.\n\n")
+ 					})
+-				}, {
+-					label: localize('install donot verify', "Install Anyway (Don't Verify Signature)"),
+-					run: () => {
+-						const installAction = this.instantiationService.createInstance(InstallAction, { ...this.options, donotVerifySignature: true, });
+-						installAction.extension = this.extension;
+-						return installAction.run();
+-					}
+ 				}],
++				// FriedLiver: no "Install Anyway (Don't Verify Signature)"; a check that couldn't run asks as PackageNotSigned.
+ 				cancelButton: true
+ 			});
+ 			return;
+@@ -455,7 +443,6 @@ export class InstallAction extends ExtensionAction {
+ 		@ITelemetryService private readonly telemetryService: ITelemetryService,
+ 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
+ 		@IAllowedExtensionsService private readonly allowedExtensionsService: IAllowedExtensionsService,
+-		@IExtensionGalleryManifestService private readonly extensionGalleryManifestService: IExtensionGalleryManifestService,
+ 	) {
+ 		super('extensions.install', localize('install', "Install"), InstallAction.CLASS, false);
+ 		this.hideOnDisabled = false;
+@@ -504,28 +491,8 @@ export class InstallAction extends ExtensionAction {
+ 			return;
+ 		}
+ 
+-		if (this.extension.gallery && !this.extension.gallery.isSigned && shouldRequireRepositorySignatureFor(this.extension.private, await this.extensionGalleryManifestService.getExtensionGalleryManifest())) {
+-			const { result } = await this.dialogService.prompt({
+-				type: Severity.Warning,
+-				message: localize('not signed', "'{0}' is an extension from an unknown source. Are you sure you want to install?", this.extension.displayName),
+-				detail: localize('not signed detail', "Extension is not signed."),
+-				buttons: [
+-					{
+-						label: localize('install anyway', "Install Anyway"),
+-						run: () => {
+-							this.options.donotVerifySignature = true;
+-							return true;
+-						}
+-					}
+-				],
+-				cancelButton: {
+-					run: () => false
+-				}
+-			});
+-			if (!result) {
+-				return;
+-			}
+-		}
++		// FriedLiver: no "Install Anyway" before installing an unsigned extension from a marketplace that requires
++		// signatures (it skipped the check). Such a marketplace is enforced; the install reports the refusal.
+ 
+ 		if (this.extension.deprecationInfo) {
+ 			let detail: string | MarkdownString = localize('deprecated message', "This extension is deprecated as it is no longer being maintained.");
