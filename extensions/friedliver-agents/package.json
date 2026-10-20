@@ -1168,7 +1168,7 @@
     "@types/vscode": "~1.140.0",
     "@vscode/test-electron": "^3.1.0",
     "esbuild": "^0.28.2",
-    "playwright": "1.56.1",
+    "playwright": "1.64.0",
     "preact": "^11.0.1",
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",
