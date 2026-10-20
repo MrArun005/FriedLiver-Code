@@ -78,8 +78,8 @@ const contrast = (a: RGBA, b: RGBA) => {
   return (x + 0.05) / (y + 0.05);
 };
 
-describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
-  for (const name of ['dark-2026', 'light-2026']) {
+describe('the design tokens keep WCAG contrast in the 2026 themes and the v2 FriedLiver Dark and Light', () => {
+  for (const name of ['dark-2026', 'light-2026', 'friedliver-dark', 'friedliver-light']) {
     it(name, () => {
       const vars = { ...declarations(block()), ...theme(name) };
       const bg = resolve('var(--bg)', vars);
@@ -112,8 +112,8 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
       // Text on the loud decision fill (counts, the waiting badge).
       expect(contrast(st('--decision-fg'), over(waiting, bg)), 'text on the decision colour').toBeGreaterThanOrEqual(4.5);
       // A toned pill's text on its 14% tint over a card: 4.5:1. The tone mixes toward --fg by --tone-ink (75% dark, 40% light).
-      const ink = name.startsWith('light') ? 0.4 : 0.75;
-      if (!name.startsWith('light')) expect(vars['--tone-ink'], 'dark themes keep 75% of a tone').toBe('75%');
+      const ink = name.includes('light') ? 0.4 : 0.75;
+      if (!name.includes('light')) expect(vars['--tone-ink'], 'dark themes keep 75% of a tone').toBe('75%');
       expect(css, 'the light block keeps --tone-ink at 40%').toMatch(/body\.vscode-light[\s\S]*?--tone-ink: 40%/);
       const fg = st('--fg');
       for (const [n, c] of Object.entries({ working, waiting, failed, warn: st('--warn'), success: st('--tl-success') })) {
@@ -123,7 +123,7 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
       }
       // The composer's mic at rest: a bare glyph on the message box, white in dark themes and the
       // text colour in light ones (the body.vscode-light block). Listening: white on the brand blue.
-      const idle = resolve(name.startsWith('light') ? 'var(--fg)' : '#ffffff', vars);
+      const idle = resolve(name.includes('light') ? 'var(--fg)' : '#ffffff', vars);
       expect(contrast(idle, surface('--input-bg')), 'idle mic glyph').toBeGreaterThanOrEqual(4.5);
       expect(contrast(resolve('var(--mic-fg)', vars), over(resolve('var(--mic-bg)', vars), surface('--input-bg'))), 'listening mic').toBeGreaterThanOrEqual(4.5);
     });
@@ -207,8 +207,8 @@ describe('the design tokens keep WCAG contrast in the 2026 themes', () => {
     const light = declarations(tokens.slice(lightAt, tokens.indexOf('}', lightAt)));
     let checked = 0;
     const fails: string[] = [];
-    for (const name of ['dark-2026', 'light-2026']) {
-      const vars = { ...declarations(block()), ...theme(name), ...(name.startsWith('light') ? light : {}) };
+    for (const name of ['dark-2026', 'light-2026', 'friedliver-dark', 'friedliver-light']) {
+      const vars = { ...declarations(block()), ...theme(name), ...(name.includes('light') ? light : {}) };
       const surfaces = ['--bg', '--input-bg', '--menu-bg', '--dialog-bg'].map((t) => over(resolve(`var(${t})`, vars), resolve('var(--bg)', vars)));
       for (const p of compounds) {
         const d = merged(p);
