@@ -50,7 +50,7 @@ describe('generated files', () => {
   it('match glyphs.json (except the font, which CI rebuilds)', () => {
     for (const [rel, contents] of Object.entries(want)) {
       if (rel.endsWith('.woff2')) continue;
-      expect(fs.readFileSync(path.join(ICONS, rel), 'utf8'), rel).toBe(contents);
+      expect(fs.readFileSync(path.join(ICONS, rel), 'utf8').replace(/\r\n/g, '\n'), rel).toBe(contents); // Windows checkouts may use CRLF
     }
     expect(fs.statSync(path.join(ICONS, 'friedliver-icons.woff2')).size).toBeGreaterThan(1000);
   });
