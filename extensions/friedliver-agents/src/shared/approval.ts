@@ -233,7 +233,11 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
             : undefined;
   const locked: Approval['locked'] = {};
   if (careful) locked.chat = locked.always = risk.lock;
-  else if (item.once) locked.chat = locked.always = 'The clipboard, screenshots and terminal-like apps ask every time.';
+  else if (item.tool === 'browser_download') {
+    // Each download a page starts asks again in another chat; a large one asks every time.
+    locked.always = 'Downloads can’t be always allowed: each chat asks.';
+    if (item.once) locked.chat = 'Downloads over 500 MB ask every time.';
+  } else if (item.once) locked.chat = locked.always = 'The clipboard, screenshots and terminal-like apps ask every time.';
   else if (!item.always) locked.always = browser ? 'The page’s site is unknown, so it can’t be remembered.' : 'Nothing here can be remembered safely.';
   return {
     id: item.requestId,
@@ -263,6 +267,7 @@ const BRIDGE_WORDS: Record<string, string> = {
   browser_type: 'Type',
   browser_back: 'Go back',
   browser_reload: 'Reload',
+  browser_download: 'Download',
 };
 
 /** A force push with the commits the host found: the first consequence counts them. */
