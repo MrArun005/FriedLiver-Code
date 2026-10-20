@@ -4,6 +4,7 @@
 import { createElement, type ButtonHTMLAttributes, type ComponentChildren, type InputHTMLAttributes, type Ref, type TextareaHTMLAttributes } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon, type IconName } from './icon';
+import { Keycaps } from './keycap';
 
 export type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'quiet-danger' | 'brand' | 'link' | 'text';
 export type Size = 'sm' | 'md' | 'lg' | 'touch';
@@ -49,7 +50,7 @@ export function Button({ variant, size, icon, iconEnd, kbd, loading, block, trun
     >
       {icon && <Icon name={icon} />}
       {children}
-      {kbd && <kbd class="fl-kbd fl-kbd--inline">{kbd}</kbd>}
+      {kbd && <Keycaps keys={kbd} inline class="fl-btn__k" />}
       {iconEnd && <Icon name={iconEnd} />}
       {loading && <span class="fl-spinner" aria-hidden="true" />}
     </button>
@@ -322,7 +323,7 @@ export function ChoiceRow({
         <span>{label}</span>
         {desc && <span class="fl-radio__desc">{desc}</span>}
       </span>
-      {kbd && <kbd class="fl-kbd fl-radio__key">{kbd}</kbd>}
+      {kbd && <Keycaps keys={kbd} class="fl-radio__key" />}
     </button>
   );
 }
@@ -378,5 +379,29 @@ export function selectTrigger(value: ComponentChildren, placeholder = 'Choose…
       </span>
       <Icon name="chevronDown" />
     </>
+  );
+}
+
+/**
+ * The Ask box (§2.36): the Welcome hero's one input, 52 tall, with an icon and the primary action inside at
+ * its end (`children`). Enter submits.
+ */
+export function AskBox({ value, onInput, onSubmit, placeholder, label, children }: { value: string; onInput(v: string): void; onSubmit(): void; placeholder: string; label: string; children?: ComponentChildren }) {
+  return (
+    <label class="fl-ask">
+      <Icon name="agents" />
+      <input
+        value={value}
+        placeholder={placeholder}
+        aria-label={label}
+        onInput={(e) => onInput(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || e.isComposing) return;
+          e.preventDefault();
+          onSubmit();
+        }}
+      />
+      {children}
+    </label>
   );
 }

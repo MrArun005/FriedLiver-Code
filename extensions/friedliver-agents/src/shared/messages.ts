@@ -71,6 +71,10 @@ export type WebviewMessage =
   | { type: 'removeWorktree'; chatId: string }
   | { type: 'moveToCenter' }
   | { type: 'openTasks' }
+  /** The Welcome page (COMPONENTS.md v2 §2.38): open a folder, clone one, or open the host's recent entry by its index. */
+  | { type: 'openFolder' }
+  | { type: 'cloneRepo' }
+  | { type: 'openRecent'; index: number }
   /** The Agent Manager on its Inbox: everything any agent waits on. */
   | { type: 'openInbox' }
   // Connections between chats and agents.
@@ -178,7 +182,17 @@ export type HostMessage =
   /** friedliver.discuss.layout changed: open discussion cards redraw in it. */
   | { type: 'discussLayout'; layout: DiscussLayout }
   /** The Agent Manager turns to its Inbox (FriedLiver: Open Decision Inbox). */
-  | { type: 'showInbox' };
+  | { type: 'showInbox' }
+  /** The Welcome page's recent folders, newest first (the webview answers with an index, never a path). */
+  | { type: 'recent'; items: RecentFolder[] };
+
+export interface RecentFolder {
+  name: string;
+  /** For display: the home folder shortened to ~. */
+  path: string;
+  /** The folder open in this window. */
+  current?: boolean;
+}
 
 /** A Claude Code session started outside FriedLiver (the CLI or the Claude Code extension), read-only. */
 export interface ClaudeSession {
@@ -320,10 +334,14 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'ready':
     case 'moveToCenter':
     case 'openTasks':
+    case 'openFolder':
+    case 'cloneRepo':
     case 'openInbox':
     case 'otherAgents':
     case 'dictationSettings':
       return { type: m.type };
+    case 'openRecent':
+      return Number.isInteger(m.index) && (m.index as number) >= 0 && (m.index as number) < 50 ? { type: 'openRecent', index: m.index as number } : null;
     case 'dictate':
       return id(m.chatId) && typeof m.on === 'boolean' ? { type: 'dictate', chatId: m.chatId, on: m.on } : null;
     case 'attach':

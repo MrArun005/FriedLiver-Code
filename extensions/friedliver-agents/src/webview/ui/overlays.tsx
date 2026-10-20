@@ -4,6 +4,7 @@ import type { ComponentChildren } from 'preact';
 import { createPortal } from 'preact/compat';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Icon, type IconName } from './icon';
+import { keyText } from './keys';
 import { Button, IconButton } from './controls';
 import { Countdown, type Tone } from './display';
 
@@ -48,7 +49,7 @@ export function useTooltip<T extends HTMLElement>({ text, kbd, delay = 500, side
     at && text ? createPortal(
       <span ref={tipRef} class="fl-tip" role="tooltip" style={{ left: `${at.x}px`, top: `${at.y}px`, transform: side === 'below' ? undefined : 'translateY(-100%)' }}>
         {text}
-        {kbd && <kbd class="fl-kbd">{kbd}</kbd>}
+        {kbd && <kbd class="fl-kbd">{keyText(kbd)}</kbd>}
       </span>,
       document.body,
     ) : null;
