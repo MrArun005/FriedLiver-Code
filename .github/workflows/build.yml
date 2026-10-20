@@ -203,6 +203,31 @@ jobs:
           path: installers/*
           if-no-files-found: error
 
+  # What patch 0300's downloads rely on (pause, cancel, user gestures, the quarantine mark and Mark of
+  # the Web), in upstream's own Electron version (its .npmrc target at the pinned tag). Its own job: the
+  # Electron package comes from npm outside a lockfile, so this job gets no secrets and makes no artifacts.
+  downloads-probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Downloads probe (Electron)
+        shell: bash
+        run: |
+          tag=$(node -p "require('./upstream.json').tag")
+          electron=$(curl -fsSL "https://raw.githubusercontent.com/microsoft/vscode/$tag/.npmrc" | sed -n 's/^target="\(.*\)"$/\1/p')
+          test -n "$electron"
+          npx -y "electron@$electron" scripts/downloads-probe.cjs --use-mock-keychain --password-store=basic
+
   # For releases only (a tag, or release.yml): the installers and portable apps of this run, with their SHA-256 sums,
   # attached to a GitHub release. The Agents extension checks for it every 4 hours and installs
   # the DMG only when its SHA-256 in SHA256SUMS.txt matches.

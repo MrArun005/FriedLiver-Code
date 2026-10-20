@@ -2,6 +2,7 @@ import { isBrowserCall, isExternal, isIndexCall, isSystemCall, type BridgeCall, 
 import { chatRef } from '../shared/names';
 import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
+import { describeForApproval, LARGE_DOWNLOAD_BYTES, type DownloadInfo } from './browserDownloads';
 import { AGENT_FACES, BRIDGE_TIMEOUT_MS, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { siteOrigin, type Grant, type ToolGrant } from '../shared/permissions';
 import { browserRisk } from '../shared/risk';
@@ -41,7 +42,7 @@ export interface ToolHost {
   message(chatId: string, targetChatId: string, text: string): void;
   cancel(chatId: string): Promise<void>;
   /** Does a browser tool call for the chat (browser.ts); absent when the editor has no built-in browser. */
-  browser?(chatId: string, call: BrowserCall, signal: AbortSignal, expectOrigin?: string): Promise<string>;
+  browser?(chatId: string, call: BrowserCall, signal: AbortSignal, expectOrigin?: string, askDownload?: (d: DownloadInfo) => Promise<boolean>): Promise<string>;
   /** Appends a fact to the project's memory (sharedRules.ts remember); absent when there is no trusted folder. */
   remember?(fact: string): Promise<string>;
   /** Whether read_chat skips the user's OK between chats a hand-off or consultation linked. Default no. */
@@ -178,6 +179,7 @@ export class BridgeRequests {
     if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
     if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
     if (!browserNeedsApproval(call.tool, undefined)) return this.host.browser(caller.id, call, signal);
+    const askDownload = (d: DownloadInfo) => this.download(caller, d, signal);
     const text =
       call.tool === 'browser_open' ? call.url : call.tool === 'browser_click' ? (call.selector ?? `"${call.text}"`) : call.tool === 'browser_type' ? `${call.selector} ← ${call.text}` : '';
     // A purchase or a form submit asks every time: only Full auto lets it through, never "this chat" or a remembered site.
@@ -202,7 +204,42 @@ export class BridgeRequests {
     // Either can change while the user decides.
     if (this.host.policy() === 'off') throw new Error('The user turned off the FriedLiver tools.');
     if (!this.chat(caller.id)) throw new Error('This chat was closed in FriedLiver.');
-    return this.host.browser(caller.id, call, signal, origin && call.tool !== 'browser_open' ? origin : undefined);
+    return this.host.browser(caller.id, call, signal, origin && call.tool !== 'browser_open' ? origin : undefined, askDownload);
+  }
+
+  /**
+   * A download the page started during this chat's browser action. Like the action it waits for the
+   * user unless the chat is on Full auto or they allowed downloads for this chat; over 500 MB it asks
+   * every time, once only. Nothing is saved until the answer.
+   */
+  private async download(caller: ChatView, d: DownloadInfo, signal: AbortSignal): Promise<boolean> {
+    const large = d.totalBytes > LARGE_DOWNLOAD_BYTES;
+    const key = `${caller.id} download`;
+    const auto = !large && (!browserNeedsApproval('browser_click', this.chat(caller.id)?.approval ?? caller.approval) || this.allowedChats.has(key));
+    if (!auto) this.room(caller.id);
+    const origin = siteOrigin(d.url);
+    const item: BridgeItem = {
+      kind: 'bridge',
+      requestId: this.host.id('bridge'),
+      tool: 'browser_download',
+      target: { browser: true },
+      text: clean(describeForApproval(d), 160),
+      state: 'awaiting',
+      ...(origin ? { always: origin } : {}),
+      ...(large ? { once: true as const } : {}),
+    };
+    const answer = await this.approve(caller, item, auto, signal, undefined, false, key);
+    return answer === 'allowed' && this.host.policy() !== 'off' && !!this.chat(caller.id);
+  }
+
+  /** A download a Claude Code browser action started: its own popup, "this session" covers later ones under 500 MB. */
+  private async externalDownload(id: string, d: DownloadInfo, signal: AbortSignal): Promise<boolean> {
+    const large = d.totalBytes > LARGE_DOWNLOAD_BYTES;
+    const key = `${id} download`;
+    if (!large && (this.host.externalAutoApprove?.() || this.allowedChats.has(key))) return true;
+    this.room(id);
+    const answer = await this.waitFor(id, key, 'Claude Code wants to download a file in the browser', clean(describeForApproval(d), 160), signal, undefined, false, large);
+    return answer === 'allowed' && this.host.policy() !== 'off';
   }
 
   /**
@@ -213,6 +250,7 @@ export class BridgeRequests {
   private async external(id: string, call: BrowserCall, signal: AbortSignal): Promise<string> {
     if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
     if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
+    const askDownload = (d: DownloadInfo) => this.externalDownload(id, d, signal);
     if (browserNeedsApproval(call.tool, undefined)) {
       const page = (await this.host.browserPage?.(call.tool === 'browser_type' ? call.selector : undefined).catch(() => undefined)) ?? { password: true };
       const origin = call.tool === 'browser_open' ? new URL(call.url).origin : (page.origin ?? 'an unknown page');
@@ -232,10 +270,10 @@ export class BridgeRequests {
         // The OK was for this origin: if the page moved on meanwhile, nothing happens. browser.ts checks again just before it acts.
         const now = (await this.host.browserPage?.().catch(() => undefined))?.origin;
         if (now !== origin) throw new Error(`The page changed to ${clean(now ?? 'an unknown page')} after you approved; ask again.`);
-        return this.host.browser(id, call, signal, origin);
+        return this.host.browser(id, call, signal, origin, askDownload);
       }
     }
-    return this.host.browser(id, call, signal);
+    return this.host.browser(id, call, signal, undefined, askDownload);
   }
 
   /** A system_* call from a chat (`caller`) or an external session; every attempt goes in the audit log. */
@@ -370,10 +408,9 @@ export class BridgeRequests {
 
   forget(chatId: string): void {
     this.settle(chatId, true);
+    // Every grant the chat holds: browser, memory, download, system … (keys are "<chatId> <what>").
     this.allowedChats.delete(chatId);
-    this.allowedChats.delete(`${chatId} browser`);
-    this.allowedChats.delete(`${chatId} memory`);
-    for (const key of [...this.allowedChats]) if (key.startsWith(`${chatId} system `)) this.allowedChats.delete(key);
+    for (const key of [...this.allowedChats]) if (key.startsWith(`${chatId} `)) this.allowedChats.delete(key);
     this.systemRate.forget(chatId);
     this.waits.delete(chatId);
   }
