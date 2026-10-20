@@ -1,5 +1,7 @@
 // /discuss: the chat's agent and the agents it names take turns on a question, in a fixed order,
 // for a few rounds at most, then the starting agent sums it up (FriedLiver does when it can't).
+// A participant is an agent on a model: the same agent can take part twice on different models,
+// each in its own chat, keyed "agent/model" (shared/discuss.ts speakerOf).
 // Everyone is read-only meanwhile: the core refuses their writes, commands and acting tools
 // (discussionAllows below), and puts their agents in a read-only mode.
 import type { BridgeCall } from '../bridge/protocol';
@@ -11,14 +13,21 @@ import {
   allAgree,
   carryOutText,
   fallbackConclusion,
+  namesOf,
   parseConclusion,
   speakerName,
+  speakerOf,
+  speakerResolver,
   stanceOf,
   stripStance,
   type DiscussEnd,
   type DiscussTurn,
   type DiscussionItem,
+  type Participant,
+  type Speaker,
 } from '../shared/discuss';
+import { currentModel, modelLabel, sameModel, type Who } from '../shared/discussMentions';
+import type { OptionChoice } from '../shared/session';
 import { estimateTokens } from '../shared/tokens';
 import type { TurnResult } from './connections';
 
@@ -28,8 +37,13 @@ export interface DiscussHost {
   dispatch(action: Action): void;
   id(prefix: string): string;
   settings(): { maxRounds?: number; tokenBudget?: number };
-  /** The agent's chat for the discussion: the one `sourceId` already consults, else a new one. */
-  participant(sourceId: string, agent: AgentKey): Promise<string>;
+  /**
+   * The participant's chat: one `sourceId` already consults with that agent (on `model`, when given) that
+   * isn't in `taken` (the discussion's other chats), else a new one, started on `model`.
+   */
+  participant(sourceId: string, agent: AgentKey, model?: string, taken?: string[]): Promise<string>;
+  /** The models the agent reported (ids and names); a participant's model must be one of them. */
+  models?(agent: AgentKey): OptionChoice[];
   /** A turn in the starting chat, given `text` as a message from FriedLiver. */
   prompt(chatId: string, text: string): Promise<TurnResult>;
   /** A turn in another participant's chat, asked from the starting one; resolves with the answer. */
@@ -98,19 +112,36 @@ export class Discussions {
 
   constructor(private readonly host: DiscussHost) {}
 
-  /** Starts a discussion in `chatId` with `agents`; resolves when it has its conclusion. */
-  async start(chatId: string, agents: AgentKey[], question: string): Promise<void> {
+  /**
+   * Starts a discussion in `chatId` with `who` (agents, or agents on models); resolves when it has its
+   * conclusion. The chat's own agent speaks first; naming it on its own model (or none) adds nobody.
+   */
+  async start(chatId: string, who: (AgentKey | Who)[], question: string): Promise<void> {
     const chat = this.require(chatId);
     if (chat.busy) throw new Error(`${chat.label} is still working. Start the discussion when the turn ends.`);
     if (this.runningIn(chatId)) throw new Error('A discussion is already running in this chat.');
-    const others = [...new Set(agents)].filter((a) => a !== chat.agent);
-    if (!others.length) throw new Error('Name at least one other agent: /discuss @gemini @codex <question>');
+    const own = currentModel(chat.session);
+    const others: Who[] = [];
+    for (const w of who.map((x): Who => (typeof x === 'string' ? { agent: x } : x))) {
+      if (w.agent === chat.agent && (!w.model || sameModel(w.model, own))) continue;
+      if (!others.some((o) => speakerOf(o) === speakerOf(w))) others.push(w);
+    }
+    if (!others.length) throw new Error('Name at least one other agent or model: /discuss @gemini @opus <question>');
+    const models = (agent: AgentKey) => this.host.models?.(agent) ?? [];
+    const named = (agent: AgentKey, model: string) => {
+      const name = models(agent).find((c) => c.value === model)?.name;
+      return name ? { modelName: modelLabel(agent, name) } : {};
+    };
+    for (const w of others)
+      if (w.model && this.host.models && !models(w.agent).some((c) => c.value === w.model)) throw new Error(`${speakerName(w.agent)} doesn't offer the model ${w.model}.`);
+    // With models in play the chat's own agent is named by its model too, so two of the same agent tell apart.
+    const self: Participant = { agent: chat.agent, ...(own && others.some((o) => o.model || o.agent === chat.agent) ? { model: own, ...named(chat.agent, own) } : {}), chatId };
     const s = this.host.settings();
     const d: DiscussionItem = {
       kind: 'discussion',
       id: this.host.id('discuss'),
       question: question.trim(),
-      participants: [{ agent: chat.agent, chatId }, ...others.map((agent) => ({ agent }))],
+      participants: [self, ...others.map((w): Participant => ({ agent: w.agent, ...(w.model ? { model: w.model, ...named(w.agent, w.model) } : {}) }))],
       maxRounds: clamp(s.maxRounds, DISCUSS_ROUNDS.min, DISCUSS_ROUNDS.max, DISCUSS_ROUNDS.default),
       round: 1,
       state: 'running',
@@ -118,7 +149,10 @@ export class Discussions {
       tokens: 0,
       budget: clamp(s.tokenBudget, DISCUSS_BUDGET.min, DISCUSS_BUDGET.max, DISCUSS_BUDGET.default),
     };
-    const typed = `/discuss ${others.map((a) => `@${a}`).join(' ')} ${d.question}`;
+    const typed = `/discuss ${d.participants
+      .slice(1)
+      .map((p) => `@${speakerOf(p)}`)
+      .join(' ')} ${d.question}`;
     this.host.dispatch({ t: 'items', chatId, items: [{ kind: 'user', text: typed, images: [] }, d], at: Date.now() });
     await this.run(chatId, d.id);
   }
@@ -189,14 +223,14 @@ export class Discussions {
     await this.run(chat.id, next.id);
   }
 
-  /** Hands the conclusion to one of the agents, as an ordinary message (its approvals apply). */
-  async carryOut(id: string, agent: AgentKey): Promise<void> {
+  /** Hands the conclusion to one of the participants (by key), as an ordinary message (its approvals apply). */
+  async carryOut(id: string, who: Speaker): Promise<void> {
     const found = this.locate(id);
     if (!found || found.d.state !== 'done' || !found.d.conclusion) return;
     const { chat, d } = found;
-    const p = d.participants.find((x) => x.agent === agent);
-    if (!p) throw new Error(`${speakerName(agent)} didn't take part in this discussion.`);
-    this.patch(d, { carried: agent });
+    const p = d.participants.find((x) => speakerOf(x) === who);
+    if (!p) throw new Error(`${speakerName(who)} didn't take part in this discussion.`);
+    this.patch(d, { carried: who });
     const text = carryOutText(d);
     if (p.chatId === chat.id || !p.chatId) await this.host.send(chat.id, text);
     else await this.host.message(chat.id, p.chatId, text);
@@ -233,21 +267,23 @@ export class Discussions {
         d = this.get(chatId, id)!;
         if (live.stop) return 'stopped';
         if (d.tokens >= d.budget) return 'budget';
-        const prompt = turnPrompt(d, p.agent);
-        this.patch(d, { speaking: p.agent });
+        const who = speakerOf(p);
+        const prompt = turnPrompt(d, who);
+        this.patch(d, { speaking: who });
         let turn: DiscussTurn;
         try {
-          const target = p.chatId ?? (await this.host.participant(chatId, p.agent));
-          if (!p.chatId) this.patch(this.get(chatId, id)!, { participants: this.get(chatId, id)!.participants.map((x) => (x.agent === p.agent ? { ...x, chatId: target } : x)) });
+          const taken = d.participants.flatMap((x) => (x.chatId ? [x.chatId] : []));
+          const target = p.chatId ?? (await this.host.participant(chatId, p.agent, p.model, taken));
+          if (!p.chatId) this.patch(this.get(chatId, id)!, { participants: this.get(chatId, id)!.participants.map((x) => (speakerOf(x) === who ? { ...x, chatId: target } : x)) });
           await guard(target);
           live.speaking = target;
           const reply = target === chatId ? await this.starterTurn(chatId, prompt) : await this.host.ask(chatId, target, p.agent, prompt);
-          turn = { by: p.agent, round: d.round, text: stripStance(reply).slice(0, MAX_TURN_TEXT) || '(no answer)', stance: stanceOf(reply) };
+          turn = { by: who, round: d.round, text: stripStance(reply).slice(0, MAX_TURN_TEXT) || '(no answer)', stance: stanceOf(reply, speakerResolver(d.participants)) };
           d = this.get(chatId, id)!;
           this.patch(d, { tokens: d.tokens + estimateTokens(prompt) + estimateTokens(reply) });
         } catch (err) {
           if (live.stop) return 'stopped';
-          turn = { by: p.agent, round: d.round, text: `Couldn't answer: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600), failed: true };
+          turn = { by: who, round: d.round, text: `Couldn't answer: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600), failed: true };
         } finally {
           live.speaking = undefined;
         }
@@ -276,17 +312,17 @@ export class Discussions {
   private async conclude(chatId: string, id: string, live: Live, ended: DiscussEnd): Promise<void> {
     this.flushPoints(this.get(chatId, id)!, this.get(chatId, id)!.round + 1);
     let d = this.get(chatId, id)!;
-    const agents = d.participants.map((p) => p.agent);
+    const starter = speakerOf(d.participants[0]);
     let conclusion = undefined as DiscussionItem['conclusion'];
     if (ended !== 'stopped' && d.turns.some((t) => t.by !== 'you' && !t.failed)) {
-      this.patch(d, { state: 'summarizing', speaking: agents[0] });
+      this.patch(d, { state: 'summarizing', speaking: starter });
       const prompt = summaryPrompt(d, ended);
       try {
         live.speaking = chatId;
         const reply = await this.starterTurn(chatId, prompt);
         d = this.get(chatId, id)!;
         this.patch(d, { tokens: d.tokens + estimateTokens(prompt) + estimateTokens(reply) });
-        conclusion = parseConclusion(reply, agents[0], agents);
+        conclusion = parseConclusion(reply, starter, d.participants);
       } catch {
         // Summed up below.
       } finally {
@@ -360,10 +396,11 @@ function sidesSoFar(d: DiscussionItem): string {
   return seen.size ? `Positions named so far: ${[...seen.values()].map((x) => `"${x}"`).join(', ')}. If you hold one, use its exact name as "side".` : '';
 }
 
-function rendered(turns: DiscussTurn[]): string {
+function rendered(d: DiscussionItem, turns: DiscussTurn[]): string {
+  const name = namesOf(d.participants);
   return turns
     .map((t) => {
-      const head = t.by === 'you' ? 'The user (between turns)' : `${speakerName(t.by)} (round ${t.round})`;
+      const head = t.by === 'you' ? 'The user (between turns)' : `${name(t.by)} (round ${t.round})`;
       const body = t.text.length > 4000 ? `${t.text.slice(0, 4000)}…` : t.text;
       const s = t.stance?.parsed ? `\n[stance: ${t.stance.position || '—'}${t.stance.disagree.length ? `; disputes: ${t.stance.disagree.join('; ')}` : '; disputes nothing'}]` : '';
       return `${head}:\n${body}${s}`;
@@ -371,29 +408,31 @@ function rendered(turns: DiscussTurn[]): string {
     .join('\n\n');
 }
 
-/** What `agent` hasn't heard yet: every turn after its own last one (all of them before its first). */
-function unheard(d: DiscussionItem, agent: AgentKey): DiscussTurn[] {
+/** What `who` hasn't heard yet: every turn after its own last one (all of them before its first). */
+function unheard(d: DiscussionItem, who: Speaker): DiscussTurn[] {
   let last = -1;
   d.turns.forEach((t, n) => {
-    if (t.by === agent) last = n;
+    if (t.by === who) last = n;
   });
-  return d.turns.slice(last + 1).filter((t) => t.by !== agent);
+  return d.turns.slice(last + 1).filter((t) => t.by !== who);
 }
 
-export function turnPrompt(d: DiscussionItem, agent: AgentKey): string {
-  const others = d.participants.filter((p) => p.agent !== agent).map((p) => speakerName(p.agent));
-  const first = !d.turns.some((t) => t.by === agent);
-  const news = unheard(d, agent);
+/** `who`'s next turn: a participant's key (an agent's name for discussions without models). */
+export function turnPrompt(d: DiscussionItem, who: Speaker): string {
+  const name = namesOf(d.participants);
+  const others = d.participants.filter((p) => speakerOf(p) !== who).map((p) => name(speakerOf(p)));
+  const first = !d.turns.some((t) => t.by === who);
+  const news = unheard(d, who);
   const lines = ['[FriedLiver discussion]'];
   if (first) {
     lines.push(
-      `You are ${speakerName(agent)}, discussing a question with ${others.join(' and ')}, taking turns, for ${d.maxRounds} round${d.maxRounds === 1 ? '' : 's'} at most.`,
+      `You are ${name(who)}, discussing a question with ${others.join(' and ')}, taking turns, for ${d.maxRounds} round${d.maxRounds === 1 ? '' : 's'} at most.`,
       'It is read-only: read and search the code as you need, but FriedLiver refuses any edit, command or other change until it ends.',
       '',
       `Question: ${d.question}`,
     );
   }
-  lines.push('', news.length ? `${first ? 'So far' : 'New since your last turn'}:\n\n${rendered(news)}` : 'You speak first.');
+  lines.push('', news.length ? `${first ? 'So far' : 'New since your last turn'}:\n\n${rendered(d, news)}` : 'You speak first.');
   lines.push(
     '',
     `Round ${d.round} of ${d.maxRounds}. In under 250 words: weigh the trade-offs for this project, answer the others' points, and change your mind when they convince you.`,
@@ -413,11 +452,15 @@ const WHY: Record<DiscussEnd, string> = {
 };
 
 export function summaryPrompt(d: DiscussionItem, ended: DiscussEnd): string {
-  const news = unheard(d, d.participants[0].agent);
-  const agents = d.participants.map((p) => p.agent);
+  const agents = d.participants.map(speakerOf);
+  const news = unheard(d, agents[0]);
+  const name = namesOf(d.participants);
+  // Keys name the participants exactly when an agent takes part twice ("claude/opus" and "claude/sonnet").
+  const keyed = agents.some((k) => k.includes('/'));
   return [
     `[FriedLiver discussion] The discussion has ended: ${WHY[ended]}.`,
-    news.length ? `\nNew since your last turn:\n\n${rendered(news)}\n` : '',
+    news.length ? `\nNew since your last turn:\n\n${rendered(d, news)}\n` : '',
+    keyed ? `Name participants by these keys: ${agents.map((k) => `"${k}" (${name(k)})`).join(', ')}.` : '',
     'Write its conclusion for the user, fairly, from the whole discussion: what everyone agreed on, where anyone still disagrees (each side with its reason), the one recommended next step, and how each round moved: converging (closer together), diverging (further apart) or stuck, and on what, in 2 to 5 words. Reply with only this fenced block:',
     '```conclusion',
     `{"agreed": ["..."], "disagreed": [{"point": "...", "sides": [{"agent": "${agents[0]}", "view": "... because ..."}]}], "next": "...", "carryOut": "${agents.join('|')}", "rounds": [{"round": 1, "trend": "converging|diverging|stuck", "on": "..."}]}`,
