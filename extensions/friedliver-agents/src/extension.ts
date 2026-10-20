@@ -249,6 +249,7 @@ export class Controller {
       permissions: this.permissions,
       clientVersion: String(context.extension.packageJSON.version ?? '0.0.0'),
       demoAgentScript: context.asAbsolutePath(path.join('dist', 'demo-agent.js')),
+      agyAdapterScript: context.asAbsolutePath(path.join('dist', 'agy-acp.js')),
       bridgeScript: context.asAbsolutePath(path.join('dist', 'bridge.js')),
       agentToAgent: () => this.agentToAgent(),
       browser: (chatId, call, signal, expectOrigin) => this.browser.call(call, signal, expectOrigin, chatId),
@@ -1769,7 +1770,7 @@ export class Controller {
         args: Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : [],
       };
     };
-    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini') };
+    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity') };
   }
 
   /** From the user's own settings only: a repository must never make its agents run without asking. */

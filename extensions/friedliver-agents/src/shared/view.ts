@@ -297,6 +297,7 @@ const AGENT_WORDS: Record<AgentKey, string> = {
   claude: 'claude',
   codex: 'codex gpt chatgpt openai',
   gemini: 'gemini google',
+  antigravity: 'antigravity agy google',
   demo: 'demo',
 };
 
@@ -813,6 +814,7 @@ export const MENTION_OPTIONS: MentionOption[] = [
   { agent: 'claude', name: 'Claude', insert: 'claude', words: ['claude'] },
   { agent: 'codex', name: 'Codex', insert: 'codex', words: ['gpt', 'codex', 'chatgpt', 'openai'] },
   { agent: 'gemini', name: 'Gemini', insert: 'gemini', words: ['gemini', 'google'] },
+  { agent: 'antigravity', name: 'Antigravity', insert: 'antigravity', words: ['antigravity', 'agy'] },
   { agent: 'demo', name: 'Demo', insert: 'demo', words: ['demo'] },
 ];
 

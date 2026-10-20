@@ -35,6 +35,7 @@ export const SIGN_IN_HOSTS: Record<string, readonly string[]> = {
   claude: ['claude.ai', 'claude.com', 'anthropic.com'],
   codex: ['auth.openai.com', 'chatgpt.com', 'platform.openai.com'],
   gemini: ['accounts.google.com', 'aistudio.google.com'],
+  antigravity: ['accounts.google.com'],
   // The demo agent prints a Google-style link in its browser sign-in.
   demo: ['accounts.google.com'],
 };

@@ -36,8 +36,8 @@ describe('agents in the editor: contributions', () => {
   });
 
   it('lets only the user, not a repository, choose which agent gets their code', () => {
-    expect(contributes.configuration.properties['friedliver.edit.defaultAgent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'demo'] });
-    expect(contributes.configuration.properties['friedliver.inlineEdit.agent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'demo'] });
+    expect(contributes.configuration.properties['friedliver.edit.defaultAgent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'antigravity', 'demo'] });
+    expect(contributes.configuration.properties['friedliver.inlineEdit.agent']).toMatchObject({ scope: 'machine', default: 'claude', enum: ['claude', 'codex', 'gemini', 'antigravity', 'demo'] });
   });
 
   it('names no AI models', () => {

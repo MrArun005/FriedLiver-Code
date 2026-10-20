@@ -54,7 +54,7 @@ async function api<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pro
 
 // ---- Small pieces ----
 
-const AGENT_NAMES: Record<AgentKey, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
+const AGENT_NAMES: Record<AgentKey, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', antigravity: 'Antigravity', demo: 'Demo' };
 const LEVELS: { level: ApprovalLevel; name: string }[] = [
   { level: 'ask', name: 'Manual' },
   { level: 'edits', name: 'Edits' },
