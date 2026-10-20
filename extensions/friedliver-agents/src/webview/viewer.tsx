@@ -10,7 +10,7 @@ import { Glyph, Icon, send, useHostImage, useNearScreen } from './common';
 import { Button, IconButton } from './ui';
 
 const PLATFORM = document.body.dataset.platform;
-const REVEAL = PLATFORM === 'darwin' ? 'Reveal in Finder' : PLATFORM === 'win32' ? 'Reveal in File Explorer' : 'Open containing folder';
+const REVEAL = PLATFORM === 'mac' ? 'Reveal in Finder' : PLATFORM === 'windows' ? 'Reveal in File Explorer' : 'Open containing folder';
 /** Horizontal trackpad travel that turns the page, and the pause before the next. */
 const SWIPE_PX = 60;
 const SWIPE_MS = 350;

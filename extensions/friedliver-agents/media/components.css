@@ -73,29 +73,47 @@
   height: var(--i-sm);
   margin: 0;
 }
-/* A key: the text's own size on a 16px line, so 18 tall with its border; r3 on the code tone. */
+/* Keycap (§2.25): 18 tall, r4, the pill fill with a hairline under it; 11px/500 tabular. One cap per key
+   on macOS, one "Ctrl+Shift+X" cap on Windows and Linux (ui/keys.ts). */
 :where(kbd),
 .fl-kbd {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--h-xs);
   min-width: var(--h-xs);
   padding: 0 var(--sp-1);
-  border: var(--line) solid var(--border);
-  border-radius: var(--r-3);
-  background: var(--code-bg);
-  color: var(--fg-2);
-  font: inherit;
-  line-height: var(--h-2xs);
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--pill-bg);
+  box-shadow: inset 0 calc(var(--line) * -1) 0 var(--hairline);
+  /* --fg, not --fg-2: secondary text fails 4.5:1 on the pill fill in some themes. */
+  color: var(--fg);
+  font: var(--w-medium) var(--t-xs) / 1 var(--font);
+  font-variant-numeric: tabular-nums;
   text-align: center;
   white-space: nowrap;
+  vertical-align: middle;
 }
-/* A key inside a button: no box, after the label ("Allow ⏎"), in the label's colour (dimmed, it failed AA). */
+.fl-kbds {
+  display: inline-flex;
+  flex: none;
+  gap: var(--sp-half);
+}
+/* Selected rows show their keys in the text colour. */
+:is([aria-selected='true'], [data-on]) > .fl-kbd,
+:is([aria-selected='true'], [data-on]) > .fl-kbds > .fl-kbd {
+  color: var(--fg);
+}
+/* A key in a running line of text ("Hold ⏎ to allow"): the text's own size. */
 .fl-kbd--inline {
+  height: auto;
   min-width: 0;
-  line-height: inherit;
-  padding: 0;
-  border: 0;
+  padding: 0 var(--sp-half);
   background: none;
+  box-shadow: none;
   color: inherit;
+  font: inherit;
 }
 :where(code, pre, .mono) {
   font-family: var(--mono);
@@ -117,7 +135,7 @@
   flex: none;
 }
 
-/* ---- Button (§2.1): primary · secondary · quiet · danger · brand · link; sm 22 · md 26 · lg 32 · touch 44; r5 ---- */
+/* ---- Button (§2.1): primary (the ember accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
 
 .fl-btn {
   --btn-h: var(--h-md);
@@ -130,6 +148,7 @@
   --btn-bg-active: var(--pill-active);
   --btn-fg: var(--fg);
   --btn-fg-hover: var(--btn-fg);
+  --btn-shadow: none;
   position: relative;
   flex: none;
   display: inline-flex;
@@ -142,16 +161,22 @@
   border: var(--line) solid var(--ctl-border);
   border-radius: var(--r-ctl);
   background: var(--btn-bg);
+  box-shadow: var(--btn-shadow);
   color: var(--btn-fg);
   font: inherit;
   font-size: var(--btn-fs);
-  font-weight: var(--w-regular);
+  font-weight: var(--w-medium);
   line-height: 1;
   white-space: nowrap;
   text-align: center;
   text-decoration: none;
   cursor: pointer;
   user-select: none;
+  /* Hover lights at once and trails off over --dur-out; a press settles back on the pop spring. */
+  transition:
+    background-color var(--dur-out) var(--ease-out),
+    color var(--dur-out) var(--ease-out),
+    transform var(--dur-pop) var(--spring-pop);
 }
 .fl-btn > .icon {
   width: var(--btn-i);
@@ -162,9 +187,12 @@
   color: var(--btn-fg-hover);
   outline: var(--hover-outline);
   outline-offset: -1px;
+  transition-duration: 0ms, 0ms, var(--dur-pop);
 }
 .fl-btn:active:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-active);
+  transform: scale(var(--press-scale));
+  transition-duration: 0ms, 0ms, var(--dur-fast);
 }
 .fl-btn:focus-visible {
   outline: var(--focus-w) solid var(--focus);
@@ -179,11 +207,12 @@
 .fl-btn[aria-haspopup][aria-expanded='true'] {
   background: var(--btn-bg-active);
 }
-/* A quiet or secondary toggle button that is on: the same "on" as a pressed pill (focus blue at 24%). */
+/* A quiet or secondary toggle button that is on: the selection fill and the strong text. */
 :is(.fl-btn--secondary, .fl-btn--quiet)[aria-pressed='true'] {
-  --btn-bg: color-mix(in srgb, var(--focus) 24%, transparent);
-  --btn-bg-hover: color-mix(in srgb, var(--focus) 32%, transparent);
+  --btn-bg: var(--sel-bg);
+  --btn-bg-hover: var(--sel-bg);
   --btn-fg: var(--sel-fg);
+  --btn-fg-hover: var(--sel-fg);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -209,20 +238,15 @@
   display: flex;
   width: 100%;
 }
-.fl-btn--primary {
-  --btn-bg: var(--primary-bg);
-  --btn-bg-hover: color-mix(in srgb, var(--primary-bg) 88%, var(--primary-fg));
-  --btn-bg-active: color-mix(in srgb, var(--primary-bg) 78%, var(--primary-fg));
-  --btn-fg: var(--primary-fg);
-  font-weight: var(--w-medium);
-}
-/* The brand fill: the composer's send, and at most one per screen instead of primary. */
+/* The one key action on a surface: the ember accent, white ink, a top-edge sheen over a contact shadow.
+   "brand" was v1's send fill; v2 removes it, so it draws as the primary (the send is the primary's colour). */
+.fl-btn--primary,
 .fl-btn--brand {
-  --btn-bg: var(--send-bg);
-  --btn-bg-hover: color-mix(in srgb, var(--send-bg) 88%, var(--send-fg));
-  --btn-bg-active: color-mix(in srgb, var(--send-bg) 82%, var(--bg));
-  --btn-fg: var(--send-fg);
-  font-weight: var(--w-medium);
+  --btn-bg: var(--primary-bg);
+  --btn-bg-hover: var(--accent-hover);
+  --btn-bg-active: var(--accent-press);
+  --btn-fg: var(--primary-fg);
+  --btn-shadow: var(--sheen), var(--elev-1);
 }
 .fl-btn--secondary {
   --btn-bg: var(--pill-bg);
@@ -232,13 +256,13 @@
   --btn-bg-hover: var(--ghost-hover);
   --btn-fg: var(--fg-2);
   --btn-fg-hover: var(--fg);
+  font-weight: var(--w-regular);
 }
 .fl-btn--danger {
   --btn-bg: color-mix(in srgb, var(--error) var(--tint), transparent);
   --btn-bg-hover: color-mix(in srgb, var(--error) var(--tint-hover), transparent);
   --btn-bg-active: color-mix(in srgb, var(--error) 30%, transparent);
-  --btn-fg: var(--error);
-  font-weight: var(--w-medium);
+  --btn-fg: color-mix(in srgb, var(--error) var(--tone-ink), var(--fg));
 }
 .fl-btn--quiet.fl-btn--danger {
   --btn-bg: transparent;
@@ -253,10 +277,15 @@
   min-width: 0;
   padding: 0;
   border: 0;
+  font-weight: var(--w-regular);
 }
 .fl-btn--link:hover:not(:disabled) {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.fl-btn--link:active:not(:disabled),
+.fl-btn--text:active:not(:disabled) {
+  transform: none;
 }
 /* Muted link: one that repeats on every row ("Full turn", "More"), grey and underlined, so the accent stays on the one action. */
 .fl-btn--link.fl-btn--muted {
@@ -302,23 +331,28 @@
   text-decoration-color: var(--fg-2);
   text-underline-offset: 3px;
 }
-/* IconButton: the same button, square; quiet unless a variant says otherwise. The composer's + and /. */
+/* IconButton (§2.2): the same button, square; quiet unless a variant says otherwise. An sm one keeps a 24px
+   hit box (WCAG 2.5.8) with 1px of margin, so neighbours' hit boxes never overlap. */
 .fl-btn--icon {
   width: var(--btn-h);
   min-width: 0;
   padding: 0;
+}
+.fl-btn--icon.fl-btn--sm {
+  margin: var(--line);
 }
 /* Round: the phone's swipe-row and pager actions only, a full circle at touch size (§2.2). */
 .fl-btn--round {
   border-radius: var(--r-round);
 }
 .fl-btn--icon.fl-btn--quiet {
-  --btn-fg: var(--fg);
+  --btn-fg: var(--fg-2);
+  --btn-fg-hover: var(--fg);
 }
 .fl-btn--icon.fl-btn--quiet.fl-btn--muted {
   --btn-fg: var(--fg-2);
 }
-/* Loading: the label keeps its room, a spinner sits in the middle. */
+/* Loading: the label keeps its room, the working arc sits in the middle. */
 .fl-btn[aria-busy='true'] {
   color: transparent;
   cursor: progress;
@@ -330,16 +364,53 @@
   position: absolute;
   inset: 0;
   margin: auto;
-  border-color: color-mix(in srgb, var(--btn-fg) 25%, transparent);
-  border-top-color: var(--btn-fg);
+  border-color: var(--btn-fg);
+  border-right-color: transparent;
 }
 /* A quieter second part of a label: the label's own colour at 75% (stays 4.5:1 on every fill). */
 .fl-btn__sub {
   color: inherit;
   opacity: 0.75;
 }
+/* On the accent the second part keeps full ink (75% of white on ember drops under 4.5:1). */
+:is(.fl-btn--primary, .fl-btn--brand) .fl-btn__sub {
+  opacity: 1;
+  font-weight: var(--w-regular);
+}
+/* The key in a button (§2.1): a keycap at 11px after the label; outlined in currentColor on the primary,
+   a 16% currentColor fill elsewhere. */
+.fl-btn .fl-btn__k,
+.fl-btn .fl-btn__k > .fl-kbd {
+  height: var(--h-2xs);
+  min-width: var(--h-2xs);
+  padding: 0 var(--sp-1);
+  margin-left: var(--sp-half);
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  box-shadow: none;
+  color: inherit;
+  font: var(--w-regular) var(--t-xs) / 1 var(--font);
+}
+.fl-btn .fl-btn__k > .fl-kbd {
+  margin-left: 0;
+}
+.fl-btn .fl-kbds.fl-btn__k {
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  background: none;
+}
+:is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-btn__k,
+:is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-btn__k > .fl-kbd {
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--line) color-mix(in srgb, currentColor 45%, transparent);
+}
+:is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-kbds.fl-btn__k {
+  box-shadow: none;
+}
 
-/* Split button: the default action and a ▾ for the others, one r5 outline. */
+/* Split button (§2.3): two buttons of one variant; outer corners --r-ctl, inner 0; the chevron half is
+   square, with a currentColor 28% divider drawn as an inset shadow (the primary keeps its sheen). */
 .fl-split {
   display: inline-flex;
   flex: none;
@@ -356,7 +427,7 @@
   padding: 0;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  border-left: var(--line) solid color-mix(in srgb, currentColor 25%, transparent);
+  box-shadow: var(--btn-shadow), inset var(--line) 0 0 color-mix(in srgb, currentColor 28%, transparent);
 }
 .fl-split > .pop:last-child > .fl-btn > .icon {
   width: var(--i-xs);
@@ -388,7 +459,7 @@
   transition: transform var(--dur-hold) var(--ease-linear);
 }
 
-/* ---- Pill / Chip / Tag (§2.3): status, risk, filter; sm 18 · md 22 · touch 32; pill radius ---- */
+/* ---- Pill / Chip / Tag (§2.5): status, risk, filter; sm 18 · md 22 · touch 32; pill radius; 500 weight ---- */
 
 .fl-pill {
   --pill-h: var(--h-xs);
@@ -413,7 +484,7 @@
   color: var(--pill-c);
   font: inherit;
   font-size: var(--pill-fs);
-  font-weight: var(--w-regular);
+  font-weight: var(--w-medium);
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -460,6 +531,7 @@
 }
 .fl-pill--mono {
   font-family: var(--mono);
+  font-weight: var(--w-regular);
 }
 .fl-pill--touch {
   --pill-h: var(--h-lg);
@@ -483,8 +555,14 @@
 [data-tone='info'] {
   --tone: var(--status-working);
 }
+/* A done pill is the neutral pill (§2.5); the done status mark is the one that turns green. */
 [data-tone='done'] {
-  --tone: var(--status-done);
+  --tone: var(--fg-2);
+}
+.fl-pill[data-tone='done'] {
+  --pill-c: var(--fg);
+  --pill-fill: var(--pill-bg);
+  --pill-fill-hover: var(--pill-hover);
 }
 [data-tone='success'] {
   --tone: var(--tl-success);
@@ -515,6 +593,12 @@
 button.fl-pill,
 .fl-pill--interactive {
   cursor: pointer;
+  transition:
+    background-color var(--dur-out) var(--ease-out),
+    transform var(--dur-pop) var(--spring-pop);
+}
+button.fl-pill:active:not(:disabled) {
+  transform: scale(var(--press-scale));
 }
 button.fl-pill:hover:not(:disabled),
 .fl-pill--interactive:hover {
@@ -529,10 +613,10 @@ button.fl-pill:focus-visible {
 .fl-pill[aria-pressed='true'],
 .fl-pill[aria-selected='true'],
 .fl-pill[aria-checked='true'] {
-  /* On: the theme's focus blue at 24% (a selection, not a status), the strong text colour. */
+  /* On: the selection fill (a selection, not a status), the strong text colour. */
   --pill-c: var(--sel-fg);
-  --pill-fill: color-mix(in srgb, var(--focus) 24%, transparent);
-  --pill-fill-hover: color-mix(in srgb, var(--focus) 32%, transparent);
+  --pill-fill: var(--sel-bg);
+  --pill-fill-hover: color-mix(in srgb, var(--sel-fg) 15%, transparent);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -581,7 +665,7 @@ button.fl-pill:focus-visible {
   background: var(--pill-hover);
 }
 
-/* ---- Badge / Count (§2.4): 16 tall, pill ---- */
+/* ---- Count (§2.6): 16 tall, pill, 600 tabular; loud is needs-you only; it bumps once when it changes ---- */
 
 .fl-count {
   display: inline-block;
@@ -592,20 +676,27 @@ button.fl-pill:focus-visible {
   border-radius: var(--r-pill);
   background: var(--pill-bg);
   color: var(--fg);
-  font-size: var(--t-75);
+  font-size: var(--t-85);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);
   text-align: center;
   outline: var(--line) solid var(--ctl-border);
   outline-offset: -1px;
+  /* The Count component keys itself by its value, so a new number mounts and bumps once (1.15 → 1). */
+  animation: fl-bump var(--dur-pop) var(--spring-pop);
 }
 .fl-count--loud {
   background: var(--decision);
   color: var(--decision-fg);
 }
+@keyframes fl-bump {
+  from {
+    transform: scale(1.15);
+  }
+}
 
-/* ---- Segmented control (§2.5): track r6 on the tonal fill, segments r4 (6 − 2 inset) ---- */
+/* ---- Segmented (§2.7): track 26, r8 on the pill fill; segments 22, --r-ctl; selected raised with a 3:1 edge ---- */
 
 .fl-seg {
   --seg-h: var(--h-md);
@@ -614,7 +705,7 @@ button.fl-pill:focus-visible {
   gap: var(--sp-half);
   height: var(--seg-h);
   padding: var(--sp-half);
-  border-radius: var(--r-6);
+  border-radius: var(--r-8);
   background: var(--pill-bg);
   box-shadow: inset 0 0 0 var(--line) var(--ctl-border);
 }
@@ -627,14 +718,18 @@ button.fl-pill:focus-visible {
   min-width: 0;
   padding: 0 var(--sp-2);
   border: 0;
-  border-radius: var(--r-4);
+  border-radius: var(--r-ctl);
   background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: var(--t-90);
+  font-weight: var(--w-medium);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--dur-pop) var(--spring-pop),
+    box-shadow var(--dur-pop) var(--spring-pop);
 }
 .fl-seg__item > .icon {
   width: var(--i-sm);
@@ -650,8 +745,10 @@ button.fl-pill:focus-visible {
 .fl-seg__item[aria-selected='true'],
 .fl-seg__item[aria-pressed='true'] {
   color: var(--sel-fg);
+  font-weight: var(--w-strong);
   background: var(--seg-on);
-  box-shadow: var(--elev-1);
+  /* The raised chip plus an inset --fg-2 edge: 3:1 against the track (WCAG 1.4.11). */
+  box-shadow: var(--elev-1), inset 0 0 0 var(--line) var(--fg-2);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -669,16 +766,26 @@ button.fl-pill:focus-visible {
 .fl-seg--block {
   display: flex;
 }
+/* Wrap: more options than one row holds (an agent picker in a narrow popover); rows of 22 segments. */
+.fl-seg--wrap {
+  flex-wrap: wrap;
+  height: auto;
+}
+.fl-seg--wrap .fl-seg__item {
+  height: var(--h-sm);
+}
 .fl-seg--block .fl-seg__item {
   flex: 1;
 }
 
-/* ---- Toggle switch (§2.6): 32×18, thumb 14; touch 44×26, thumb 22 ---- */
+/* ---- Switch (§2.8): 32×18, knob 14; off = an outlined track and a --fg-2 knob, on = the accent and a white
+   knob; the knob travels on the pop spring. Windows: Fluent 40×20, knob 12. Touch 44×26, knob 22. ---- */
 
 .fl-toggle {
   --tg-w: 32px;
   --tg-h: var(--h-xs);
   --tg-k: 14px;
+  --tg-inset: calc((var(--tg-h) - var(--tg-k)) / 2);
   position: relative;
   flex: none;
   width: var(--tg-w);
@@ -686,33 +793,41 @@ button.fl-pill:focus-visible {
   padding: 0;
   border: 0;
   border-radius: var(--r-pill);
-  background: var(--border);
-  box-shadow: inset 0 0 0 var(--line) var(--ctl-border);
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--line) var(--fg-2);
   cursor: pointer;
   transition: background-color var(--dur) var(--ease-out);
 }
 .fl-toggle::after {
   content: '';
   position: absolute;
-  top: calc((var(--tg-h) - var(--tg-k)) / 2);
-  left: calc((var(--tg-h) - var(--tg-k)) / 2);
+  top: var(--tg-inset);
+  left: var(--tg-inset);
   width: var(--tg-k);
   height: var(--tg-k);
   border-radius: var(--r-round);
-  background: var(--thumb);
-  box-shadow: var(--shadow-thumb);
-  transition: left var(--dur) var(--ease-out);
+  background: var(--fg-2);
+  transition:
+    transform var(--dur-pop) var(--spring-pop),
+    background-color var(--dur) var(--ease-out);
 }
 .fl-toggle[aria-checked='true'] {
   background: var(--toggle-on);
   box-shadow: inset 0 0 0 var(--line) var(--ctl-border-active);
 }
 .fl-toggle[aria-checked='true']::after {
-  left: calc(var(--tg-w) - var(--tg-k) - (var(--tg-h) - var(--tg-k)) / 2);
+  background: var(--thumb);
+  box-shadow: var(--shadow-thumb);
+  transform: translateX(calc(var(--tg-w) - var(--tg-k) - var(--tg-inset) * 2));
 }
 .fl-toggle:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--border) 75%, var(--fg));
+  background: color-mix(in srgb, var(--fg) 15%, transparent);
   outline: var(--hover-outline);
+}
+body[data-platform='windows'] .fl-toggle:not(.fl-toggle--touch) {
+  --tg-w: 40px;
+  --tg-h: 20px;
+  --tg-k: 12px;
 }
 .fl-toggle[aria-checked='true']:hover:not(:disabled) {
   background: color-mix(in srgb, var(--toggle-on) 85%, var(--fg));
@@ -731,7 +846,7 @@ button.fl-pill:focus-visible {
   --tg-k: 22px;
 }
 
-/* ---- Checkbox (§2.7): 14 square, r3; Radio row (§2.8): a row with a 14 dot ---- */
+/* ---- Checkbox (§2.9): 14 square, r4, the accent when checked; Radio row (§2.10): a row with a 14 dot ---- */
 
 .fl-check {
   display: inline-flex;
@@ -755,15 +870,15 @@ button.fl-pill:focus-visible {
   cursor: pointer;
 }
 .fl-check__box {
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
 }
 .fl-check__box::after {
   content: '';
   width: 8px;
   height: 4px;
   margin-top: -2px;
-  border-left: 1.5px solid var(--button-fg);
-  border-bottom: 1.5px solid var(--button-fg);
+  border-left: 2px solid var(--button-fg);
+  border-bottom: 2px solid var(--button-fg);
   transform: rotate(-45deg) scale(0);
 }
 .fl-check__box:checked,
@@ -844,10 +959,24 @@ button.fl-pill:focus-visible {
 }
 .fl-radio:has(:checked),
 .fl-radio[data-on] {
+  position: relative;
   background: var(--sel-bg);
   color: var(--sel-fg);
   outline: var(--sel-outline);
   outline-offset: -1px;
+}
+/* The selection mark (§2.37): a 3×12 pill at the row's leading edge. */
+.fl-radio:has(:checked)::before,
+.fl-radio[data-on]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: var(--i-xs);
+  margin-top: calc(var(--i-xs) / -2);
+  border-radius: var(--r-pill);
+  background: var(--sel-fg);
 }
 .fl-radio__text {
   display: flex;
@@ -868,7 +997,7 @@ button.fl-pill:focus-visible {
   opacity: 0.7;
 }
 
-/* ---- Input / Textarea / Search (§2.9): 26 tall, r5, the theme's input fill; focus = ring + 3px halo ---- */
+/* ---- Input / Textarea / Search (§2.11): 26 tall, --r-ctl, the input fill, a 3:1 field edge; focus = --focus edge + 3px halo ---- */
 
 .fl-input {
   --in-h: var(--h-md);
@@ -892,7 +1021,7 @@ button.fl-pill:focus-visible {
   color: var(--placeholder);
 }
 .fl-input:hover:not(:disabled, :focus) {
-  border-color: var(--border);
+  border-color: var(--fg-2);
 }
 .fl-input:focus,
 .fl-input:focus-visible {
@@ -966,7 +1095,7 @@ textarea.fl-input {
   color: var(--error);
 }
 
-/* ---- Select / Dropdown trigger (§2.10): the field's look, a chevron at the end ---- */
+/* ---- Select (§2.12): the field's look, a chevron at the end ---- */
 
 .fl-select {
   display: inline-flex;
@@ -1001,7 +1130,7 @@ textarea.fl-input {
   color: var(--placeholder);
 }
 .fl-select:hover:not(:disabled) {
-  border-color: var(--border);
+  border-color: var(--fg-2);
 }
 .fl-select:focus-visible,
 .fl-select[aria-expanded='true'] {
@@ -1019,7 +1148,8 @@ textarea.fl-input {
   cursor: default;
 }
 
-/* ---- Menu / Popover (§2.11): glass r8 on elevation 3; rows inset 4, r4 (concentric) ---- */
+/* ---- Menu / Popover (§2.13): glass, --r-float 12, rim + elevation 3; rows inset 6, --r-row 6 (concentric);
+   opens on the snap spring from 6px below at 98%, closes with a fade ---- */
 
 .fl-menu {
   position: absolute;
@@ -1027,20 +1157,23 @@ textarea.fl-input {
   display: flex;
   flex-direction: column;
   gap: var(--sp-half);
-  min-width: 200px;
-  max-width: min(380px, calc(100vw - var(--sp-4)));
+  min-width: 220px;
+  max-width: min(var(--w-menu), calc(100vw - var(--sp-4)));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--sp-1) 0;
-  border: var(--line) solid var(--border);
-  border-radius: var(--r-box);
+  border: var(--line) solid var(--dialog-border);
+  border-radius: var(--r-float);
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--elev-3);
+  box-shadow: var(--rim), var(--elev-3);
   color: var(--vscode-menu-foreground, var(--fg));
   font-size: var(--t-100);
   text-align: left;
-  animation: rise var(--dur) var(--ease-out);
+  transform-origin: top;
+  animation:
+    fadeIn var(--dur-fast) var(--ease-out),
+    rise var(--dur-spring) var(--spring-snap);
 }
 .fl-menu > * {
   flex-shrink: 0;
@@ -1072,8 +1205,9 @@ textarea.fl-input {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
   font-size: var(--t-85);
+  font-weight: var(--w-medium);
   color: var(--fg-50);
 }
 .fl-menu__item,
@@ -1081,8 +1215,9 @@ textarea.fl-input {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  position: relative;
   min-height: var(--h-md);
-  margin: 0 var(--sp-1);
+  margin: 0 calc(var(--sp-1) + var(--sp-half));
   padding: var(--sp-1) var(--sp-2);
   border: 0;
   border-radius: var(--r-row);
@@ -1092,6 +1227,7 @@ textarea.fl-input {
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--dur-out) var(--ease-out);
 }
 .fl-menu__item > .icon,
 .fl-menu [role^='menuitem'] > .icon {
@@ -1107,6 +1243,7 @@ textarea.fl-input {
   background: var(--hover-bg);
   outline: var(--hover-outline);
   outline-offset: -1px;
+  transition-duration: 0ms;
 }
 .fl-menu__item[aria-checked='true'],
 .fl-menu [role^='menuitem'][aria-checked='true'] {
@@ -1114,6 +1251,19 @@ textarea.fl-input {
   color: var(--sel-fg);
   outline: var(--sel-outline);
   outline-offset: -1px;
+}
+/* The selection mark (§2.37) on the checked item. */
+.fl-menu__item[aria-checked='true']::before,
+.fl-menu [role^='menuitem'][aria-checked='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: var(--i-xs);
+  margin-top: calc(var(--i-xs) / -2);
+  border-radius: var(--r-pill);
+  background: var(--sel-fg);
 }
 .fl-menu [role^='menuitem'][aria-checked='true'] > .icon,
 .fl-menu__item[aria-checked='true'] > .icon,
@@ -1163,13 +1313,13 @@ textarea.fl-input {
   flex: none;
   height: var(--line);
   margin: var(--sp-1) 0;
-  background: var(--border);
+  background: var(--hairline);
 }
 .fl-menu__filter {
   flex: none;
   width: auto;
   height: var(--h-md);
-  margin: 0 var(--sp-1) var(--sp-1);
+  margin: 0 calc(var(--sp-1) + var(--sp-half)) var(--sp-1);
   padding: 0 var(--sp-2);
   border: 0;
   border-radius: var(--r-row);
@@ -1185,19 +1335,19 @@ textarea.fl-input {
   color: var(--fg-2);
 }
 
-/* ---- Tooltip (§2.12): solid, r6, 11px; after 500ms, never interactive ---- */
+/* ---- Tooltip (§2.14): solid float tone, r8, 12px; after 500ms (at once on focus), never interactive ---- */
 
 .fl-tip {
   position: fixed;
   z-index: var(--z-tip);
-  max-width: 280px;
+  max-width: var(--w-tip);
   padding: var(--sp-1) var(--sp-2);
-  border: var(--line) solid var(--border);
-  border-radius: var(--r-6);
+  border: var(--line) solid var(--dialog-border);
+  border-radius: var(--r-8);
   background: var(--menu-bg);
   box-shadow: var(--shadow-tip);
   color: var(--fg);
-  font-size: var(--t-85);
+  font-size: var(--t-90);
   line-height: var(--lh);
   pointer-events: none;
   animation: fadeIn var(--dur-fast) var(--ease-out);
@@ -1206,7 +1356,8 @@ textarea.fl-input {
   margin-left: var(--sp-1);
 }
 
-/* ---- Timestamp (§2.32): when a message was sent; shown while its message is hovered or focused ---- */
+/* ---- Timestamp (§2.32): when a message was sent; shown while its message is hovered or focused. It floats in
+   the margin beside its message (.fl-time--float): no room taken at rest, no shift when it shows. ---- */
 
 .fl-time {
   color: var(--fg-2);
@@ -1223,8 +1374,23 @@ textarea.fl-input {
 [data-stamp]:focus-within .fl-time {
   opacity: 1;
 }
+[data-stamp]:has(> .fl-time--float) {
+  position: relative;
+}
+.fl-time--float {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+}
+.fl-time--float[data-side='end'] {
+  left: calc(100% + var(--sp-2));
+}
+.fl-time--float[data-side='start'] {
+  right: calc(100% + var(--sp-2));
+}
 
-/* ---- Toast (§2.13): glass r8, elevation 3, bottom right; a draining bar while it counts down ---- */
+/* ---- Toast (§2.15): glass, --r-float, rim + elevation 3, bottom right; arrives on the pop spring from 8px
+   below; a 2px --fg-2 bar drains along its foot while it counts down ---- */
 
 .fl-toasts {
   position: fixed;
@@ -1242,17 +1408,24 @@ textarea.fl-input {
   display: flex;
   align-items: flex-start;
   gap: var(--sp-2);
-  width: min(400px, calc(100vw - var(--sp-8)));
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
-  border: var(--line) solid var(--border);
-  border-radius: var(--r-box);
+  width: min(var(--w-toast), calc(100vw - var(--sp-8)));
+  padding: var(--sp-3);
+  border: var(--line) solid var(--dialog-border);
+  border-radius: var(--r-float);
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--elev-3);
+  box-shadow: var(--rim), var(--elev-3);
   color: var(--fg);
   overflow: hidden;
   pointer-events: auto;
-  animation: rise var(--dur) var(--ease-out);
+  animation:
+    fadeIn var(--dur-fast) var(--ease-out),
+    fl-toast-in var(--dur-pop) var(--spring-pop);
+}
+@keyframes fl-toast-in {
+  from {
+    transform: translateY(calc(var(--rise) + var(--sp-half)));
+  }
 }
 .fl-toast > .icon {
   width: var(--i-md);
@@ -1268,6 +1441,7 @@ textarea.fl-input {
 }
 .fl-toast__title {
   font-weight: var(--w-strong);
+  color: var(--sel-fg);
 }
 .fl-toast__text {
   font-size: var(--t-90);
@@ -1280,13 +1454,17 @@ textarea.fl-input {
 }
 .fl-toast > .fl-countdown {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: 0;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: var(--sp-1);
+}
+.fl-toast:hover > .fl-countdown > i {
+  animation-play-state: paused;
 }
 
-/* ---- Card (§2.16): inline (menu tone) · flat (outline only) · raised (lifts); r8; 12 padding and rhythm (sm 8·12 / 8) ---- */
+/* ---- Card (§2.16): inline (the input tone, a hairline, the rim) · flat (outline only) · ghost; --r-box 10;
+   12 padding and rhythm (sm 8·12 / 8). No rings: the card the keys act on is a tonal fill with a --fg-2 edge;
+   waiting and failed show in the head (a bullseye, a ⊗ and words), never as a coloured border. ---- */
 
 .fl-card {
   --card-pad: var(--sp-3);
@@ -1296,16 +1474,19 @@ textarea.fl-input {
   gap: var(--sp-3);
   min-width: 0;
   padding: var(--card-pad);
-  border: var(--line) solid var(--border);
+  border: var(--line) solid var(--hairline);
   border-radius: var(--r-box);
-  background: var(--menu-bg);
+  background: var(--input-bg);
+  box-shadow: var(--rim);
   color: var(--fg);
+  transition: border-color var(--dur-out) var(--ease-out);
 }
 .fl-card--flat {
   background: transparent;
+  box-shadow: none;
 }
 .fl-card--raised {
-  box-shadow: var(--elev-1);
+  box-shadow: var(--rim), var(--elev-1);
 }
 .fl-card--bare {
   --card-pad: 0;
@@ -1315,37 +1496,35 @@ textarea.fl-input {
 .fl-card--ghost {
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
 }
-/* A card that just arrived: the 150ms rise. */
+/* A card that just arrived: it rises on the pop spring. */
 .fl-card[data-enter] {
-  animation: rise var(--dur) var(--ease-out);
+  animation: rise var(--dur-pop) var(--spring-pop);
 }
 .fl-card--sm {
   --card-pad: var(--sp-2) var(--sp-3);
   gap: var(--sp-2);
 }
 .fl-card--interactive:hover {
-  border-color: color-mix(in srgb, var(--border) 60%, var(--fg));
+  border-color: color-mix(in srgb, var(--border) 60%, var(--fg-2));
+  transition-duration: 0ms;
 }
 .fl-card:focus-visible {
   outline: var(--focus-w) solid var(--focus);
   outline-offset: var(--focus-off);
 }
-/* The one the keys act on, or the one that needs you: the decision colour's ring and 3px halo. */
-.fl-card[data-focus],
-.fl-card[data-tone='waiting'] {
-  border-color: var(--decision-line);
-}
+/* The one the keys act on: a 7% --sel-fg tonal fill and a 1px --fg-2 edge (no blue ring; v2 §1.12). */
 .fl-card[data-focus] {
-  box-shadow: 0 0 0 3px var(--decision-soft);
+  border-color: var(--fg-2);
+  background: color-mix(in srgb, var(--sel-fg) 7%, var(--input-bg));
 }
-.fl-card[data-tone='waiting'] {
-  background: linear-gradient(var(--decision-soft), var(--decision-soft)), var(--menu-bg);
+.fl-card--ghost[data-focus] {
+  background: color-mix(in srgb, var(--sel-fg) 7%, transparent);
 }
-.fl-card[data-tone='error'],
-.fl-card[data-tone='failed'],
-.fl-card[data-tone='careful'] {
-  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+/* On the focused card's tint, quiet text reads in --fg (secondary text drops under 4.5:1 there in some themes). */
+.fl-card[data-focus] .fl-card__meta {
+  color: var(--fg);
 }
 .fl-card[data-muted] {
   opacity: 0.6;
@@ -1368,6 +1547,7 @@ textarea.fl-input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--sel-fg);
   font-weight: var(--w-strong);
 }
 .fl-card__meta {
@@ -1705,26 +1885,34 @@ textarea.fl-input {
   align-items: center;
   gap: var(--sp-1);
 }
+/* Positions (§2.30): unboxed; one grid for every lane (subgrid), so a long participant label ("Claude ·
+   Opus 4.5") never wraps and every track starts at the same x. who | track (1px --fg-2, a centre tick, one
+   puck) | the words. Compact (a side bar): who | track, the words hidden. */
 .fl-discuss__meter {
   display: grid;
-  gap: var(--sp-1);
-  padding: var(--sp-3) var(--sp-4) var(--sp-2);
-  border: var(--line) solid var(--hairline);
-  border-radius: var(--r-box);
-  background: var(--bg);
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, var(--discuss-tag-w));
+  column-gap: var(--sp-4);
+  row-gap: 0;
 }
 .fl-discuss__axis,
 .fl-discuss__lane {
   display: grid;
-  grid-template-columns: var(--discuss-who-w) minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: var(--sp-3);
+}
+.fl-discuss__axis-h {
+  color: var(--fg-2);
+  font-size: var(--t-90);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
 }
 .fl-discuss__ends {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  min-width: 0;
   font-size: var(--t-85);
   color: var(--fg-2);
 }
@@ -1733,14 +1921,14 @@ textarea.fl-input {
   align-items: center;
   gap: var(--sp-1);
   min-width: 0;
-  font-size: var(--t-title);
+  font-size: var(--t-100);
   font-weight: var(--w-strong);
   color: var(--sel-fg);
 }
 .fl-discuss__ends .icon {
   flex: none;
-  width: var(--i-md);
-  height: var(--i-md);
+  width: var(--i-sm);
+  height: var(--i-sm);
   color: var(--fg-2);
 }
 .fl-discuss__who {
@@ -1748,6 +1936,13 @@ textarea.fl-input {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  color: var(--fg);
+  font-size: var(--t-90);
+  white-space: nowrap;
+}
+.fl-discuss__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fl-discuss__track {
   position: relative;
@@ -1763,40 +1958,15 @@ textarea.fl-input {
   right: 0;
   top: 50%;
   height: var(--line);
-  background: var(--border);
+  background: var(--fg-2);
 }
 .fl-discuss__mid {
   position: absolute;
   left: 50%;
-  top: var(--sp-2);
-  bottom: var(--sp-2);
+  top: var(--sp-3);
+  bottom: var(--sp-3);
   width: var(--line);
-  background: var(--border);
-}
-.fl-discuss__trail {
-  position: absolute;
-  left: var(--x);
-  width: var(--w);
-  top: calc(50% - 1px);
-  height: 2px;
-  border-radius: var(--r-pill);
-  background: var(--fg-50);
-}
-.fl-discuss__ghost {
-  position: absolute;
-  left: var(--x);
-  top: 50%;
-  width: var(--sp-2);
-  height: var(--sp-2);
-  margin: calc(var(--sp-1) * -1) 0 0 calc(var(--sp-1) * -1);
-  border-radius: var(--r-round);
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1.5px var(--fg-2);
-}
-.fl-discuss__legend > .fl-discuss__ghost {
-  position: static;
-  margin: 0;
-  display: inline-block;
+  background: var(--fg-2);
 }
 .fl-discuss__marker {
   position: absolute;
@@ -1804,37 +1974,21 @@ textarea.fl-input {
   top: 50%;
   display: inline-grid;
   transform: translate(-50%, -50%);
-  border-radius: calc(var(--discuss-marker) / 4);
-  box-shadow: 0 0 0 3px var(--bg);
+  border-radius: var(--r-round);
+  box-shadow: 0 0 0 3px var(--card-surface, var(--input-bg));
+  transition: left var(--dur-spring) var(--spring-snap);
 }
 .fl-discuss__marker > .fl-avatar {
-  background: color-mix(in srgb, var(--hue) 22%, var(--bg));
-}
-.fl-discuss__marker[data-speaking] {
-  box-shadow:
-    0 0 0 3px var(--bg),
-    0 0 0 5px var(--status-working);
+  --av-ring: var(--input-bg);
+  background: color-mix(in srgb, var(--hue) 22%, var(--input-bg));
 }
 .fl-discuss__val {
-  position: absolute;
-  left: var(--x);
-  top: calc(50% + var(--discuss-marker) / 2 + var(--sp-half));
-  transform: translateX(-50%);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--t-75);
+  font-size: var(--t-85);
   color: var(--fg-2);
-}
-.fl-discuss__val[data-speaking] {
-  top: calc(50% + var(--discuss-marker) / 2 + var(--sp-1));
-}
-.fl-discuss__val[data-end='start'] {
-  transform: translateX(-20%);
-}
-.fl-discuss__val[data-end='end'] {
-  transform: translateX(-80%);
-}
-.fl-discuss__meter[data-compact] .fl-discuss__val {
-  display: none;
 }
 .fl-discuss__rows {
   display: grid;
@@ -2030,7 +2184,8 @@ summary.fl-discuss__row:hover {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  font-size: var(--t-hero);
+  letter-spacing: var(--track-title);
+  font-size: var(--t-lead);
   font-weight: var(--w-strong);
   line-height: var(--lh-tight);
   color: var(--sel-fg);
@@ -2062,10 +2217,6 @@ summary.fl-discuss__row:hover {
   align-content: start;
   gap: var(--sp-1);
   min-width: 0;
-  padding: var(--sp-3);
-  border: var(--line) solid var(--hairline);
-  border-radius: var(--r-box);
-  background: var(--bg);
 }
 .fl-discuss__side-head {
   display: flex;
@@ -2074,16 +2225,22 @@ summary.fl-discuss__row:hover {
   gap: var(--sp-1) var(--sp-2);
 }
 .fl-discuss__side-head > b {
-  font-size: var(--t-title);
+  font-size: var(--t-lead);
   font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
   color: var(--sel-fg);
 }
 .fl-discuss__side-who {
   font-size: var(--t-85);
   color: var(--fg-2);
 }
+/* "vs" on the single hairline between the two sides. */
 .fl-discuss__vs {
-  align-self: center;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  padding: 0 var(--sp-2);
+  background: linear-gradient(var(--hairline), var(--hairline)) center / var(--line) 100% no-repeat;
   font-size: var(--t-85);
   color: var(--fg-2);
 }
@@ -2184,16 +2341,20 @@ summary.fl-discuss__row:hover {
   .fl-discuss__tile {
     padding: var(--sp-2);
   }
-  .fl-discuss__axis,
-  .fl-discuss__lane {
+  /* The names go to their marks: who is the puck alone, the words are hidden. */
+  .fl-discuss__meter,
+  .fl-discuss__meter[data-compact] {
     grid-template-columns: var(--i-lg) minmax(0, 1fr);
-    gap: var(--sp-2);
+    column-gap: var(--sp-2);
   }
-  .fl-discuss__who > span:not(.fl-avatar) {
+  .fl-discuss__who > span:not(.fl-avatar),
+  .fl-discuss__val {
     display: none;
   }
-  .fl-discuss__meter {
-    padding: var(--sp-2) var(--sp-3);
+  /* Keeps its cell (so the ends sit over the tracks), unseen. */
+  .fl-discuss__axis-h {
+    visibility: hidden;
+    overflow: hidden;
   }
   .fl-discuss__ends b {
     font-size: var(--t-100);
@@ -2254,7 +2415,8 @@ summary.fl-discuss__row:hover {
   }
 }
 
-/* ---- Dialog (§2.15): glass r8 on a 75% overlay, elevation 4. Sheet: r12 top, a handle ---- */
+/* ---- Dialog · Sheet (§2.17): glass, --r-dialog 14, rim + elevation 4, on the overlay; opens on the snap
+   spring (98% and 6px). Sheet: --r-dialog top corners, a 36×4 handle, slides up on the snap spring ---- */
 
 .fl-overlay {
   position: fixed;
@@ -2270,20 +2432,22 @@ summary.fl-discuss__row:hover {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  width: min(560px, 100%);
+  width: min(var(--w-dialog), 100%);
   max-height: calc(100vh - var(--sp-8));
   overflow: auto;
   padding: var(--sp-4);
   border: var(--line) solid var(--dialog-border);
-  border-radius: var(--r-box);
+  border-radius: var(--r-dialog);
   background: var(--glass-dialog-bg);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--elev-4);
+  box-shadow: var(--rim), var(--elev-4);
   color: var(--fg);
-  animation: rise var(--dur) var(--ease-out);
+  animation:
+    fadeIn var(--dur-fast) var(--ease-out),
+    rise var(--dur-spring) var(--spring-snap);
 }
 .fl-dialog--wide {
-  width: min(880px, 100%);
+  width: min(var(--w-dialog-wide), 100%);
 }
 .fl-dialog__head {
   display: flex;
@@ -2293,13 +2457,21 @@ summary.fl-discuss__row:hover {
 }
 .fl-dialog__title {
   margin: 0;
+  color: var(--sel-fg);
   font-size: var(--t-title);
   font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
   line-height: var(--lh-tight);
 }
 .fl-dialog__sub {
   margin-top: var(--sp-1);
   color: var(--fg-2);
+  font-size: var(--t-90);
+}
+/* Windows (Fluent): the primary comes first in a dialog's foot. */
+body[data-platform='windows'] .fl-dialog__foot {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
 }
 .fl-dialog__foot {
   display: flex;
@@ -2319,12 +2491,12 @@ summary.fl-discuss__row:hover {
   overflow: auto;
   padding: var(--sp-2) var(--sp-4) var(--sp-4);
   border-top: var(--line) solid var(--dialog-border);
-  border-radius: var(--r-12) var(--r-12) 0 0;
+  border-radius: var(--r-dialog) var(--r-dialog) 0 0;
   background: var(--glass-dialog-bg);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-sheet);
+  box-shadow: var(--rim), var(--shadow-sheet);
   color: var(--fg);
-  animation: sheet-in var(--dur-slow) var(--ease-out);
+  animation: sheet-in var(--dur-slow) var(--spring-snap);
 }
 .fl-sheet__handle {
   flex: none;
@@ -2337,7 +2509,8 @@ summary.fl-discuss__row:hover {
   cursor: grab;
 }
 
-/* ---- Tabs (§2.16): a strip of r5 tabs, 26 tall in a 30 strip; selected takes the selection fill ---- */
+/* ---- Tabs (§2.18): 26 tabs in a 32 strip, --r-ctl; the open tab takes the fill, the strong text and a 2px
+   --sel-fg line along its top edge, inset 8 ---- */
 
 .fl-tabs {
   display: flex;
@@ -2349,11 +2522,12 @@ summary.fl-discuss__row:hover {
   scrollbar-width: none;
 }
 .fl-tab {
+  position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-1);
-  max-width: 220px;
+  gap: var(--sp-2);
+  max-width: var(--tab-max);
   height: var(--h-md);
   padding: 0 var(--sp-2);
   border: var(--line) solid var(--ctl-border);
@@ -2363,6 +2537,7 @@ summary.fl-discuss__row:hover {
   font: inherit;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--dur-out) var(--ease-out);
 }
 .fl-tab:hover {
   color: var(--fg);
@@ -2375,6 +2550,23 @@ summary.fl-discuss__row:hover {
   background: var(--sel-bg);
   outline: var(--sel-outline);
   outline-offset: -1px;
+}
+.fl-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  height: 2px;
+  border-radius: 0 0 var(--r-1) var(--r-1);
+  background: var(--sel-fg);
+  animation: fl-tab-line var(--dur-spring) var(--spring-snap);
+}
+@keyframes fl-tab-line {
+  from {
+    transform: scaleX(0.4);
+    opacity: 0;
+  }
 }
 .fl-tab:focus-visible {
   outline: var(--focus-w) solid var(--focus);
@@ -2391,7 +2583,7 @@ summary.fl-discuss__row:hover {
   display: flex;
   align-items: center;
   min-width: 0;
-  max-width: 220px;
+  max-width: var(--tab-max);
 }
 .fl-tab-wrap > .fl-tab {
   flex: 1 1 auto;
@@ -2521,7 +2713,8 @@ summary.fl-discuss__row:hover {
   height: 100%;
 }
 
-/* ---- List row / tree row (§2.17): 26 tall, r4; indent 12 a level ---- */
+/* ---- Row / tree row (§2.19): 26 tall (trees 24), --r-row 6; indent 12 a level; selected = the fill and the
+   selection mark (§2.37), a 3×12 --sel-fg pill at the leading edge ---- */
 
 .fl-row {
   --level: 1;
@@ -2531,12 +2724,17 @@ summary.fl-discuss__row:hover {
   min-width: 0;
   min-height: var(--h-md);
   padding: var(--sp-1) var(--sp-2) var(--sp-1) calc(var(--sp-2) + (var(--level) - 1) * var(--sp-3));
+  position: relative;
   border: 0;
   border-radius: var(--r-row);
   background: none;
   color: var(--fg);
   font: inherit;
   text-align: left;
+  transition: background-color var(--dur-out) var(--ease-out);
+}
+.fl-row[role='treeitem'] {
+  min-height: var(--sp-6);
 }
 button.fl-row,
 .fl-row[role='option'],
@@ -2560,6 +2758,17 @@ button.fl-row,
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
+.fl-row[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: var(--i-xs);
+  margin-top: calc(var(--i-xs) / -2);
+  border-radius: var(--r-pill);
+  background: var(--sel-fg);
+}
 .fl-row:focus-visible {
   outline: var(--line) solid var(--focus);
   outline-offset: -1px;
@@ -2579,6 +2788,7 @@ button.fl-row,
 .fl-row__meta {
   flex: none;
   font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-2);
 }
 .fl-row__twisty {
@@ -2608,7 +2818,7 @@ button.fl-row,
   background: var(--bg);
   color: var(--fg-2);
   font-size: var(--t-85);
-  font-weight: var(--w-regular);
+  font-weight: var(--w-medium);
   text-align: left;
   white-space: nowrap;
 }
@@ -2635,18 +2845,18 @@ button.fl-row,
   overflow: hidden;
 }
 
-/* ---- Code block · IN/OUT · Diff (§2.19) ---- */
+/* ---- Code · IO · Diff (§2.21): the code well (--code-bg), --r-box (--r-ctl inside a card), mono 12/1.6 ---- */
 
 .fl-code {
   position: relative;
   margin: 0;
-  padding: var(--sp-2);
-  border-radius: var(--r-row);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-box);
   background: var(--code-bg);
   color: var(--fg);
   font-family: var(--mono);
   font-size: var(--fs-mono);
-  line-height: var(--lh);
+  line-height: var(--lh-code);
   white-space: pre-wrap;
   word-break: break-word;
   overflow-x: auto;
@@ -2701,21 +2911,26 @@ button.fl-row,
 .fl-io__body[data-out] {
   background: var(--code-bg);
 }
+.fl-card .fl-code {
+  border-radius: var(--r-ctl);
+}
 .fl-diff {
   margin: 0;
   padding: var(--sp-1) 0;
-  border-radius: var(--r-row);
+  border-radius: var(--r-ctl);
   background: var(--code-bg);
   font-family: var(--mono);
   font-size: var(--fs-mono);
-  line-height: var(--lh);
+  line-height: var(--lh-code);
   overflow-x: auto;
 }
+/* Added and removed rows: the tone's tint and a 2px bar along the leading edge (a shape, not only a colour). */
 .fl-diff__line {
   display: grid;
   grid-template-columns: 4ch 2ch 1fr;
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-3);
   white-space: pre;
+  box-shadow: inset 2px 0 0 transparent;
 }
 .fl-diff__no {
   color: var(--fg-2);
@@ -2725,19 +2940,25 @@ button.fl-row,
 }
 .fl-diff__line[data-kind='add'] {
   background: color-mix(in srgb, var(--added) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--added);
 }
 .fl-diff__line[data-kind='add'] .fl-diff__sign {
-  color: var(--added);
+  color: color-mix(in srgb, var(--added) var(--tone-ink), var(--fg));
+  font-weight: var(--w-strong);
 }
 .fl-diff__line[data-kind='del'] {
   background: color-mix(in srgb, var(--removed) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--removed);
 }
 .fl-diff__line[data-kind='del'] .fl-diff__sign {
-  color: var(--removed);
+  color: color-mix(in srgb, var(--removed) var(--tone-ink), var(--fg));
+  font-weight: var(--w-strong);
 }
 .fl-diff-stat {
   font-family: var(--mono);
   font-size: var(--t-85);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
 }
 .fl-diff-stat > [data-kind='add'] {
   color: var(--added);
@@ -2747,18 +2968,21 @@ button.fl-row,
   margin-left: var(--sp-1);
 }
 
-/* ---- Avatar / agent glyph (§2.20): radius = size ÷ 4; status dot (§2.21) ---- */
+/* ---- Agent puck (§2.22; class kept: .fl-avatar): round, the hue at 16%, the mark at 70% in the hue.
+   xs 14 · sm 16 · md 20 · marker 28 · lg 32. A working agent wears a 3px ring that breathes. ---- */
 
 .fl-avatar {
   --av: 20px;
   --hue: var(--hue-demo);
+  position: relative;
   flex: none;
   display: inline-grid;
   place-items: center;
   width: var(--av);
   height: var(--av);
-  border-radius: calc(var(--av) / 4);
-  background: color-mix(in srgb, var(--hue) 16%, transparent);
+  border-radius: var(--r-round);
+  /* A neutral tile: the agent's logo brings its own colour (owner, 2026-10-21). */
+  background: var(--pill-bg);
   color: var(--hue);
   font-size: var(--t-85);
   font-weight: var(--w-strong);
@@ -2766,8 +2990,12 @@ button.fl-row,
   outline: var(--line) solid var(--ctl-border);
   outline-offset: -1px;
 }
+.fl-avatar--xs {
+  --av: var(--i-sm);
+  font-size: var(--t-75);
+}
 .fl-avatar--sm {
-  --av: 16px;
+  --av: var(--i-md);
   font-size: var(--t-75);
 }
 .fl-avatar--lg {
@@ -2778,11 +3006,47 @@ button.fl-row,
 .fl-avatar--marker {
   --av: var(--discuss-marker);
 }
-/* With its Mark (§2.22b) in place of the letter: the mark at 70% of the tile, in the agent's hue. */
+/* Its Mark (§2.22b) in the agent's hue at 70% of the puck. */
 .fl-avatar--mark > .fl-mark {
   width: 70%;
   height: 70%;
   color: var(--hue);
+}
+/* Working: a 1.5px gap in the surface colour (--av-ring), then a 2px ring that breathes (.6 ↔ 1 over 2.4s;
+   v2 drew 3px, which crowded the agent's name beside a 16px puck).
+   The ring fades in over --dur-slow when work starts; under reduced motion it holds still. */
+.fl-avatar[data-working]::after {
+  content: '';
+  position: absolute;
+  inset: -3.5px;
+  border-radius: var(--r-round);
+  box-shadow: inset 0 0 0 2px var(--status-working);
+  pointer-events: none;
+  animation:
+    fadeIn var(--dur-slow) var(--ease-out),
+    fl-breathe 2.4s var(--ease-in-out) var(--dur-slow) infinite alternate;
+}
+.fl-avatar[data-working] {
+  box-shadow: 0 0 0 1.5px var(--av-ring, var(--bg));
+}
+@keyframes fl-breathe {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.6;
+  }
+}
+/* A stack overlaps by 4px, each ringed in the surface colour. */
+.fl-pucks {
+  display: inline-flex;
+  flex: none;
+}
+.fl-pucks > .fl-avatar {
+  box-shadow: 0 0 0 2px var(--av-ring, var(--bg));
+}
+.fl-pucks > .fl-avatar + .fl-avatar {
+  margin-left: calc(var(--sp-1) * -1);
 }
 [data-agent='claude'] {
   --hue: var(--hue-claude);
@@ -2796,41 +3060,96 @@ button.fl-row,
 [data-agent='demo'] {
   --hue: var(--hue-demo);
 }
-.fl-dot {
-  --dot: 8px;
+
+/* ---- Status mark (§2.23; .fl-dot kept as the class): a 12px shape per state, its colour a second channel.
+   needs you ◉ a bullseye · working ◠ an open arc that turns · done ✓ · failed ⊗ · idle ○ a hollow ring. ---- */
+
+.fl-dot,
+.fl-status {
+  --dot: var(--i-xs);
+  --dot-c: var(--fg-2);
+  position: relative;
   flex: none;
   display: inline-block;
   width: var(--dot);
   height: var(--dot);
+  border: 1.5px solid var(--dot-c);
   border-radius: var(--r-round);
-  background: var(--dot-idle);
+  background: transparent;
+  vertical-align: middle;
 }
 .fl-dot--sm {
+  --dot: 10px;
+}
+:is(.fl-dot, .fl-status)[data-state='needs-you'] {
+  --dot-c: var(--status-waiting);
+  border-width: 2px;
+  background: radial-gradient(circle, var(--dot-c) 0 2px, transparent 2.5px);
+}
+:is(.fl-dot, .fl-status)[data-state='working'] {
+  --dot-c: var(--status-working);
+  border-width: 2px;
+  border-right-color: transparent;
+  animation: spin 1s linear infinite;
+}
+:is(.fl-dot, .fl-status)[data-state='done'] {
+  --dot-c: var(--status-done);
+  border-color: transparent;
+}
+:is(.fl-dot, .fl-status)[data-state='done']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 35%;
+  height: 65%;
+  border: solid var(--dot-c);
+  border-width: 0 2px 2px 0;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+:is(.fl-dot, .fl-status)[data-state='error'],
+:is(.fl-dot, .fl-status)[data-state='failed'] {
+  --dot-c: var(--status-failed);
+  border-width: 2px;
+}
+:is(.fl-dot, .fl-status):is([data-state='error'], [data-state='failed'])::before,
+:is(.fl-dot, .fl-status):is([data-state='error'], [data-state='failed'])::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 55%;
+  height: 2px;
+  border-radius: var(--r-pill);
+  background: var(--dot-c);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+:is(.fl-dot, .fl-status):is([data-state='error'], [data-state='failed'])::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+/* A changed setting (§2.23 modified): a 6px dot. */
+:is(.fl-dot, .fl-status)[data-state='modified'] {
   --dot: 6px;
+  border: 0;
+  background: var(--dot-c);
 }
-.fl-dot[data-state='working'] {
-  background: var(--status-working);
-  animation: blink 1s linear infinite;
-}
-.fl-dot[data-state='needs-you'] {
-  background: var(--status-waiting);
-}
-.fl-dot[data-state='done'] {
-  background: var(--status-done);
-}
-.fl-dot[data-state='error'] {
-  background: var(--status-failed);
-}
-.fl-dot[data-still] {
+/* A count of none, a legend, a finished step: the arc holds still (an endless animation repaints every frame). */
+.fl-dot[data-still],
+.fl-status[data-still] {
   animation: none;
 }
-/* Elsewhere: a ring, not a fill. */
 .fl-dot[data-ring] {
   background: transparent;
-  box-shadow: inset 0 0 0 2px var(--dot-idle);
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.fl-dot, .fl-status)[data-state='working'],
+  .fl-spinner,
+  .fl-avatar[data-working]::after {
+    animation: none;
+  }
 }
 
-/* ---- Progress · spinner · countdown (§2.22) ---- */
+/* ---- Progress · spinner · countdown (§2.24) ---- */
 
 .fl-progress {
   display: block;
@@ -2839,6 +3158,9 @@ button.fl-row,
   background: var(--pill-bg);
   overflow: hidden;
   outline: var(--line) solid var(--ctl-border);
+}
+.fl-progress--card {
+  height: 3px;
 }
 .fl-progress > i {
   display: block;
@@ -2852,16 +3174,17 @@ button.fl-row,
   width: 30%;
   animation: slide 1.2s var(--ease-out) infinite;
 }
+/* The spinner is the working arc (12 / 14 / 20): an open ring that turns once a second. */
 .fl-spinner {
   --sz: var(--i-sm);
   flex: none;
   display: inline-block;
   width: var(--sz);
   height: var(--sz);
-  border: 1.5px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  border-top-color: var(--accent);
+  border: 2px solid var(--status-working);
+  border-right-color: transparent;
   border-radius: var(--r-round);
-  animation: spin 0.8s linear infinite;
+  animation: spin 1s linear infinite;
 }
 .fl-spinner--sm {
   --sz: var(--i-xs);
@@ -2870,9 +3193,10 @@ button.fl-row,
   --sz: var(--i-lg);
 }
 .fl-btn > .fl-spinner {
-  border-color: color-mix(in srgb, currentColor 25%, transparent);
-  border-top-color: currentColor;
+  border-color: currentColor;
+  border-right-color: transparent;
 }
+/* A countdown spends no accent: 2px of --fg-2 draining on the pill fill. */
 .fl-countdown {
   display: block;
   height: var(--sp-half);
@@ -2883,7 +3207,7 @@ button.fl-row,
 .fl-countdown > i {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--fg-2);
   transform-origin: left;
   animation: drain var(--countdown, 6s) var(--ease-linear) forwards;
 }
@@ -2898,7 +3222,7 @@ button.fl-row,
   height: var(--line);
   margin: var(--sp-1) 0;
   border: 0;
-  background: var(--border);
+  background: var(--hairline);
 }
 .fl-divider--v {
   width: var(--line);
@@ -2906,28 +3230,40 @@ button.fl-row,
   margin: 0 var(--sp-1);
 }
 
-/* ---- Empty state (§2.25): centred in the whole width, one action ---- */
+/* ---- Empty state (§2.26): unboxed, start-aligned in its column, padding 12 4: a 20 icon (or the 40 line mark)
+   in --fg-2, a 15/500 title, 12px text that says what will arrive and what happens then, one action ---- */
 
 .fl-empty {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  padding: var(--sp-8) var(--sp-4);
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-1);
   color: var(--fg-2);
-  text-align: center;
+  text-align: left;
 }
 .fl-empty > .icon {
-  width: var(--i-xl);
-  height: var(--i-xl);
+  width: var(--i-lg);
+  height: var(--i-lg);
+  margin-bottom: var(--sp-1);
+}
+.fl-empty > .fl-mark {
+  width: var(--sp-10);
+  height: var(--sp-10);
+  margin-bottom: var(--sp-2);
+  color: var(--fg-2);
 }
 .fl-empty__title {
   color: var(--fg);
-  font-weight: var(--w-strong);
+  font-size: var(--t-lead);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--track-title);
 }
 .fl-empty__text {
+  max-width: 60ch;
   font-size: var(--t-90);
+  line-height: var(--lh);
 }
 .fl-empty__actions {
   display: flex;
@@ -2935,7 +3271,55 @@ button.fl-row,
   margin-top: var(--sp-1);
 }
 
-/* ---- Banner (§2.26): inline, full width, r8; a tone tints it 8% ---- */
+/* ---- The FriedLiver mark (§1.6, ui/brandMark.tsx): the outline logo in --brand ---- */
+
+.fl-brand {
+  flex: none;
+  color: var(--brand);
+}
+
+/* ---- Ask box (§2.36): the Welcome hero's input, 52 tall, r12, the field edge, rim + elevation 1; a primary
+   "Start ⏎" inside at its end. Full width of its row (owner: use the whole screen). ---- */
+
+.fl-ask {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 52px;
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  border: var(--line) solid var(--field-border);
+  border-radius: var(--r-12);
+  background: var(--input-bg);
+  box-shadow: var(--rim), var(--elev-1);
+  color: var(--fg-2);
+  cursor: text;
+}
+.fl-ask:focus-within {
+  border-color: var(--focus);
+  box-shadow: var(--rim), var(--elev-1), var(--focus-halo);
+}
+.fl-ask > .icon {
+  flex: none;
+  width: var(--i-lg);
+  height: var(--i-lg);
+}
+.fl-ask > input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sel-fg);
+  font: inherit;
+  font-size: var(--t-lg);
+  outline: none;
+}
+.fl-ask > input::placeholder {
+  color: var(--placeholder);
+}
+
+/* ---- Banner (§2.26): inline, full width, --r-box; a tone tints it 8% ---- */
 
 .fl-banner {
   display: flex;
@@ -2944,9 +3328,10 @@ button.fl-row,
   gap: var(--sp-2) var(--sp-3);
   min-width: 0;
   padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
-  border: var(--line) solid var(--border);
+  border: var(--line) solid var(--hairline);
   border-radius: var(--r-box);
-  background: var(--menu-bg);
+  background: var(--input-bg);
+  box-shadow: var(--rim);
   color: var(--fg);
   container: fl-banner / inline-size;
 }
@@ -2990,12 +3375,11 @@ button.fl-row,
   position: relative;
   z-index: var(--z-composer);
   flex: none;
-  padding: 0 var(--sp-4) var(--sp-4);
+  padding: 0 var(--gutter) var(--sp-4);
 }
+/* The whole chat width, on the transcript's gutters (owner, 2026-10-20: use the whole screen). */
 .composer-col {
   position: relative;
-  max-width: 680px;
-  margin: 0 auto;
 }
 .composer {
   container-type: inline-size;
@@ -3003,37 +3387,20 @@ button.fl-row,
   display: flex;
   flex-direction: column;
   background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  box-shadow: var(--shadow-composer);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-12);
+  box-shadow: var(--rim), var(--shadow-composer);
 }
-/* The mode's colour: the focus ring and the send button. */
-.composer,
-.composer[data-mode='ask'] {
-  --mode: var(--accent);
+/* v2 (§2.27, owner-authorised restyle): the send is the one accent in every mode (the mode button says the
+   mode); focus is the neutral ring at 60% with its halo. */
+.composer {
+  --mode: var(--focus);
   --mode-send: var(--send-bg);
   --mode-send-fg: var(--send-fg);
 }
-.composer[data-mode='edits'] {
-  --mode: var(--fg);
-  --mode-send: var(--fg);
-  --mode-send-fg: var(--tool-bg);
-}
-.composer[data-mode='plan'] {
-  --mode: var(--focus-border);
-  --mode-send: var(--button-bg);
-  --mode-send-fg: var(--button-fg);
-}
-.composer[data-mode='full'] {
-  --mode: var(--error);
-  --mode-send: var(--error);
-  --mode-send-fg: var(--button-fg);
-}
 .composer:focus-within {
-  border-color: var(--mode);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--mode) 12%, transparent),
-    0 1px 2px color-mix(in srgb, var(--mode) 20%, transparent);
+  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
+  box-shadow: var(--rim), var(--shadow-composer), var(--focus-halo);
 }
 /* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
 .cc-chips {
@@ -3041,7 +3408,7 @@ button.fl-row,
   align-items: center;
   gap: var(--sp-1);
   padding: 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hairline);
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -3064,8 +3431,8 @@ button.fl-row,
   height: 24px;
   max-width: 180px;
   padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
   background: var(--chip-bg);
   font-size: var(--t-85);
   font-weight: 500;
@@ -3139,9 +3506,9 @@ button.cc-chip-remove:hover {
   field-sizing: content;
   padding: 10px 36px 10px 14px;
   border: 0;
-  border-radius: var(--r-8);
+  border-radius: var(--r-12);
   background: transparent;
-  color: var(--fg);
+  color: var(--sel-fg);
   caret-color: var(--fg);
   font-size: var(--t-100);
   line-height: 1.5;
@@ -3177,7 +3544,7 @@ button.cc-mic .icon {
   gap: 2px;
   min-width: 0;
   padding: 5px;
-  border-top: 0.5px solid var(--border);
+  border-top: 0.5px solid var(--hairline);
   color: var(--fg-2);
 }
 button.cc-icon-btn {
@@ -3185,7 +3552,11 @@ button.cc-icon-btn {
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
+  color: var(--fg-2);
+  transition: background-color var(--dur-out) var(--ease-out);
+}
+button.cc-icon-btn:hover:not(:disabled) {
   color: var(--fg);
 }
 button.cc-icon-btn:hover:not(:disabled),
@@ -3202,6 +3573,7 @@ button.cc-pill {
   background: var(--pill-bg);
   color: var(--fg);
   font-size: var(--t-85);
+  font-weight: var(--w-medium);
   line-height: 18px;
   white-space: nowrap;
 }
@@ -3241,7 +3613,7 @@ button.cc-mode {
   height: 26px;
   gap: 0;
   padding: 0 var(--sp-2) 0 0;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   color: var(--fg);
   white-space: nowrap;
 }
@@ -3266,19 +3638,33 @@ button.send-btn {
   width: 26px;
   height: 26px;
   margin-left: 2px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   color: var(--mode-send-fg);
   background: var(--mode-send);
+  box-shadow: var(--sheen), var(--elev-1);
+  transition: transform var(--dur-pop) var(--spring-pop);
 }
 button.send-btn:hover:not(:disabled) {
-  background: var(--mode-send);
-  filter: brightness(1.1);
+  background: var(--accent-hover);
 }
 button.send-btn:active:not(:disabled) {
-  filter: brightness(0.9);
+  background: var(--accent-press);
+  transform: scale(var(--press-scale));
+}
+/* Nothing to send, or Stop while the agent works: the pill fill, not the accent (the accent is for sending). */
+button.send-btn[data-stop] {
+  background: var(--pill-bg);
+  color: var(--fg);
+  box-shadow: none;
+}
+button.send-btn[data-stop]:hover:not(:disabled) {
+  background: var(--pill-hover);
 }
 button.send-btn:disabled {
-  opacity: 0.4;
+  opacity: 1;
+  background: var(--pill-bg);
+  color: var(--fg-2);
+  box-shadow: none;
 }
 /* Narrow: labels go before anything overlaps (the controls keep their tooltips). */
 @container (max-width: 420px) {

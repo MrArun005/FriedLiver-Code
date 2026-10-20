@@ -1,5 +1,5 @@
-// FriedLiver's one icon set: 16-grid paths, 1.2px stroke at every size (COMPONENTS.md §1.6). No VS Code API here,
-// so the phone app can draw the same icons.
+// FriedLiver's one icon set: 16-grid paths, 1.5px stroke at every size (COMPONENTS.md v2 §1.6; --i-stroke). No VS Code
+// API here, so the phone app can draw the same icons. The workbench's product icon theme (§6.21) draws the same paths.
 export const ICONS = {
   plus: 'M8 3v10M3 8h10',
   minus: 'M3 8h10',
@@ -67,17 +67,42 @@ export const ICONS = {
   split: 'M8 2v12M3 5h3M3 8h3M3 11h3M10 5h3M10 8h3M10 11h3',
   reply: 'M6.5 4 2.5 8l4 4M2.5 8h7a4 4 0 0 1 4 4v1',
   arrowLeft: 'M13 8H4M7.5 4.5 4 8l3.5 3.5',
+  // v2 (review/v2/src/mock.js P): the workbench's glyphs, drawn the same way.
+  arrowRight: 'M3 8h9.5M9 4.5 12.5 8 9 11.5',
+  files: 'M5.5 2.5h4.25l2.75 2.75v6.25h-7zM9.75 2.5v2.75h2.75M3.5 5v8.5h6',
+  extensions: 'M2.75 6.25h3.5v3.5h-3.5zM6.25 9.75h3.5v3.5h-3.5zM2.75 9.75h3.5v3.5h-3.5zM9.25 2.75h4v4h-4z',
+  debug: 'M5.25 3.25v9.5L12.75 8z',
+  scm: 'M4.5 2.75v10.5M4.5 13.25a1.5 1.5 0 1 0 0-.01M11.5 5.75a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3zM11.5 5.75v1.5c0 1.5-1 2.5-2.5 2.5H4.5',
+  agents: 'M8 1.75C8.5 5.5 10.5 7.5 14.25 8 10.5 8.5 8.5 10.5 8 14.25 7.5 10.5 5.5 8.5 1.75 8 5.5 7.5 7.5 5.5 8 1.75Z',
+  sliders: 'M2.5 4.75h6M11.5 4.75h2M2.5 11.25h2M7.5 11.25h6M10 3.25v3M6 9.75v3',
+  bell: 'M4.25 10.75V7a3.75 3.75 0 0 1 7.5 0v3.75l1 1.25h-9.5zM6.75 13.5h2.5',
+  sideL: 'M2.5 3h11v10h-11zM6.25 3v10',
+  sideR: 'M2.5 3h11v10h-11zM9.75 3v10',
+  panelB: 'M2.5 3h11v10h-11zM2.5 9.75h11',
+  folder: 'M2.5 4.5a1 1 0 0 1 1-1h2.75l1.5 1.5h4.75a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z',
+  sync: 'M3 7a5 5 0 0 1 9-2.5M13 9a5 5 0 0 1-9 2.5M12 2.5v2.25H9.75M4 13.5v-2.25h2.25',
+  braces: 'M6 2.5c-1.4 0-2 .6-2 1.8v1.5c0 1-.5 1.7-1.5 2.2 1 .5 1.5 1.2 1.5 2.2v1.5c0 1.2.6 1.8 2 1.8M10 2.5c1.4 0 2 .6 2 1.8v1.5c0 1 .5 1.7 1.5 2.2-1 .5-1.5 1.2-1.5 2.2v1.5c0 1.2-.6 1.8-2 1.8',
+  book: 'M2.75 3.25h3.5A1.75 1.75 0 0 1 8 5v8.25a1.5 1.5 0 0 0-1.5-1.5H2.75zM13.25 3.25h-3.5A1.75 1.75 0 0 0 8 5v8.25a1.5 1.5 0 0 1 1.5-1.5h3.75z',
+  clone: 'M4.5 2.75v10.5M4.5 13.25a1.5 1.5 0 1 0 0-.01M11.5 5.75a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3zM11.5 5.75v1.5c0 1.5-1 2.5-2.5 2.5H4.5',
+  error: 'M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 0 0 0-11zM6 6l4 4M10 6l-4 4',
+  pr: 'M4.5 2.75v10.5M4.5 13.25a1.5 1.5 0 1 0 0-.01M4.5 2.75a1.5 1.5 0 1 0 0 .01M11.5 13.25a1.5 1.5 0 1 0 0-.01M11.5 11.75V6a2 2 0 0 0-2-2H7.5M9 2.5 7.5 4 9 5.5',
+  filter: 'M2.75 3.75h10.5L9.25 8.5v4l-2.5 1v-5z',
+  menu: 'M2.75 4.5h10.5M2.75 8h10.5M2.75 11.5h10.5',
+  keyboard: 'M2 4.25h12v7.5H2zM4.5 6.75h.01M7 6.75h.01M9.5 6.75h.01M12 6.75h.01M5 9.25h6',
+  square: 'M4 4h8v8H4z',
+  fork: 'M8 13.5V9.25M8 9.25 4.25 5M8 9.25 11.75 5M4.25 5a1.5 1.5 0 1 0 0-.01M11.75 5a1.5 1.5 0 1 0 0-.01',
+  sun: 'M8 5.25a2.75 2.75 0 1 0 0 5.5a2.75 2.75 0 0 0 0-5.5zM8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1 1M11.4 11.4l1 1M12.4 3.6l-1 1M4.6 11.4l-1 1',
 };
 export type IconName = keyof typeof ICONS;
 
 /**
- * One icon set on a 16 grid. `size` is the box in CSS px; the stroke stays 1.2 CSS px
+ * One icon set on a 16 grid. `size` is the box in CSS px; the stroke stays 1.5 CSS px
  * at every size (non-scaling), so a 20px menu icon is no heavier than a 14px one.
  */
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   return (
     <svg class="icon" viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
-      <path d={ICONS[name]} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+      <path d={ICONS[name]} fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }
