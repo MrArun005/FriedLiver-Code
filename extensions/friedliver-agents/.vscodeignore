@@ -3,6 +3,7 @@
 !package.json
 !dist/extension.js
 !dist/demo-agent.js
+!dist/agy-acp.js
 !dist/bridge.js
 !dist/externalStdio.js
 !dist/thumbWorker.js

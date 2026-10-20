@@ -153,6 +153,8 @@ export const KEY_SETUPS: Record<VendorKey, KeySetup[]> = {
       acpMethods: ['vertex-ai'],
     },
   ],
+  // agy signs in with Google itself; its API-key mode lives in its own settings.json, which FriedLiver never edits.
+  antigravity: [],
 };
 
 export function keySetup(agent: AgentKey, id: unknown): KeySetup | undefined {
@@ -239,6 +241,11 @@ export const CLI_ACCOUNTS: Record<VendorKey, CliAccount> = {
     signIn: { command: 'gemini', then: 'Choose Login with Google, or type /auth to pick another way.' },
     signOut: { command: 'gemini', then: 'Type /signout, which clears its cached credentials.' },
     note: 'The Gemini CLI itself: the same program FriedLiver runs in ACP mode.',
+  },
+  antigravity: {
+    signIn: { command: 'agy', then: 'Choose Google OAuth and finish in the browser, then type /quit.' },
+    signOut: { command: 'agy', then: 'Type /logout, which signs out and clears its saved tokens.' },
+    note: 'Google’s Antigravity CLI. It has no ACP mode, so FriedLiver runs it through its own adapter with the same login. It can’t stop to ask, so Manual, Plan and /discuss are talk only (FriedLiver reads the project for it, in a deny-by-default sandbox); Edit automatically and Auto run it in the project. macOS only for now.',
   },
 };
 

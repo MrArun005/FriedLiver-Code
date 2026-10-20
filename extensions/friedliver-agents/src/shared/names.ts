@@ -28,7 +28,7 @@ export function chatTip(chat: Named): string {
 }
 
 /** Matches a numbered agent label: the thing never to show. */
-export const NUMBERED_LABEL = /\b(Claude|Codex|Gemini|Demo) \d+\b/;
+export const NUMBERED_LABEL = /\b(Claude|Codex|Gemini|Antigravity|Demo) \d+\b/;
 
 const short = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 const list = (chats: Named[]) => chats.map((c) => `“${short(chatName(c), 60)}” (${agentName(c.agent)})`).join(', ');
