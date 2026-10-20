@@ -7,7 +7,7 @@ import { AGENT_FACES, isAgentKey, type AgentKey } from '../shared/model';
 import type { AgentCore } from './core';
 import type { Span } from './editorPrompt';
 import { applyReplacement, inlinePrompt, runInline, type InlineRun } from './inlineEdit';
-import { userSetting } from './settings';
+import { testAgentsOn, userSetting } from './settings';
 
 const SCHEME = 'friedliver-inline';
 const PENDING = 'friedliver.inlineEdit.pending';
@@ -60,7 +60,7 @@ export class InlineEditor implements vscode.Disposable {
 
   private agent(): AgentKey {
     const v = userSetting(vscode.workspace.getConfiguration('friedliver').inspect<string>('inlineEdit.agent')).value;
-    return isAgentKey(v) ? v : 'claude';
+    return isAgentKey(v) && (v !== 'demo' || testAgentsOn()) ? v : 'claude';
   }
 
   async start(): Promise<void> {

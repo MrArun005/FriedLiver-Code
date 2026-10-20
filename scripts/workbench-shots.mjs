@@ -78,7 +78,6 @@ function profile(dir, theme) {
 		'workbench.hover.delay': 300,
 		'update.mode': 'none',
 		'friedliver.update.mode': 'off',
-		'friedliver.showDemoAgent': true,
 		'extensions.autoCheckUpdates': false,
 		'extensions.autoUpdate': false,
 		'telemetry.telemetryLevel': 'off',
@@ -101,6 +100,8 @@ async function run(themeKey, out, failures) {
 	profile(dir, THEMES[themeKey]);
 	const app = await electron.launch({
 		executablePath: executable(path.resolve(values.app)),
+		// The fake Demo agent runs only with this; packaged builds never set it.
+		env: { ...process.env, FRIEDLIVER_TEST_AGENTS: '1' },
 		args: [
 			ws,
 			// Opened as editors at startup, as four tabs.
