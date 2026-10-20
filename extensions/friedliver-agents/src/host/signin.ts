@@ -12,9 +12,13 @@ export function installCommandFor(agent: AgentKey): string | null {
   return cliLineFor(DEFAULT_AGENTS[agent].installCommand);
 }
 
-/** One of FriedLiver's own lines for a terminal (shared/accounts.ts CLI_ACCOUNTS), if it has only plain characters. */
+/**
+ * One of FriedLiver's own lines for a terminal (shared/accounts.ts CLI_ACCOUNTS), if it has only plain
+ * characters. One pipe into bash or iex at the end is allowed: Antigravity's official installer is
+ * `curl … | bash` (`irm … | iex` on Windows).
+ */
 export function cliLineFor(command: string): string | null {
-  return /^[\w@/.: -]+$/.test(command) ? command : null;
+  return /^[\w@/.: -]+( \| (bash|iex))?$/.test(command) ? command : null;
 }
 
 const MAX_LOGIN_ARGS = 32;

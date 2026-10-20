@@ -208,7 +208,7 @@ export function chatList(state: Pick<AppState, 'chats' | 'links'>, callerId: str
 
 /** list_agents: the agents FriedLiver can start. */
 export function agentList(): string {
-  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', demo: 'offline test agent; it echoes what it is told' };
+  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', antigravity: 'Google models through the Antigravity CLI', demo: 'offline test agent; it echoes what it is told' };
   return [
     ...AGENT_KEYS.map((k) => `${k} · ${AGENT_FACES[k].name}${about[k] ? ` (${about[k]})` : ''}`),
     '',

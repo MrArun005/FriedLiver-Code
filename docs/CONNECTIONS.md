@@ -1,6 +1,6 @@
 # Connections between chats and agents
 
-Any chat can work with any agent: Claude, Codex (GPT), Gemini or the offline
+Any chat can work with any agent: Claude, Codex (GPT), Gemini, Antigravity or the offline
 Demo. A chat can hand its work to another agent, ask one a question, feed
 its replies to another chat, or run the same task on several agents at once.
 Agents can also reach each other themselves, through FriedLiver's own tools,
@@ -17,7 +17,7 @@ The host side lives in `extensions/friedliver-agents/src/host/`
 |---|---|---|
 | **Hand off** | A new chat for the agent you pick, in the same folder (or the same task worktree). It starts from the old chat's transcript: your messages, the agent's replies (trimmed), the latest plan, the commands with their exit codes, and the files changed. | No. The transcript goes in front of the first message you send there. |
 | **Ask** | Your question goes to another agent, with a short brief: the asking chat's task, an excerpt of its last reply, the files it changed. The answer shows in your chat. Asking the same agent again continues the same consultation. | One turn in the consulted chat. |
-| **@gemini …** | The same as Ask. A message that starts with `@claude`, `@codex`, `@gpt`, `@gemini` or `@demo` goes to that agent instead of this chat's. A mention later in the text is just text. | One turn in the consulted chat. |
+| **@gemini …** | The same as Ask. A message that starts with `@claude`, `@codex`, `@gpt`, `@gemini`, `@antigravity` (or `@agy`) or `@demo` goes to that agent instead of this chat's. A mention later in the text is just text. | One turn in the consulted chat. |
 | **Pipe to** | From now on, each reply that finishes in this chat is sent to the other chat as a message. If the other chat is busy, the newest reply waits until it is idle. | One turn in the other chat per reply. |
 | **Forward** | Sends this chat's last reply to another chat once, e.g. a consultant's answer back to the main chat. | One turn in the other chat. |
 | **Run on several agents** | One chat per agent you pick, all given the same message at once, shown side by side on the board. With "Own worktree" each gets its own git worktree and branch, so their edits never mix. | One turn each. |

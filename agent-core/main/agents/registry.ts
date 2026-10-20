@@ -1,4 +1,4 @@
-export const AGENT_IDS = ['claude', 'codex', 'gemini', 'demo'] as const;
+export const AGENT_IDS = ['claude', 'codex', 'gemini', 'antigravity', 'demo'] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 /** Agents from an AI company, signed in through that company's own CLI. */
 export type VendorAgentId = Exclude<AgentId, 'demo'>;
@@ -51,6 +51,16 @@ export const DEFAULT_AGENTS: Record<VendorAgentId, AgentSpec> = {
     args: ['--acp'],
     installCommand: 'npm install -g @google/gemini-cli',
     loginHint: 'Run `gemini` in a terminal and choose "Login with Google", or set GEMINI_API_KEY.',
+  },
+  // Google's Antigravity CLI has no ACP mode: FriedLiver runs its own adapter (agyAcp.ts), which
+  // drives `agy` through its documented headless stream-json mode. `command` here is agy itself.
+  antigravity: {
+    id: 'antigravity',
+    label: 'Antigravity',
+    command: 'agy',
+    args: [],
+    installCommand: process.platform === 'win32' ? 'irm https://antigravity.google/cli/install.ps1 | iex' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    loginHint: 'Run `agy` in a terminal: it opens Google sign-in in the browser.',
   },
 };
 
