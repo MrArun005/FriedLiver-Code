@@ -227,6 +227,19 @@ describe('/discuss: the orchestrator', () => {
     ]);
   });
 
+  it('Antigravity takes part like any agent: its chat goes read only (talk only) before its first turn', async () => {
+    const h = fakeHost({ claude: [`P${stance('Postgres', ['x'])}`, CONCLUSION], antigravity: [`M${stance('MySQL', ['y'])}`] }, { maxRounds: 1 });
+    await h.discussions.start('chat-1', [{ agent: 'antigravity' }], 'q');
+    expect(h.d()).toMatchObject({ state: 'done', ended: 'rounds' });
+    expect(h.asked.map((a) => a.agent)).toEqual(['claude', 'antigravity', 'claude']);
+    expect(h.guards).toEqual([
+      ['chat-1', true],
+      ['chat-antigravity', true],
+      ['chat-1', false],
+      ['chat-antigravity', false],
+    ]);
+  });
+
   it('a point added while it runs waits for the round to end, then everyone hears it from the next round', async () => {
     let release!: () => void;
     const h = fakeHost(

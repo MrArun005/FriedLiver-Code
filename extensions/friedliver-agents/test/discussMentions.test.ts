@@ -66,6 +66,13 @@ describe('/discuss mentions: agents, models and pairs', () => {
     expect(resolveMention('openai', CATALOG)).toEqual({ ok: { agent: 'codex' } });
   });
 
+  it('Antigravity by name or as agy, anywhere in the question', () => {
+    expect(resolveMention('antigravity', CATALOG)).toEqual({ ok: { agent: 'antigravity' } });
+    expect(resolveMention('AGY', CATALOG)).toEqual({ ok: { agent: 'antigravity' } });
+    expect(plan('/discuss @antigravity Postgres or MySQL?')).toEqual({ participants: [{ agent: 'antigravity' }], question: 'Postgres or MySQL?', problems: [] });
+    expect(plan('/discuss Postgres or MySQL? @gemini @agy')).toEqual({ participants: [{ agent: 'gemini' }, { agent: 'antigravity' }], question: 'Postgres or MySQL?', problems: [] });
+  });
+
   it('a model by id or display name, any case', () => {
     expect(resolveMention('gpt-5.6-terra', CATALOG)).toEqual({ ok: { agent: 'codex', model: 'gpt-5.6-terra' } });
     expect(resolveMention('Gemini-3.1-Pro', CATALOG)).toEqual({ ok: { agent: 'gemini', model: 'gemini-3.1-pro' } });
