@@ -286,13 +286,13 @@ it('every theme defines the same color keys', () => {
   expect(new Set(keys).size).toBe(1);
 });
 
-it('contributes four themes, with Black Blue as the default and Light Blue as the light preference', () => {
-  expect(THEMES.map(({ contribution }) => contribution.id)).toEqual(['FriedLiver Black Blue', 'FriedLiver Light Blue', 'FriedLiver Midnight Blue', 'FriedLiver Graphite']);
+it('contributes six themes, with Design System v2 FriedLiver Dark as the default and FriedLiver Light as the light preference', () => {
+  expect(THEMES.map(({ contribution }) => contribution.id)).toEqual(['FriedLiver Dark', 'FriedLiver Light', 'FriedLiver Black Blue', 'FriedLiver Light Blue', 'FriedLiver Midnight Blue', 'FriedLiver Graphite']);
   for (const { contribution } of THEMES) expect(existsSync(path.join(EXT, contribution.path))).toBe(true);
   const defaults = manifest.contributes.configurationDefaults;
-  expect(defaults['workbench.colorTheme']).toBe('FriedLiver Black Blue');
-  expect(defaults['workbench.preferredDarkColorTheme']).toBe('FriedLiver Black Blue');
-  expect(defaults['workbench.preferredLightColorTheme']).toBe('FriedLiver Light Blue');
+  expect(defaults['workbench.colorTheme']).toBe('FriedLiver Dark');
+  expect(defaults['workbench.preferredDarkColorTheme']).toBe('FriedLiver Dark');
+  expect(defaults['workbench.preferredLightColorTheme']).toBe('FriedLiver Light');
   expect(defaults['editor.fontFamily']).toBe("'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace");
   expect(defaults['terminal.integrated.fontFamily']).toBe(defaults['editor.fontFamily']);
 });
