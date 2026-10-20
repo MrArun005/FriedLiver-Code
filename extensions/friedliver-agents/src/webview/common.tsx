@@ -42,7 +42,7 @@ document.addEventListener('click', onLink, true);
 document.addEventListener('auxclick', onLink, true);
 
 /** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
-let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
+let roster: AgentRoster = { agents: AGENT_KEYS.filter((a) => a !== 'demo'), signIn: {} };
 const rosterWatchers = new Set<() => void>();
 
 function setRoster(next: AgentRoster): void {
@@ -50,7 +50,7 @@ function setRoster(next: AgentRoster): void {
   for (const wake of rosterWatchers) wake();
 }
 
-/** The roster, drawing the component again when it changes (friedliver.showDemoAgent, a check, a sign-in). */
+/** The roster, drawing the component again when it changes (a check, a sign-in). */
 export function useRoster(): AgentRoster {
   const [, setN] = useState(0);
   useEffect(() => {

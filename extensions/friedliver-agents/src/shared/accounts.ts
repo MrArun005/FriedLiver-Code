@@ -283,7 +283,7 @@ export function validDefault(d: AgentDefaults | undefined, key: DefaultKey, valu
 
 // ---- Which agents the pickers show, and their sign-in marks ----
 
-/** The agents pickers and menus offer; Demo only when the user turned it on (friedliver.showDemoAgent). */
+/** The agents pickers and menus offer; the fake Demo agent only in tests (FRIEDLIVER_TEST_AGENTS=1). */
 export function shownAgents(showDemo: boolean): AgentKey[] {
   return AGENT_KEYS.filter((a) => showDemo || a !== 'demo');
 }
@@ -357,7 +357,6 @@ export interface AccountsView {
   cards: AccountCard[];
   /** The card to scroll to; `n` grows each time the page is opened on one. */
   focus?: { agent: AgentKey; n: number };
-  showDemo: boolean;
   /** Where links you click open. */
   links: LinkMode;
   /** "Mac & Windows control": the system_* tools' settings. */
@@ -382,7 +381,6 @@ export type CliWhat = 'install' | 'signIn' | 'signOut';
 
 export type AccountsMessage =
   | { type: 'ready' }
-  | { type: 'openSettings' }
   /** Where links you click open (friedliver.links.openIn). */
   | { type: 'setLinks'; mode: LinkMode }
   /** Starts the agent and a short session: sign-in, version and models. */
@@ -414,7 +412,7 @@ const isWhat = (v: unknown): v is CliWhat => v === 'install' || v === 'signIn' |
 export function parseAccountsMessage(raw: unknown, shown: readonly AgentKey[]): AccountsMessage | null {
   if (!isObj(raw) || typeof raw.type !== 'string') return null;
   const m = raw;
-  if (m.type === 'ready' || m.type === 'openSettings' || m.type === 'systemLog') return { type: m.type };
+  if (m.type === 'ready' || m.type === 'systemLog') return { type: m.type };
   if (m.type === 'setLinks') return m.mode === 'builtin' || m.mode === 'external' ? { type: 'setLinks', mode: m.mode } : null;
   if (m.type === 'setSystem') {
     const key = m.key;

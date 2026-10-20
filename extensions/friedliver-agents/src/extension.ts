@@ -30,7 +30,7 @@ import { StateFile } from './host/persist';
 import { SystemControl, systemSettings } from './host/system';
 import { ReviewUi, type ReviewPlacement } from './host/review';
 import { RemoteControl } from './remote/host';
-import { userSetting } from './host/settings';
+import { testAgentsOn, userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
 import { startUpdateChecks } from './host/updates';
@@ -221,7 +221,7 @@ export class Controller {
       () => this.core,
       () => this.folders()[0],
       (agent) => void this.core.reconfigure([agent]),
-      () => this.showDemo(),
+      () => testAgentsOn(),
     );
     this.permissions = new Permissions({
       user: context.globalState,
@@ -245,7 +245,7 @@ export class Controller {
       links: () => (vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin'),
       openInBrowser: (url, signal) => this.browser.call({ tool: 'browser_open', url }, signal),
     });
-    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => this.showDemo(), (line) => this.log.warn(line));
+    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => testAgentsOn(), (line) => this.log.warn(line));
     this.core = new AgentCore({
       folders: () => this.folders(),
       noFolderCwd,
@@ -381,7 +381,7 @@ export class Controller {
     this.remote = new RemoteControl(context, {
       core: this.core,
       folders: () => this.folders(),
-      agents: () => shownAgents(this.showDemo()),
+      agents: () => shownAgents(testAgentsOn()),
       reviews: { accept: (id) => this.reviews.accept(id), reject: (id) => this.reviews.reject(id) },
       hidden: (chatId) => this.inlineChats.has(chatId),
       log: (line) => this.log.info(line),
@@ -465,7 +465,7 @@ export class Controller {
       showChat: (chatId, revealItem) => this.showChat(chatId, revealItem),
       currentChat: () => this.lastSelected,
       addToComposer: (chatId, ref) => this.addToComposer(chatId, ref),
-      shownAgents: () => shownAgents(this.showDemo()),
+      shownAgents: () => shownAgents(testAgentsOn()),
       error: (err) => this.error(err),
     });
     context.subscriptions.push(this.editor, new InlineEditor(this.core, this.inlineChats));
@@ -1194,7 +1194,7 @@ export class Controller {
       agent ??
       (
         await vscode.window.showQuickPick(
-          shownAgents(this.showDemo()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
+          shownAgents(testAgentsOn()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
           { title: 'New chat with…' },
         )
       )?.agent;
@@ -1412,7 +1412,7 @@ export class Controller {
 
   /** Another agent first: these commands are for reaching a different one. */
   private async pickAgent(title: string, current: AgentKey): Promise<AgentKey | undefined> {
-    const shown = shownAgents(this.showDemo());
+    const shown = shownAgents(testAgentsOn());
     const order = [...shown.filter((a) => a !== current && a !== 'demo'), ...shown.filter((a) => a === current || a === 'demo')];
     return (
       await vscode.window.showQuickPick(
@@ -1748,13 +1748,8 @@ export class Controller {
     void this.permissionsPanel.panel.webview.postMessage(message).then(undefined, () => {});
   }
 
-  /** Demo is a fake local agent for trying the UI; pickers offer it only when the user turned it on. */
-  private showDemo(): boolean {
-    return userSetting(vscode.workspace.getConfiguration('friedliver').inspect<unknown>('showDemoAgent')).value === true;
-  }
-
   private roster() {
-    return rosterOf(this.showDemo(), this.accounts.records());
+    return rosterOf(testAgentsOn(), this.accounts.records());
   }
 
   private discussLayout(): DiscussLayout {
@@ -2029,10 +2024,6 @@ export class Controller {
       for (const s of this.surfaces) post(s, message);
     }
     if (e.affectsConfiguration('friedliver.images')) void this.tidyImages().finally(() => this.postImageStore());
-    if (e.affectsConfiguration('friedliver.showDemoAgent')) {
-      this.accounts.refresh();
-      this.postRoster();
-    }
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
         if (!this.stateFile) void this.openStateFile(false).then(() => this.stateFile?.schedule());

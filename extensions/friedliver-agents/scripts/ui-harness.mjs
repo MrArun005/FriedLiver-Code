@@ -1838,22 +1838,6 @@ async function narrowChecks({ open, check }) {
     bad = await narrowOffenders(a, '.apv');
     check(bad.length === 0, `at ${width}px the approval cards fit the panel, no text cut${bad.length ? ` [${bad.slice(0, 5).join(' | ')}]` : ''}`);
     await a.close();
-    // The start cards: Demo's "fake, local" note sits under its name, not on it.
-    const e = await open('surface=chat&theme=dark-2026&side=1&empty=1', width, 900);
-    const overlaps = await e.evaluate(() =>
-      [...document.querySelectorAll('.pick-agent')].flatMap((b) => {
-        const note = b.querySelector('.pick-note');
-        const name = [...b.children].filter((c) => c.tagName === 'SPAN' && !c.classList.contains('pick-note')).at(-1);
-        if (!note || !name) return [];
-        const n = note.getBoundingClientRect();
-        const t = name.getBoundingClientRect();
-        const card = b.getBoundingClientRect();
-        return n.top < t.bottom - 0.5 || n.bottom > card.bottom + 0.5 ? [`${b.textContent.trim()}: note ${Math.round(n.top)}..${Math.round(n.bottom)}, name ends ${Math.round(t.bottom)}`] : [];
-      }),
-    );
-    const notes = await e.locator('.pick-agent .pick-note').count();
-    check(notes === 1 && overlaps.length === 0, `at ${width}px Demo's start card keeps its note under its name${overlaps.length ? ` [${overlaps.join(' | ')}]` : ''}`);
-    await e.close();
     // Five open chats: the strip shows more than the open one (marks, or titles), and scrolls to the rest.
     const t = await open('surface=chat&theme=dark-2026&side=1&tabs=5', width, 900);
     const strip = await t.evaluate(() => {

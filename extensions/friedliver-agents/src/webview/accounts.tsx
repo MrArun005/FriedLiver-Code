@@ -65,12 +65,6 @@ function Page() {
         <Card key={card.agent} card={card} focused={view.focus?.agent === card.agent} />
       ))}
       {view.system && <SystemCard s={view.system} />}
-      <footer class="acct-foot hint">
-        {view.showDemo ? 'The Demo agent is shown: a fake local agent for trying FriedLiver with no account.' : 'The Demo agent, a fake local agent for trying FriedLiver with no account, is hidden.'}{' '}
-        <Button variant="link" onClick={() => send({ type: 'openSettings' })}>
-          {view.showDemo ? 'Hide it' : 'Show it'} in Settings
-        </Button>
-      </footer>
     </main>
   );
 }

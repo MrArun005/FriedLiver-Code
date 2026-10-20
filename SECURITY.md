@@ -14,7 +14,7 @@ agent CLI bugs to their vendors.
 ## Threat model
 
 FriedLiver is VS Code (Code - OSS) with an Agents extension that runs coding
-agents (Claude, Codex, Gemini, and an offline Demo) over the Agent Client
+agents (Claude, Codex, Gemini, Antigravity) over the Agent Client
 Protocol. Who is trusted:
 
 - **You.** You choose per chat how much an agent may do without asking (Ask,
@@ -35,11 +35,11 @@ An agent can:
 
 - Read files in the open workspace folders and its task worktree. It sees
   unsaved editor text the way you do.
-- Propose a write through FriedLiver (Gemini, the Demo agent). In Ask it opens
+- Propose a write through FriedLiver (Gemini). In Ask it opens
   as a diff and is written only if you accept, with the content you leave in
   the diff. Edits you ask for from the editor (Edit with Agent, Fix with
   Agent; docs/EDITOR.md) are ordinary chat turns and go through the same review.
-- Ask to run a command in a FriedLiver terminal (the Demo agent). In Ask it
+- Ask to run a command in a FriedLiver terminal (agents that use FriedLiver's terminal tool). In Ask it
   runs only after you approve it. You see the whole command line, including
   any environment variables the agent sets, with invisible and
   direction-changing characters spelled out.
@@ -582,7 +582,7 @@ for a typical single-user desktop.
 | FL-17 | Low | Webview input | Permission answers weren't checked against the offered options. The webview `<title>` wasn't escaped. | Fixed. |
 | FL-18 | High | Extensions | Patch 0040 turned off extension signature verification, because the verifier (`@vscode/vsce-sign`) is Microsoft-only. Any package Open VSX's CDN or a compromised mirror served was installed as is. | Fixed by FL-37: FriedLiver checks Open VSX's own signatures, and `extensions.verifySignature` is on again. |
 | FL-19 | Accepted | Agents | Agent processes aren't sandboxed. | Accepted by design. Documented above; install only agents you trust. |
-| FL-20 | Accepted | Demo agent | The offline Demo agent ships in the app. | Accepted. It has no network access and no keys, and goes through the same review and approval paths. Its terminal-login mode (a marker in the temp folder) is reachable only from tests. |
+| FL-20 | Fixed | Demo agent | The offline Demo agent ships in the app. | Removed from the product: it starts only with `FRIEDLIVER_TEST_AGENTS=1`, which the tests and UI harness set and a user's FriedLiver never does; saved Demo chats are dropped on restore (`test/noDemo.test.ts`). The script still ships for the packaged-build e2e checks. It has no network access and no keys. |
 | FL-21 | Info | Platform defaults | Checked: workspace trust stays on by default, and no patch touches the renderer sandbox or context isolation. Telemetry is off, the update service is absent, and product.json uses HTTPS only with a minimal link-protection list. `--no-sandbox` appears only in `dev.mjs` (as root) and test tooling. `webviewContentExternalBaseUrlTemplate` (Microsoft's CDN) only matters for web and server builds, which FriedLiver doesn't ship. | No change needed. |
 | FL-22 | Accepted | Residual | There is a short gap between the path check and the write, which a process you approved could use to swap a link. On Windows, terminal commands you approve still find programs in their folder, as cmd.exe always does. The extension host's environment reaches agents. | Accepted. These need a process you already allowed, or they are standard platform behaviour. |
 | FL-23 | Low | Agent-to-agent bridge | Reviewed at merge: per-chat tokens, socket permissions, request checks, approval, loop and depth limits hold. Under "ask", an agent could leave any number of requests waiting in its chat. | Fixed. At most 3 waiting per chat; more are refused with a message to the agent. |
