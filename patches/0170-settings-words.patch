@@ -1,0 +1,64 @@
+diff --git a/src/vs/workbench/contrib/preferences/browser/preferencesWidgets.ts b/src/vs/workbench/contrib/preferences/browser/preferencesWidgets.ts
+index 4db6d89a..1e14279d 100644
+--- a/src/vs/workbench/contrib/preferences/browser/preferencesWidgets.ts
++++ b/src/vs/workbench/contrib/preferences/browser/preferencesWidgets.ts
+@@ -250,9 +250,9 @@ export class SettingsTargetsWidget extends Widget {
+ 	private resetLabels() {
+ 		const remoteAuthority = this.environmentService.remoteAuthority;
+ 		const hostLabel = remoteAuthority && this.labelService.getHostLabel(Schemas.vscodeRemote, remoteAuthority);
+-		this.userLocalSettings.label = localize('userSettings', "User");
++		this.userLocalSettings.label = localize('friedliver.userSettings', "For me"); // FriedLiver: plain words (§6.14)
+ 		this.userRemoteSettings.label = localize('userSettingsRemote', "Remote") + (hostLabel ? ` [${hostLabel}]` : '');
+-		this.workspaceSettings.label = this.contextService.getWorkspace().name || localize('workspaceSettings', "Workspace");
++		this.workspaceSettings.label = localize('friedliver.workspaceSettings', "For this project"); // FriedLiver: plain words (§6.14)
+ 		this.folderSettingsAction.label = localize('folderSettings', "Folder");
+ 	}
+ 
+@@ -267,7 +267,7 @@ export class SettingsTargetsWidget extends Widget {
+ 		}));
+ 
+ 		this.userLocalSettings = this._register(new Action('userSettings', '', '.settings-tab', true, () => this.updateTarget(ConfigurationTarget.USER_LOCAL)));
+-		this.userLocalSettings.tooltip = localize('userSettings', "User");
++		this.userLocalSettings.tooltip = localize('friedliver.userSettingsTip', "Your settings, in every project (User)");
+ 
+ 		this.userRemoteSettings = this._register(new Action('userSettingsRemote', '', '.settings-tab', true, () => this.updateTarget(ConfigurationTarget.USER_REMOTE)));
+ 		const remoteAuthority = this.environmentService.remoteAuthority;
+@@ -306,14 +306,14 @@ export class SettingsTargetsWidget extends Widget {
+ 
+ 	setResultCount(settingsTarget: SettingsTarget, count: number): void {
+ 		if (settingsTarget === ConfigurationTarget.WORKSPACE) {
+-			let label = this.contextService.getWorkspace().name ?? localize('workspaceSettings', "Workspace");
++			let label = localize('friedliver.workspaceSettings', "For this project");
+ 			if (count) {
+ 				label += ` (${count})`;
+ 			}
+ 
+ 			this.workspaceSettings.label = label;
+ 		} else if (settingsTarget === ConfigurationTarget.USER_LOCAL) {
+-			let label = localize('userSettings', "User");
++			let label = localize('friedliver.userSettings', "For me");
+ 			if (count) {
+ 				label += ` (${count})`;
+ 			}
+@@ -366,7 +366,7 @@ export class SettingsTargetsWidget extends Widget {
+ 		this.workspaceSettings.enabled = this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY;
+ 		this.folderSettings.action.enabled = this.contextService.getWorkbenchState() === WorkbenchState.WORKSPACE && this.contextService.getWorkspace().folders.length > 0;
+ 
+-		this.workspaceSettings.tooltip = localize('workspaceSettings', "Workspace");
++		this.workspaceSettings.tooltip = localize('friedliver.workspaceSettingsTip', "Settings for this project only, saved in it (Workspace)");
+ 	}
+ }
+ 
+diff --git a/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts b/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts
+index 9637a692..ebff2d0b 100644
+--- a/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts
++++ b/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts
+@@ -126,7 +126,7 @@ export class SettingsEditor2 extends EditorPane {
+ 	private static SETTING_UPDATE_SLOW_DEBOUNCE: number = 1000;
+ 	private static CONFIG_SCHEMA_UPDATE_DELAYER = 500;
+ 	private static TOC_MIN_WIDTH: number = 100;
+-	private static TOC_RESET_WIDTH: number = 200;
++	private static TOC_RESET_WIDTH: number = 232; // FriedLiver: the settings TOC is 232 wide (COMPONENTS.md §6.14)
+ 	private static EDITOR_MIN_WIDTH: number = 500;
+ 	// Below NARROW_TOTAL_WIDTH, we only render the editor rather than the ToC.
+ 	private static NARROW_TOTAL_WIDTH: number = this.TOC_RESET_WIDTH + this.EDITOR_MIN_WIDTH;

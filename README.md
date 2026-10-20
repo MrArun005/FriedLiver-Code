@@ -237,7 +237,7 @@ prerequisites per OS, time, disk and memory: [docs/BUILD.md](docs/BUILD.md).
 | `upstream.json` | Pinned upstream tag and commit |
 | `product.json` | Names, IDs, Open VSX gallery and service overrides, deep-merged into upstream's. `null` deletes a key |
 | `patches/` | Source patches, applied in file-name order |
-| `branding/` | The roasted liver icon and artwork, and `make-branding.py`, which generates `overlay/` (Windows and macOS icons, installer pictures, watermark) |
+| `branding/` | The FriedLiver mark (`mark.svg`, the outline logo) and `make-branding.mjs`, which generates `icon.png` and `overlay/` from it (Windows and macOS icons, installer pictures, watermark) |
 | `extensions/friedliver-agents/` | The Agents panel, Agent Manager and reviews |
 | `extensions/friedliver-theme/` | Color themes generated from `palette.json`, and the workbench defaults |
 | `agent-core/` | The ACP client the agents extension bundles, and the fake agent the tests drive ([README](agent-core/README.md)) |
