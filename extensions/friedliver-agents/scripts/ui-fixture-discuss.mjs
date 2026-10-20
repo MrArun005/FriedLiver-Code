@@ -1,7 +1,9 @@
 // /discuss in a real-looking project: Claude, Gemini and Codex weigh Postgres against MySQL for an
 // audit log. Three chats show the card's states: running (round 2, Codex speaking), done and still
 // split, and (an open question, two agents) agreed. `before` is the same question asked the old way, one /ask at
-// a time. Only the UI harness uses it (?fixture=discuss, ?fixture=discuss-before).
+// a time. `models`: the same question between Claude · Opus, Claude · Sonnet and Gemini (the same agent on two
+// models), and an empty Claude chat whose agents report their models, for the /discuss @ suggestions. Only the UI
+// harness uses it (?fixture=discuss, ?fixture=discuss-before, ?fixture=discuss-models).
 
 const ROOT = '/Users/arun/code/ledger';
 
@@ -47,7 +49,29 @@ const W = {
   codex2: turn('codex', 2, 'Backoff, then dead-letter', 0.85, 'With 4xx out, backoff is right for what’s left. Add an idempotency key so retries are safe.', 'With 4xx out, backoff is right for what’s left. Add an idempotency key so retries are safe.', 'claude', 'back off only on 5xx and timeouts', []),
 };
 
-export function discussFixture(now = Date.now(), { before = false } = {}) {
+/** The models each agent reports, as its session's model option. */
+const MODELS = {
+  claude: [
+    ['default', 'Default (recommended)'],
+    ['claude-opus-4-5', 'Opus 4.5'],
+    ['claude-opus-4-1', 'Opus 4.1'],
+    ['claude-sonnet-4-5', 'Sonnet 4.5'],
+    ['claude-haiku-4-5', 'Haiku 4.5'],
+  ],
+  codex: [
+    ['gpt-5.6-terra', 'gpt-5.6-terra'],
+    ['gpt-5.6-luna', 'gpt-5.6-luna'],
+    ['gpt-5-pro', 'GPT-5 Pro'],
+  ],
+  gemini: [
+    ['gemini-3.1-pro', 'Gemini 3.1 Pro'],
+    ['gemini-3.1-flash', 'Gemini 3.1 Flash'],
+    ['argon', 'Argon'],
+  ],
+};
+const modelOption = (agent, current) => ({ id: 'model', name: 'Model', category: 'model', type: 'select', current, choices: MODELS[agent].map(([value, name]) => ({ value, name })), via: 'option' });
+
+export function discussFixture(now = Date.now(), { before = false, models = false } = {}) {
   const sec = (s) => now - s * 1000;
   const chat = (id, agent, title, items, over = {}) => ({
     id,
@@ -77,6 +101,45 @@ export function discussFixture(now = Date.now(), { before = false } = {}) {
   ];
   const card = (over) => ({ kind: 'discussion', id: 'discuss-1', question, participants, maxRounds: 3, round: 2, state: 'done', turns: [], tokens: 18400, budget: 60000, at: sec(900), ...over });
   const typed = { kind: 'user', text: `/discuss @gemini @codex ${question}`, images: [], at: sec(1000) };
+
+  if (models) {
+    const O = 'claude/claude-opus-4-5';
+    const S = 'claude/claude-sonnet-4-5';
+    const who = { claude: O, codex: S };
+    const recast = (t) => ({ ...t, by: who[t.by] ?? t.by, stance: { ...t.stance, ...(t.stance.re ? { re: { ...t.stance.re, agent: who[t.stance.re.agent] ?? t.stance.re.agent } } : {}) } });
+    const turns = Object.values(T).map((t) => (t.by === 'you' ? t : recast(t)));
+    const conclusion = {
+      ...conclusionSplit,
+      disagreed: conclusionSplit.disagreed.map((d) => ({ ...d, sides: d.sides.map((s) => ({ ...s, agent: who[s.agent] ?? s.agent })) })),
+      by: O,
+      carryOut: S,
+    };
+    const split = card({
+      participants: [
+        { agent: 'claude', model: 'claude-opus-4-5', modelName: 'Opus 4.5', chatId: 'chat-main' },
+        { agent: 'claude', model: 'claude-sonnet-4-5', modelName: 'Sonnet 4.5', chatId: 'chat-s' },
+        { agent: 'gemini', chatId: 'chat-g' },
+      ],
+      ended: 'rounds',
+      round: 3,
+      maxRounds: 3,
+      turns,
+      conclusion,
+      span: 0,
+    });
+    const running = { ...split, id: 'discuss-2', state: 'running', ended: undefined, conclusion: undefined, span: undefined, round: 2, speaking: S, turns: turns.slice(0, 6) };
+    const session = (agent, current) => ({ options: [modelOption(agent, current)], commands: [], live: true });
+    const asked = { kind: 'user', text: `/discuss @sonnet @gemini ${question}`, images: [], at: sec(1000) };
+    const chats = [
+      chat('chat-main', 'claude', 'Invoice audit log', [...lead, asked, split], { session: session('claude', 'claude-opus-4-5') }),
+      chat('chat-running', 'claude', 'Invoice audit log', [...lead, asked, running], { session: session('claude', 'claude-opus-4-5') }),
+      chat('chat-compose', 'claude', 'Invoice audit log', lead, { session: session('claude', 'claude-opus-4-5') }),
+      chat('chat-s', 'claude', 'Discussion', [], { origin: { kind: 'consult', chatId: 'chat-main', by: 'user' }, depth: 1, session: session('claude', 'claude-sonnet-4-5') }),
+      chat('chat-g', 'gemini', 'Discussion', [], { origin: { kind: 'consult', chatId: 'chat-main', by: 'user' }, depth: 1 }),
+    ];
+    const defaults = Object.fromEntries(Object.keys(MODELS).map((agent) => [agent, { options: [modelOption(agent, MODELS[agent][0][0])], chosen: {} }]));
+    return { state: { chats, images: [], links: [] }, defaults };
+  }
 
   if (before) {
     const link = (role, agent, chatId, text) => ({ kind: 'link', linkId: `l-${agent}`, role, chatId, agent, label: agent === 'gemini' ? 'Gemini' : 'Codex', text, by: 'user' });

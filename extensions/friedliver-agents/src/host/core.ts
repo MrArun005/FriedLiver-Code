@@ -84,6 +84,7 @@ import { mergeOffered, type AccountRecord } from '../shared/accounts';
 import { relativeFile, rewoundHistory } from './transcript';
 import { RULES_CAP, type Rules } from './sharedRules';
 import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge } from './discuss';
+import { currentModel, modelCatalog, sameModel, type Who } from '../shared/discussMentions';
 
 const READ_ONLY = 'This chat only proposes text: FriedLiver refuses file access, commands and tools in it.';
 
@@ -388,13 +389,25 @@ export class AgentCore {
       dispatch: (action) => this.dispatch(action),
       id: (prefix) => this.id(prefix),
       settings: () => this.options.discussSettings?.() ?? {},
-      participant: async (sourceId, agent) => {
+      participant: async (sourceId, agent, model, taken = []) => {
         const source = this.requireChat(sourceId);
-        const known = this.links.consultation(sourceId, agent);
+        // The newest chat this one consults with the agent, on the model when one is named, that no other participant has.
+        const known = live()
+          .links.filter((l) => l.kind === 'consult' && l.from === sourceId)
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((l) => this.chat(l.to))
+          .find((c) => c && c.agent === agent && !c.archived && !taken.includes(c.id) && (!model || sameModel(currentModel(c.session) ?? this.chosen.get(c.id)?.model?.toString(), model)));
         if (known) return known.id;
-        const chat = await this.createChat(agent, { shareWorktreeOf: sourceId, title: 'Discussion', origin: { kind: 'consult', chatId: sourceId, by: 'user' }, depth: source.depth + 1 });
+        const chat = await this.createChat(agent, {
+          shareWorktreeOf: sourceId,
+          title: 'Discussion',
+          origin: { kind: 'consult', chatId: sourceId, by: 'user' },
+          depth: source.depth + 1,
+          ...(model ? { choices: { model } } : {}),
+        });
         return chat.id;
       },
+      models: (agent) => modelCatalog(this.agentDefaults(), live().chats)[agent] ?? [],
       prompt: (chatId, text) => {
         const chat = this.requireChat(chatId);
         // What the agent was given, so its reply is read from here on (folded into the card in the chat).
@@ -957,10 +970,10 @@ export class AgentCore {
     return this.links.consult(chatId, agent, text, by, { images, fresh });
   }
 
-  /** /discuss: this chat's agent and `agents` talk `question` through; resolves with the conclusion on the card. */
-  discuss(chatId: string, agents: AgentKey[], question: string): Promise<void> {
+  /** /discuss: this chat's agent and `who` (agents, or agents on models) talk `question` through; resolves with the conclusion on the card. */
+  discuss(chatId: string, who: (AgentKey | Who)[], question: string): Promise<void> {
     this.retitle(this.requireChat(chatId), question);
-    return this.discussions.start(chatId, agents, question);
+    return this.discussions.start(chatId, who, question);
   }
 
   /**

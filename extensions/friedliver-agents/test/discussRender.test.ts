@@ -2,7 +2,7 @@
 // what Preact touches), and switching friedliver.discuss.layout redraws an open card at once.
 import { createElement as h } from 'preact';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { DiscussTurn, DiscussionItem } from '../src/shared/discuss';
+import type { DiscussTurn, DiscussionItem, Speaker } from '../src/shared/discuss';
 import { DISCUSS_LAYOUTS, discussLayouts } from '../src/shared/discussView';
 import type { AgentKey, ChatView } from '../src/shared/model';
 
@@ -98,7 +98,7 @@ beforeAll(async () => {
   ({ DiscussionCard: Card } = await import('../src/webview/discussion'));
 });
 
-const turn = (by: AgentKey, round: number, side: string, confidence: number, re?: AgentKey): DiscussTurn => ({
+const turn = (by: Speaker, round: number, side: string, confidence: number, re?: Speaker): DiscussTurn => ({
   by,
   round,
   text: `${by} holds ${side}. More reasons follow here.`,
@@ -178,6 +178,46 @@ describe('/discuss card renders', () => {
     expect(root.all('fl-discuss__board')).toHaveLength(0);
     expect(root.all('fl-discuss__thread').length).toBeGreaterThan(0);
     expect(root.all('fl-discuss')[0].getAttribute('data-layout')).toBe('timeline');
+    render(null, root as unknown as Element);
+    discussLayouts.set('board+meter');
+  });
+});
+
+describe('/discuss card: the same agent on two models', () => {
+  const OPUS = 'claude/claude-opus-4-5';
+  const SONNET = 'claude/claude-sonnet-4-5';
+  const d: DiscussionItem = {
+    ...base([], [turn(OPUS, 1, 'Postgres', 0.8), turn(SONNET, 1, 'MySQL', 0.6, OPUS), turn('gemini', 1, 'MySQL', 0.7, SONNET)], {
+      round: 1,
+      maxRounds: 1,
+      conclusion: { agreed: [], disagreed: [{ point: 'Which engine?', sides: [{ agent: OPUS, view: 'Postgres.' }, { agent: SONNET, view: 'MySQL.' }] }], next: 'Prototype.', by: OPUS, carryOut: SONNET },
+    }),
+    participants: [
+      { agent: 'claude', model: 'claude-opus-4-5', modelName: 'Opus 4.5', chatId: 'chat-1' },
+      { agent: 'claude', model: 'claude-sonnet-4-5', modelName: 'Sonnet 4.5' },
+      { agent: 'gemini' },
+    ],
+  };
+
+  for (const layout of DISCUSS_LAYOUTS)
+    it(`names each by agent and model (${layout})`, () => {
+      discussLayouts.set(layout);
+      const root = new Node_(1, 'div');
+      act(() => render(h(Card, { item: d, chat }), root as unknown as Element));
+      const text = root.textContent;
+      expect(text).toContain('Claude · Opus 4.5');
+      expect(text).toContain('Claude · Sonnet 4.5');
+      expect(text).toContain('Carry out with Claude · Sonnet 4.5');
+      // No raw key anywhere but the fixture turns' own prose ("claude/… holds …").
+      expect(text.replace(/claude\/claude-[\w-]+ holds/g, '')).not.toMatch(/claude\/claude/);
+      render(null, root as unknown as Element);
+    });
+
+  it('while it runs, the speaker is named by model too', () => {
+    discussLayouts.set('timeline');
+    const root = new Node_(1, 'div');
+    act(() => render(h(Card, { item: { ...d, state: 'running', ended: undefined, conclusion: undefined, speaking: SONNET }, chat }), root as unknown as Element));
+    expect(root.textContent).toContain('Claude · Sonnet 4.5 is speaking');
     render(null, root as unknown as Element);
     discussLayouts.set('board+meter');
   });
