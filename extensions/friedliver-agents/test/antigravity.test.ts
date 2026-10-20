@@ -1,13 +1,14 @@
 // Antigravity (Google's `agy`): FriedLiver's ACP adapter over agy's headless stream-json mode,
 // and the agent's place in FriedLiver (spec, levels, mentions, Accounts). agy itself is the
 // fixture test/fixtures/fake-agy.mjs: no network, no sign-in.
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
 import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGY_MODES, extraArgs, parseModels, settingsModel, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
-import { agyAgent } from '@friedliver/main/agents/agyAcp';
+import { AGY_MODES, extraArgs, parseModels, seatbeltProfile, settingsModel, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
+import { PLATFORM_REFUSAL, agyAgent, type AgyAdapterOptions } from '@friedliver/main/agents/agyAcp';
 import { findProgram } from '@friedliver/main/agents/processes';
 import { DEFAULT_AGENTS } from '@friedliver/main/agents/registry';
 import { parseEditInput } from '../src/host/editorPrompt';
@@ -99,8 +100,8 @@ describe('FriedLiver levels on agy’s modes', () => {
   });
 });
 
-describe('workspace agy config (fail closed)', () => {
-  const rel = (repo: string, sub: string) => workspaceConfig(sub, '/nonexistent-home').map((f) => path.relative(repo, f).split(path.sep).join('/')).sort();
+describe('workspace agy config (defence in depth, fail closed)', () => {
+  const rel = (repo: string, sub: string) => workspaceConfig(sub, repo).map((f) => path.relative(repo, f).split(path.sep).join('/')).sort();
 
   it('allows only text: rules and workflows as markdown, GEMINI.md, and agy’s own artifacts', async () => {
     const repo = await gitRepo();
@@ -156,26 +157,64 @@ describe('workspace agy config (fail closed)', () => {
     }
   });
 
-  it('outside a repository looks at the folder only, and never at the home folder’s own config', () => {
+  it('never walks past the root git gave, nor up from a folder outside it (a planted .git changes nothing)', () => {
+    const outer = tmpDir('fl-agy-outer-');
+    mkdirSync(path.join(outer, '.agents'));
+    writeFileSync(path.join(outer, '.agents', 'hooks.json'), '{}');
+    const project = path.join(outer, 'project');
+    mkdirSync(path.join(project, 'sub', '.git'), { recursive: true });
+    expect(workspaceConfig(project, project)).toEqual([]);
+    expect(workspaceConfig(path.join(project, 'sub'), project)).toEqual([]);
+    // A root that isn't above the folder: the folder only.
+    expect(workspaceConfig(project, path.join(outer, 'elsewhere'))).toEqual([]);
+    expect(workspaceConfig(project, outer)).toEqual([path.join(outer, '.agents', 'hooks.json')]);
+  });
+});
+
+describe.skipIf(process.platform !== 'darwin')('the macOS sandbox every agy process runs in', () => {
+  /** Runs `sh -c` in the profile; the exit code and what it said. */
+  const inSandbox = (home: string, cwd: string, script: string) => {
+    const r = spawnSync('/usr/bin/sandbox-exec', ['-p', seatbeltProfile(home), '/bin/sh', '-c', script], { cwd, encoding: 'utf8' });
+    return { code: r.status, out: `${r.stdout}${r.stderr}` };
+  };
+
+  it('agy and what it starts can’t read or write any workspace config folder, in any case, at any depth', async () => {
     const home = tmpDir('fl-agy-home-');
-    mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
-    writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), '{}');
-    const project = path.join(home, 'project');
-    mkdirSync(project);
-    expect(workspaceConfig(project, home)).toEqual([]);
-    expect(workspaceConfig(home, home)).toEqual([]);
+    const repo = await gitRepo();
+    mkdirSync(path.join(repo, '.agents', 'rules'), { recursive: true });
+    writeFileSync(path.join(repo, '.agents', 'rules', 'x.md'), 'hi');
+    expect(inSandbox(home, repo, 'mkdir -p .gemini && echo x > .gemini/settings.json')).toMatchObject({ code: 1, out: expect.stringContaining('Operation not permitted') });
+    expect(existsSync(path.join(repo, '.gemini', 'settings.json'))).toBe(false);
+    expect(inSandbox(home, repo, 'mkdir -p pkg/_Agents && echo {} > pkg/_Agents/hooks.json').code).not.toBe(0);
+    expect(inSandbox(home, repo, 'echo {} > .AGENTS/hooks.json').code).not.toBe(0);
+    expect(inSandbox(home, repo, 'cat .agents/rules/x.md').out).toContain('Operation not permitted');
+    expect(inSandbox(home, repo, 'echo ok > src.txt && cat src.txt')).toEqual({ code: 0, out: 'ok\n' });
+  });
+
+  it('keeps the user’s own ~/.gemini readable, and writable only where agy keeps state', () => {
+    const home = tmpDir('fl-agy-home-');
+    mkdirSync(path.join(home, '.gemini', 'antigravity-cli', 'log'), { recursive: true });
+    mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+    writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), '{"model":"x"}');
+    const g = path.join(home, '.gemini');
+    expect(inSandbox(home, home, `cat "${g}/antigravity-cli/settings.json"`).out).toBe('{"model":"x"}');
+    expect(inSandbox(home, home, `echo log > "${g}/antigravity-cli/log/a.log"`).code).toBe(0);
+    for (const target of ['antigravity-cli/settings.json', 'config/hooks.json', 'config/mcp_config.json', 'GEMINI.md']) {
+      expect(inSandbox(home, home, `echo x > "${g}/${target}"`).code, target).not.toBe(0);
+    }
+    expect(readFileSync(path.join(g, 'antigravity-cli', 'settings.json'), 'utf8')).toBe('{"model":"x"}');
   });
 });
 
 /** The adapter in this process, talking to the fake agy; every update it sends is kept. */
-function adapter(env: Record<string, string> = {}) {
+function adapter(env: Record<string, string> = {}, over: Partial<AgyAdapterOptions> = {}) {
   const log = path.join(tmpDir('fl-agy-log-'), 'calls.jsonl');
   writeFileSync(log, '');
   const updates: acp.SessionNotification[] = [];
   // Over NDJSON byte streams, as on stdio (agent-core may load its own copy of the SDK).
   const toAgent = new TransformStream<Uint8Array, Uint8Array>();
   const toClient = new TransformStream<Uint8Array, Uint8Array>();
-  const served = agyAgent({ command: process.execPath, baseArgs: [FAKE_AGY], env: { ...process.env, FAKE_AGY_LOG: log, ...env } }).connect(acp.ndJsonStream(toClient.writable, toAgent.readable));
+  const served = agyAgent({ command: process.execPath, baseArgs: [FAKE_AGY], env: { ...process.env, FAKE_AGY_LOG: log, ...env }, ...over }).connect(acp.ndJsonStream(toClient.writable, toAgent.readable));
   const conn = acp
     .client({ name: 'test' })
     .onNotification(acp.methods.client.session.update, ({ params }) => void updates.push(params))
@@ -193,7 +232,27 @@ function adapter(env: Record<string, string> = {}) {
 
 const prompt = (text: string): acp.ContentBlock[] => [{ type: 'text', text }];
 
-describe('the agy ACP adapter (fake agy)', () => {
+describe('where the adapter won’t start agy', () => {
+  it('off macOS: no sandbox to hide workspace config, so no session, and no agy call', async () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      const a = adapter({}, { platform });
+      await expect(a.agent.request(acp.methods.agent.session.new, { cwd: await gitRepo(), mcpServers: [] })).rejects.toMatchObject({ data: { details: PLATFORM_REFUSAL } });
+      expect(a.calls()).toEqual([]);
+      a.close();
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('in the home folder, or a repository at its root', async () => {
+    const home = await gitRepo();
+    const a = adapter({}, { home });
+    await expect(a.agent.request(acp.methods.agent.session.new, { cwd: home, mcpServers: [] })).rejects.toMatchObject({ data: { details: expect.stringMatching(/home folder/) } });
+    mkdirSync(path.join(home, 'project'));
+    await expect(a.agent.request(acp.methods.agent.session.new, { cwd: path.join(home, 'project'), mcpServers: [] })).rejects.toMatchObject({ data: { details: expect.stringMatching(/home folder/) } });
+    a.close();
+  });
+});
+
+describe.skipIf(process.platform !== 'darwin')('the agy ACP adapter (fake agy, in the sandbox)', () => {
   it('starts a session with agy’s models and version, in Manual, which runs nothing', async () => {
     const a = adapter();
     const init = await a.agent.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
@@ -249,29 +308,31 @@ describe('the agy ACP adapter (fake agy)', () => {
     a.close();
   });
 
-  it('a turn that leaves agy config behind ends the session: a clear reason, and no next turn runs', async () => {
-    const a = adapter();
-    const project = await gitRepo();
-    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
-    await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'accept-edits' });
-    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('write-config') })).rejects.toMatchObject({
-      data: { details: expect.stringMatching(/\.gemini.settings\.json.*session has ended/s) },
-    });
-    expect(existsSync(path.join(project, '.gemini', 'settings.json'))).toBe(true);
-    // Even after the file is gone: this session is over.
-    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('next') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/session has ended/) } });
-    expect(a.calls()).toHaveLength(1);
-    a.close();
-  });
-
-  it('config written while agy works stops agy at once', async () => {
+  it('a write to .gemini/settings.json during a turn fails at the OS level, even in Full access', async () => {
     const a = adapter();
     const project = await gitRepo();
     const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
     await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'full' });
-    const started = Date.now();
-    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('write-config-slow') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/session has ended/) } });
-    expect(Date.now() - started).toBeLessThan(10_000);
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('write-config') });
+    expect(a.said()).toMatch(/^\[refused: EPERM\] /);
+    expect(existsSync(path.join(project, '.gemini', 'settings.json'))).toBe(false);
+    a.close();
+  });
+
+  it('config that appears during a turn from elsewhere ends the session: a clear reason, and no next turn runs', async () => {
+    const a = adapter();
+    const project = await gitRepo();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'accept-edits' });
+    const turn = a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('pause') });
+    await waitFor(() => a.calls().length > 0);
+    // Another agent or a script in the same folder, not sandboxed.
+    mkdirSync(path.join(project, '.agents'));
+    writeFileSync(path.join(project, '.agents', 'hooks.json'), '{}');
+    await expect(turn).rejects.toMatchObject({ data: { details: expect.stringMatching(/\.agents.hooks\.json.*session has ended/s) } });
+    rmSync(path.join(project, '.agents'), { recursive: true });
+    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('next') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/session has ended/) } });
+    expect(a.calls()).toHaveLength(1);
     a.close();
   });
 
@@ -367,7 +428,7 @@ describe('Antigravity in FriedLiver', () => {
     expect(markFor('antigravity')).not.toEqual(markFor('someone-else'));
   });
 
-  it.skipIf(process.platform === 'win32')(
+  it.skipIf(process.platform !== 'darwin')(
     'end to end: a chat with Antigravity runs nothing in Manual, and answers through the built adapter in Edit automatically',
     async () => {
       const bin = tmpDir('fl-agy-bin-');

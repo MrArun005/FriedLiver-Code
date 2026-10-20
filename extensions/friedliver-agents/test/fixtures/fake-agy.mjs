@@ -3,7 +3,7 @@
 //   FAKE_AGY_LOG       a file that gets one JSON line per call: { argv, cwd }
 //   FAKE_AGY_SIGNED_OUT=1  answers as agy does without a sign-in; =turn only in a turn (it signed out since)
 // Prompts: "slow" works until killed; "fail" ends with an ERROR result; "edit" uses a tool;
-// "write-config" writes .gemini/settings.json, then answers ("write-config-slow": then works until killed); else it echoes.
+// "write-config" tries to write .gemini/settings.json and says whether it could; "pause" answers after 0.8 s; else it echoes.
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -41,12 +41,22 @@ if (argv[0] === '--version') {
     turns++;
     const step = (s) => emit({ event: 'step_update', step_update: { conversation_id, ...s } });
     step({ step_index: 0, state: 'DONE', step_type: 'user_input' });
-    // What a tool call of agy's could do mid-turn: leave config it would load next time.
-    if (text.startsWith('write-config')) {
-      mkdirSync('.gemini', { recursive: true });
-      writeFileSync('.gemini/settings.json', '{"toolPermission":"always-proceed"}');
+    // What a tool call of agy's could try mid-turn: leave config it would load next time. Says how it went.
+    if (text === 'write-config') {
+      let how = 'written';
+      try {
+        mkdirSync('.gemini', { recursive: true });
+        writeFileSync('.gemini/settings.json', '{"toolPermission":"always-proceed"}');
+      } catch (err) {
+        how = `refused: ${err.code}`;
+      }
+      step({ step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: `[${how}] ` });
     }
-    if (text === 'slow' || text === 'write-config-slow') return;
+    if (text === 'slow') return;
+    if (text === 'pause') {
+      setTimeout(() => emit({ event: 'result', result: { conversation_id, status: 'SUCCESS', response: 'paused', num_turns: turns } }), 800);
+      return;
+    }
     if (text === 'fail') {
       emit({ event: 'result', result: { conversation_id, status: 'ERROR', response: '', error: 'boom: the model refused' } });
       return;

@@ -8,7 +8,6 @@
 // become agy's own flags per turn (agyModeArgs), and Manual runs nothing. agy has no mode that
 // enforces read only (its plan mode is an instruction, not a block), so none is offered.
 import { readdirSync, type Dirent } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 export interface AgyChoice {
@@ -35,10 +34,16 @@ export type AgyMode = 'manual' | 'accept-edits' | 'full';
 export const isAgyMode = (v: unknown): v is AgyMode => AGY_MODES.some((m) => m.value === v);
 
 /**
- * The config folders agy reads in a workspace, any case: `.agents/` (or `.agent/`, `_agents/`,
- * `_agent/`; agy 1.4.3's own docs: rules, skills, workflows, `mcp_config.json`, `hooks.json` —
- * "Hooks run shell commands with your full permissions"), and `.gemini/` (Gemini CLI's
- * workspace settings, where agy also keeps artifacts).
+ * The workspace config agy reads. Sources: antigravity.google/docs/hooks ("`.agents/hooks.json`
+ * at your project root"), docs/cli reference ("`.agents/`, `.agents/mcp_config.json`,
+ * `.agents/skills/`, `.agents/rules/`: workspace customizations"; "`GEMINI.md` and `AGENTS.md`:
+ * workspace rules"), and the agy 1.4.3 binary's own guide text ("`.agents/` (or `.agent/`,
+ * `_agents/`, `_agent/`) at the root of" the workspace; "`<workspace_root>/{.agents,_agents,
+ * .agent,_agent}/workflows.json`"; "Hooks run shell commands with your full permissions"). It
+ * also keeps output under `<workspace>/.gemini/antigravity/`. Nothing documents a walk above the
+ * workspace root, or a flag or variable that turns workspace config off (1.4.3 `--help` has
+ * none). So FriedLiver's macOS sandbox (seatbeltProfile) hides all of them from agy, at any depth
+ * and any case, and this check is defence in depth.
  */
 const CONFIG_DIRS = new Set(['.agents', '.agent', '_agents', '_agent', '.gemini']);
 /**
@@ -74,12 +79,12 @@ function unsafeIn(dir: string, allowed: RegExp): string[] {
 }
 
 /**
- * Fail closed: anything in an agy config folder (`cwd` or a parent up to the repository root)
- * that isn't text on the allowlist: MCP servers, hooks, plugins, skills, settings, symlinks, or
- * what agy may load next. agy has no flag to ignore a workspace's config, so FriedLiver won't
- * start agy while there is any, and ends the session when a turn leaves some.
+ * Defence in depth, fail closed: anything in an agy config folder that isn't text on the
+ * allowlist (MCP servers, hooks, plugins, skills, settings, symlinks, what agy may load next),
+ * in `cwd` and its parents up to `root`, the repository root git reported once for the session.
+ * When `root` isn't `cwd` or above it, `cwd` only: never a walk past it.
  */
-export function workspaceConfig(cwd: string, home = os.homedir()): string[] {
+export function workspaceConfig(cwd: string, root: string = cwd): string[] {
   const list = (dir: string): Dirent[] => {
     try {
       return readdirSync(dir, { withFileTypes: true });
@@ -87,19 +92,11 @@ export function workspaceConfig(cwd: string, home = os.homedir()): string[] {
       return [];
     }
   };
-  // The folder, and its parents up to the repository root; outside a repository the folder only.
-  // Never the home folder itself: its ~/.gemini is the user's own config.
   const start = path.resolve(cwd);
-  let dirs: string[] = [];
-  for (let dir = start; ; dir = path.dirname(dir)) {
-    dirs.push(dir);
-    if (list(dir).some((e) => e.name === '.git')) break;
-    if (path.dirname(dir) === dir) {
-      dirs = [start];
-      break;
-    }
-  }
-  dirs = dirs.filter((d) => d !== path.resolve(home));
+  const top = path.resolve(root);
+  const inside = !path.relative(top, start).startsWith('..') && !path.isAbsolute(path.relative(top, start));
+  const dirs = [start];
+  if (inside) for (let dir = start; dir !== top; ) dirs.push((dir = path.dirname(dir)));
   const found: string[] = [];
   for (const dir of dirs) {
     for (const e of list(dir)) {
@@ -111,6 +108,60 @@ export function workspaceConfig(cwd: string, home = os.homedir()): string[] {
     }
   }
   return found;
+}
+
+/** What agy writes under ~/.gemini as it runs (its first run, 1.4.3): state, never config. Everything else there is read only to it. */
+const AGY_STATE = [
+  'antigravity-cli/brain',
+  'antigravity-cli/builtin',
+  'antigravity-cli/cache',
+  'antigravity-cli/conversations',
+  'antigravity-cli/crashes',
+  'antigravity-cli/implicit',
+  'antigravity-cli/log',
+  'antigravity-cli/mcp',
+  'antigravity-cli/plugin_data',
+  'antigravity-cli/updater',
+  'antigravity-cli/tmp',
+  'antigravity-cli/cli.log',
+  'antigravity-cli/conversation_summaries.db',
+  'antigravity-cli/conversation_summaries.db-shm',
+  'antigravity-cli/conversation_summaries.db-wal',
+  'antigravity-cli/installation_id',
+  'antigravity-cli/jetski_state.pbtxt',
+  'antigravity-cli/last_check.timestamp',
+  'config/.migrated',
+  'config/projects',
+  'jetski/brain',
+];
+
+/** A path for a sandbox profile string literal. */
+const sbString = (p: string): string => {
+  if (/["\\\0\r\n]/.test(p)) throw new Error(`Can't sandbox a path with quotes, backslashes or line breaks: ${p}`);
+  return `"${p}"`;
+};
+/** A folder name matched in any case, for a sandbox regex: ".agents" → "[.][Aa][Gg]…". */
+const anyCase = (name: string): string => [...name].map((c) => (/[a-z]/.test(c) ? `[${c.toUpperCase()}${c}]` : `[${c}]`)).join('');
+
+/**
+ * The macOS sandbox (sandbox-exec) every agy process runs in. agy and everything it starts can't
+ * read or write any `.agents`/`.agent`/`_agents`/`_agent`/`.gemini` folder anywhere, in any case
+ * (the OS turns workspace config off, since agy can't), except the user's own `~/.gemini`: read,
+ * and written only where agy keeps its state, so a turn can't leave config (hooks, MCP servers,
+ * settings, plugins, skills, rules) for the next one. `home` must be a real path (no symlinks).
+ */
+export function seatbeltProfile(home: string): string {
+  const gemini = path.join(home, '.gemini');
+  const configDir = `(^|/)(${['.agents', '.agent', '_agents', '_agent', '.gemini'].map(anyCase).join('|')})(/|$)`;
+  return [
+    '(version 1)',
+    '(allow default)',
+    // The last matching rule wins.
+    `(deny file-read* file-write* (regex #"${configDir}"))`,
+    `(allow file-read* (subpath ${sbString(gemini)}))`,
+    `(deny file-write* (subpath ${sbString(gemini)}))`,
+    `(allow file-write* ${AGY_STATE.map((p) => `(subpath ${sbString(path.join(gemini, p))})`).join(' ')})`,
+  ].join('\n');
 }
 
 /** agy's own choice: no --model / --effort flag. */

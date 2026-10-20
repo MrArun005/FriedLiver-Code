@@ -2,8 +2,9 @@
 // One agy process per turn in its documented headless stream-json mode (agy.ts); the session's
 // later turns continue agy's conversation with --conversation. FriedLiver starts this file
 // (dist/agy-acp.js) with the editor's own Node; FRIEDLIVER_AGY is the agy binary core.ts found.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,7 @@ import {
   needsSignIn,
   parseEvent,
   parseModels,
+  seatbeltProfile,
   settingsModel,
   stepOf,
   stopReasonOf,
@@ -42,34 +44,64 @@ export interface AgyAdapterOptions {
   env?: NodeJS.ProcessEnv;
   /** agy's settings file, read only for its default model. */
   settingsFile?: string;
+  /** Tests: another platform, home folder, or sandbox-exec. */
+  platform?: NodeJS.Platform;
+  home?: string;
+  sandboxExec?: string;
 }
+
+/** Why Antigravity doesn't run off macOS. */
+export const PLATFORM_REFUSAL =
+  'Antigravity runs only on macOS in FriedLiver for now. agy has no way to turn off a repository’s own agy config (hooks, MCP servers, settings), so FriedLiver hides that config with macOS’s sandbox, and has no equal for this system yet.';
 
 interface Session {
   cwd: string;
+  /** The repository root git reported when the session started; the folder itself outside one. */
+  root: string;
   mode: AgyMode;
   model: string;
   effort: string;
   models: AgyChoice[];
   /** agy's conversation, from the session's earlier turns. */
   conversationId?: string;
-  /** Why the session is over (agy left workspace config): every later prompt is refused with it. */
+  /** Why the session is over (config appeared in the workspace during a turn): every later prompt is refused with it. */
   ended?: string;
   running?: { child: ChildProcess; cancelled: boolean };
 }
 
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_STDERR = 40;
-/** How often a running turn's workspace is checked for config agy wrote. ponytail: polling; fs.watch if this ever costs. */
-const WATCH_MS = 250;
 const internal = (details: string) => new acp.RequestError(-32603, 'Internal error', { details });
+
+/** The repository root, asked of git once; undefined outside a repository (or without git). */
+function repoRoot(cwd: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile('git', ['rev-parse', '--show-toplevel'], { cwd, timeout: 5000, windowsHide: true }, (err, out) => resolve(err ? undefined : out.trim() || undefined));
+  });
+}
+
+const real = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
 
 export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
   const sessions = new Map<string, Session>();
+  const platform = opts.platform ?? process.platform;
+  const home = real(opts.home ?? os.homedir());
   const env = { ...(opts.env ?? process.env) };
   // Not for agy: what started this adapter as Node.
   delete env.ELECTRON_RUN_AS_NODE;
-  const run = (args: string[], cwd: string) =>
-    spawn(opts.command, [...(opts.baseArgs ?? []), ...args], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
+  // Every agy process (and all it starts) in the sandbox: no workspace config, no writes to config.
+  const profile = platform === 'darwin' ? seatbeltProfile(home) : undefined;
+  const run = (args: string[], cwd: string) => {
+    const argv = [...(opts.baseArgs ?? []), ...args];
+    const [file, fileArgs] = profile ? [opts.sandboxExec ?? '/usr/bin/sandbox-exec', ['-p', profile, opts.command, ...argv]] : [opts.command, argv];
+    return spawn(file, fileArgs, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: platform !== 'win32', windowsHide: true });
+  };
 
   /** A short agy call (`models`, `--version`) with nothing on stdin. */
   async function call(args: string[], cwd: string): Promise<{ code: number | null; out: string; err: string }> {
@@ -123,31 +155,22 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
     const mode = s.mode;
     if (mode === 'manual') throw internal(MANUAL_REFUSAL);
     const named = (files: string[]) => files.map((f) => path.relative(s.cwd, f) || f).join(', ');
-    // Checked before every turn: the repository may add it at any time.
-    const config = workspaceConfig(s.cwd);
+    // Defence in depth (the sandbox hides it from agy anyway): checked before every turn.
+    const config = workspaceConfig(s.cwd, s.root);
     if (config.length) {
       throw internal(
-        `Antigravity won’t run in this folder: agy would load its config here (${named(config)}), and only text rules and workflows are allowed there, since agy has no way to ignore the rest (MCP servers, hooks, plugins, skills, settings). Remove it, or use another agent here.`,
+        `Antigravity won’t run in this folder: it has agy config (${named(config)}), and only text rules and workflows are allowed there, since agy has no way to ignore the rest (MCP servers, hooks, plugins, skills, settings). Remove it, or use another agent here.`,
       );
     }
     const seen = (id: unknown) => {
       if (typeof id === 'string' && id) s.conversationId = id;
     };
-    let watch: ReturnType<typeof setInterval> | undefined;
     try {
       const child = run(turnArgs({ mode, model: s.model, effort: s.effort, conversationId: s.conversationId }, opts.extraArgs), s.cwd);
       // agy may exit before it reads stdin (a refused flag): that is its answer, not the adapter's crash.
       child.stdin?.on('error', () => {});
       const running = { child, cancelled: false };
       s.running = running;
-      // agy's own tools may write config it would load next: watched during the turn, checked after it.
-      let leaked: string[] | undefined;
-      watch = setInterval(() => {
-        const found = workspaceConfig(s.cwd);
-        if (!found.length || leaked) return;
-        leaked = found;
-        if (child.pid) killProcessTree(child.pid);
-      }, WATCH_MS);
       const stderr: string[] = [];
       let signIn = false;
       child.stderr?.setEncoding('utf8').on('data', (d: string) => {
@@ -211,10 +234,10 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
         }
       }
       await exited.catch(() => null);
-      clearInterval(watch);
-      const left = leaked ?? workspaceConfig(s.cwd);
+      // The sandbox stops agy writing config; something else may have (another agent, a script).
+      const left = workspaceConfig(s.cwd, s.root);
       if (left.length) {
-        s.ended = `agy left config it would load on its next turn (${named(left)}), so FriedLiver stopped it and this session has ended. Check and remove those files, then start a new chat.`;
+        s.ended = `agy config appeared in this folder during the turn (${named(left)}), so this session has ended. Check and remove those files, then start a new chat.`;
         throw internal(s.ended);
       }
       if (running.cancelled) return 'cancelled';
@@ -225,7 +248,6 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
       if (!said && result?.response) await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: result.response } });
       return stop;
     } finally {
-      clearInterval(watch);
       s.running = undefined;
     }
   }
@@ -242,11 +264,18 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
       agentInfo: { name: 'agy', version: await agyVersion() },
     }))
     .onRequest(acp.methods.agent.session.new, async ({ params }) => {
-      const models = await listModels(params.cwd);
+      if (!profile) throw internal(PLATFORM_REFUSAL);
+      const cwd = real(params.cwd);
+      // Resolved once: a repository can't move its own root later.
+      const top = await repoRoot(cwd);
+      const root = top ? real(top) : cwd;
+      // The home folder holds the user's own ~/.gemini, which the sandbox must leave readable.
+      if (cwd === home || root === home) throw internal('Antigravity won’t run in your home folder or a repository at its root, where your own agy config lives. Open a project folder.');
+      const models = await listModels(cwd);
       const settings = opts.settingsFile ? await readFile(opts.settingsFile, 'utf8').catch(() => undefined) : undefined;
       const sessionId = randomUUID();
       // Manual (runs nothing) until FriedLiver sets the chat's level: the safe start.
-      const s: Session = { cwd: params.cwd, mode: 'manual', model: settingsModel(settings, models) ?? AGY_DEFAULT, effort: AGY_DEFAULT, models };
+      const s: Session = { cwd, root, mode: 'manual', model: settingsModel(settings, models) ?? AGY_DEFAULT, effort: AGY_DEFAULT, models };
       sessions.set(sessionId, s);
       return { sessionId, configOptions: configOptions(s) };
     })
