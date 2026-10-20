@@ -5,7 +5,9 @@
 // prints NDJSON events (init, step_update…, result) and `--input-format stream-json` reads the
 // prompt as {"event":"user",…} on stdin, so a prompt never sits in the process list. Headless
 // agy can't stop to ask for approval: a tool that needs one is refused. So FriedLiver's levels
-// become agy's own flags per turn (agyModeArgs), and Manual is a read-only workspace.
+// become agy's own flags per turn (agyModeArgs), and Manual runs nothing. agy has no mode that
+// enforces read only (its plan mode is an instruction, not a block), so none is offered.
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 export interface AgyChoice {
@@ -14,23 +16,40 @@ export interface AgyChoice {
   description?: string;
 }
 
+/** Why Manual runs nothing. */
+export const MANUAL_REFUSAL =
+  'Antigravity can’t ask before it edits or runs a command, so FriedLiver doesn’t run it in Manual. Switch this chat to Edit automatically (it edits files; commands are refused) or Auto.';
+
 /**
  * FriedLiver's levels as agy runs them. Names and descriptions say what each does, so
- * FriedLiver's modeClass reads them right: read-only is Manual, accept-edits is Edit
- * automatically, full is Auto, plan is Plan.
+ * FriedLiver's modeClass reads them right: manual is Manual, accept-edits is Edit
+ * automatically, full is Auto. Nothing here reads as read-only or plan (readOnlyChoice).
  */
 export const AGY_MODES: AgyChoice[] = [
-  {
-    value: 'read-only',
-    name: 'Read only',
-    description: 'No project files and no commands: it answers from the chat. agy can’t stop to ask inside FriedLiver.',
-  },
-  { value: 'plan', name: 'Plan', description: 'Reads the project and plans before changing anything; commands are refused' },
+  { value: 'manual', name: 'Manual', description: 'Runs nothing: agy can’t stop to ask inside FriedLiver' },
   { value: 'accept-edits', name: 'Accept edits', description: 'Edits files without asking; commands are refused unless allowed in agy’s own settings' },
   { value: 'full', name: 'Full access', description: 'Auto-approves all tool requests: edits and commands' },
 ];
-export type AgyMode = 'read-only' | 'plan' | 'accept-edits' | 'full';
+export type AgyMode = 'manual' | 'accept-edits' | 'full';
 export const isAgyMode = (v: unknown): v is AgyMode => AGY_MODES.some((m) => m.value === v);
+
+/** The agy config folders it reads at a workspace's root (agy 1.4.3 docs: `.agents/`, or `.agent/`, `_agents/`, `_agent/`). */
+const AGENT_DIRS = ['.agents', '.agent', '_agents', '_agent'];
+/** In them, what can start programs or change agy's settings: MCP servers, hooks, plugins, settings. Rules, skills and workflows are text. */
+const RISKY = ['mcp_config.json', 'hooks.json', 'plugins', 'settings.json'];
+
+/**
+ * A repository's agy config that could run code or change what agy may do, in `cwd` or a parent
+ * up to the repository root. agy has no flag to ignore it, so FriedLiver won't start agy there.
+ */
+export function workspaceConfig(cwd: string): string[] {
+  const found: string[] = [];
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    for (const d of AGENT_DIRS) for (const f of RISKY) if (existsSync(path.join(dir, d, f))) found.push(path.join(dir, d, f));
+    if (existsSync(path.join(dir, '.gemini', 'settings.json'))) found.push(path.join(dir, '.gemini', 'settings.json'));
+    if (existsSync(path.join(dir, '.git')) || path.dirname(dir) === dir) return found;
+  }
+}
 
 /** agy's own choice: no --model / --effort flag. */
 export const AGY_DEFAULT = 'default';
@@ -39,17 +58,9 @@ export const AGY_EFFORTS: AgyChoice[] = [
   ...['low', 'medium', 'high', 'xhigh', 'max'].map((e) => ({ value: e, name: e === 'xhigh' ? 'Extra high' : e.charAt(0).toUpperCase() + e.slice(1) })),
 ];
 
-/** Flags per level. agy's --sandbox restricts its terminal; the read-only workspace (an empty folder) keeps it off the project. */
-export function agyModeArgs(mode: AgyMode): string[] {
-  switch (mode) {
-    case 'read-only':
-    case 'plan':
-      return ['--mode', 'plan', '--sandbox'];
-    case 'accept-edits':
-      return ['--mode', 'accept-edits', '--sandbox'];
-    case 'full':
-      return ['--dangerously-skip-permissions'];
-  }
+/** Flags per level that runs (Manual runs nothing). agy's --sandbox restricts its terminal. */
+export function agyModeArgs(mode: Exclude<AgyMode, 'manual'>): string[] {
+  return mode === 'full' ? ['--dangerously-skip-permissions'] : ['--mode', 'accept-edits', '--sandbox'];
 }
 
 /** Flags FriedLiver sets itself, dropped from the user's extra arguments; `true`: takes a value. */
@@ -89,7 +100,7 @@ export function extraArgs(args: readonly string[]): string[] {
 }
 
 export interface TurnChoices {
-  mode: AgyMode;
+  mode: Exclude<AgyMode, 'manual'>;
   model: string;
   effort: string;
   /** agy's conversation, from the session's earlier turns. */

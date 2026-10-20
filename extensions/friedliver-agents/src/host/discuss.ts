@@ -19,6 +19,7 @@ import {
   type DiscussTurn,
   type DiscussionItem,
 } from '../shared/discuss';
+import { NO_READ_ONLY, noReadOnlyText } from '../shared/session';
 import { estimateTokens } from '../shared/tokens';
 import type { TurnResult } from './connections';
 
@@ -105,6 +106,9 @@ export class Discussions {
     if (this.runningIn(chatId)) throw new Error('A discussion is already running in this chat.');
     const others = [...new Set(agents)].filter((a) => a !== chat.agent);
     if (!others.length) throw new Error('Name at least one other agent: /discuss @gemini @codex <question>');
+    // Everyone is read only in a discussion: an agent nothing holds to that can't take part.
+    const loose = [chat.agent, ...others].find((a) => NO_READ_ONLY.includes(a));
+    if (loose) throw new Error(noReadOnlyText(speakerName(loose)));
     const s = this.host.settings();
     const d: DiscussionItem = {
       kind: 'discussion',

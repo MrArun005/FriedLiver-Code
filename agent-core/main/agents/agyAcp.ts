@@ -4,8 +4,7 @@
 // (dist/agy-acp.js) with the editor's own Node; FRIEDLIVER_AGY is the agy binary core.ts found.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -15,7 +14,9 @@ import {
   AGY_DEFAULT,
   AGY_EFFORTS,
   AGY_MODES,
+  MANUAL_REFUSAL,
   isAgyMode,
+  workspaceConfig,
   needsSignIn,
   parseEvent,
   parseModels,
@@ -49,21 +50,14 @@ interface Session {
   model: string;
   effort: string;
   models: AgyChoice[];
-  /** Read only: agy's workspace, an empty folder of this session's own, so its file tools can't reach the project. */
-  scratch?: string;
-  /** agy's conversation per workspace (the project, the scratch folder): a conversation may belong to its folder. */
-  conversations: Map<string, string>;
+  /** agy's conversation, from the session's earlier turns. */
+  conversationId?: string;
   running?: { child: ChildProcess; cancelled: boolean };
 }
 
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_STDERR = 40;
-
-/** Read-only sessions' empty folders, removed when the adapter exits. */
-const scratchDirs = new Set<string>();
-process.once('exit', () => {
-  for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
-});
+const internal = (details: string) => new acp.RequestError(-32603, 'Internal error', { details });
 
 export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
   const sessions = new Map<string, Session>();
@@ -121,11 +115,20 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
   }
 
   async function turn(s: Session, sessionId: string, text: string, notify: (u: acp.SessionUpdate) => Promise<void>): Promise<acp.StopReason> {
-    if (s.mode === 'read-only' && !s.scratch) scratchDirs.add((s.scratch = await mkdtemp(path.join(os.tmpdir(), 'friedliver-agy-'))));
-    const where = s.mode === 'read-only' && s.scratch ? s.scratch : s.cwd;
-    const seen = (id: unknown) => typeof id === 'string' && id && s.conversations.set(where, id);
+    const mode = s.mode;
+    if (mode === 'manual') throw internal(MANUAL_REFUSAL);
+    // Checked before every turn: the repository may add it at any time.
+    const config = workspaceConfig(s.cwd);
+    if (config.length) {
+      throw internal(
+        `Antigravity won’t run in this folder: agy would load its config here (${config.map((f) => path.relative(s.cwd, f) || f).join(', ')}), which can start programs or change what it may do, and agy has no way to ignore it. Remove it, or use another agent here.`,
+      );
+    }
+    const seen = (id: unknown) => {
+      if (typeof id === 'string' && id) s.conversationId = id;
+    };
     try {
-      const child = run(turnArgs({ mode: s.mode, model: s.model, effort: s.effort, conversationId: s.conversations.get(where) }, opts.extraArgs), where);
+      const child = run(turnArgs({ mode, model: s.model, effort: s.effort, conversationId: s.conversationId }, opts.extraArgs), s.cwd);
       // agy may exit before it reads stdin (a refused flag): that is its answer, not the adapter's crash.
       child.stdin?.on('error', () => {});
       const running = { child, cancelled: false };
@@ -169,7 +172,7 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
           }
           if (st.step_type === 'tool') {
             const name = st.tool_info?.name ?? st.tool_name ?? 'tool';
-            const toolCallId = `agy-${s.conversations.get(where) ?? sessionId}-${st.step_index ?? tools.size}`;
+            const toolCallId = `agy-${s.conversationId ?? sessionId}-${st.step_index ?? tools.size}`;
             if (!tools.has(toolCallId)) {
               tools.add(toolCallId);
               const locations = toolPaths(st.tool_info?.parameters, s.cwd).map((p) => ({ path: p }));
@@ -220,8 +223,8 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
       const models = await listModels(params.cwd);
       const settings = opts.settingsFile ? await readFile(opts.settingsFile, 'utf8').catch(() => undefined) : undefined;
       const sessionId = randomUUID();
-      // Read only until FriedLiver sets the chat's level: the safe start.
-      const s: Session = { cwd: params.cwd, mode: 'read-only', model: settingsModel(settings, models) ?? AGY_DEFAULT, effort: AGY_DEFAULT, models, conversations: new Map() };
+      // Manual (runs nothing) until FriedLiver sets the chat's level: the safe start.
+      const s: Session = { cwd: params.cwd, mode: 'manual', model: settingsModel(settings, models) ?? AGY_DEFAULT, effort: AGY_DEFAULT, models };
       sessions.set(sessionId, s);
       return { sessionId, configOptions: configOptions(s) };
     })

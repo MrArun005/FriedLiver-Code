@@ -41,6 +41,8 @@ import {
   type SessionOption,
   readOnlyChoice,
   CLAUDE_READ_ONLY_META,
+  NO_READ_ONLY,
+  noReadOnlyText,
 } from '../shared/session';
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
 import { ESCALATING, claudeMeta, commandOf, planOf, type PermissionDetail } from '../shared/tools';
@@ -503,6 +505,7 @@ export class AgentCore {
   }
 
   async createChat(agent: AgentKey, options: NewChat = {}): Promise<ChatView> {
+    if (options.readOnly && NO_READ_ONLY.includes(agent)) throw new Error(noReadOnlyText(AGENT_FACES[agent].name));
     const folder = this.options.folders()[0];
     if (!folder) throw new Error('Open a folder first. Agents work inside the folder you open.');
     const shared = options.shareWorktreeOf ? this.chat(options.shareWorktreeOf) : undefined;

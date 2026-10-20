@@ -152,16 +152,20 @@ taking the agent's default:
 **Antigravity** (Google's `agy` CLI, with the Gemini, Claude and GPT-OSS models
 your Antigravity plan offers) has no ACP mode, so FriedLiver runs it through
 its own adapter over agy's documented headless mode (`--output-format
-stream-json`). Headless agy can't stop to ask for approval, so FriedLiver sets
-agy's own flags per level instead of asking: **Manual** is read only (agy works
-in an empty folder, so it sees no project files and runs no commands), **Plan**
-reads the project in agy's plan mode, **Edit automatically** lets agy edit
-files itself (`--mode accept-edits`; commands are refused unless your agy
-settings allow them) and **Auto** is `--dangerously-skip-permissions`. Its
+stream-json`). Headless agy can't stop to ask for approval, and its tools never
+pass through FriedLiver, so FriedLiver runs it only where agy's own flags hold:
+**Edit automatically** lets agy edit files itself (`--mode accept-edits
+--sandbox`; commands are refused unless your agy settings allow them) and
+**Auto** is `--dangerously-skip-permissions`. **Manual** runs nothing (the chat
+says to pick one of those), there is no Plan, and since agy has no mode that
+enforces read only it never takes part in Inline Edit or /discuss. FriedLiver
+also won't start agy in a folder whose own agy config could run code or change
+its settings (`.agents/mcp_config.json`, `hooks.json`, `plugins/`,
+`settings.json`, `.gemini/settings.json`): agy has no flag to ignore it. Its
 edits don't pass through FriedLiver's diff review, but the per-turn git
-snapshot still undoes them. It can be asked, consulted, handed off to and
-joined to /discuss like any agent; it can't call FriedLiver's own tools,
-since agy reads MCP servers only from its own config.
+snapshot still undoes them. It can be asked, consulted and handed off to like
+any agent; it can't call FriedLiver's own tools, since agy reads MCP servers
+only from its own config.
 
 "Always allow" on a command adds a rule (that exact command, or a program and
 its subcommand) for this workspace, kept in your profile, never in the

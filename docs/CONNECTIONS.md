@@ -1,6 +1,6 @@
 # Connections between chats and agents
 
-Any chat can work with any agent: Claude, Codex (GPT), Gemini, Antigravity or the offline
+Any chat can work with any agent (Antigravity everywhere but /discuss, which is read only): Claude, Codex (GPT), Gemini, Antigravity or the offline
 Demo. A chat can hand its work to another agent, ask one a question, feed
 its replies to another chat, or run the same task on several agents at once.
 Agents can also reach each other themselves, through FriedLiver's own tools,
