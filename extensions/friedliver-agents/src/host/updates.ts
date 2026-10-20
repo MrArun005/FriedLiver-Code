@@ -1,10 +1,10 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
-import { appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, resolveRealApp, sumFor, versionLabel, type Release } from './updateCheck';
+import { UPDATER_APP, UPDATER_INFO_PLIST, appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, releasePageFrom, resolveRealApp, sumFor, versionLabel, type Release } from './updateCheck';
 
 const FIRST_CHECK_DELAY_MS = 30_000;
 const RECHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -72,7 +72,9 @@ async function reportLastInstall(log: vscode.LogOutputChannel): Promise<void> {
   const result = readInstallResult(text);
   if (result?.ok) return void vscode.window.showInformationMessage(`Updated to FriedLiver ${result.detail}.`);
   const why = result?.detail || 'the install script did not finish';
-  if ((await vscode.window.showErrorMessage(`Update failed: ${why}`, 'Show log')) === 'Show log') log.show();
+  const choice = await vscode.window.showErrorMessage(`FriedLiver couldn't update itself (${why}). This version is unchanged; download the new one from its release page.`, 'Download manually', 'Show log');
+  if (choice === 'Download manually') await vscode.env.openExternal(vscode.Uri.parse(releasePageFrom(text), true));
+  if (choice === 'Show log') log.show();
 }
 
 function product(): { friedliverVersion?: unknown; friedliverBuild?: unknown; quality?: unknown } {
@@ -165,12 +167,22 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
     return;
   }
   const restart = await vscode.window.showInformationMessage(`FriedLiver ${release.version} is ready.`, 'Restart to update');
-  if (restart !== 'Restart to update') return; // The verified DMG stays in the temp folder; next launch offers it again.
-  const script = path.join(dir, 'install.sh');
-  // ponytail: the extension host's parent is the app's main process (Electron utilityProcess); unverified in a packaged build.
-  writeFileSync(script, installScript({ pid: process.ppid, app, dmg, dir, log: INSTALL_LOG(), version: release.version }), { mode: 0o700 });
-  log.info(`Starting ${script} (log: ${INSTALL_LOG()})`);
-  spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' }).unref();
+  if (restart !== 'Restart to update') return void rmSync(dir, { recursive: true, force: true }); // The next check offers it again.
+  // Runs as its own background app (see UPDATER_INFO_PLIST) so quitting or force-quitting FriedLiver can't stop it.
+  const updater = path.join(dir, UPDATER_APP);
+  const script = path.join(updater, 'Contents/MacOS/install');
+  mkdirSync(path.dirname(script), { recursive: true });
+  writeFileSync(path.join(updater, 'Contents/Info.plist'), UPDATER_INFO_PLIST);
+  // The extension host's parent is the app's main process (seen with ps in a packaged 1.142.0-9).
+  writeFileSync(script, installScript({ pid: process.ppid, app, dmg, dir, log: INSTALL_LOG(), version: release.version, page: release.url }), { mode: 0o700 });
+  try {
+    execFileSync('/usr/bin/open', ['-n', '-g', '-j', updater], { timeout: 15_000, stdio: ['ignore', 'ignore', 'pipe'] });
+    log.info(`Started ${updater} (log: ${INSTALL_LOG()})`);
+  } catch (err) {
+    // Still installs; only a Force Quit of FriedLiver during the install could stop it.
+    log.warn(`open ${updater} failed (${(err as { stderr?: Buffer }).stderr?.toString().trim() || String(err)}); running the script directly`);
+    spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' }).unref();
+  }
   await vscode.commands.executeCommand('workbench.action.quit');
 }
 
