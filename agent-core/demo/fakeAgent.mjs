@@ -106,7 +106,7 @@ const cancels = new Map();
 const sessionCwd = new Map();
 const sessionMeta = new Map();
 const sessionMcp = new Map();
-const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', demo: 'Demo' };
+const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', antigravity: 'Antigravity', demo: 'Demo' };
 const legacy = process.env.FAKE_AGENT_LEGACY === '1';
 /** The client takes `type: "boolean"` config options (session.configOptions.boolean). */
 let booleanOptions = false;
