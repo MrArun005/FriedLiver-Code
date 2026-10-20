@@ -144,7 +144,9 @@ function readTheme(name) {
     "--vscode-font-family: system-ui, 'Ubuntu', 'Droid Sans', sans-serif;",
     '--vscode-font-size: 13px;',
     '--vscode-font-weight: normal;',
-    "--vscode-editor-font-family: 'Droid Sans Mono', monospace;",
+    // FriedLiver's defaults: Geist Mono in the editor (patch 0100), Geist for chat (this extension's configurationDefaults).
+    "--vscode-editor-font-family: 'Geist Mono', monospace;",
+    "--vscode-chat-font-family: Geist, system-ui, sans-serif;",
     '--vscode-editor-font-size: 13px;',
   );
   return { kind, colors, css: `:root { ${vars.join(' ')} }` };
@@ -179,7 +181,7 @@ function withTabs(state, n) {
 }
 
 function page(params) {
-  const surface = ['tasks', 'chat', 'images', 'permissions', 'accounts'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
+  const surface = ['tasks', 'chat', 'images', 'permissions', 'accounts', 'welcome'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
   const theme = readTheme(params.get('theme') ?? 'black-blue');
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
@@ -251,6 +253,8 @@ function page(params) {
             window.postMessage({ type: m.type, path: m.path, ...(src ? { src } : {}) }, '*');
           });
         }
+        // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none).
+        if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && !location.search.includes('firstRun=1')) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
         if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
         // An outside subagent's detail, as the host sends it while the sheet follows its transcript.
         if (m && m.type === 'watchSubagent' && m.id && details && details[m.id]) setTimeout(() => window.postMessage({ type: 'subagentDetail', detail: details[m.id] }, '*'), 0);
@@ -269,13 +273,14 @@ function page(params) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>${theme.css} body { background-color: ${background}; }</style>
+<link rel="stylesheet" href="/media/fonts.css">
 <link rel="stylesheet" href="/media/tokens.css">
 <link rel="stylesheet" href="/media/webview.css">
 <link rel="stylesheet" href="/media/components.css">
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
-<body class="vscode-${theme.kind}" data-accent="#D97757" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
+<body class="vscode-${theme.kind}" data-accent="#D97757" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${{ win: 'windows', windows: 'windows', linux: 'linux' }[params.get('platform')] ?? 'mac'}">
 <div id="root"></div>
 <script src="/media/dist/${surface}.js"></script>
 </body>
@@ -883,14 +888,15 @@ async function shoot() {
     await p.close();
   }
   {
-    // The composer: centred, 640px at most; one row; orange border on focus.
+    // The composer: the whole chat column on the transcript's gutters (owner: use the whole screen); one row.
     for (const width of [480, 900, 1600]) {
       const p = await open('surface=chat&select=chat-c5', width, 700);
       const r = await p.evaluate(() => {
         const c = document.querySelector('.composer').getBoundingClientRect();
-        return { w: c.width, left: c.left, right: window.innerWidth - c.right };
+        const col = document.querySelector('.chat-col').getBoundingClientRect();
+        return { left: c.left - col.left, right: col.right - c.right };
       });
-      check(r.w <= 680.5 && Math.abs(r.left - r.right) <= 1 && (width > 712 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 680, 16px gutters)`);
+      check(Math.abs(r.left - r.right) <= 1 && r.left >= 15.5 && r.left <= 20.5, `at ${width}px the composer spans the chat column on its gutters (${Math.round(r.left)} / ${Math.round(r.right)}px)`);
       await p.close();
     }
     for (const [width, id] of [[320, 'chat-c6'], [480, 'chat-c6'], [640, 'chat-c6'], [320, 'chat-c5'], [900, 'chat-pay&fixture=subagents']]) {
