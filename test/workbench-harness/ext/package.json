@@ -1,17 +1,19 @@
 {
   "name": "workbench-harness",
   "displayName": "Workbench Harness",
-  "description": "Test-only: opens notifications and dialogs for scripts/workbench-shots.mjs. Never shipped.",
+  "description": "Test-only: opens notifications, dialogs and browser downloads for scripts/workbench-shots.mjs. Never shipped.",
   "version": "0.0.1",
   "publisher": "friedliver-test",
   "private": true,
   "engines": { "vscode": "^1.100.0" },
   "activationEvents": ["onStartupFinished"],
   "main": "./extension.js",
+  "enabledApiProposals": ["browser"],
   "contributes": {
     "commands": [
       { "command": "harness.toasts", "title": "Harness: Toasts" },
-      { "command": "harness.dialog", "title": "Harness: Dialog" }
+      { "command": "harness.dialog", "title": "Harness: Dialog" },
+      { "command": "harness.downloads", "title": "Harness: Browser downloads" }
     ]
   }
 }

@@ -45,6 +45,8 @@ const COMMANDS = {
 	p: 'workbench.action.closeQuickOpen',
 	q: 'notifications.hideList',
 	r: 'workbench.action.closeActiveEditor',
+	s: 'harness.downloads',
+	t: 'workbench.action.browser.showDownloads',
 };
 const keyOf = Object.fromEntries(Object.entries(COMMANDS).map(([k, c]) => [c, k]));
 
@@ -84,6 +86,7 @@ function profile(dir, theme) {
 		'telemetry.telemetryLevel': 'off',
 		'security.workspace.trust.enabled': false,
 		'git.enabled': false,
+		'friedliver.browser.downloadFolder': path.join(dir, 'downloads'),
 	}, null, 2));
 	fs.writeFileSync(path.join(user, 'keybindings.json'), JSON.stringify(
 		Object.entries(COMMANDS).map(([k, command]) => ({ key: `ctrl+alt+shift+${k}`, command })), null, 2));
@@ -108,6 +111,8 @@ async function run(themeKey, out, failures) {
 			`--user-data-dir=${path.join(dir, 'data')}`,
 			`--extensions-dir=${path.join(dir, 'ext')}`,
 			`--extensionDevelopmentPath=${path.join(HARNESS, 'ext')}`,
+			// The harness opens the integrated browser (vscode.window.openBrowserTab, proposed API).
+			'--enable-proposed-api', 'friedliver-test.workbench-harness',
 			'--use-mock-keychain', '--password-store=basic',
 			'--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--disable-updates',
 		],
@@ -252,6 +257,27 @@ async function run(themeKey, out, failures) {
 		await cmd('workbench.action.openWalkthrough', 2500);
 		await shot('16-welcome');
 		await cmd('workbench.action.closeAllEditors', 800);
+	});
+
+	// Browser downloads (patch 0300, COMPONENTS.md §2.39): a page's download waiting with its toast,
+	// then the indicator's popover with a finished, a running, a failed and a waiting download.
+	await step('19-downloads-toast', async () => {
+		await cmd('notifications.clearAll', 300);
+		// Once: each run would open another browser tab (the harness is active since 04-toasts).
+		await cmd('harness.downloads', 300);
+		await win.locator('.notifications-toasts .notification-toast').first().waitFor({ timeout: 30_000 });
+		await win.locator('.fl-dl-indicator').first().waitFor({ timeout: 30_000 });
+		await wait(6000); // the harness allows three; their toasts close, the installer's stays
+		await shot('19-downloads-toast');
+	});
+	await step('20-downloads-popover', async () => {
+		await cmd('workbench.action.browser.showDownloads', 300);
+		await win.locator('.fl-downloads .fl-downloads__row').nth(3).waitFor({ timeout: 15_000 });
+		await wait(800);
+		await shot('20-downloads-popover');
+		await escape(1);
+		await cmd('workbench.action.closeAllEditors', 800);
+		await cmd('notifications.clearAll', 600);
 	});
 
 	// The approved composer: a screenshot to look at, and its computed styles to compare.

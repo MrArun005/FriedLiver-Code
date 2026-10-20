@@ -18,7 +18,7 @@ export default tseslint.config(
   {
     // The workbench harness's test-only extension (CommonJS, loaded by the extension host).
     files: ['test/workbench-harness/**/*.js'],
-    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', exports: 'writable' } },
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', exports: 'writable', Buffer: 'readonly', setInterval: 'readonly', clearInterval: 'readonly' } },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   {

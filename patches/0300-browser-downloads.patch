@@ -965,10 +965,10 @@ index 7a69461a..98c621be 100644
  	const url = Object.entries(viewState ?? {}).find(([key]) => key === 'url')?.[1];
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
 new file mode 100644
-index 00000000..ae2e7140
+index 00000000..8a01b676
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
-@@ -0,0 +1,472 @@
+@@ -0,0 +1,484 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): downloads in the browser panel (COMPONENTS.md §2.39).
 + *  - Indicator: an IconButton in the browser's actions toolbar, with a progress ring and a Count of
@@ -1006,7 +1006,7 @@ index 00000000..ae2e7140
 +import { registerMainProcessRemoteService } from '../../../../../platform/ipc/electron-browser/services.js';
 +import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 +import { INativeHostService } from '../../../../../platform/native/common/native.js';
-+import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
++import { INotificationHandle, INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
 +import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 +import { IEditorService } from '../../../../services/editor/common/editorService.js';
 +import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../common/contributions.js';
@@ -1331,6 +1331,8 @@ index 00000000..ae2e7140
 +
 +	private readonly _seen = new Map<string, IBrowserDownload['state']>();
 +	private readonly _asked = new Set<string>();
++	/** The open "Download it?" toasts: closed once the download is answered anywhere else. */
++	private readonly _questions = new Map<string, INotificationHandle>();
 +
 +	constructor(
 +		@IBrowserDownloadsService private readonly _service: IBrowserDownloadsService,
@@ -1369,6 +1371,11 @@ index 00000000..ae2e7140
 +			if (before === d.state || !this._mine(d)) {
 +				continue;
 +			}
++			if (d.state !== 'awaiting') {
++				// Closing calls onCancel, whose approve(id, false) does nothing once a download is answered.
++				this._questions.get(d.id)?.close();
++				this._questions.delete(d.id);
++			}
 +			if (d.state === 'completed') {
 +				this._notificationService.prompt(Severity.Info,
 +					localize('browser.downloads.done', "Downloaded {0} ({1})", d.filename, formatBytes(d.receivedBytes)),
@@ -1392,6 +1399,8 @@ index 00000000..ae2e7140
 +			if (!ids.has(id)) {
 +				this._seen.delete(id);
 +				this._asked.delete(id);
++				this._questions.get(id)?.close();
++				this._questions.delete(id);
 +			}
 +		}
 +	}
@@ -1416,7 +1425,10 @@ index 00000000..ae2e7140
 +			return;
 +		}
 +		const size = d.totalBytes > 0 ? ` (${formatBytes(d.totalBytes)})` : '';
-+		this._notificationService.prompt(Severity.Warning,
++		if (d.state !== 'awaiting') {
++			return;
++		}
++		this._questions.set(id, this._notificationService.prompt(Severity.Warning,
 +			d.waitingFor === 'page'
 +				? localize('browser.downloads.pageAsk', "A page started a download in the browser without a click: {0}{1} from {2}. Download it?", d.filename, size, hostOf(d.url))
 +				: localize('browser.downloads.agentAsk', "An agent started a download in the browser: {0}{1} from {2}. Download it?", d.filename, size, hostOf(d.url)),
@@ -1424,7 +1436,7 @@ index 00000000..ae2e7140
 +				{ label: localize('browser.downloads.allowAgent', "Download"), run: () => this._service.approve(id, true) },
 +				{ label: localize('browser.downloads.cancelAgent', "Cancel"), run: () => this._service.approve(id, false) },
 +			],
-+			{ sticky: true, onCancel: () => this._service.approve(id, false) });
++			{ sticky: true, onCancel: () => this._service.approve(id, false) }));
 +	}
 +}
 +
