@@ -1,7 +1,6 @@
 # Connections between chats and agents
 
-Any chat can work with any agent: Claude, Codex (GPT), Gemini, Antigravity or the offline
-Demo. A chat can hand its work to another agent, ask one a question, feed
+Any chat can work with any agent: Claude, Codex (GPT), Gemini, or Antigravity. A chat can hand its work to another agent, ask one a question, feed
 its replies to another chat, or run the same task on several agents at once.
 Agents can also reach each other themselves, through FriedLiver's own tools,
 but only when you allow it.
@@ -17,7 +16,7 @@ The host side lives in `extensions/friedliver-agents/src/host/`
 |---|---|---|
 | **Hand off** | A new chat for the agent you pick, in the same folder (or the same task worktree). It starts from the old chat's transcript: your messages, the agent's replies (trimmed), the latest plan, the commands with their exit codes, and the files changed. | No. The transcript goes in front of the first message you send there. |
 | **Ask** | Your question goes to another agent, with a short brief: the asking chat's task, an excerpt of its last reply, the files it changed. The answer shows in your chat. Asking the same agent again continues the same consultation. | One turn in the consulted chat. |
-| **@gemini …** | The same as Ask. A message that starts with `@claude`, `@codex`, `@gpt`, `@gemini`, `@antigravity` (or `@agy`) or `@demo` goes to that agent instead of this chat's. A mention later in the text is just text. | One turn in the consulted chat. |
+| **@gemini …** | The same as Ask. A message that starts with `@claude`, `@codex`, `@gpt`, `@gemini` or `@antigravity` (or `@agy`) goes to that agent instead of this chat's. A mention later in the text is just text. | One turn in the consulted chat. |
 | **Pipe to** | From now on, each reply that finishes in this chat is sent to the other chat as a message. If the other chat is busy, the newest reply waits until it is idle. | One turn in the other chat per reply. |
 | **Forward** | Sends this chat's last reply to another chat once, e.g. a consultant's answer back to the main chat. | One turn in the other chat. |
 | **/discuss @… question** | The chat's agent and the ones you mention take turns on the question (read-only), then the chat's agent sums it up. Mentions go anywhere in the text, in any order: an agent (`@gemini`), a model one of them reported (`@opus`, `@gpt-5.6-terra`; a family name is its newest model), or both (`@claude/opus`, `@codex:gpt-5.6-luna`). The same agent can join twice on different models (`@opus @sonnet`), each in its own chat. The chat's own agent always takes part: naming it on its own model, or on none, adds nobody. An `@` in code, an email or a URL is no mention. A mention that fits several models, or none, gets a chip and a picker, and nothing is sent until it is settled. | One turn per participant per round, and the summing up. |

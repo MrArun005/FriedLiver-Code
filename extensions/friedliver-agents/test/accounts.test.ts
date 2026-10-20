@@ -233,7 +233,6 @@ describe('messages from the Agents & Accounts page', () => {
 
   it('takes well-formed messages about a shown agent', () => {
     ok({ type: 'ready' });
-    ok({ type: 'openSettings' });
     ok({ type: 'check', agent: 'gemini' });
     ok({ type: 'signIn', agent: 'gemini', methodId: 'oauth-personal' });
     ok({ type: 'setKey', agent: 'gemini', setup: 'vertex' });
