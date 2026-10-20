@@ -7,13 +7,17 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef } from '../shared/model';
 import { agentName, chatName, chatRef } from '../shared/names';
-import type { AgentCore, PendingReview, SendOptions } from './core';
+import { testAgentsOn, type AgentCore, type PendingReview, type SendOptions } from './core';
+
 import { EditChats, runEdit, type EditOutcome } from './editFlow';
 import { EDIT_AGENT_HINT, editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
 import { branchName, collectChanges, reviewMessage, reviewPrompt } from './gitChanges';
 import { insideRoots } from './paths';
 import type { ReviewPlacement } from './review';
 import { userSetting } from './settings';
+
+/** An agent a setting or saved choice may name: not the removed Demo agent, outside tests. */
+const usable = (v: unknown): v is AgentKey => isAgentKey(v) && (v !== 'demo' || testAgentsOn());
 
 /** The agent last used for edits in this workspace. */
 const LAST_AGENT = 'friedliver.edit.lastAgent';
@@ -461,9 +465,9 @@ export class EditorAgent implements vscode.Disposable {
   /** The agent for edits: the last one used here, else friedliver.edit.defaultAgent from the user's settings. */
   lastAgent(): AgentKey {
     const remembered = this.context.workspaceState.get<unknown>(LAST_AGENT);
-    if (isAgentKey(remembered)) return remembered;
+    if (usable(remembered)) return remembered;
     const { value } = userSetting(vscode.workspace.getConfiguration('friedliver.edit').inspect<unknown>('defaultAgent'));
-    return isAgentKey(value) ? value : 'claude';
+    return usable(value) ? value : 'claude';
   }
 
   private async pickAgent(title: string, current?: AgentKey): Promise<AgentKey | undefined> {

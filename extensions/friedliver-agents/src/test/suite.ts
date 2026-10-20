@@ -187,18 +187,14 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('notification.acceptPrimaryAction');
   await waitFor(() => tabShows(controls), "the notification's Open to show the chat in the chat tab");
 
-  step('Agents & Accounts: Demo hidden until turned on, a check that caches models, the page');
-  const settings = vscode.workspace.getConfiguration('friedliver');
-  if (c.accountsPage.view().cards.some((card) => card.agent === 'demo')) throw new Error('Demo shows while friedliver.showDemoAgent is off');
-  await settings.update('showDemoAgent', true, vscode.ConfigurationTarget.Global);
-  await waitFor(() => c.accountsPage.view().cards.some((card) => card.agent === 'demo'), 'Demo to show once turned on');
+  step('Agents & Accounts: the test-only Demo agent (FRIEDLIVER_TEST_AGENTS=1), a check that caches models, the page');
+  if (!c.accountsPage.view().cards.some((card) => card.agent === 'demo')) throw new Error('Demo is missing with FRIEDLIVER_TEST_AGENTS=1');
   const demo = await c.accounts.check('demo');
   if (demo?.status !== 'signed-in') throw new Error(`The Demo check said ${demo?.status}`);
   if (!c.accountsPage.view().cards.find((card) => card.agent === 'demo')?.model) throw new Error("The check didn't keep Demo's models");
   await vscode.commands.executeCommand('friedliver.accounts', 'demo');
   await pause(1500);
   await screenshot('13-accounts');
-  await settings.update('showDemoAgent', undefined, vscode.ConfigurationTarget.Global);
   step('all passed');
 }
 

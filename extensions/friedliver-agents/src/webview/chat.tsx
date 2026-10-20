@@ -324,7 +324,6 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
               >
                 <AgentMark agent={agent} />
                 <span class="grow">{AGENT_FACES[agent].name}</span>
-                {agent === 'demo' && <span class="hint">fake, local</span>}
                 <SignInMark agent={agent} />
               </button>
             ))}
@@ -630,7 +629,6 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
             <span>
               {AGENT_FACES[agent].name} <SignInMark agent={agent} />
             </span>
-            {agent === 'demo' && <span class="hint pick-note">fake, local</span>}
           </button>
         ))}
       </div>
@@ -641,11 +639,6 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         </Button>
         .
       </p>
-      {agents.includes('demo') && (
-        <p class="hint">
-          No account? <strong>Demo</strong>, then <code>tour</code> or <code>project</code>.
-        </p>
-      )}
       <p class="hint">
         <Button variant="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…

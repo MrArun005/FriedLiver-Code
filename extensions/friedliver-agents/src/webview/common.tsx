@@ -50,7 +50,7 @@ function setRoster(next: AgentRoster): void {
   for (const wake of rosterWatchers) wake();
 }
 
-/** The roster, drawing the component again when it changes (friedliver.showDemoAgent, a check, a sign-in). */
+/** The roster, drawing the component again when it changes (a check, a sign-in). */
 export function useRoster(): AgentRoster {
   const [, setN] = useState(0);
   useEffect(() => {

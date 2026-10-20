@@ -157,6 +157,12 @@ export interface CoreUi {
   unsavedText?(file: string): string | undefined;
 }
 
+/**
+ * The fake Demo agent is for tests and the UI harness only: it runs when FRIEDLIVER_TEST_AGENTS=1,
+ * which packaged builds never set. Without it pickers leave it out and a Demo chat can't start.
+ */
+export const testAgentsOn = (): boolean => process.env.FRIEDLIVER_TEST_AGENTS === '1';
+
 export interface CoreOptions {
   folders(): string[];
   clientVersion: string;
@@ -488,7 +494,10 @@ export class AgentCore {
 
   /** The agent's command, with the user's settings and that agent's own API key applied. */
   spec(id: AgentKey): AgentSpec {
-    if (id === 'demo') return { ...demoAgentSpec(this.options.demoAgentScript), label: 'Demo' };
+    if (id === 'demo') {
+      if (!testAgentsOn()) throw new Error('The Demo agent was removed.');
+      return { ...demoAgentSpec(this.options.demoAgentScript), label: 'Demo' };
+    }
     const base = DEFAULT_AGENTS[id];
     const { command, args } = this.options.agentCommand(id);
     const key = this.options.apiKey(id);
@@ -1192,7 +1201,8 @@ export class AgentCore {
     const chats: ChatView[] = [];
     for (const chat of state.chats) {
       const host = saved.chats[chat.id];
-      if (!host) continue;
+      // Chats with the removed Demo agent are dropped on restore.
+      if (!host || (chat.agent === 'demo' && !testAgentsOn())) continue;
       this.hub.restoreChat(chat.id, chat.agent, chat.cwd, host.sessionId);
       let view = chat;
       if (host.worktree && existsSync(host.worktree.path)) {
