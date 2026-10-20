@@ -1,10 +1,11 @@
 name: Workbench shots
 
-# The workbench visual harness: download a FriedLiver build for macOS arm64 (the latest release,
-# a release tag, or a trusted Build FriedLiver run), screenshot every workbench surface at
-# 1440x900 in FriedLiver's dark and light themes and the owner's Dark 2026, check the approved
-# chat composer against its computed-style baseline, and upload the screenshots. Pushes to ui/*
-# that touch the harness run it against the latest release.
+# The workbench visual harness, on macOS and Windows: download a FriedLiver build (the latest
+# release, a release tag, or a trusted Build FriedLiver run), screenshot every workbench surface
+# in FriedLiver Dark and Light and the owner's Dark 2026 at 1440x900 and 1280x800, run the design
+# gates on the live DOM, record three short motion clips, check the approved chat composer against
+# its computed-style baseline (macOS), and upload everything. Pushes to ui/* that touch the harness
+# run it against the latest release.
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +15,16 @@ on:
         default: 'latest'
       write_baseline:
         description: 'Save the composer styles as the new baseline (artifact only; commit it by hand)'
+        type: boolean
+        required: false
+        default: false
+      record:
+        description: 'Record the motion clips (palette, tabs, toast)'
+        type: boolean
+        required: false
+        default: true
+      strict_gates:
+        description: 'Fail the run when a design gate fails (otherwise the gates only report)'
         type: boolean
         required: false
         default: false
@@ -36,12 +47,25 @@ concurrency:
 
 jobs:
   shots:
-    runs-on: macos-latest
-    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, platform: mac }
+          - { os: windows-latest, platform: windows }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
     env:
       # Inputs reach scripts only as environment variables.
       BUILD: ${{ inputs.build || 'latest' }}
       WRITE_BASELINE: ${{ inputs.write_baseline && '1' || '' }}
+      STRICT_GATES: ${{ inputs.strict_gates && '1' || '' }}
+      # Pushes record too; a dispatch can turn it off.
+      RECORD: ${{ github.event_name != 'workflow_dispatch' || inputs.record }}
+      PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -58,28 +82,38 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          app=$(node scripts/fetch-build.mjs "$BUILD" "$RUNNER_TEMP/build")
+          app=$(node scripts/fetch-build.mjs "$BUILD" "$RUNNER_TEMP/build" "$PLATFORM")
           echo "APP=$app" >> "$GITHUB_ENV"
       - name: Screenshots
         run: |
-          sw_vers
-          system_profiler SPDisplaysDataType | grep -i resolution || true
-          node scripts/workbench-shots.mjs --app "$APP" --out shots ${WRITE_BASELINE:+--write-baseline}
+          if [ "$PLATFORM" = mac ]; then
+            sw_vers
+            system_profiler SPDisplaysDataType | grep -i resolution || true
+          fi
+          flags=()
+          [ -n "$WRITE_BASELINE" ] && flags+=(--write-baseline)
+          [ -n "$STRICT_GATES" ] && flags+=(--strict-gates)
+          [ "$RECORD" = true ] && flags+=(--record)
+          node scripts/workbench-shots.mjs --app "$APP" --out shots "${flags[@]}"
       - name: Summary
         if: always()
         run: |
           {
-            echo "### Workbench shots ($BUILD)"
-            if [ -s shots/failures.txt ] && [ "$(tr -d '\n' < shots/failures.txt)" != "" ]; then
-              echo '```'; cat shots/failures.txt; echo '```'
+            echo "### Workbench shots, $PLATFORM ($BUILD)"
+            if [ -s "shots/$PLATFORM/failures.txt" ] && [ "$(tr -d '\n' < "shots/$PLATFORM/failures.txt")" != "" ]; then
+              echo '```'; cat "shots/$PLATFORM/failures.txt"; echo '```'
             else
               echo "Every surface captured; the composer matches its baseline."
             fi
-            echo "Download the **workbench-shots** artifact for the PNGs."
+            if [ -s "shots/$PLATFORM/gates-summary.txt" ]; then
+              echo "#### Design gates"
+              echo '```'; cat "shots/$PLATFORM/gates-summary.txt"; echo '```'
+            fi
+            echo "Download the **workbench-shots-$PLATFORM** artifact for the PNGs, gates.json and recordings."
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: workbench-shots
+          name: workbench-shots-${{ matrix.platform }}
           path: shots/
           if-no-files-found: warn
