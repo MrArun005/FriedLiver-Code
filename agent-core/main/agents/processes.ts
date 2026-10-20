@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 /** A Windows system program by absolute path, so a same-named file in the current folder is never run instead. */
@@ -59,6 +59,27 @@ export function launchFor(command: string, args: string[]): Launch {
     return { file: comspec, args: ['/d', '/s', '/c', `"${cmdCommandLine(resolved, args)}"`], windowsVerbatimArguments: true };
   }
   return { file: resolved, args };
+}
+
+/**
+ * Where `command` runs from: a path as given, or the first match in an absolute PATH entry.
+ * Null when there is none, the way a spawn would fail with ENOENT.
+ */
+export function findProgram(command: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string | null {
+  if (platform === 'win32') return findOnWindowsPath(command, env);
+  const runnable = (file: string) => {
+    try {
+      accessSync(file, constants.X_OK);
+      return statSync(file).isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (command.includes('/')) return runnable(command) ? command : null;
+  for (const dir of (env.PATH ?? '').split(':')) {
+    if (dir && path.isAbsolute(dir) && runnable(path.join(dir, command))) return path.join(dir, command);
+  }
+  return null;
 }
 
 export function findOnWindowsPath(command: string, env: NodeJS.ProcessEnv = process.env, delimiter = path.delimiter): string | null {

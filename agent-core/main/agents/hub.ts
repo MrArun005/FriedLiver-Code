@@ -81,6 +81,8 @@ export interface HubOptions {
   primerFor?(chatId: string, agentId: AgentId, text: string): Promise<string | undefined>;
   /** Extra `_meta` for a chat's session/new (e.g. a read-only chat's tool limits). */
   sessionMetaFor?(chatId: string, agentId: AgentId): Record<string, unknown> | undefined;
+  /** Extra `_meta` for each session/prompt, read when the prompt goes out (e.g. this turn must stay read only). */
+  promptMetaFor?(chatId: string): Record<string, unknown> | undefined;
   /** Chats that never load or resume a session: each start is a fresh session/new (read-only chats). */
   freshSessionFor?(chatId: string): boolean;
   log?(line: string): void;
@@ -233,7 +235,7 @@ export class AgentHub {
       }
       // Rules first, then the map: the same order every session, so a cached prefix stays the same.
       const front = [rules, primer].flatMap((t): acp.ContentBlock[] => (t ? [{ type: 'text', text: t }] : []));
-      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, [...front, ...blocks]));
+      return await agent.conn.prompt(chat.sessionId!, this.fitToAgent(chat, agent, [...front, ...blocks]), this.options.promptMetaFor?.(chat.id));
     } catch (err) {
       if (agent && isAuthRequired(err)) throw new AuthRequiredError(agent.conn.spec, agent.conn.authMethods);
       throw err;
