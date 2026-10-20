@@ -264,21 +264,54 @@ export function readInstallResult(log: string): { ok: boolean; detail: string } 
   return m ? { ok: m[1] === 'ok', detail: m[2] } : null;
 }
 
+/** The release page the install log names on its `PAGE` line (for "Download manually"); this repo's releases otherwise. */
+export function releasePageFrom(log: string): string {
+  const m = /^PAGE (\S+)$/m.exec(log);
+  return m && m[1].startsWith(`${RELEASES_PAGE}/`) && !/["'<>]/.test(m[1]) ? m[1] : RELEASES_PAGE;
+}
+
 const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** The install script runs as this background-only app: <dir>/FriedLiver Update.app/Contents/MacOS/install. */
+export const UPDATER_APP = 'FriedLiver Update.app';
+
 /**
- * The detached script that installs a verified DMG after the app quits: wait for the app's
- * process, mount the image read-only, copy the new .app next to the old one, swap them
- * (putting the old one back if the swap fails), clear quarantine on the new bundle (it's
- * checksum-verified, and a quarantined app would launch translocated again), detach, reopen
- * by path with `open -a`, and remove its own folder. Every step goes to LOG, which outlives
- * the folder; its last line is `RESULT ok <version>` or `RESULT failed <reason>`.
+ * Info.plist for UPDATER_APP, which `open -n -g -j` starts through LaunchServices. A child the
+ * app spawns (even detached) still counts as part of the app: its Dock icon stays "running"
+ * after the window closes, and Force Quit on it kills the child mid-install. That's how
+ * 1.142.0-8 → -9 died on 2026-10-19: the Dock force-quit FriedLiver at 10:09:10 while hdiutil
+ * was checksumming ("canceling…", "attach failed - No child processes") and took the script
+ * down before it could log a RESULT. Launched as its own app, the installer is in its own
+ * coalition: the Dock icon goes as soon as the app exits, and nothing aimed at FriedLiver reaches it.
  */
-export function installScript(p: { pid: number; app: string; dmg: string; dir: string; log: string; version: string }): string {
+export const UPDATER_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.friedliver.update</string>
+  <key>CFBundleName</key><string>FriedLiver Update</string>
+  <key>CFBundleExecutable</key><string>install</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSBackgroundOnly</key><true/>
+</dict>
+</plist>
+`;
+
+/**
+ * The script that installs a verified DMG after the app quits: wait for the app's process,
+ * mount the image read-only at a mountpoint inside its own folder (never /Volumes/<name>),
+ * copy the new .app next to the old one, swap them (putting the old one back if the swap
+ * fails), clear quarantine on the new bundle (it's checksum-verified, and a quarantined app
+ * would launch translocated again), reopen by path with `open -a`. Whatever happens, on exit
+ * it detaches the image and removes its folder; on failure the current app is untouched.
+ * Every step goes to LOG, which outlives the folder: a `PAGE <release page>` line, exit codes
+ * of the mount, and last `RESULT ok <version>` or `RESULT failed <reason>`.
+ */
+export function installScript(p: { pid: number; app: string; dmg: string; dir: string; log: string; version: string; page: string }): string {
   if (!Number.isSafeInteger(p.pid) || p.pid <= 1) throw new Error('bad pid');
   if (p.app.includes('/AppTranslocation/')) throw new Error('refusing to install into a translocated app');
   return `#!/bin/sh
-# FriedLiver update: written by the Agents extension, runs once, deletes itself.
+# FriedLiver update: written by the Agents extension, runs once as its own app, removes its folder.
 set -u
 PID=${p.pid}
 APP=${sq(p.app)}
@@ -286,18 +319,40 @@ DMG=${sq(p.dmg)}
 DIR=${sq(p.dir)}
 LOG=${sq(p.log)}
 VERSION=${sq(p.version)}
+PAGE=${sq(releasePageFrom(`PAGE ${p.page}`))}
 MNT="$DIR/mnt"
+RC=0
 say() { echo "$(date '+%Y-%m-%dT%H:%M:%S') $*" >> "$LOG"; }
-fail() { say "$1"; echo "RESULT failed $1" >> "$LOG"; open "$DMG"; exit 1; }
+fail() { say "$1"; echo "RESULT failed $1" >> "$LOG"; exit 1; }
+cleanup() {
+  hdiutil detach "$MNT" -quiet 2>/dev/null || hdiutil detach "$MNT" -force -quiet 2>/dev/null
+  # An empty mountpoint is not mounted; never rm -rf into a mounted image.
+  if [ -n "$(ls -A "$MNT" 2>/dev/null)" ]; then say "$MNT is still mounted; leaving $DIR"; else rm -rf "$DIR"; fi
+}
+trap cleanup EXIT
+trap 'fail "stopped by a signal"' HUP INT TERM
 : > "$LOG"
+exec >> "$LOG" 2>&1 # Stray errors too (LaunchServices sends stdout and stderr nowhere).
+echo "PAGE $PAGE"
 say "install script started: $VERSION into $APP (waiting for pid $PID)"
 i=0
 while kill -0 "$PID" 2>/dev/null; do
   i=$((i + 1)); [ "$i" -gt 300 ] && fail "the app did not quit within 300 s"
   sleep 1
 done
+say "the app quit after $i s; mounting the update"
 mkdir -p "$MNT"
-hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG" >> "$LOG" 2>&1 || fail "could not mount the DMG"
+# No checksum pass: the extension already checked the DMG's SHA-256 against SHA256SUMS.
+# diskutil image (macOS 14+) first; where it's missing or fails, hdiutil.
+attach() {
+  diskutil image attach --readOnly --nobrowse --mountPoint "$MNT" "$DMG" >> "$LOG" 2>&1 && return 0
+  say "diskutil image attach exited $?; trying hdiutil"
+  hdiutil attach -nobrowse -readonly -noautoopen -noverify -mountpoint "$MNT" "$DMG" >> "$LOG" 2>&1
+  RC=$?
+  say "hdiutil attach exited $RC"
+  return $RC
+}
+attach || { sleep 2; say "retrying the mount"; attach; } || fail "could not mount the DMG (hdiutil exit $RC)"
 SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -n 1)
 say "copying \${SRC:-<no .app in the DMG>}"
 OK=0
@@ -314,6 +369,5 @@ xattr -dr com.apple.quarantine "$APP" >> "$LOG" 2>&1 || say "could not clear qua
 say "installed; relaunching $APP"
 echo "RESULT ok $VERSION" >> "$LOG"
 open -a "$APP"
-rm -rf "$DIR"
 `;
 }
