@@ -8,7 +8,7 @@ import type { ClaudeSession } from '../shared/messages';
 import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, turnsText, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
 import { chatName, chatTip } from '../shared/names';
-import { Button, IconButton } from './ui';
+import { Button, IconButton, MarkSvg } from './ui';
 import { parentLine } from '../shared/subagentDetail';
 import { OutsideSubagent } from './subagentDetail';
 
@@ -290,10 +290,8 @@ function MapDefs() {
 function SvgGlyph({ agent, x, y, size }: { agent: MapNode['lane']; x: number; y: number; size: number }) {
   return (
     <g class="map-glyph" data-agent={agent} transform={`translate(${x} ${y})`} aria-hidden="true">
-      <rect width={size} height={size} rx={size / 4} />
-      <text x={size / 2} y={size / 2 + size * 0.19} style={{ fontSize: `${Math.round(size * 0.55)}px` }}>
-        {AGENT_FACES[agent].letter}
-      </text>
+      <rect width={size} height={size} rx={size / 2} />
+      <MarkSvg agent={agent} box={{ x: size * 0.15, y: size * 0.15, size: size * 0.7 }} />
     </g>
   );
 }

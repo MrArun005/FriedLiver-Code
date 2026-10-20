@@ -1,7 +1,7 @@
 {
   "name": "friedliver-theme",
   "displayName": "FriedLiver Themes",
-  "description": "The FriedLiver Control Room color themes and workbench defaults.",
+  "description": "The FriedLiver color themes (Design System v2: FriedLiver Dark and Light) and workbench defaults.",
   "version": "1.0.0",
   "publisher": "friedliver",
   "license": "MIT",
@@ -13,6 +13,18 @@
   ],
   "contributes": {
     "themes": [
+      {
+        "id": "FriedLiver Dark",
+        "label": "FriedLiver Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/friedliver-dark-color-theme.json"
+      },
+      {
+        "id": "FriedLiver Light",
+        "label": "FriedLiver Light",
+        "uiTheme": "vs",
+        "path": "./themes/friedliver-light-color-theme.json"
+      },
       {
         "id": "FriedLiver Black Blue",
         "label": "FriedLiver Black Blue",
@@ -38,10 +50,26 @@
         "path": "./themes/friedliver-graphite-color-theme.json"
       }
     ],
+    "productIconThemes": [
+      {
+        "id": "friedliver-icons",
+        "label": "FriedLiver Icons",
+        "path": "./icons/friedliver-icons.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "friedliver-files",
+        "label": "FriedLiver Files",
+        "path": "./icons/friedliver-files.json"
+      }
+    ],
     "configurationDefaults": {
-      "workbench.colorTheme": "FriedLiver Black Blue",
-      "workbench.preferredDarkColorTheme": "FriedLiver Black Blue",
-      "workbench.preferredLightColorTheme": "FriedLiver Light Blue",
+      "workbench.colorTheme": "FriedLiver Dark",
+      "workbench.preferredDarkColorTheme": "FriedLiver Dark",
+      "workbench.preferredLightColorTheme": "FriedLiver Light",
+      "workbench.productIconTheme": "friedliver-icons",
+      "workbench.iconTheme": "friedliver-files",
       "editor.fontFamily": "'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace",
       "editor.fontSize": 13,
       "editor.lineHeight": 1.55,
@@ -83,7 +111,36 @@
         "**/.turbo/**": true,
         "**/.parcel-cache/**": true,
         "**/.gradle/**": true
+      },
+      "workbench.tree.renderIndentGuides": "always",
+      "workbench.list.density": "comfortable",
+      "workbench.hover.delay": 500,
+      "workbench.editor.tabSizing": "shrink",
+      "workbench.editor.useModal": "off",
+      "workbench.settings.editor": "ui",
+      "workbench.settings.useSplitJSON": false,
+      "workbench.welcomePage.walkthroughs.openOnInstall": false,
+      "window.titleBarStyle": "custom",
+      "editor.inlineSuggest.showToolbar": "never",
+      "scm.diffDecorationsGutterPattern": {
+        "added": false,
+        "modified": true
+      },
+      "diffEditor.renderSideBySideInlineBreakpoint": 900,
+      "diffEditor.experimental.showMoves": true,
+      "workbench.experimental.modernUIEditorTabStyle": "pill"
+    },
+    "colors": [
+      {
+        "id": "friedliver.brand",
+        "description": "The FriedLiver mark (title bar, welcome); never a control.",
+        "defaults": {
+          "dark": "#e2884f",
+          "light": "#c4622a",
+          "highContrast": "#e2884f",
+          "highContrastLight": "#c4622a"
+        }
       }
-    }
+    ]
   }
 }

@@ -18,6 +18,7 @@
     "onStartupFinished",
     "onFileSystem:friedliver-proposed",
     "onWebviewPanel:friedliver.tasks",
+    "onWebviewPanel:friedliver.welcome",
     "onWebviewPanel:friedliver.chatPanel",
     "onWebviewPanel:friedliver.accountsPanel"
   ],
@@ -55,6 +56,7 @@
       }
     ],
     "configurationDefaults": {
+      "chat.fontFamily": "Geist, system-ui, sans-serif",
       "[friedliver-output]": {
         "editor.wordWrap": "on",
         "editor.wrappingIndent": "same"
@@ -155,6 +157,16 @@
         "title": "Agent Manager",
         "category": "FriedLiver",
         "icon": "$(checklist)"
+      },
+      {
+        "command": "friedliver.welcome",
+        "title": "Welcome",
+        "category": "FriedLiver"
+      },
+      {
+        "command": "friedliver.needsYou.open",
+        "title": "Open What Needs You",
+        "category": "FriedLiver"
       },
       {
         "command": "friedliver.nextDecision",
@@ -347,6 +359,12 @@
       }
     ],
     "menus": {
+      "friedliver/titleBar": [
+        {
+          "command": "friedliver.needsYou.open",
+          "when": "friedliver.needsYouCount > 0"
+        }
+      ],
       "view/title": [
         {
           "command": "friedliver.accounts",
@@ -595,32 +613,32 @@
       },
       {
         "id": "friedliver.agentClaude",
-        "description": "Claude's hue, used for its letter glyph.",
+        "description": "Claude's hue, for its mark and puck (oklch .8 .09 55 dark, .5 .12 50 light).",
         "defaults": {
-          "dark": "#e8b48c",
-          "light": "#8a4c24",
-          "highContrast": "#e8b48c",
-          "highContrastLight": "#8a4c24"
+          "dark": "#ebaf86",
+          "light": "#984b16",
+          "highContrast": "#ebaf86",
+          "highContrastLight": "#984b16"
         }
       },
       {
         "id": "friedliver.agentCodex",
-        "description": "Codex's hue, used for its letter glyph.",
+        "description": "Codex's hue, for its mark and puck (oklch .83 .08 180 dark, .5 .09 180 light).",
         "defaults": {
-          "dark": "#86d8c4",
-          "light": "#0b6e60",
-          "highContrast": "#86d8c4",
-          "highContrastLight": "#0b6e60"
+          "dark": "#8bd9c9",
+          "light": "#037465",
+          "highContrast": "#8bd9c9",
+          "highContrastLight": "#037465"
         }
       },
       {
         "id": "friedliver.agentGemini",
-        "description": "Gemini's hue, used for its letter glyph.",
+        "description": "Gemini's hue, for its mark and puck (oklch .79 .09 275 dark, .5 .14 275 light).",
         "defaults": {
-          "dark": "#a9b4ff",
-          "light": "#4450c4",
-          "highContrast": "#a9b4ff",
-          "highContrastLight": "#4450c4"
+          "dark": "#a9b6f5",
+          "light": "#4e59b1",
+          "highContrast": "#a9b6f5",
+          "highContrastLight": "#4e59b1"
         }
       },
       {
@@ -673,6 +691,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Lets an agent read the chat that handed it its task, or that consulted it, without asking each time. Off by default: reading another chat waits for your OK. Read from your user settings only."
+        },
+        "friedliver.welcome.onEmptyWindow": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Open the FriedLiver Welcome page (live agents, recent folders, an Ask box) in a window with no folder."
         },
         "friedliver.chat.fontFamily": {
           "type": "string",
@@ -804,12 +827,6 @@
           "default": "builtin",
           "markdownDescription": "Where web links you click open: in a chat, the Agent Manager and Images, and (through the editor's link openers) in Markdown previews, hovers, the editor and the terminal. Per-site choices you made in `#workbench.externalUriOpeners#` still win."
         },
-        "friedliver.showDemoAgent": {
-          "scope": "machine",
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show the Demo agent in the agent pickers, New Chat and the Agent Manager. Demo is a fake agent that runs locally inside FriedLiver, with no account and no network, for trying the chat, reviews and approvals; it isn't an AI model. Chats you already have with it still open. Read from your user settings only."
-        },
         "friedliver.maxRunningAgents": {
           "type": "integer",
           "default": 3,
@@ -919,19 +936,17 @@
             "claude",
             "codex",
             "gemini",
-            "antigravity",
-            "demo"
+            "antigravity"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
-            "Antigravity",
-            "Demo"
+            "Antigravity"
           ],
           "default": "claude",
           "scope": "machine",
-          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini, @antigravity or @demo). Read from user settings only, so a repository can't choose where your code goes."
+          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @antigravity). Read from user settings only, so a repository can't choose where your code goes."
         },
         "friedliver.browser.externalClients": {
           "scope": "machine",
@@ -1052,15 +1067,13 @@
             "claude",
             "codex",
             "gemini",
-            "antigravity",
-            "demo"
+            "antigravity"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
-            "Antigravity",
-            "Demo"
+            "Antigravity"
           ],
           "default": "claude",
           "scope": "machine",
@@ -1107,18 +1120,6 @@
             "completionEvents": [
               "onCommand:workbench.action.files.openFolder",
               "onContext:workspaceFolderCount > 0"
-            ]
-          },
-          {
-            "id": "demoAgent",
-            "title": "Try it with the Demo agent (no account)",
-            "description": "The Demo agent is a fake local agent: no account, no network, not an AI. It shows how FriedLiver works. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Under the message box pick the model, the effort and how much it may do without asking (Shift+Tab switches). Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N. It stays out of the agent pickers unless you turn on `friedliver.showDemoAgent`.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
-            "media": {
-              "svg": "media/walkthrough/demo-agent.svg",
-              "altText": "A Demo agent chat with a plan and an edit waiting for review, with Accept and Reject buttons."
-            },
-            "completionEvents": [
-              "onCommand:friedliver.newChat"
             ]
           },
           {

@@ -22,7 +22,7 @@ const src = path.join(root, 'src');
 // Every surface's TSX: the webviews and the phone app (FriedLiver Remote).
 const SURFACES = [path.join(src, 'webview'), path.join(src, 'remote/phone')];
 const baselineFile = path.join(__dirname, 'fixtures/ds-baseline.json');
-const SYSTEM = new Set(['tokens.css', 'components.css']);
+const SYSTEM = new Set(['fonts.css', 'tokens.css', 'components.css']);
 
 interface Decl {
   selector: string;

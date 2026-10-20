@@ -259,7 +259,7 @@ jobs:
           ditto -x -k build/friedliver-fork-macos-arm64.zip build/app
           echo "APP=$(ls -d "$PWD"/build/app/*.app | head -1)" >> "$GITHUB_ENV"
       - name: Screenshots
-        run: node scripts/workbench-shots.mjs --app "$APP" --out shots
+        run: node scripts/workbench-shots.mjs --app "$APP" --out shots --themes fl-dark,fl-light --sizes 1440x900
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

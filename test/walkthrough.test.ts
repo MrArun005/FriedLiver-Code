@@ -26,9 +26,9 @@ function commandLinks(description: string): { id: string; args: unknown[] }[] {
   }));
 }
 
-it('contributes one walkthrough with the six first-run steps', () => {
+it('contributes one walkthrough with the five first-run steps', () => {
   expect(manifest.contributes.walkthroughs).toHaveLength(1);
-  expect(steps.map((s) => s.id)).toEqual(['openFolder', 'demoAgent', 'signIn', 'agentManager', 'mention', 'editInPlace']);
+  expect(steps.map((s) => s.id)).toEqual(['openFolder', 'signIn', 'agentManager', 'mention', 'editInPlace']);
 });
 
 describe.each(steps)('step $id', (step) => {
@@ -51,9 +51,8 @@ describe.each(steps)('step $id', (step) => {
   });
 });
 
-it('starts the Demo agent, the accounts check and the Agent Manager from their steps', () => {
+it('starts the accounts check and the Agent Manager from their steps', () => {
   const byId = Object.fromEntries(steps.map((s) => [s.id, commandLinks(s.description)]));
-  expect(byId.demoAgent).toEqual([{ id: 'friedliver.newChat', args: ['demo'] }]);
   expect(byId.signIn[0].id).toBe('friedliver.accounts');
   expect(byId.agentManager[0].id).toBe('friedliver.openTasks');
   expect(steps.find((s) => s.id === 'mention')?.title).toContain('@gemini');

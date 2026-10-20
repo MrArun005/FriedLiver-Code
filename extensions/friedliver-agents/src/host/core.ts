@@ -83,6 +83,7 @@ import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposal
 import { loginExtras } from './signin';
 import { mergeOffered, type AccountRecord } from '../shared/accounts';
 import { relativeFile, rewoundHistory } from './transcript';
+import { testAgentsOn } from './settings';
 import { RULES_CAP, type Rules } from './sharedRules';
 import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge } from './discuss';
 import { currentModel, modelCatalog, sameModel, type Who } from '../shared/discussMentions';
@@ -488,7 +489,10 @@ export class AgentCore {
 
   /** The agent's command, with the user's settings and that agent's own API key applied. */
   spec(id: AgentKey): AgentSpec {
-    if (id === 'demo') return { ...demoAgentSpec(this.options.demoAgentScript), label: 'Demo' };
+    if (id === 'demo') {
+      if (!testAgentsOn()) throw new Error('The Demo agent was removed.');
+      return { ...demoAgentSpec(this.options.demoAgentScript), label: 'Demo' };
+    }
     const base = DEFAULT_AGENTS[id];
     const { command, args } = this.options.agentCommand(id);
     const key = this.options.apiKey(id);
@@ -1192,7 +1196,8 @@ export class AgentCore {
     const chats: ChatView[] = [];
     for (const chat of state.chats) {
       const host = saved.chats[chat.id];
-      if (!host) continue;
+      // Chats with the removed Demo agent are dropped on restore.
+      if (!host || (chat.agent === 'demo' && !testAgentsOn())) continue;
       this.hub.restoreChat(chat.id, chat.agent, chat.cwd, host.sessionId);
       let view = chat;
       if (host.worktree && existsSync(host.worktree.path)) {

@@ -33,7 +33,7 @@ describe('the FriedLiver tools server (MCP)', () => {
     expect(listed && 'reply' in listed && (listed.reply as { result: { tools: unknown } }).result.tools).toBe(TOOLS);
     expect(TOOLS.map((t) => t.name)).toEqual(['list_agents', 'list_chats', 'ask_agent', 'send_to_chat', 'read_chat', 'remember', 'index_search', 'index_symbols', 'index_read', 'index_outline', 'index_related', 'index_diff', 'index_changes', 'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_console', 'browser_back', 'browser_reload', ...SYSTEM_TOOLS]);
     const ask = TOOLS[2].inputSchema as unknown as { properties: Record<string, { enum?: string[]; maxLength?: number }>; required: string[] };
-    expect(ask.properties.agent.enum).toEqual([...AGENT_KEYS]);
+    expect(ask.properties.agent.enum).toEqual(AGENT_KEYS.filter((a) => a !== 'demo'));
     expect(ask.properties.prompt.maxLength).toBe(BRIDGE_LIMITS.text);
     expect(ask.required).toEqual(['agent', 'prompt']);
     expect((TOOLS[4].inputSchema as unknown as { properties: { last: { maximum: number } } }).properties.last.maximum).toBe(BRIDGE_LIMITS.last);

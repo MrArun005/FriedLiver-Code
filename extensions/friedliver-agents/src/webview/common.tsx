@@ -42,7 +42,7 @@ document.addEventListener('click', onLink, true);
 document.addEventListener('auxclick', onLink, true);
 
 /** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
-let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
+let roster: AgentRoster = { agents: AGENT_KEYS.filter((a) => a !== 'demo'), signIn: {} };
 const rosterWatchers = new Set<() => void>();
 
 function setRoster(next: AgentRoster): void {
@@ -50,7 +50,7 @@ function setRoster(next: AgentRoster): void {
   for (const wake of rosterWatchers) wake();
 }
 
-/** The roster, drawing the component again when it changes (friedliver.showDemoAgent, a check, a sign-in). */
+/** The roster, drawing the component again when it changes (a check, a sign-in). */
 export function useRoster(): AgentRoster {
   const [, setN] = useState(0);
   useEffect(() => {
@@ -348,14 +348,18 @@ const MarkdownBlock = memo(
       case 'ul':
       case 'ol':
         return <List list={b} cwd={cwd} />;
-      case 'table':
+      case 'table': {
+        // A column of numbers aligns right (tabular digits), unless the markdown set its own alignment.
+        const cellText = (c: Inline[]) => c.map((x) => ('v' in x ? x.v : '')).join('').trim();
+        const numeric = b.head.map((_, n) => b.rows.length > 0 && b.rows.every((r) => /^[-+−]?[$€£¥]?[\d.,]+\s*(%|[kKMGB]|ms|s|x|×)?$/.test(cellText(r[n] ?? []))));
+        const align = b.head.map((_, n) => b.align[n] || (numeric[n] ? 'right' : undefined));
         return (
           <div class="md-table">
             <table>
               <thead>
                 <tr>
                   {b.head.map((c, n) => (
-                    <th key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                    <th key={n} style={align[n] ? { textAlign: align[n] } : undefined}>
                       {inline(c, cwd)}
                     </th>
                   ))}
@@ -365,7 +369,7 @@ const MarkdownBlock = memo(
                 {b.rows.map((r, k) => (
                   <tr key={k}>
                     {r.map((c, n) => (
-                      <td key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                      <td key={n} data-num={numeric[n] ? '' : undefined} style={align[n] ? { textAlign: align[n] } : undefined}>
                         {inline(c, cwd)}
                       </td>
                     ))}
@@ -375,6 +379,7 @@ const MarkdownBlock = memo(
             </table>
           </div>
         );
+      }
       case 'mono':
         return <pre class="md-mono">{b.text}</pre>;
       case 'pre':

@@ -8,7 +8,7 @@ import { age } from '../shared/model';
 import type { SessionOption } from '../shared/session';
 import { NEVER_ALWAYS, SYSTEM_TOOLS, SYSTEM_WORDS, unsupportedOn, type SystemSettingsView } from '../shared/system';
 import { Glyph, Icon, Popover, send } from './common';
-import { Button, IconButton, MenuItem, selectTrigger, Toggle } from './ui';
+import { BrandMark, Button, IconButton, MenuItem, selectTrigger, Toggle } from './ui';
 
 const KIND_TEXT: Record<MethodView['kind'], string> = { browser: 'in your browser', terminal: 'in a terminal', key: 'API key' };
 
@@ -38,7 +38,9 @@ function Page() {
   return (
     <main class="acct-page">
       <header class="acct-head">
-        <h1>Agents &amp; Accounts</h1>
+        <h1>
+          <BrandMark size={20} /> Agents &amp; Accounts
+        </h1>
         <p class="hint">
           Each agent signs in with its own company, through its own login or an API key you keep here. FriedLiver never sees a password; keys stay in the
           editor’s secret storage and go only to their own agent. Nothing here starts an agent until you press Check, Refresh or a sign-in.
@@ -50,9 +52,9 @@ function Page() {
             <h2>Open links in</h2>
             <p class="hint">Links you click in FriedLiver, its editor and terminal. In chats and the Agent Manager, hold {MAC ? '⌘' : 'Ctrl'} to open one the other way.</p>
           </div>
-          <div class="seg" role="radiogroup" aria-label="Open links in">
+          <div class="fl-seg seg" role="radiogroup" aria-label="Open links in">
             {(['builtin', 'external'] as const).map((mode) => (
-              <button key={mode} type="button" role="radio" class="seg-item" aria-checked={view.links === mode} onClick={() => send({ type: 'setLinks', mode })}>
+              <button key={mode} type="button" role="radio" class="fl-seg__item seg-item" aria-checked={view.links === mode} onClick={() => send({ type: 'setLinks', mode })}>
                 {mode === 'builtin' ? 'FriedLiver browser' : 'System browser'}
               </button>
             ))}
@@ -63,12 +65,6 @@ function Page() {
         <Card key={card.agent} card={card} focused={view.focus?.agent === card.agent} />
       ))}
       {view.system && <SystemCard s={view.system} />}
-      <footer class="acct-foot hint">
-        {view.showDemo ? 'The Demo agent is shown: a fake local agent for trying FriedLiver with no account.' : 'The Demo agent, a fake local agent for trying FriedLiver with no account, is hidden.'}{' '}
-        <Button variant="link" onClick={() => send({ type: 'openSettings' })}>
-          {view.showDemo ? 'Hide it' : 'Show it'} in Settings
-        </Button>
-      </footer>
     </main>
   );
 }

@@ -2,11 +2,12 @@
 // is the model). Two weights, by risk:
 // - Routine: one sentence row (C): the verb and target, a "once ▾" scope token, Deny and Allow; with
 //   friedliver.approvals.autoRoutineSeconds on, a draining countdown you can stop.
-// - Review and careful: a compact card (A): one header row (who, verb, mono target, risk chip, then
-//   Deny and the split button "Allow once ⏎ │ ▾", whose menu names the exact rule for Once, This chat
-//   and Always), the preview under it. A sensitive path gets a plain "Allow once" and a lock line. A
-//   careful request is red-toned, lists what would be lost and a safer way, is once only, and allows
-//   on a press-and-hold.
+// - Review and careful: the approval card (COMPONENTS.md v2 §2.29): a head (the needs-you bullseye, who,
+//   verb, mono target, the risk pill at the end), "Why:", the command well or diff, the effects in plain
+//   sentences, and a foot with Deny and the split button "Allow once ⌘⏎ │ ▾" (its menu names the exact
+//   rule for Once, This chat and Always; Windows puts the primary first). A sensitive path gets a plain
+//   "Allow once" and a lock line. A careful request lists what would be lost and a safer way, is once
+//   only, and allows on a press-and-hold. On an Agent Manager card (compact) the head carries the actions.
 // Drawn with the design system's components (src/webview/ui, COMPONENTS.md): Button, SplitButton, the hold
 // Button, Segmented, Pill, Countdown, MenuItem and the Card classes.
 import type { ComponentChildren } from 'preact';
@@ -39,8 +40,6 @@ export interface CardKeys {
 }
 export const cardKeys = new Map<string, CardKeys>();
 
-const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
-const MOD = MAC ? '⌘' : 'Ctrl+';
 
 /** `code` in a rule set in mono; the rest as text. */
 function Ticks({ text }: { text: string }) {
@@ -136,8 +135,8 @@ export function ApprovalCard(props: ApprovalCardProps) {
       {item.kind === 'review' ? 'Reject' : 'Deny'}
     </Button>
   );
-  // The request the keys act on gets the one brand button; the others a secondary one.
-  const primary: Variant = on ? 'brand' : 'secondary';
+  // The request the keys act on gets the one primary (the accent); the others a secondary one.
+  const primary: Variant = on ? 'primary' : 'secondary';
 
   // Routine: one sentence row, with the scope as a token.
   if (a.risk.tone === 'routine' && !compact) {
@@ -173,11 +172,58 @@ export function ApprovalCard(props: ApprovalCardProps) {
     );
   }
 
-  // Review and careful: the compact card.
+  // Review and careful: the approval card.
   const offered = SCOPES.filter((s) => s !== 'once' && allowMessage(a, s));
+  const act = (
+    <span class="apv-act">
+      {a.hold && (
+        <Pill icon="lock" title={a.risk.lock} class="apv-once">
+          once only
+        </Pill>
+      )}
+      {a.others.length > 0 && (
+        <Popover label="Other answers" title="The agent's other answers" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" align="end" trigger={<Icon name="more" />}>
+          {(close) => a.others.map((o) => <MenuItem key={o.label} label={o.label} onSelect={() => (close(), send(o.message))} />)}
+        </Popover>
+      )}
+      {deny}
+      {a.hold
+        ? a.allow.once && (
+            <Button
+              variant="danger"
+              class="fl-btn--hold"
+              data-holding={holding ? '' : undefined}
+              aria-label={`Press and hold to ${a.yes.toLowerCase()}`}
+              onPointerDown={(e) => e.button === 0 && start()}
+              onPointerUp={release}
+              onPointerLeave={release}
+              onPointerCancel={release}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (!e.repeat) start();
+              }}
+              onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && release()}
+            >
+              <span>
+                Hold <Kbd inline>⏎</Kbd> to {a.yes.toLowerCase()}
+              </span>
+            </Button>
+          )
+        : a.allow.once &&
+          (offered.length ? (
+            <SplitAllow a={a} item={item} chat={chat} tone={primary} scope={current} allow={(s, g) => allowRef.current(s, g)} />
+          ) : (
+            <Button variant={primary} kbd="⏎" onClick={() => allowRef.current('once')}>
+              {primaryLabel(a, 'once')}
+            </Button>
+          ))}
+    </span>
+  );
   return (
     <section
-      class="fl-card fl-card--bare apv"
+      class={cx('fl-card fl-card--bare apv', compact && 'fl-card--ghost')}
       data-enter=""
       id={`item-${a.id}`}
       data-risk={a.risk.tone}
@@ -189,51 +235,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
     >
       <div class="apv-hd">
         {what}
-        <span class="apv-act">
-          {a.hold && (
-            <Pill icon="lock" title={a.risk.lock} class="apv-once">
-              once only
-            </Pill>
-          )}
-          {a.others.length > 0 && (
-            <Popover label="Other answers" title="The agent's other answers" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" align="end" trigger={<Icon name="more" />}>
-              {(close) => a.others.map((o) => <MenuItem key={o.label} label={o.label} onSelect={() => (close(), send(o.message))} />)}
-            </Popover>
-          )}
-          {deny}
-          {a.hold
-            ? a.allow.once && (
-                <Button
-                  variant="danger"
-                  class="fl-btn--hold"
-                  data-holding={holding ? '' : undefined}
-                  aria-label={`Press and hold to ${a.yes.toLowerCase()}`}
-                  onPointerDown={(e) => e.button === 0 && start()}
-                  onPointerUp={release}
-                  onPointerLeave={release}
-                  onPointerCancel={release}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!e.repeat) start();
-                  }}
-                  onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && release()}
-                >
-                  <span>
-                    Hold <Kbd inline>⏎</Kbd> to {a.yes.toLowerCase()}
-                  </span>
-                </Button>
-              )
-            : a.allow.once &&
-              (offered.length ? (
-                <SplitAllow a={a} item={item} chat={chat} tone={primary} scope={current} allow={(s, g) => allowRef.current(s, g)} />
-              ) : (
-                <Button variant={primary} kbd="⏎" onClick={() => allowRef.current('once')}>
-                  {primaryLabel(a, 'once')}
-                </Button>
-              ))}
-        </span>
+        {compact && act}
       </div>
       {!compact && <Preview a={a} item={item} chat={chat} state={state} diff={diff} />}
       {compact && a.risk.consequences.length > 0 && <Risks a={a} />}
@@ -243,19 +245,22 @@ export function ApprovalCard(props: ApprovalCardProps) {
           {a.risk.lock}
         </div>
       )}
+      {!compact && <div class="apv-ft">{act}</div>}
       {children}
     </section>
   );
 }
 
-/** The kind icon, who, the verb, the target in mono, where, and the risk chip (or, on a routine row, its words). */
+const KIND_NAME: Partial<Record<IconName, string>> = { terminal: 'a command', file: 'a file change', plan: 'a plan', globe: 'a site', shield: 'a permission', pointer: 'a page action', handoff: 'a message to another chat' };
+
+/** The needs-you mark, who, the verb, the target in mono, where, and the risk pill at the end (or, on a routine row, its words). */
 function What({ a, item, chat, withChip }: { a: Approval; item: Approvable; chat: ChatView; withChip: boolean }) {
   const full = item.kind === 'command' ? item.commandLine : item.kind === 'permission' ? (item.detail?.command?.line ?? item.title) : a.target;
   const targetAgent = item.kind === 'bridge' && 'agent' in item.target ? item.target.agent : undefined;
   return (
     <span class="apv-what">
-      <span class="apv-kind" aria-hidden="true">
-        <Icon name={kindIcon(item)} size={14} />
+      <span class="apv-kind" title={`Needs you · ${KIND_NAME[kindIcon(item)] ?? 'a request'}`}>
+        <span class="fl-dot" data-state="needs-you" role="img" aria-label="needs you" />
       </span>
       <Glyph agent={chat.agent} size="sm" />
       {targetAgent && (
@@ -413,13 +418,19 @@ function Batch({ a, batch }: { a: Approval; batch: NonNullable<ApprovalCardProps
 
 function Risks({ a }: { a: Approval }) {
   return (
-    <ul class="apv-risks">
+    <ul class="apv-risks" aria-label="What it does">
       {a.risk.consequences.map((c) => (
-        <li key={c}>{c}</li>
+        <li key={c}>
+          <Icon name="warn" size={12} />
+          <span>{c}</span>
+        </li>
       ))}
       {a.risk.safer && (
         <li data-safer="">
-          <span class="apv-safer">Safer:</span> <code>{a.risk.safer}</code>
+          <Icon name="shield" size={12} />
+          <span>
+            <span class="apv-safer">Safer:</span> <code>{a.risk.safer}</code>
+          </span>
         </li>
       )}
     </ul>
@@ -433,7 +444,11 @@ function Preview({ a, item, chat, state, diff }: { a: Approval; item: Approvable
   const dropped = item.kind === 'permission' ? item.detail?.dropped : item.kind === 'command' ? item.dropped : undefined;
   return (
     <div class="apv-bd">
-      {why && <div class="apv-why">“{why.length > 300 ? `${why.slice(0, 299)}…` : why}”</div>}
+      {why && (
+        <div class="apv-why">
+          <b>Why:</b> {why.length > 300 ? `${why.slice(0, 299)}…` : why}
+        </div>
+      )}
       {line !== undefined && (
         <div class="apv-pre">
           <pre>
@@ -455,7 +470,7 @@ function Preview({ a, item, chat, state, diff }: { a: Approval; item: Approvable
               <span class="plus">+{item.added}</span> <span class="minus">−{item.removed}</span>
             </span>
             <span class="spacer" />
-            <Button variant="quiet" size="sm" kbd={`${MOD}D`} onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
+            <Button variant="quiet" size="sm" kbd="⌘D" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
               Open the diff
             </Button>
           </div>
@@ -510,7 +525,7 @@ function MiniDiff({ file, chat, open: startOpen, diff, requestId }: { file: Prop
         </span>
         <span class="spacer" />
         {file.full && (
-          <Button variant="quiet" size="sm" kbd={diff ? `${MOD}D` : undefined} title="The whole file with this change, read-only" onClick={() => send(diff ?? { type: 'permissionDiff', requestId, path: file.path })}>
+          <Button variant="quiet" size="sm" kbd={diff ? "⌘D" : undefined} title="The whole file with this change, read-only" onClick={() => send(diff ?? { type: 'permissionDiff', requestId, path: file.path })}>
             Full diff
           </Button>
         )}

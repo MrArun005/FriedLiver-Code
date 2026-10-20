@@ -1,4 +1,5 @@
 import { Fragment, render } from 'preact';
+import { createPortal } from 'preact/compat';
 import { DiscussionCard } from './discussion';
 import { discussingLabel, parseDiscuss, withoutDiscussionTurns } from '../shared/discuss';
 import { applyDiscussMention, currentModel, discussMentionAt, mentionSuggestions, modelCatalog, type Choice, type MentionProblem } from '../shared/discussMentions';
@@ -60,8 +61,12 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
 import { Viewer } from './viewer';
+import { ContextRail } from './contextRail';
+
+/** The chat page's width from which it shows the context rail (COMPONENTS.md v2 §2.34). */
+const RAIL_MIN = 1100;
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
 import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
@@ -71,19 +76,20 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
+import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** The mic button: dictation through the app's macOS speech helper (host/dictation.ts). */
-const MAC = document.body.dataset.platform === 'darwin';
+const MAC = document.body.dataset.platform === 'mac';
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
 
 type Select = (chatId: string) => void;
 
 function App() {
+  const width = useWidth();
   // Images and code references waiting in each chat's composer, so they go with that chat's next message only.
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
@@ -168,6 +174,8 @@ function App() {
     );
   }
 
+  // A wide chat page (an editor tab) gets the context rail (§2.34); a side bar keeps the one column.
+  const rail = width >= RAIL_MIN;
   // The image viewer: the open chat's images, transcript order, opened on the one clicked; focus goes back to it on close.
   const gallery = viewer && chat ? chatGallery(chat, state.images) : [];
   const viewerAt = gallery.findIndex((g) => g.path === viewer?.path);
@@ -196,6 +204,8 @@ function App() {
         {chat ? (
           <>
             <ChatHeader chat={chat} state={state} onSelect={select} />
+            <div class="chat-body" data-rail={rail ? '' : undefined}>
+            <div class="chat-col">
             <Transcript
               chat={chat}
               state={state}
@@ -204,6 +214,7 @@ function App() {
               conflictKey={JSON.stringify(conflicts)}
               reveal={reveal}
               onSelect={select}
+              rail={rail}
             />
             <Composer
               key={chat.id}
@@ -216,6 +227,9 @@ function App() {
               found={found?.chatId === chat.id ? found : null}
               linked={state.chats.filter((c) => c.origin?.chatId === chat.id && !c.archived)}
             />
+            </div>
+            {rail && <ContextRail chat={chat} />}
+            </div>
           </>
         ) : (
           <Empty chats={state.chats} onSelect={select} />
@@ -324,7 +338,6 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
               >
                 <AgentMark agent={agent} />
                 <span class="grow">{AGENT_FACES[agent].name}</span>
-                {agent === 'demo' && <span class="hint">fake, local</span>}
                 <SignInMark agent={agent} />
               </button>
             ))}
@@ -467,6 +480,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
       <header class="chat-head">
         <div class="chat-head-text">
           <div class="chat-head-row">
+            <Avatar agent={chat.agent} working={chat.busy} />
             <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
               {chat.title}
             </button>
@@ -519,6 +533,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </Popover>
         )}
         <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
+          <Dot state={status} still={status !== 'working'} />
           {chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status]}
         </Pill>
         <div class="chat-head-actions">
@@ -622,6 +637,7 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
   const recent = recentChats(chats, undefined, 5).sort((a, b) => b.lastActivity - a.lastActivity);
   return (
     <div class="empty">
+      <BrandMark size={40} class="empty-mark" />
       <h2>Start a chat</h2>
       <div class="pick">
         {agents.map((agent) => (
@@ -630,7 +646,6 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
             <span>
               {AGENT_FACES[agent].name} <SignInMark agent={agent} />
             </span>
-            {agent === 'demo' && <span class="hint pick-note">fake, local</span>}
           </button>
         ))}
       </div>
@@ -641,11 +656,6 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         </Button>
         .
       </p>
-      {agents.includes('demo') && (
-        <p class="hint">
-          No account? <strong>Demo</strong>, then <code>tour</code> or <code>project</code>.
-        </p>
-      )}
       <p class="hint">
         <Button variant="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…
@@ -676,6 +686,8 @@ interface TranscriptProps {
   conflictKey: string;
   reveal: { id: string; n: number } | null;
   onSelect: Select;
+  /** The context rail is shown: "In this chat" moves into it (its slot, #ctx-jump). */
+  rail?: boolean;
 }
 
 /** Drawn again when this chat, or what it shows of the others, changed: not for every chunk another agent streams. */
@@ -687,7 +699,8 @@ const Transcript = memo(
     a.conflictKey === b.conflictKey &&
     a.state.images === b.state.images &&
     a.reveal === b.reveal &&
-    a.onSelect === b.onSelect,
+    a.onSelect === b.onSelect &&
+    a.rail === b.rail,
 );
 
 /** The ids a notification can reveal an item by (its element is item-<id>). */
@@ -699,7 +712,10 @@ function revealIds(i: Item): string[] {
 /** Groups shown at first, and added each time you scroll up to the earliest one shown. */
 const WINDOW = 120;
 
-function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect }: TranscriptProps) {
+function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect, rail }: TranscriptProps) {
+  // With the context rail, "In this chat" draws in the rail's slot (§2.34) instead of beside the transcript.
+  const [railSlot, setRailSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => setRailSlot(rail ? document.getElementById('ctx-jump') : null), [rail]);
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // Only the newest groups are in the page; scrolling up to the first one shown brings earlier ones in.
@@ -796,7 +812,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     }
   };
   return (
-    <div class="transcript-wrap" data-jump={jump ? '' : undefined}>
+    <div class="transcript-wrap" data-jump={jump && !rail ? "" : undefined}>
     <div
       class="transcript"
       ref={box}
@@ -845,16 +861,20 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
           </div>
         </div>
       )}
-      {jump && (
-        <nav class="jump-list" aria-label="In this chat">
-          <b>In this chat</b>
-          {asks.map((a) => (
-            <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
-              {clip(a.text, 60)}
-            </button>
-          ))}
-        </nav>
-      )}
+      {jump &&
+        (() => {
+          const nav = (
+            <nav class="jump-list" aria-label="In this chat" data-rail={railSlot ? '' : undefined}>
+              <b>In this chat</b>
+              {asks.map((a) => (
+                <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
+                  {clip(a.text, 60)}
+                </button>
+              ))}
+            </nav>
+          );
+          return railSlot ? createPortal(nav, railSlot) : rail ? null : nav;
+        })()}
     </div>
   );
 }

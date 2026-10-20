@@ -316,14 +316,13 @@ function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: {
           }
         }}
       />
-      <Button disabled={!text.trim()} kbd={MAC ? '⌘⏎' : 'Ctrl+⏎'} onClick={go}>
+      <Button disabled={!text.trim()} kbd="⌘⏎" onClick={go}>
         Send and deny
       </Button>
     </aside>
   );
 }
 
-const MAC = /Mac/.test(navigator.platform);
 
 function QuestionWhat({ entry: e }: { entry: InboxEntry }) {
   const i = e.item;

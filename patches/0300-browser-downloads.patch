@@ -977,7 +977,7 @@ index 7a69461a..98c621be 100644
  	const url = Object.entries(viewState ?? {}).find(([key]) => key === 'url')?.[1];
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
 new file mode 100644
-index 00000000..8a01b676
+index 00000000..6c7eaca6
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
 @@ -0,0 +1,484 @@
@@ -1143,7 +1143,7 @@ index 00000000..8a01b676
 +		return b;
 +	};
 +	const textButton = (parent: HTMLElement, label: string, run: () => unknown, primary: boolean) => {
-+		const b = append(parent, $(`button.fl-downloads__text-btn${primary ? '.fl-downloads__text-btn--primary' : ''}`)) as HTMLButtonElement;
++		const b = append(parent, $(`button.fl-downloads__text-btn.fl-downloads__text-btn--${primary ? 'primary' : 'secondary'}`)) as HTMLButtonElement;
 +		b.textContent = label;
 +		store.add(addDisposableListener(b, EventType.CLICK, e => { e.stopPropagation(); feature.run(run); }));
 +		return b;
@@ -1516,10 +1516,10 @@ index 096492d9..24321e91 100644
  
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
 new file mode 100644
-index 00000000..fc8ce2d0
+index 00000000..1511172b
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,328 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): browser downloads, COMPONENTS.md §2.39.
 + *  Only design-system tokens (--fl-*, generated from tokens.css into the workbench) and theme
@@ -1606,17 +1606,17 @@ index 00000000..fc8ce2d0
 +	color: var(--fl-decision-fg);
 +}
 +
-+/* ---- Popover §2.13: glass r8, elevation 3, rows are two-line menu items ---------------------- */
++/* ---- Popover §2.13 (Beacon): glass, r-float, rim + elevation 3, rows are two-line menu items -- */
 +
 +.monaco-workbench .fl-downloads {
 +	box-sizing: border-box;
 +	width: min(calc(var(--fl-sp-8) * 11.25), calc(100vw - var(--fl-sp-4)));
 +	padding: var(--fl-sp-1) 0;
-+	border: var(--fl-line) solid var(--fl-border);
-+	border-radius: var(--fl-r-box);
++	border: var(--fl-line) solid var(--fl-dialog-border);
++	border-radius: var(--fl-r-float);
 +	background: var(--fl-glass-bg);
 +	backdrop-filter: var(--fl-glass-blur);
-+	box-shadow: var(--fl-elev-3);
++	box-shadow: var(--fl-rim), var(--fl-elev-3);
 +	color: var(--fl-fg);
 +	font-size: var(--fl-t-100);
 +	margin-top: var(--fl-sp-1);
@@ -1656,7 +1656,8 @@ index 00000000..fc8ce2d0
 +	align-items: center;
 +	gap: var(--fl-sp-2);
 +	min-height: calc(var(--fl-sp-8) + var(--fl-sp-2));
-+	margin: 0 var(--fl-sp-1);
++	/* Concentric with the popover: r-float − margin = r-row. */
++	margin: 0 calc(var(--fl-r-float) - var(--fl-r-row));
 +	padding: var(--fl-sp-1) var(--fl-sp-2);
 +	border-radius: var(--fl-r-row);
 +}
@@ -1751,7 +1752,7 @@ index 00000000..fc8ce2d0
 +	cursor: pointer;
 +}
 +
-+/* Button sm: 22 tall, min 44, padding 0 8, r5, .9em; quiet, or the one primary (inverted neutral). */
++/* Button sm §2.1: 22 tall, min 44, padding 0 8, r-ctl, .9em; quiet ("Clear"), secondary ("Cancel"), or the one primary ("Download"). */
 +.monaco-workbench .fl-downloads__text-btn {
 +	height: var(--fl-h-sm);
 +	min-width: calc(var(--fl-h-sm) * 2);
@@ -1778,15 +1779,32 @@ index 00000000..fc8ce2d0
 +	background: var(--fl-pill-active);
 +}
 +
-+.monaco-workbench .fl-downloads__text-btn--primary {
-+	background: var(--fl-primary-bg);
-+	color: var(--fl-primary-fg);
++.monaco-workbench .fl-downloads__text-btn--secondary {
++	border-color: transparent;
++	background: var(--fl-pill-bg);
++	color: var(--fl-fg);
 +	font-weight: var(--fl-w-medium);
 +}
 +
++.monaco-workbench .fl-downloads__text-btn--secondary:hover:not(:disabled) {
++	background: var(--fl-pill-hover);
++}
++
++.monaco-workbench .fl-downloads__text-btn--primary {
++	border-color: transparent;
++	background: var(--fl-accent-bg);
++	color: var(--fl-accent-fg);
++	font-weight: var(--fl-w-medium);
++	box-shadow: var(--fl-sheen), var(--fl-elev-1);
++}
++
 +.monaco-workbench .fl-downloads__text-btn--primary:hover:not(:disabled) {
-+	background: color-mix(in srgb, var(--fl-primary-bg) 88%, var(--fl-primary-fg));
-+	color: var(--fl-primary-fg);
++	background: var(--fl-accent-hover);
++	color: var(--fl-accent-fg);
++}
++
++.monaco-workbench .fl-downloads__text-btn--primary:active:not(:disabled) {
++	background: var(--fl-accent-press);
 +}
 +
 +.monaco-workbench .fl-downloads__text-btn:disabled {
