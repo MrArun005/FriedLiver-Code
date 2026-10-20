@@ -1,6 +1,7 @@
 // Downloads an agent starts in FriedLiver's browser. The editor (patch 0300) saves them and pauses
-// any that start while an agent acts; this asks the user in the agent's chat, lets them go on or
-// cancels them, and tells the agent where the file is, how big it is and its sha256.
+// any that start while an agent's call acts, marked with that call's token; this asks the user in the
+// agent's chat about the call's own downloads only, lets them go on or cancels them, and tells the
+// agent where the file is, how big it is and its sha256.
 // Without patch 0300 (stock VS Code) the commands don't exist and nothing here changes a call.
 
 /** One download, as the editor's _friedliver.browser.downloads.* commands give it. */
@@ -10,8 +11,10 @@ export interface DownloadInfo {
   filename: string;
   path: string;
   state: 'awaiting' | 'progressing' | 'completed' | 'cancelled' | 'failed';
-  waitingFor?: 'agent' | 'large';
+  waitingFor?: 'agent' | 'page' | 'large';
   byAgent: boolean;
+  /** The agent call (DownloadsApi.begin's token) it started during. */
+  agentCall?: string;
   receivedBytes: number;
   totalBytes: number;
   startTime: number;
@@ -21,8 +24,12 @@ export interface DownloadInfo {
 
 export interface DownloadsApi {
   list(): Promise<DownloadInfo[]>;
-  scope(active: boolean): Promise<void>;
-  claim(id: string): Promise<boolean>;
+  /** A call starts acting; its token marks the downloads that start before it ends. */
+  begin(): Promise<string>;
+  /** That call ended; other calls keep theirs. */
+  end(token: string): Promise<void>;
+  /** Takes the OK for one of the call's own downloads; false when it isn't the call's or was taken. */
+  claim(id: string, token: string): Promise<boolean>;
   approve(id: string, allow: boolean): Promise<void>;
   waitFor(id: string, ms: number): Promise<DownloadInfo | undefined>;
 }
@@ -31,7 +38,7 @@ export interface DownloadsApi {
 export const LARGE_DOWNLOAD_BYTES = 500 * 1024 * 1024;
 /** How long a tool call waits for a download it started to finish before it reports progress instead. */
 export const DOWNLOAD_WAIT_MS = 5 * 60_000;
-/** After the action, how long a download has to start to count as this call's. */
+/** After the action, how long the call stays open for a download it caused to start. */
 export const DOWNLOAD_SETTLE_MS = 1_500;
 
 /** The editor's commands, through `exec` (vscode.commands.executeCommand). */
@@ -39,8 +46,9 @@ export function commandsApi(exec: (command: string, ...args: unknown[]) => Thena
   const run = <T>(command: string, ...args: unknown[]) => Promise.resolve(exec(`_friedliver.browser.downloads.${command}`, ...args)) as Promise<T>;
   return {
     list: () => run<DownloadInfo[]>('list').then((l) => (Array.isArray(l) ? l : [])),
-    scope: (active) => run('agentScope', active),
-    claim: (id) => run<boolean>('claim', id).then((v) => v === true),
+    begin: () => run<string>('beginAgentCall'),
+    end: (token) => run('endAgentCall', token),
+    claim: (id, token) => run<boolean>('claim', id, token).then((v) => v === true),
     approve: (id, allow) => run('approve', id, allow),
     waitFor: (id, ms) => run<DownloadInfo | undefined>('waitFor', id, ms),
   };
@@ -94,29 +102,29 @@ export interface AgentDownloadOptions {
 }
 
 /**
- * Runs a browser action as the agent's: downloads that start meanwhile wait (paused) until `ask`
- * allows them. Returns the action's text with a line per download it started.
+ * Runs a browser action as one agent call: downloads that start meanwhile are this call's and wait
+ * (paused) until `ask` allows them. Returns the action's text with a line per download it started.
+ * Concurrent calls each get their own token, so one never answers or ends another's.
  */
 export async function withAgentDownloads(api: DownloadsApi | undefined, act: () => Promise<string>, opts: AgentDownloadOptions = {}): Promise<string> {
   if (!api) return act();
-  const since = Date.now() - 1_000;
-  const scoped = await api.scope(true).then(() => true, () => false);
-  if (!scoped) return act();
+  const token = await api.begin().catch(() => undefined);
+  if (typeof token !== 'string' || !token) return act();
   let text: string;
   try {
     text = await act();
     await sleep(opts.settleMs ?? DOWNLOAD_SETTLE_MS, opts.signal);
   } finally {
-    await api.scope(false).catch(() => {});
+    await api.end(token).catch(() => {});
   }
-  const mine = (await api.list().catch(() => [] as DownloadInfo[])).filter((d) => d.byAgent && d.startTime >= since);
+  const mine = (await api.list().catch(() => [] as DownloadInfo[])).filter((d) => d.agentCall === token);
   const lines: string[] = [];
   for (const d of mine) {
     if (d.state === 'failed') {
       lines.push(downloadLine(d));
       continue;
     }
-    if (d.state !== 'awaiting' || !(await api.claim(d.id).catch(() => false))) continue;
+    if (d.state !== 'awaiting' || !(await api.claim(d.id, token).catch(() => false))) continue;
     const allowed = opts.signal?.aborted ? false : await (opts.ask?.(d) ?? Promise.resolve(false)).catch(() => false);
     await api.approve(d.id, allowed).catch(() => {});
     if (!allowed) {

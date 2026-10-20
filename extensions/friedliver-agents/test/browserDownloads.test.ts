@@ -5,6 +5,7 @@ import { approvalOf } from '../src/shared/approval';
 import { EMPTY_STATE, reduce, type Action, type AppState, type ChatView } from '../src/shared/model';
 
 const MB = 1024 * 1024;
+const tick = () => new Promise((r) => setTimeout(r, 0));
 const dl = (over: Partial<DownloadInfo> = {}): DownloadInfo => ({
   id: 'd1',
   url: 'https://github.com/o/r/releases/download/v1/tool.zip',
@@ -19,15 +20,26 @@ const dl = (over: Partial<DownloadInfo> = {}): DownloadInfo => ({
   ...over,
 });
 
-/** The editor's side: downloads that start during `act`, and what they end as once allowed. */
+/** The editor's side: downloads that start during `act` (the newest open call's, like DownloadAttribution), and what they end as once allowed. */
 function fakeEditor(started: DownloadInfo[], finished: (d: DownloadInfo) => DownloadInfo = (d) => ({ ...d, state: 'completed', path: `/dl/${d.filename}`, receivedBytes: d.totalBytes, sha256: 'ab'.repeat(32) })) {
   const log: string[] = [];
   const list: DownloadInfo[] = [];
   const claimed = new Set<string>();
+  const open: string[] = [];
+  let n = 0;
   const api: DownloadsApi = {
     list: async () => list.map((d) => ({ ...d })),
-    scope: async (active) => void log.push(`scope ${active}`),
-    claim: async (id) => (claimed.has(id) ? false : (claimed.add(id), true)),
+    begin: async () => {
+      const token = `t${++n}`;
+      open.push(token);
+      log.push(`begin ${token}`);
+      return token;
+    },
+    end: async (token) => {
+      open.splice(open.indexOf(token), 1);
+      log.push(`end ${token}`);
+    },
+    claim: async (id, token) => (claimed.has(id) || list.find((d) => d.id === id)?.agentCall !== token ? false : (claimed.add(id), true)),
     approve: async (id, allow) => {
       log.push(`approve ${id} ${allow}`);
       const d = list.find((x) => x.id === id)!;
@@ -35,12 +47,13 @@ function fakeEditor(started: DownloadInfo[], finished: (d: DownloadInfo) => Down
     },
     waitFor: async (id) => list.find((x) => x.id === id),
   };
+  const start = (ds: DownloadInfo[]) => list.push(...ds.map((d) => ({ ...d, agentCall: d.agentCall ?? open.at(-1) })));
   const act = async () => {
     log.push('act');
-    list.push(...started);
+    start(started);
     return 'Clicked a "Download".';
   };
-  return { api, act, log, list };
+  return { api, act, log, list, start };
 }
 
 describe('a download an agent starts', () => {
@@ -49,7 +62,7 @@ describe('a download an agent starts', () => {
     const asked: string[] = [];
     const out = await withAgentDownloads(api, act, { ask: async (d) => (asked.push(d.filename), true), settleMs: 0 });
     expect(asked).toEqual(['tool.zip']);
-    expect(log).toEqual(['scope true', 'act', 'scope false', 'approve d1 true']);
+    expect(log).toEqual(['begin t1', 'act', 'end t1', 'approve d1 true']);
     expect(out).toBe(`Clicked a "Download".\nDownloaded tool.zip to /dl/tool.zip (2.0 MB, ${2 * MB} bytes, sha256 ${'ab'.repeat(32)}).`);
   });
 
@@ -69,12 +82,15 @@ describe('a download an agent starts', () => {
     }
   });
 
-  it('leaves downloads alone that the user started or another caller claimed', async () => {
+  it("leaves downloads alone that the user started, another call started, or that were claimed", async () => {
     const mine = dl({ id: 'a' });
     const users = dl({ id: 'b', byAgent: false, state: 'progressing', waitingFor: undefined });
-    const old = dl({ id: 'c', startTime: Date.now() - 60_000 });
-    const { api, act, log } = fakeEditor([mine, users, old]);
-    await api.claim('a');
+    const others = dl({ id: 'c', agentCall: 'someone-else' });
+    const leftover = dl({ id: 'd', agentCall: undefined });
+    const { api, act, log, start } = fakeEditor([mine, users, others]);
+    start([leftover]);
+    const realClaim = api.claim;
+    api.claim = async (id, token) => (id === 'a' ? false : realClaim(id, token));
     const out = await withAgentDownloads(api, act, { ask: async () => true, settleMs: 0 });
     expect(log.filter((l) => l.startsWith('approve'))).toEqual([]);
     expect(out).toBe('Clicked a "Download".');
@@ -92,29 +108,64 @@ describe('a download an agent starts', () => {
     expect(out).toMatch(/tool\.zip is still downloading to \/dl\/tool\.zip \(100 MB of 900 MB\)/);
   });
 
-  it('ends the agent scope even when the action throws', async () => {
+  it('ends its call even when the action throws', async () => {
     const { api, log } = fakeEditor([]);
     await expect(withAgentDownloads(api, async () => { throw new Error('page closed'); }, { settleMs: 0 })).rejects.toThrow('page closed');
-    expect(log).toEqual(['scope true', 'scope false']);
+    expect(log).toEqual(['begin t1', 'end t1']);
+  });
+
+  it('keeps concurrent calls apart: each asks about and reports only its own downloads', async () => {
+    const { api, log, start } = fakeEditor([]);
+    let releaseFirst!: () => void;
+    const firstActs = new Promise<void>((r) => (releaseFirst = r));
+    const asked: string[] = [];
+    const ask = (who: string) => async (d: DownloadInfo) => (asked.push(`${who} ${d.filename}`), true);
+    const first = withAgentDownloads(api, async () => {
+      start([dl({ id: 'a', filename: 'a.zip' })]);
+      await firstActs;
+      return 'first';
+    }, { ask: ask('first'), settleMs: 0 });
+    await tick();
+    const second = await withAgentDownloads(api, async () => {
+      start([dl({ id: 'b', filename: 'b.zip' })]);
+      return 'second';
+    }, { ask: ask('second'), settleMs: 0 });
+    // The second call ended while the first still acts: the first's download stays the first's.
+    start([dl({ id: 'c', filename: 'c.zip' })]);
+    releaseFirst();
+    const firstOut = await first;
+    expect(asked).toEqual(['second b.zip', 'first a.zip', 'first c.zip']);
+    expect(second).toBe('second\nDownloaded b.zip to /dl/b.zip (2.0 MB, 2097152 bytes, sha256 ' + 'ab'.repeat(32) + ').');
+    expect(firstOut.split('\n').slice(1).map((l) => l.split(' to ')[0])).toEqual(['Downloaded a.zip', 'Downloaded c.zip']);
+    expect(log.filter((l) => /^(begin|end)/.test(l))).toEqual(['begin t1', 'begin t2', 'end t2', 'end t1']);
+  });
+
+  it('acts without asking when the editor gives no call token', async () => {
+    const { api, act, log } = fakeEditor([dl()]);
+    api.begin = async () => undefined as unknown as string;
+    await expect(withAgentDownloads(api, act, { ask: async () => true, settleMs: 0 })).resolves.toBe('Clicked a "Download".');
+    expect(log).toEqual(['act']);
   });
 
   it('just acts in an editor without downloads (stock VS Code)', async () => {
-    const api = commandsApi(() => Promise.reject(new Error("command '_friedliver.browser.downloads.agentScope' not found")));
+    const api = commandsApi(() => Promise.reject(new Error("command '_friedliver.browser.downloads.beginAgentCall' not found")));
     await expect(withAgentDownloads(api, async () => 'Opened x', { settleMs: 0 })).resolves.toBe('Opened x');
     await expect(withAgentDownloads(undefined, async () => 'Opened y')).resolves.toBe('Opened y');
   });
 
   it('calls the editor commands with plain arguments', async () => {
     const calls: unknown[][] = [];
-    const api = commandsApi(async (...args) => (calls.push(args), args[0] === '_friedliver.browser.downloads.claim' ? true : []));
-    await api.scope(true);
-    expect(await api.claim('x')).toBe(true);
+    const api = commandsApi(async (...args) => (calls.push(args), args[0] === '_friedliver.browser.downloads.claim' ? true : args[0] === '_friedliver.browser.downloads.beginAgentCall' ? 'tok' : []));
+    expect(await api.begin()).toBe('tok');
+    expect(await api.claim('x', 'tok')).toBe(true);
     await api.approve('x', false);
+    await api.end('tok');
     expect(await api.list()).toEqual([]);
     expect(calls).toEqual([
-      ['_friedliver.browser.downloads.agentScope', true],
-      ['_friedliver.browser.downloads.claim', 'x'],
+      ['_friedliver.browser.downloads.beginAgentCall'],
+      ['_friedliver.browser.downloads.claim', 'x', 'tok'],
       ['_friedliver.browser.downloads.approve', 'x', false],
+      ['_friedliver.browser.downloads.endAgentCall', 'tok'],
       ['_friedliver.browser.downloads.list'],
     ]);
   });
@@ -208,6 +259,28 @@ describe('download approvals in the chat', () => {
     expect(items().at(-1)).toMatchObject({ text: 'b.zip (2.0 MB) from github.com', state: 'allowed' });
     void requests.call('chat-1', { tool: 'browser_back' }, signal).catch(() => {});
     expect(items().at(-1)).toMatchObject({ tool: 'browser_back', state: 'awaiting' });
+  });
+
+  it('forgets "Allow downloads for this chat" when the chat is forgotten', async () => {
+    const { requests, items, answers, signal } = setup('ask');
+    const first = requests.call('chat-1', { tool: 'browser_reload' }, signal);
+    const reload = items().at(-1)!;
+    if (reload.kind === 'bridge') requests.answer(reload.requestId, 'allow');
+    await flush();
+    const dlItem = items().at(-1)!;
+    if (dlItem.kind === 'bridge') requests.answer(dlItem.requestId, 'allowChat');
+    await first;
+    expect(answers).toEqual([true]);
+    requests.forget('chat-1');
+    const again = requests.call('chat-1', { tool: 'browser_reload' }, signal);
+    const reload2 = items().at(-1)!;
+    if (reload2.kind === 'bridge') requests.answer(reload2.requestId, 'allow');
+    await flush();
+    expect(items().at(-1)).toMatchObject({ tool: 'browser_download', state: 'awaiting' });
+    const dl2 = items().at(-1)!;
+    if (dl2.kind === 'bridge') requests.answer(dl2.requestId, 'deny');
+    await again;
+    expect(answers).toEqual([true, false]);
   });
 
   it('never offers "Always allow" on a download card', () => {

@@ -7,7 +7,7 @@ import { TOKENS_SOURCE, definedTokens, workbenchTokens } from '../scripts/workbe
 // it never overwrites, which sources may download, which files the list never opens, and the
 // state machine every download goes through.
 type State = 'awaiting' | 'progressing' | 'completed' | 'cancelled' | 'failed';
-type Download = { state: State; waitingFor?: 'agent' | 'large'; receivedBytes: number; totalBytes: number; bytesPerSecond: number; error?: string };
+type Download = { state: State; waitingFor?: 'agent' | 'page' | 'large'; receivedBytes: number; totalBytes: number; bytesPerSecond: number; error?: string };
 let m: {
   LARGE_DOWNLOAD_BYTES: number;
   sanitizeFilename(raw: string, fallback?: string): string;
@@ -25,7 +25,16 @@ let m: {
   canCancelDownload(s: State): boolean;
   needsSizeConfirm(total: number): boolean;
   pruneDownloads<T extends { state: State }>(list: T[], max?: number): T[];
+  MAX_AGENT_SCOPE_MS: number;
+  DownloadAttribution: new (now?: () => number, maxScopeMs?: number) => Attribution;
 };
+type Who = { byAgent: boolean; agentCall?: string; waitingFor?: 'agent' | 'page' };
+interface Attribution {
+  begin(): string;
+  end(token: string): void;
+  userInput(page: object, type: string): void;
+  classify(page: object | undefined, hasUserGesture: boolean): Who;
+}
 
 const PATCH = '0300-browser-downloads.patch';
 
@@ -225,6 +234,111 @@ describe('what a row says', () => {
     expect(m.expandHome('~', '/Users/me')).toBe('/Users/me');
     expect(m.expandHome('/tmp/dl', '/Users/me')).toBe('/tmp/dl');
     expect(m.expandHome('~other/x', '/Users/me')).toBe('~other/x');
+  });
+});
+
+describe('whose download it is', () => {
+  let t = 0;
+  const make = (maxMs?: number) => new m.DownloadAttribution(() => t, maxMs);
+  const page = {};
+  const other = {};
+
+  it("is the user's when they clicked in the page and no agent has acted", () => {
+    t = 1_000;
+    const a = make();
+    a.userInput(page, 'mouseDown');
+    expect(a.classify(page, true)).toEqual({ byAgent: false });
+  });
+
+  it("is the page's, and waits, without a user gesture", () => {
+    const a = make();
+    expect(a.classify(page, false)).toEqual({ byAgent: false, waitingFor: 'page' });
+    a.userInput(page, 'mouseDown');
+    expect(a.classify(page, false)).toEqual({ byAgent: false, waitingFor: 'page' });
+  });
+
+  it('belongs to the call that is acting, even with a gesture (CDP clicks have one)', () => {
+    const a = make();
+    const call = a.begin();
+    a.userInput(page, 'mouseDown');
+    expect(a.classify(page, true)).toEqual({ byAgent: true, agentCall: call, waitingFor: 'agent' });
+  });
+
+  it('keeps concurrent calls apart: one ending never clears the other', () => {
+    const a = make();
+    const first = a.begin();
+    const second = a.begin();
+    expect(first).not.toBe(second);
+    expect(a.classify(page, true).agentCall).toBe(second);
+    a.end(second);
+    expect(a.classify(page, true)).toEqual({ byAgent: true, agentCall: first, waitingFor: 'agent' });
+    const third = a.begin();
+    a.end(first);
+    expect(a.classify(page, true).agentCall).toBe(third);
+    a.end(third);
+    a.end(third);
+    a.end('nobody');
+    expect(a.classify(page, true).agentCall).toBeUndefined();
+  });
+
+  it("stays the agent's after its call ended, however late, until the user interacts with that page", () => {
+    t = 10_000;
+    const a = make();
+    a.userInput(page, 'mouseDown');
+    a.end(a.begin());
+    t += 60 * 60_000;
+    expect(a.classify(page, true)).toEqual({ byAgent: true, waitingFor: 'agent' });
+    expect(a.classify(other, true)).toEqual({ byAgent: true, waitingFor: 'agent' });
+    expect(a.classify(undefined, true)).toEqual({ byAgent: true, waitingFor: 'agent' });
+    a.userInput(page, 'mouseMove');
+    expect(a.classify(page, true).byAgent).toBe(true);
+    t += 1;
+    a.userInput(page, 'mouseDown');
+    expect(a.classify(page, true)).toEqual({ byAgent: false });
+    expect(a.classify(other, true).byAgent).toBe(true);
+    t += 1;
+    a.userInput(other, 'keyDown');
+    expect(a.classify(other, true)).toEqual({ byAgent: false });
+  });
+
+  it("ignores input while an agent acts: CDP's synthetic clicks are input too", () => {
+    t = 20_000;
+    const a = make();
+    const call = a.begin();
+    t += 1;
+    a.userInput(page, 'mouseDown');
+    t += 1;
+    a.end(call);
+    expect(a.classify(page, true)).toEqual({ byAgent: true, waitingFor: 'agent' });
+  });
+
+  it('marks pages again when the next call acts', () => {
+    t = 30_000;
+    const a = make();
+    a.end(a.begin());
+    t += 1;
+    a.userInput(page, 'pointerDown');
+    expect(a.classify(page, true).byAgent).toBe(false);
+    t += 1;
+    a.end(a.begin());
+    expect(a.classify(page, true).byAgent).toBe(true);
+  });
+
+  it('drops a call that never ended after the longest a call can take, and the page stays marked', () => {
+    t = 40_000;
+    const a = make(1_000);
+    const call = a.begin();
+    t += 1_001;
+    expect(a.classify(page, true)).toEqual({ byAgent: true, waitingFor: 'agent' });
+    expect(a.classify(page, true).agentCall).not.toBe(call);
+    t += 1;
+    a.userInput(page, 'mouseDown');
+    expect(a.classify(page, true)).toEqual({ byAgent: false });
+    expect(m.MAX_AGENT_SCOPE_MS).toBeGreaterThanOrEqual(10 * 60_000);
+  });
+
+  it('says why it waits', () => {
+    expect(m.describeDownload({ state: 'awaiting', waitingFor: 'page', receivedBytes: 0, totalBytes: 0, bytesPerSecond: 0 })).toBe('the page started it · waiting for your OK');
   });
 });
 

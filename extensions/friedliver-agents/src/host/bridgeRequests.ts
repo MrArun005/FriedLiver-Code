@@ -408,10 +408,9 @@ export class BridgeRequests {
 
   forget(chatId: string): void {
     this.settle(chatId, true);
+    // Every grant the chat holds: browser, memory, download, system … (keys are "<chatId> <what>").
     this.allowedChats.delete(chatId);
-    this.allowedChats.delete(`${chatId} browser`);
-    this.allowedChats.delete(`${chatId} memory`);
-    for (const key of [...this.allowedChats]) if (key.startsWith(`${chatId} system `)) this.allowedChats.delete(key);
+    for (const key of [...this.allowedChats]) if (key.startsWith(`${chatId} `)) this.allowedChats.delete(key);
     this.systemRate.forget(chatId);
     this.waits.delete(chatId);
   }

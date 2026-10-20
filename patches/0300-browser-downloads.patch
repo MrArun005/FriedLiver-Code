@@ -31,10 +31,10 @@ index 41ec3495..5e28e723 100644
  		mainProcessElectronServer.registerChannel('sign', signChannel);
 diff --git a/src/vs/platform/browserView/common/browserDownloads.ts b/src/vs/platform/browserView/common/browserDownloads.ts
 new file mode 100644
-index 00000000..60b85f7b
+index 00000000..78b8bb84
 --- /dev/null
 +++ b/src/vs/platform/browserView/common/browserDownloads.ts
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,335 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): downloads in the integrated browser.
 + *  The rules, with no imports so FriedLiver's own tests run them as they ship:
@@ -51,13 +51,16 @@ index 00000000..60b85f7b
 +export const MAX_DOWNLOADS_KEPT = 50;
 +
 +/**
-+ * awaiting: paused before any byte is written, until the user allows it (an agent started it, or it is large).
++ * awaiting: paused before any byte is written, until the user allows it (an agent or the page started it, or it is large).
 + * progressing: being written. completed / cancelled / failed: finished.
 + */
 +export type BrowserDownloadState = 'awaiting' | 'progressing' | 'completed' | 'cancelled' | 'failed';
 +
-+/** Why an `awaiting` download waits. */
-+export type BrowserDownloadWait = 'agent' | 'large';
++/**
++ * Why an `awaiting` download waits: an agent's call started it, or it came from a page an agent acted
++ * on since the user last did (agent); it started without a user gesture (page); it is over 500 MB (large).
++ */
++export type BrowserDownloadWait = 'agent' | 'page' | 'large';
 +
 +export type BrowserDownloadEvent = 'approve' | 'cancel' | 'complete' | 'fail';
 +
@@ -71,8 +74,10 @@ index 00000000..60b85f7b
 +	readonly path: string;
 +	readonly state: BrowserDownloadState;
 +	readonly waitingFor?: BrowserDownloadWait;
-+	/** Started while an agent was acting in the browser. */
++	/** Started while an agent was acting in the browser, or on a page an agent acted on since the user last did. */
 +	readonly byAgent: boolean;
++	/** The agent call (DownloadAttribution.begin) it started during: only that call may take the OK in its chat. */
++	readonly agentCall?: string;
 +	readonly receivedBytes: number;
 +	/** 0 when the server didn't say. */
 +	readonly totalBytes: number;
@@ -247,7 +252,7 @@ index 00000000..60b85f7b
 +		case 'awaiting':
 +			return d.waitingFor === 'large'
 +				? `${size} · waiting for your OK`
-+				: `${size ? `${size} · ` : ''}an agent started it · waiting for your OK`;
++				: `${size ? `${size} · ` : ''}${d.waitingFor === 'page' ? 'the page' : 'an agent'} started it · waiting for your OK`;
 +		case 'progressing': {
 +			const done = d.totalBytes > 0 ? `${formatBytes(d.receivedBytes)} of ${size}` : formatBytes(d.receivedBytes);
 +			if (d.bytesPerSecond <= 0) {
@@ -295,12 +300,82 @@ index 00000000..60b85f7b
 +	}
 +	return out;
 +}
++
++/** The longest an agent's browser call can hold its scope; one never ended (a crashed extension) is dropped then. */
++export const MAX_AGENT_SCOPE_MS = 15 * 60_000;
++
++/** Input that gives a page user activation (as the browser view's popup blocker counts it); a mouse move doesn't. */
++const ACTIVATING_INPUT = new Set(['rawKeyDown', 'keyDown', 'mouseDown', 'pointerDown', 'pointerUp', 'touchEnd']);
++
++/**
++ * Whose a download is. Agents' browser calls each hold a token (begin … end); a download that starts
++ * while calls act belongs to the newest of them, and only that call takes the OK in its chat. After an
++ * agent acted, every page stays the agent's until the user interacts with it (input while an agent acts
++ * doesn't count: CDP's clicks are input too). A download is the user's only when it has a user gesture
++ * and the user interacted with that page since an agent last acted; one without a gesture is the page's.
++ */
++export class DownloadAttribution<Page extends object = object> {
++	private readonly calls = new Map<string, number>();
++	private seq = 0;
++	/** Orders agent acts and user input; times can tie. */
++	private tick = 0;
++	/** The tick an agent last acted at: a call began, ended or was dropped. */
++	private agentAt = 0;
++	/** Each page's tick of the user's last activating input there. */
++	private readonly userAt = new WeakMap<Page, number>();
++
++	constructor(private readonly now: () => number = Date.now, private readonly maxScopeMs = MAX_AGENT_SCOPE_MS) { }
++
++	begin(): string {
++		this.prune();
++		const token = `agent-call-${++this.seq}-${this.now().toString(36)}`;
++		this.calls.set(token, this.now());
++		this.agentAt = ++this.tick;
++		return token;
++	}
++
++	/** Ends one call; the others keep acting. An unknown or ended token changes nothing. */
++	end(token: string): void {
++		if (this.calls.delete(token)) {
++			this.agentAt = ++this.tick;
++		}
++	}
++
++	/** Electron's input-event `type` on a browser view's page. */
++	userInput(page: Page, type: string): void {
++		this.prune();
++		if (ACTIVATING_INPUT.has(type) && this.calls.size === 0) {
++			this.userAt.set(page, ++this.tick);
++		}
++	}
++
++	classify(page: Page | undefined, hasUserGesture: boolean): { byAgent: boolean; agentCall?: string; waitingFor?: 'agent' | 'page' } {
++		this.prune();
++		const agentCall = [...this.calls.keys()].at(-1);
++		if (agentCall) {
++			return { byAgent: true, agentCall, waitingFor: 'agent' };
++		}
++		if ((page ? this.userAt.get(page) ?? 0 : 0) < this.agentAt) {
++			return { byAgent: true, waitingFor: 'agent' };
++		}
++		return hasUserGesture ? { byAgent: false } : { byAgent: false, waitingFor: 'page' };
++	}
++
++	private prune(): void {
++		for (const [token, began] of this.calls) {
++			if (this.now() - began > this.maxScopeMs) {
++				this.calls.delete(token);
++				this.agentAt = ++this.tick;
++			}
++		}
++	}
++}
 diff --git a/src/vs/platform/browserView/common/browserDownloadsService.ts b/src/vs/platform/browserView/common/browserDownloadsService.ts
 new file mode 100644
-index 00000000..0c9f24fe
+index 00000000..44b885f7
 --- /dev/null
 +++ b/src/vs/platform/browserView/common/browserDownloadsService.ts
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,42 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): the integrated browser's downloads, owned by the main process
 + *  (BrowserDownloadsMainService) and read by every window over the browserDownloads channel.
@@ -332,47 +407,51 @@ index 00000000..0c9f24fe
 +	clear(): Promise<void>;
 +
 +	/**
-+	 * An agent starts (true) or ends (false) acting in the browser. Downloads that start meanwhile, or
-+	 * within a few seconds after, wait for the user's OK (waitingFor 'agent').
++	 * An agent's browser call starts. Downloads that start before it ends are this call's (agentCall,
++	 * the newest call's when several act) and wait for the user's OK (waitingFor 'agent'). Returns the token for endAgentCall and claim.
 +	 */
-+	setAgentScope(active: boolean): Promise<void>;
-+	/** The agent's chat takes the OK for this download; false when another caller already did. */
-+	claim(id: string): Promise<boolean>;
++	beginAgentCall(): Promise<string>;
++	/** That call ended; other calls keep acting. Pages stay the agent's until the user interacts with them (DownloadAttribution). */
++	endAgentCall(token: string): Promise<void>;
++	/** Takes the OK for a waiting download; with `agentCall`, only that call's own. False when it was taken already. */
++	claim(id: string, agentCall?: string): Promise<boolean>;
 +	/** Resolves when the download is finished, or with its state after `timeoutMs`. */
 +	waitFor(id: string, timeoutMs: number): Promise<IBrowserDownload | undefined>;
 +}
 diff --git a/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
 new file mode 100644
-index 00000000..fea5d7bd
+index 00000000..ca0c9492
 --- /dev/null
 +++ b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
-@@ -0,0 +1,404 @@
+@@ -0,0 +1,421 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): saves what the integrated browser downloads.
 + *
 + *  - Into friedliver.browser.downloadFolder (user settings; default ~/Downloads) under a sanitized,
 + *    unique name, or where the user picks when friedliver.browser.downloadAsk is on.
 + *  - Only http(s) sources (and blobs web pages make); everything else is refused before a byte is written.
-+ *  - A download an agent started, or one over 500 MB, is paused until the user allows it.
++ *  - A download an agent or the page started (no user gesture, or a page an agent acted on since the
++ *    user last did), or one over 500 MB, is paused until the user allows it.
++ *  - Downloads that start during an agent's browser call are that call's alone (DownloadAttribution).
 + *  - Nothing is ever opened or run automatically. Finished files keep (or get) the OS's
 + *    downloaded-from-the-internet mark: com.apple.quarantine on macOS, Zone.Identifier on Windows.
 + *--------------------------------------------------------------------------------------------*/
 +
-+import { app, shell } from 'electron';
++import { app, shell, webContents as allWebContents } from 'electron';
 +import { createHash } from 'crypto';
 +import { execFile } from 'child_process';
 +import * as fs from 'fs';
 +import { homedir } from 'os';
 +import { basename, dirname, join } from '../../../base/common/path.js';
 +import { Emitter } from '../../../base/common/event.js';
-+import { Disposable } from '../../../base/common/lifecycle.js';
++import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
 +import { RunOnceScheduler } from '../../../base/common/async.js';
 +import { generateUuid } from '../../../base/common/uuid.js';
 +import { isMacintosh, isWindows } from '../../../base/common/platform.js';
 +import { createDecorator } from '../../instantiation/common/instantiation.js';
 +import { IConfigurationService } from '../../configuration/common/configuration.js';
 +import { ILogService } from '../../log/common/log.js';
-+import { IBrowserDownload, BrowserDownloadEvent, canCancelDownload, canRetryDownload, expandHome, formatBytes, isAllowedDownloadUrl, isDownloadFinished, isExecutableName, needsSizeConfirm, nextDownloadState, pruneDownloads, sanitizeFilename, uniqueFilename } from '../common/browserDownloads.js';
++import { IBrowserDownload, BrowserDownloadEvent, DownloadAttribution, canCancelDownload, canRetryDownload, expandHome, formatBytes, isAllowedDownloadUrl, isDownloadFinished, isExecutableName, needsSizeConfirm, nextDownloadState, pruneDownloads, sanitizeFilename, uniqueFilename } from '../common/browserDownloads.js';
 +import { IBrowserDownloadsService } from '../common/browserDownloadsService.js';
 +import { BrowserSession } from './browserSession.js';
 +import { IBrowserViewMainService } from './browserViewMainService.js';
@@ -380,8 +459,8 @@ index 00000000..fea5d7bd
 +export const IBrowserDownloadsMainService = createDecorator<IBrowserDownloadsMainService>('browserDownloadsMainService');
 +export interface IBrowserDownloadsMainService extends IBrowserDownloadsService { }
 +
-+/** Downloads that start this long after an agent's browser action still count as the agent's. */
-+const AGENT_GRACE_MS = 5_000;
++/** How soon after Retry its download must start to count as the user's. */
++const RETRY_WINDOW_MS = 10_000;
 +
 +type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 +
@@ -402,8 +481,9 @@ index 00000000..fea5d7bd
 +	private readonly entries = new Map<string, Entry>();
 +	/** Paths handed to downloads still writing, so two at once never get the same name. */
 +	private readonly reserved = new Set<string>();
-+	private agentScopes = 0;
-+	private agentGraceUntil = 0;
++	private readonly attribution = new DownloadAttribution<Electron.WebContents>();
++	/** URLs the user asked to download again (Retry), and when: the download that follows within seconds is the user's. */
++	private readonly retried = new Map<string, number>();
 +	private readonly progress = this._register(new RunOnceScheduler(() => this.fire(), 250));
 +
 +	constructor(
@@ -413,6 +493,16 @@ index 00000000..fea5d7bd
 +	) {
 +		super();
 +		this._register(BrowserSession.onWillDownload(e => this.willDownload(e.event, e.item, e.webContents, e.session)));
++		// The user's input in a browser view's page (not the workbench's), to tell their downloads from the page's.
++		const watch = (contents: Electron.WebContents) => {
++			if (BrowserSession.isBrowserViewWebContents(contents)) {
++				contents.on('input-event', (_e, input) => this.attribution.userInput(contents, input.type));
++			}
++		};
++		allWebContents.getAllWebContents().forEach(watch);
++		const onCreated = (_e: Electron.Event, contents: Electron.WebContents) => watch(contents);
++		app.on('web-contents-created', onCreated);
++		this._register(toDisposable(() => app.off('web-contents-created', onCreated)));
 +	}
 +
 +	// #region Electron
@@ -421,13 +511,17 @@ index 00000000..fea5d7bd
 +		const chain = item.getURLChain();
 +		const url = chain.at(-1) ?? item.getURL();
 +		const name = sanitizeFilename(item.getFilename());
++		const retriedAt = this.retried.get(chain[0] ?? url);
++		this.retried.delete(chain[0] ?? url);
++		const who: ReturnType<DownloadAttribution['classify']> = retriedAt !== undefined && Date.now() - retriedAt < RETRY_WINDOW_MS ? { byAgent: false } : this.attribution.classify(webContents, item.hasUserGesture());
 +		const base: Mutable<IBrowserDownload> = {
 +			id: generateUuid(),
 +			url,
 +			filename: name,
 +			path: '',
 +			state: 'progressing',
-+			byAgent: this.agentScopes > 0 || Date.now() < this.agentGraceUntil,
++			byAgent: who.byAgent,
++			agentCall: who.agentCall,
 +			receivedBytes: 0,
 +			totalBytes: Math.max(0, item.getTotalBytes()),
 +			bytesPerSecond: 0,
@@ -444,7 +538,7 @@ index 00000000..fea5d7bd
 +		}
 +
 +		const folder = this.folder();
-+		const ask = !base.byAgent && this.configurationService.getValue<boolean>('friedliver.browser.downloadAsk') === true;
++		const ask = !who.waitingFor && this.configurationService.getValue<boolean>('friedliver.browser.downloadAsk') === true;
 +		try {
 +			fs.mkdirSync(folder, { recursive: true });
 +		} catch (err) {
@@ -469,8 +563,8 @@ index 00000000..fea5d7bd
 +			base.filename = basename(file);
 +		}
 +
-+		// An agent's download, or a large one, writes nothing until the user allows it.
-+		const wait = base.byAgent ? 'agent' : (!ask && needsSizeConfirm(base.totalBytes) ? 'large' : undefined);
++		// An agent's or the page's download, or a large one, writes nothing until the user allows it.
++		const wait = who.waitingFor ?? (!ask && needsSizeConfirm(base.totalBytes) ? 'large' : undefined);
 +		if (wait) {
 +			item.pause();
 +			base.state = 'awaiting';
@@ -630,6 +724,7 @@ index 00000000..fea5d7bd
 +		}
 +		this.entries.delete(id);
 +		this.fire();
++		this.retried.set(entry.d.url, Date.now());
 +		entry.session.downloadURL(entry.d.url);
 +	}
 +
@@ -665,18 +760,17 @@ index 00000000..fea5d7bd
 +		this.fire();
 +	}
 +
-+	async setAgentScope(active: boolean): Promise<void> {
-+		if (active) {
-+			this.agentScopes++;
-+		} else {
-+			this.agentScopes = Math.max(0, this.agentScopes - 1);
-+			this.agentGraceUntil = Date.now() + AGENT_GRACE_MS;
-+		}
++	async beginAgentCall(): Promise<string> {
++		return this.attribution.begin();
 +	}
 +
-+	async claim(id: string): Promise<boolean> {
++	async endAgentCall(token: string): Promise<void> {
++		this.attribution.end(token);
++	}
++
++	async claim(id: string, agentCall?: string): Promise<boolean> {
 +		const entry = this.entry(id);
-+		if (entry.claimed || entry.d.state !== 'awaiting') {
++		if (entry.claimed || entry.d.state !== 'awaiting' || (agentCall !== undefined && entry.d.agentCall !== agentCall)) {
 +			return false;
 +		}
 +		entry.claimed = true;
@@ -830,18 +924,19 @@ index 7a69461a..98c621be 100644
  	const url = Object.entries(viewState ?? {}).find(([key]) => key === 'url')?.[1];
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
 new file mode 100644
-index 00000000..74f0da07
+index 00000000..ed3eed4d
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
-@@ -0,0 +1,466 @@
+@@ -0,0 +1,472 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): downloads in the browser panel (COMPONENTS.md §2.33).
 + *  - Indicator: an IconButton in the browser's actions toolbar, with a progress ring and a Count of
 + *    active downloads, shown once there is any download.
 + *  - Popover: the list (name, size, progress and speed, state) with Cancel, Retry, Open, Show in
 + *    Finder/Explorer, Copy link and Clear.
-+ *  - Toasts: a finished download (Show in Finder), a failed one (Retry), and an agent's download
-+ *    that no chat took the OK for (Allow / Cancel). A large one asks in a dialog with its size.
++ *  - Toasts: a finished download (Show in Finder), a failed one (Retry), and a waiting one no chat
++ *    took the OK for (Allow / Cancel): the page's (no user gesture), one from a page an agent left,
++ *    or an agent call's after 3 s. A large one asks in a dialog with its size.
 + *  - Commands the Agents extension calls (_friedliver.browser.downloads.*): agent downloads ask in
 + *    the agent's chat and report their path, size and sha256 in the tool's output.
 + *--------------------------------------------------------------------------------------------*/
@@ -882,7 +977,7 @@ index 00000000..74f0da07
 +
 +const CONTEXT_BROWSER_HAS_DOWNLOADS = new RawContextKey<boolean>('browserHasDownloads', false, localize('browser.hasDownloads', "Whether the integrated browser has downloaded anything in this session"));
 +const SHOW_DOWNLOADS_ID = 'workbench.action.browser.showDownloads';
-+/** An agent's download no chat claimed within this time asks in a toast instead. */
++/** A download an agent's call started that its chat didn't claim within this time asks in a toast instead. */
 +const UNCLAIMED_AFTER_MS = 3_000;
 +
 +const showInFolderLabel = () => isMacintosh
@@ -1246,7 +1341,8 @@ index 00000000..74f0da07
 +				if (d.waitingFor === 'large') {
 +					void this._askLarge(d);
 +				} else {
-+					setTimeout(() => void this._askUnclaimed(d.id), UNCLAIMED_AFTER_MS);
++					// The page's, or one from a page an agent left: no chat will ask, so ask now.
++					setTimeout(() => void this._askUnclaimed(d.id), d.agentCall ? UNCLAIMED_AFTER_MS : 0);
 +				}
 +			}
 +		}
@@ -1269,7 +1365,7 @@ index 00000000..74f0da07
 +		await this._service.approve(d.id, confirmed);
 +	}
 +
-+	/** An agent's download no chat took the OK for: ask here, so it never waits unseen. */
++	/** A waiting download no chat took the OK for: ask here, so it never waits unseen. */
 +	private async _askUnclaimed(id: string): Promise<void> {
 +		if (!await this._service.claim(id).catch(() => false)) {
 +			return;
@@ -1280,7 +1376,9 @@ index 00000000..74f0da07
 +		}
 +		const size = d.totalBytes > 0 ? ` (${formatBytes(d.totalBytes)})` : '';
 +		this._notificationService.prompt(Severity.Warning,
-+			localize('browser.downloads.agentAsk', "An agent started a download in the browser: {0}{1} from {2}. Download it?", d.filename, size, hostOf(d.url)),
++			d.waitingFor === 'page'
++				? localize('browser.downloads.pageAsk', "A page started a download in the browser without a click: {0}{1} from {2}. Download it?", d.filename, size, hostOf(d.url))
++				: localize('browser.downloads.agentAsk', "An agent started a download in the browser: {0}{1} from {2}. Download it?", d.filename, size, hostOf(d.url)),
 +			[
 +				{ label: localize('browser.downloads.allowAgent', "Download"), run: () => this._service.approve(id, true) },
 +				{ label: localize('browser.downloads.cancelAgent', "Cancel"), run: () => this._service.approve(id, false) },
@@ -1293,8 +1391,10 @@ index 00000000..74f0da07
 +
 +// For the Agents extension (vscode.commands.executeCommand). Results are plain JSON.
 +CommandsRegistry.registerCommand('_friedliver.browser.downloads.list', accessor => accessor.get(IBrowserDownloadsService).getDownloads());
-+CommandsRegistry.registerCommand('_friedliver.browser.downloads.agentScope', (accessor, active: unknown) => accessor.get(IBrowserDownloadsService).setAgentScope(active === true));
-+CommandsRegistry.registerCommand('_friedliver.browser.downloads.claim', (accessor, id: unknown) => typeof id === 'string' ? accessor.get(IBrowserDownloadsService).claim(id) : false);
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.beginAgentCall', accessor => accessor.get(IBrowserDownloadsService).beginAgentCall());
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.endAgentCall', (accessor, token: unknown) => typeof token === 'string' ? accessor.get(IBrowserDownloadsService).endAgentCall(token) : undefined);
++// Only with the call's token: a call never takes the OK for another call's download.
++CommandsRegistry.registerCommand('_friedliver.browser.downloads.claim', (accessor, id: unknown, token: unknown) => typeof id === 'string' && typeof token === 'string' ? accessor.get(IBrowserDownloadsService).claim(id, token) : false);
 +CommandsRegistry.registerCommand('_friedliver.browser.downloads.approve', (accessor, id: unknown, allow: unknown) => typeof id === 'string' ? accessor.get(IBrowserDownloadsService).approve(id, allow === true) : undefined);
 +CommandsRegistry.registerCommand('_friedliver.browser.downloads.waitFor', (accessor, id: unknown, ms: unknown) => typeof id === 'string' ? accessor.get(IBrowserDownloadsService).waitFor(id, typeof ms === 'number' ? ms : 0) : undefined);
 +
