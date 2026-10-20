@@ -29,7 +29,12 @@ const CHUNK = 64 * 1024;
 const BODY = crypto.randomBytes(SIZE);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-dl-probe-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-dl-probe-'));
+// As in patch 0300: a waiting download is written to a staging folder, moved to the downloads folder when done.
+const staging = path.join(root, 'pending');
+const dir = path.join(root, 'downloads');
+fs.mkdirSync(staging);
+fs.mkdirSync(dir);
 const results = [];
 let failed = false;
 function check(name, ok, detail = '') {
@@ -69,7 +74,7 @@ const server = http.createServer((req, res) => {
 
 function nextDownload(win) {
   return new Promise((resolve) => win.webContents.session.once('will-download', (_e, item) => {
-    item.setSavePath(path.join(dir, item.getFilename()));
+    item.setSavePath(path.join(staging, item.getFilename()));
     item.pause(); // synchronously, as BrowserDownloadsMainService does
     const done = new Promise((r) => item.once('done', (_e2, state) => r(state)));
     resolve({ item, done });
@@ -123,10 +128,13 @@ async function main() {
   const r2 = item.getReceivedBytes();
   const d2 = onDisk();
   check('nothing more arrives while paused', r2 === r1 && r2 < SIZE, `${r1} → ${r2} of ${SIZE}`);
-  check('nothing more is written while paused (at most the first chunk)', d2 === d1 && d2 <= 2 * CHUNK, `${d1} → ${d2} bytes on disk`);
+  // Chromium may already have buffered some bytes to the staged file (64 KB on macOS, ~450 KB on Windows).
+  check('the staged file stops growing while paused', d2 === d1 && d2 < SIZE, `${d1} → ${d2} bytes staged`);
+  check('nothing reaches the downloads folder while waiting', fs.readdirSync(dir).length === 0, fs.readdirSync(dir).join(', '));
   item.resume();
   const state1 = await done;
-  const file1 = item.getSavePath();
+  const file1 = path.join(dir, path.basename(item.getSavePath()));
+  if (state1 === 'completed') fs.renameSync(item.getSavePath(), file1);
   check('resume() finishes the download', state1 === 'completed', state1);
   check('the file is byte for byte the body', state1 === 'completed' && sha256(fs.readFileSync(file1)) === sha256(BODY));
   if (process.platform === 'darwin') note('Chromium set com.apple.quarantine', quarantine(file1) ?? 'no');
@@ -148,7 +156,7 @@ async function main() {
   item.cancel();
   check('cancel() while paused ends it cancelled', (await done) === 'cancelled');
   await sleep(500);
-  const left = fs.readdirSync(dir).filter((f) => f.startsWith('script.bin') || f.endsWith('.crdownload'));
+  const left = [...fs.readdirSync(staging), ...fs.readdirSync(dir)].filter((f) => f.startsWith('script.bin') || f.endsWith('.crdownload'));
   check('a cancelled download leaves no file', left.length === 0, left.join(', '));
 
   // 3. A blob a click handler makes: blob: URL with a user gesture.
@@ -181,6 +189,6 @@ app.whenReady().then(main).catch((err) => {
 }).finally(() => {
   console.log(`downloads probe on ${process.platform}-${process.arch}\n${results.join('\n')}`);
   server.close();
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(root, { recursive: true, force: true });
   app.exit(failed ? 1 : 0);
 });

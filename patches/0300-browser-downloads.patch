@@ -887,7 +887,7 @@ index 00000000..5c7f3fb8
 +	}
 +}
 diff --git a/src/vs/platform/browserView/electron-main/browserSession.ts b/src/vs/platform/browserView/electron-main/browserSession.ts
-index 99a1c114..84e1ae62 100644
+index 99a1c114..5d20bb9f 100644
 --- a/src/vs/platform/browserView/electron-main/browserSession.ts
 +++ b/src/vs/platform/browserView/electron-main/browserSession.ts
 @@ -4,6 +4,7 @@
@@ -898,7 +898,20 @@ index 99a1c114..84e1ae62 100644
  import { createHash } from 'crypto';
  import { normalize } from '../../../base/common/path.js';
  import { isLinux } from '../../../base/common/platform.js';
-@@ -42,6 +43,14 @@ export class BrowserSession {
+@@ -22,6 +23,12 @@ import { localize } from '../../../nls.js';
+ import { IAgentNetworkFilterService } from '../../networkFilter/common/networkFilterService.js';
+ import { ISandboxNetworkRestrictions } from '../../sandbox/common/sandboxSettingsResolutionHelper.js';
+ 
++/**
++ * FriedLiver (patch 0300): the emitter behind BrowserSession.onWillDownload, at module level so no
++ * static initializer reads the class binding (undefined there in the built app's class emit).
++ */
++const onWillDownload = new Emitter<{ readonly event: Electron.Event; readonly item: Electron.DownloadItem; readonly webContents: Electron.WebContents; readonly session: Electron.Session }>();
++
+ /**
+  * Holds an Electron session along with its storage scope and unique browser
+  * context identifier.  Each instance maps one-to-one to an Electron
+@@ -42,6 +49,13 @@ export class BrowserSession {
  
  	// #region Static registry
  
@@ -907,17 +920,16 @@ index 99a1c114..84e1ae62 100644
 +	 * from Electron's will-download, so a listener can still choose the save path
 +	 * (BrowserDownloadsMainService). With no listener Electron falls back to its own Save dialog.
 +	 */
-+	private static readonly _onWillDownload = new Emitter<{ readonly event: Electron.Event; readonly item: Electron.DownloadItem; readonly webContents: Electron.WebContents; readonly session: Electron.Session }>();
-+	static readonly onWillDownload = BrowserSession._onWillDownload.event;
++	static readonly onWillDownload = onWillDownload.event;
 +
  	/**
  	 * Primary store — keyed by Electron session so entries are
  	 * automatically removed when the Electron session is GC'd.
-@@ -349,6 +358,7 @@ export class BrowserSession {
+@@ -349,6 +363,7 @@ export class BrowserSession {
  	 */
  	private configure(): void {
  		this._permissions.configure(this.electronSession);
-+		this.electronSession.on('will-download', (event, item, webContents) => BrowserSession._onWillDownload.fire({ event, item, webContents, session: this.electronSession }));
++		this.electronSession.on('will-download', (event, item, webContents) => onWillDownload.fire({ event, item, webContents, session: this.electronSession }));
  		this.electronSession.registerPreloadScript({
  			type: 'frame',
  			filePath: FileAccess.asFileUri('vs/platform/browserView/electron-browser/preload-browserView.js').fsPath
