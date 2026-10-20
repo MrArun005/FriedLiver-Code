@@ -81,6 +81,15 @@ describe('GitHub workflows', () => {
     expect(build).toMatch(/^ {2}workflow_call:$/m);
   });
 
+  it('installs an Open VSX extension into the Linux build and requires a successful signature check', () => {
+    const build = read('build.yml');
+    const step = build.slice(build.indexOf('- name: Install an extension from Open VSX'), build.indexOf('- name: Remove the signing keychain'));
+    expect(step).toContain("if: runner.os == 'Linux'");
+    expect(step).toContain('shell: bash');
+    expect(step).toContain('--install-extension redhat.vscode-yaml');
+    expect(step).toContain(': Success\\.');
+  });
+
   it('releases only from main after CI passed, then checks the published Mac app', () => {
     const release = read('release.yml');
     expect(release).toMatch(/^on:\n {2}workflow_dispatch:\n\n/m);
