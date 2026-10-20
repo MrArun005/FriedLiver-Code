@@ -145,7 +145,41 @@ Raw `--r-1/3/4/5/6/8/10/12/14` stay as the ramp; components use the families.
 - Webviews: `src/webview/ui/icon.tsx` (B2: stroke 1.2 → 1.5; add `files, extensions, debug, scm, agents, sliders, bell, sideL, sideR, panelB, folder, sync, braces, book, clone, error, filter, fork, menu, keyboard, arrowRight, minus, square` from `review/v2/src/mock.js`).
 - Workbench: the **FriedLiver Icons** product icon theme (§6.21) renders the same glyphs.
 - File icons are neutral (`--fg-2`); language is not colour-coded.
-- **The mark** (`friedliverMark.ts`) is drawn as a line (2px at 48, 1.5px at 14–16) with a 16% fill in `--brand`. It appears in the title bar, the welcome hero, the palette footer, the Welcome tab and empty states; nowhere is it a control.
+- **The mark** is the product logo; see §1.6b.
+
+### 1.6b Brand mark (owner, 2026-10-21)
+
+The outline mark from the v2 mock is the logo everywhere ("that outline is the better logo"): a liver drawn as one outline with a 16% fill of its own colour, and three rising steam strokes.
+
+**Source** (`branding/mark.svg`; the same paths in `friedliverTitle.ts` (workbench) and `friedliverMark.ts` (webviews)):
+
+```svg
+<svg viewBox="170 60 760 700" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M200 500C190 380 292 318 424 318C522 318 566 338 604 350C619 336 636 330 656 330C748 328 846 340 884 372C910 394 900 420 862 436C762 480 662 548 562 628C522 660 484 678 456 688C446 718 414 738 382 728C300 716 212 640 200 500Z"
+        fill="currentColor" fill-opacity=".16" vector-effect="non-scaling-stroke"/>
+  <path d="M430 270C400 230 460 200 430 160C405 128 440 104 432 84M560 285C532 245 590 215 562 175C540 145 572 122 566 102M690 300C664 266 716 240 692 206"
+        vector-effect="non-scaling-stroke"/>
+</svg>
+```
+
+| | Dark | Light | High Contrast |
+|---|---|---|---|
+| Colour (`friedliver.brand` / `--brand`, oklch .72 .14 52 / .62 .15 48) | #e2884f | #c4622a | #e2884f on HC dark, #c4622a on HC light (no fill) |
+| App icon | the mark in #e2884f on the graphite tile in every theme | | |
+
+**Size rules (in the UI).** Strokes are in screen pixels (`non-scaling-stroke`): 1.5px at 14–16, 2px at 20–48, then 4% of the box. Minimum 14px. Clear space: a quarter of the box on every side (the 16px title-bar mark keeps 8px to its neighbours). The fill stays 16%.
+
+**App icons** (`node branding/make-branding.mjs`; every size drawn at that size, never scaled down from one image):
+- **macOS** (`code.icns`, 16–1024, 1x and 2x): Apple's icon grid, an 824 tile on 1024 with radius 185 and a soft shadow (none at 32 and below); the warm graphite surface as a top-to-bottom ramp #2e2925 → #151210 with a 1px top rim light (white 7%, 10% at 32 and below); the mark 560 wide (68% of the tile), centred on the liver's optical centre.
+- **Windows and Linux** (`code.ico` 16–256, Start tiles 70/150, `icon.png` 1024, server 192/512, `favicon.ico`): the same tile, Fluent-style: 944 on 1024, radius 208 (22%), no baked shadow; the mark 640 wide.
+- **Stroke per size (output px):** 16 → 1.5 · 20 → 1.6 · 24 → 1.7 · 32 → 1.75 · 40/48 → 2 · 64 → 2.25 · 128 → 3.25 · 150 → 3.6 · 192 → 4.4 · 256 → 5.5 · 512 → 10.5 · 1024 → 20. At 32 and below the fill rises to 26% so the shape reads; at 16 the steam is dropped and the liver drawn 12% larger (three 1px steam bars turned to noise).
+- **Installer pictures** (Inno Setup): the mark alone on #151210 for the tall welcome picture, the Windows icon on white for the small header. No custom DMG background (the build makes a plain .dmg).
+- **Empty-editor watermark** (`letterpress-*.svg`): the outline mark in upstream's letterpress tones (black 30% dark, 10% light, solid greys in HC), the liver filled at 35% of that tone.
+
+**Where it appears.** The app icon (Dock, taskbar, About), the title bar (16px, after the traffic lights on macOS; Windows and Linux show the app icon), the welcome hero (48), the palette footer (14), the Welcome tab (16), voiced empty states (40, in `--fg-2`) and the empty-editor watermark.
+
+**Don't.** Never a control or a button's icon; never recoloured to the accent (`--accent-bg`) or the needs-you blue; never on a busy background without its clear space; no gradients or effects on the mark itself (the tile carries the depth).
+
 
 ### 1.7 Lines
 

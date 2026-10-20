@@ -240,15 +240,19 @@ doesn't reach Desktop, Documents or Downloads.
 
 ### Icons and branding
 
-`prepare.mjs` copies `branding/icon.png` (1024 px, roasted liver) over
-`resources/linux/code.png`, then copies `branding/overlay/` over the
-upstream tree. `branding/make-branding.py` (Pillow) generates that overlay
-from `branding/icon.png` and `branding/liver-art.svg`:
+`prepare.mjs` copies `branding/icon.png` (1024 px, the outline mark on its
+graphite tile) over `resources/linux/code.png`, then copies `branding/overlay/`
+over the upstream tree. `node branding/make-branding.mjs` (Chrome through
+Playwright, and macOS's `iconutil`; local only, the outputs are committed)
+generates both from `branding/mark.svg`, drawing every size at that size with
+the stroke tuned per size (COMPONENTS.md "Brand mark"):
 
-- Windows `code.ico`, Start tiles and the Inno Setup wizard pictures for every
-  display scale.
-- macOS `code.icns`, plus the server icons.
-- The empty-editor watermark: the liver's silhouette, in upstream's letterpress style.
+- Windows `code.ico` (16-256), Start tiles and the Inno Setup wizard pictures for
+  every display scale.
+- macOS `code.icns` (16-1024, 1x and 2x) on Apple's icon grid, plus the server icons.
+- The empty-editor watermark: the outline mark, in upstream's letterpress tones.
+
+`--sheet <png>` also writes a review sheet of the icon at 1024, 128, 32 and 16.
 
 The generated files are committed, so builds need no Pillow. Run the script
 again after changing the artwork.
