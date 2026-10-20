@@ -18,7 +18,13 @@ export default tseslint.config(
   {
     // The workbench harness's test-only extension (CommonJS, loaded by the extension host).
     files: ['test/workbench-harness/**/*.js'],
-    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', exports: 'writable' } },
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', exports: 'writable', Buffer: 'readonly', setInterval: 'readonly', clearInterval: 'readonly' } },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
+    // Electron main-process scripts (CommonJS), like the downloads probe.
+    files: ['scripts/**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', process: 'readonly', console: 'readonly', setTimeout: 'readonly', setInterval: 'readonly', clearInterval: 'readonly' } },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   {
