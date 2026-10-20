@@ -2,18 +2,19 @@
 // and the agent's place in FriedLiver (spec, levels, mentions, Accounts). agy itself is the
 // fixture test/fixtures/fake-agy.mjs: no network, no sign-in.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
 import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGY_MODES, extraArgs, parseModels, seatbeltProfile, settingsModel, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
+import { AGY_MODES, TALK_LIMITS, extraArgs, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
 import { PLATFORM_REFUSAL, agyAgent, type AgyAdapterOptions } from '@friedliver/main/agents/agyAcp';
 import { findProgram } from '@friedliver/main/agents/processes';
 import { DEFAULT_AGENTS } from '@friedliver/main/agents/registry';
 import { parseEditInput } from '../src/host/editorPrompt';
 import { cliLineFor, installCommandFor } from '../src/host/signin';
 import { CLI_ACCOUNTS, KEY_SETUPS } from '../src/shared/accounts';
+import type { DiscussionItem } from '../src/shared/discuss';
 import { parseMention } from '../src/shared/model';
 import { modeFor, planToggle, readOnlyChoice, sessionOptions } from '../src/shared/session';
 import { mentionOptions } from '../src/shared/view';
@@ -21,6 +22,7 @@ import { markFor } from '../src/webview/ui/marks';
 import { DEMO_AGENT, disposeCores, gitRepo, makeCore, tmpDir, waitFor } from './helpers';
 
 const FAKE_AGY = path.resolve(__dirname, 'fixtures/fake-agy.mjs');
+const FAKE_BRIDGE = path.resolve(__dirname, 'fixtures/fake-bridge.mjs');
 const manifest = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')) as {
   capabilities: { untrustedWorkspaces: { supported: boolean } };
   contributes: { configuration: { properties: Record<string, { enum?: string[] }> } };
@@ -85,18 +87,72 @@ describe('agy models', () => {
 });
 
 describe('FriedLiver levels on agy’s modes', () => {
-  const mode = sessionOptions({ configOptions: [{ id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: 'manual', options: AGY_MODES }] as acp.SessionConfigOption[] }).find((o) => o.category === 'mode');
+  const mode = sessionOptions({ configOptions: [{ id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: 'read-only', options: AGY_MODES }] as acp.SessionConfigOption[] }).find((o) => o.category === 'mode');
 
-  it('Manual is a mode that runs nothing, Edit automatically accepts edits, Auto is full access', () => {
-    expect(modeFor('antigravity', mode, 'ask')).toBe('manual');
+  it('Manual is talk only, Plan is talk only planning, Edit automatically accepts edits, Auto is full access', () => {
+    expect(modeFor('antigravity', mode, 'ask')).toBe('read-only');
+    expect(modeFor('antigravity', mode, 'plan')).toBe('plan');
     expect(modeFor('antigravity', mode, 'edits')).toBe('accept-edits');
     expect(modeFor('antigravity', mode, 'full')).toBe('full');
   });
 
-  it('offers no read-only or plan mode: agy enforces neither, so FriedLiver claims neither', () => {
-    expect(readOnlyChoice(mode ? [mode] : [])).toBeUndefined();
-    expect(planToggle({ options: mode ? [mode] : [], commands: [], live: true })).toBeUndefined();
-    expect(modeFor('antigravity', mode, 'plan')).toBeUndefined();
+  it('read-only chats and /discuss pick talk only; the Plan toggle is talk only too', () => {
+    expect(readOnlyChoice(mode ? [mode] : [])).toMatchObject({ value: 'read-only' });
+    expect(planToggle({ options: mode ? [mode] : [], commands: [], live: true })).toMatchObject({ on: 'plan' });
+    expect(['read-only', 'plan'].map((m) => turnArgs({ mode: m as 'plan', model: 'default', effort: 'default' }))).toEqual([
+      expect.not.arrayContaining(['--dangerously-skip-permissions', 'accept-edits']),
+      expect.arrayContaining(['--mode', 'plan', '--sandbox']),
+    ]);
+  });
+});
+
+describe('what talk-only agy may ask FriedLiver to read', () => {
+  const fenced = (need: unknown, fence = '~~~') => `Thinking.\n${fence}need\n${JSON.stringify({ need })}\n${fence}`;
+
+  it('reads, searches and outlines, with line ranges, and the text without the block', () => {
+    const r = parseNeeds(fenced([{ read: 'src/a.ts', lines: '1-120' }, { search: ' refresh token ' }, { outline: './src/b.ts' }, { read: 'docs/x.md' }], '```'));
+    expect(r).toEqual({
+      text: 'Thinking.',
+      needs: [
+        { kind: 'read', path: 'src/a.ts', lines: [1, 120] },
+        { kind: 'search', query: 'refresh token' },
+        { kind: 'outline', path: 'src/b.ts' },
+        { kind: 'read', path: 'docs/x.md' },
+      ],
+      refused: [],
+    });
+    expect(parseNeeds('No block here.')).toEqual({ text: 'No block here.', needs: [], refused: [] });
+  });
+
+  it('refuses paths outside the project: absolute, home, drive letters, .. anywhere it escapes', () => {
+    for (const p of ['/etc/passwd', '~/.ssh/id_rsa', 'C:\\Windows\\win.ini', '../secrets.txt', 'src/../../x', '..\\..\\x', '', 'a\u0000b']) {
+      const r = parseNeeds(fenced([{ read: p }]));
+      expect(r.needs, p).toEqual([]);
+      expect(r.refused, p).toHaveLength(1);
+    }
+    expect(parseNeeds(fenced([{ read: 'src/../lib/a.ts' }])).needs).toEqual([{ kind: 'read', path: 'lib/a.ts' }]);
+  });
+
+  it('refuses files that may hold secrets, as the project index does', () => {
+    for (const p of ['.env', 'config/.env.local', 'keys/server.pem', 'id_ed25519', '.npmrc', 'infra/prod.tfvars', 'deploy/service-account-x.json', '.git/config', '.ssh/known_hosts', 'home/.aws/credentials']) {
+      expect(parseNeeds(fenced([{ outline: p }])).refused, p).toEqual([expect.stringContaining('secrets')]);
+    }
+  });
+
+  it('caps requests per round and line spans, and refuses malformed ones', () => {
+    const many = parseNeeds(fenced(Array.from({ length: 8 }, (_, i) => ({ read: `f${i}.ts` }))));
+    expect(many.needs).toHaveLength(TALK_LIMITS.needs);
+    expect(many.refused).toEqual([`more than ${TALK_LIMITS.needs} requests`]);
+    expect(parseNeeds(fenced([{ read: 'a.ts', lines: '10-9000' }])).needs).toEqual([{ kind: 'read', path: 'a.ts', lines: [10, 10 + TALK_LIMITS.lines - 1] }]);
+    expect(parseNeeds(fenced([{ read: 'a.ts', lines: 'all' }])).refused).toHaveLength(1);
+    expect(parseNeeds(fenced([{ search: '' }, 42, null])).refused).toHaveLength(3);
+    expect(parseNeeds('x\n~~~need\nnot json\n~~~').refused).toEqual(['the need block isn’t JSON']);
+  });
+
+  it('becomes FriedLiver’s own read-only index calls', () => {
+    expect(needCall({ kind: 'read', path: 'a.ts', lines: [1, 5] })).toEqual({ name: 'index_read', args: { path: 'a.ts', lines: [1, 5] }, title: 'Read a.ts 1-5' });
+    expect(needCall({ kind: 'search', query: 'q' }).name).toBe('index_search');
+    expect(needCall({ kind: 'outline', path: 'a.ts' }).name).toBe('index_outline');
   });
 });
 
@@ -206,10 +262,45 @@ describe.skipIf(process.platform !== 'darwin')('the macOS sandbox every agy proc
   });
 });
 
+describe.skipIf(process.platform !== 'darwin')('the talk-only sandbox (deny by default)', () => {
+  it('lets only agy run, read only its own folder (not the project), and write nowhere else', async () => {
+    const home = tmpDir('fl-agy-home-');
+    const scratch = tmpDir('fl-agy-talk-');
+    const repo = await gitRepo();
+    writeFileSync(path.join(scratch, 'note.txt'), 'mine');
+    // /bin/cat stands in for agy: the one program the profile lets start.
+    const profile = talkProfile({ agy: '/bin/cat', scratch, home });
+    const run = (file: string, args: string[]) => spawnSync('/usr/bin/sandbox-exec', ['-p', profile, file, ...args], { cwd: scratch, encoding: 'utf8' });
+    expect(run('/bin/cat', [path.join(scratch, 'note.txt')]).stdout).toBe('mine');
+    expect(run('/bin/cat', [path.join(repo, 'README.md')]).stderr).toContain('Operation not permitted');
+    expect(run('/bin/sh', ['-c', 'echo hi']).status).not.toBe(0);
+    expect(run('/usr/bin/touch', [path.join(scratch, 'x')]).status).not.toBe(0);
+  });
+});
+
+/** What the talk-only sandbox must also let the fake agy (Node and a script) read: Node's install and the fixtures. */
+const NODE_READ = [path.dirname(path.dirname(realpathSync(process.execPath))), path.dirname(FAKE_AGY), ...['/opt/homebrew', '/usr/local'].filter((d) => existsSync(d))];
+
+/** FriedLiver's tools server for a session, faked: it logs each index call. */
+function bridge(): { server: acp.McpServerStdio; calls: () => { name: string; args: Record<string, unknown> }[] } {
+  const log = path.join(tmpDir('fl-agy-bridge-'), 'calls.jsonl');
+  writeFileSync(log, '');
+  return {
+    server: { name: 'friedliver', command: process.execPath, args: [FAKE_BRIDGE], env: [{ name: 'FAKE_BRIDGE_LOG', value: log }] },
+    calls: () =>
+      readFileSync(log, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { name: string; args: Record<string, unknown> }),
+  };
+}
+
 /** The adapter in this process, talking to the fake agy; every update it sends is kept. */
 function adapter(env: Record<string, string> = {}, over: Partial<AgyAdapterOptions> = {}) {
-  const log = path.join(tmpDir('fl-agy-log-'), 'calls.jsonl');
+  const logDir = tmpDir('fl-agy-log-');
+  const log = path.join(logDir, 'calls.jsonl');
   writeFileSync(log, '');
+  over = { talkRead: NODE_READ, talkWrite: [logDir], ...over };
   const updates: acp.SessionNotification[] = [];
   // Over NDJSON byte streams, as on stdio (agent-core may load its own copy of the SDK).
   const toAgent = new TransformStream<Uint8Array, Uint8Array>();
@@ -227,7 +318,9 @@ function adapter(env: Record<string, string> = {}, over: Partial<AgyAdapterOptio
       .map((l) => JSON.parse(l) as { argv: string[]; cwd: string })
       .filter((c) => c.argv[0] !== 'models' && c.argv[0] !== '--version');
   const said = () => updates.flatMap((u) => (u.update.sessionUpdate === 'agent_message_chunk' && u.update.content.type === 'text' ? [u.update.content.text] : [])).join('');
-  return { agent: conn.agent, updates, calls, said, close: () => (conn.close(), served.close()) };
+  const thought = () => updates.flatMap((u) => (u.update.sessionUpdate === 'agent_thought_chunk' && u.update.content.type === 'text' ? [u.update.content.text] : [])).join('');
+  const tools = () => updates.map((u) => u.update).filter((u) => u.sessionUpdate === 'tool_call' || u.sessionUpdate === 'tool_call_update');
+  return { agent: conn.agent, updates, calls, said, thought, tools, close: () => (conn.close(), served.close()) };
 }
 
 const prompt = (text: string): acp.ContentBlock[] => [{ type: 'text', text }];
@@ -253,7 +346,7 @@ describe('where the adapter won’t start agy', () => {
 });
 
 describe.skipIf(process.platform !== 'darwin')('the agy ACP adapter (fake agy, in the sandbox)', () => {
-  it('starts a session with agy’s models and version, in Manual, which runs nothing', async () => {
+  it('starts a session with agy’s models and version, in talk only', async () => {
     const a = adapter();
     const init = await a.agent.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
     expect(init.agentInfo).toMatchObject({ name: 'agy', version: '1.4.3' });
@@ -261,12 +354,83 @@ describe.skipIf(process.platform !== 'darwin')('the agy ACP adapter (fake agy, i
     const project = await gitRepo();
     const s = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
     const options = sessionOptions(s);
-    expect(options.find((o) => o.category === 'mode')?.current).toBe('manual');
+    expect(options.find((o) => o.category === 'mode')?.current).toBe('read-only');
     expect(options.find((o) => o.category === 'model')?.choices.map((c) => c.value)).toEqual(['default', 'Gemini 3.8 Flash (Medium)', 'Gemini 3.1 Pro (High)', 'Claude Sonnet 5.5 (Thinking)']);
     expect(options.find((o) => o.category === 'thought_level')?.choices.map((c) => c.value)).toEqual(['default', 'low', 'medium', 'high', 'xhigh', 'max']);
-    // Manual: no agy process at all, and a reason that says what to pick.
-    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId: s.sessionId, prompt: prompt('hello') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/can’t ask.*Edit automatically/) } });
-    expect(a.calls()).toEqual([]);
+    // Manual is talk only: agy in the session's own empty folder, never the project.
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId: s.sessionId, prompt: prompt('hello') });
+    expect(a.said()).toBe('You said: hello');
+    const [call] = a.calls();
+    expect(path.basename(call.cwd)).toMatch(/^friedliver-agy-talk-/);
+    expect(path.relative(project, call.cwd).startsWith('..')).toBe(true);
+    expect(call.argv).toContain('--sandbox');
+    expect(call.argv).not.toContain('accept-edits');
+    a.close();
+  });
+
+  it('talk only: agy can’t read the project, write outside its folder or run a shell, at the OS level', async () => {
+    const a = adapter();
+    const project = await gitRepo();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt(`probe:${path.join(project, 'README.md')}`) });
+    expect(JSON.parse(a.said())).toEqual({ readProject: 'EPERM', writeProject: 'EPERM', writeOwnFolder: 'ok', shell: 'EPERM' });
+    expect(existsSync(path.join(project, 'README.md.x'))).toBe(false);
+    a.close();
+  });
+
+  it('talk only: FriedLiver gives excerpts, then reads what agy asks for through its index, refusing escapes and secrets', async () => {
+    const a = adapter();
+    const b = bridge();
+    const project = await gitRepo();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [b.server] });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('ask-need') });
+    expect(b.calls()).toEqual([
+      { name: 'index_search', args: { query: 'ask-need', limit: 5, budget: 1500 } },
+      { name: 'index_read', args: { path: 'src/a.ts', lines: [1, 2] } },
+      { name: 'index_search', args: { query: 'jsonb', limit: 5, budget: 1500 } },
+    ]);
+    expect(a.thought()).toBe('Let me look.');
+    expect(a.tools().filter((t) => t.sessionUpdate === 'tool_call').map((t) => t.sessionUpdate === 'tool_call' && [t.kind, t.title])).toEqual([
+      ['read', 'Read src/a.ts 1-2'],
+      ['search', 'Search the project: jsonb'],
+    ]);
+    const answer = a.said();
+    expect(answer).toMatch(/^Got answers:\n## FriedLiver's answers/);
+    expect(answer).toContain('index_read {"path":"src/a.ts","lines":[1,2]}');
+    expect(answer).toContain('Refused: ../../etc/passwd: not inside the project.');
+    expect(answer).toContain('Refused: config/.env: may hold secrets.');
+    expect(answer).toContain('Refused: /etc/hosts: not inside the project.');
+    expect(a.calls().map((c) => c.argv.at(-1))).toEqual(['--sandbox', 'conv-ask']);
+    a.close();
+  });
+
+  it('talk only: at most TALK_LIMITS.rounds rounds of reads, then agy’s answer as it is', async () => {
+    const a = adapter();
+    const b = bridge();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: await gitRepo(), mcpServers: [b.server] });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('always-need') });
+    expect(a.calls()).toHaveLength(TALK_LIMITS.rounds + 1);
+    expect(b.calls().filter((c) => c.name === 'index_read')).toHaveLength(TALK_LIMITS.rounds);
+    expect(a.said()).toBe('Again.\n\n(FriedLiver’s reads for this turn are used up.)');
+    a.close();
+  });
+
+  it('talk only: the turn’s read budget caps what FriedLiver passes on', async () => {
+    const a = adapter();
+    const b = bridge();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: await gitRepo(), mcpServers: [b.server] });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('big-need') });
+    const answers = a.tools().flatMap((t) => (t.sessionUpdate === 'tool_call_update' && t.content?.[0]?.type === 'content' && t.content[0].content.type === 'text' ? [t.content[0].content.text] : []));
+    expect(answers.join('').length).toBeLessThanOrEqual(TALK_LIMITS.turnChars + 200);
+    expect(answers.at(-1)).toMatch(/read budget for this turn is used up/);
+    a.close();
+  });
+
+  it('talk only without FriedLiver’s tools (a read-only chat): agy is told FriedLiver can’t read here', async () => {
+    const a = adapter();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: await gitRepo(), mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('ask-need') });
+    expect(a.said()).toContain('Couldn’t: This chat has no project index');
     a.close();
   });
 
@@ -274,7 +438,7 @@ describe.skipIf(process.platform !== 'darwin')('the agy ACP adapter (fake agy, i
     const a = adapter();
     const project = await gitRepo();
     const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
-    await expect(a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'read-only' })).rejects.toThrow(/Unknown mode/);
+    await expect(a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'manual' })).rejects.toThrow(/Unknown mode/);
     await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'accept-edits' });
     await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'model', value: 'Gemini 3.1 Pro (High)' });
     await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'effort', value: 'high' });
@@ -396,14 +560,8 @@ describe('Antigravity in FriedLiver', () => {
     expect(status.message).toContain('fl-agy-that-is-not-installed');
   });
 
-  it('never runs read only: no read-only chat (Inline Edit), no /discuss, and not the Inline Edit agent setting', async () => {
-    const core = makeCore(await gitRepo());
-    await expect(core.createChat('antigravity', { readOnly: true })).rejects.toThrow(/Antigravity can’t work read only/);
-    const chat = await core.createChat('claude');
-    await expect(core.discuss(chat.id, ['antigravity'], 'tabs or spaces?')).rejects.toThrow(/Antigravity can’t work read only/);
-    const starter = await core.createChat('antigravity');
-    await expect(core.discuss(starter.id, ['claude'], 'tabs or spaces?')).rejects.toThrow(/Antigravity can’t work read only/);
-    expect(manifest.contributes.configuration.properties['friedliver.inlineEdit.agent'].enum).not.toContain('antigravity');
+  it('is offered for Inline Edit, which is read only (talk only for it)', () => {
+    expect(manifest.contributes.configuration.properties['friedliver.inlineEdit.agent'].enum).toContain('antigravity');
   });
 
   it('never starts in a workspace VS Code doesn’t trust', () => {
@@ -428,44 +586,77 @@ describe('Antigravity in FriedLiver', () => {
     expect(markFor('antigravity')).not.toEqual(markFor('someone-else'));
   });
 
-  it.skipIf(process.platform !== 'darwin')(
-    'end to end: a chat with Antigravity runs nothing in Manual, and answers through the built adapter in Edit automatically',
-    async () => {
-      const bin = tmpDir('fl-agy-bin-');
-      const agy = path.join(bin, 'agy');
-      writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${FAKE_AGY}" "$@"\n`);
-      chmodSync(agy, 0o755);
-      const script = path.join(tmpDir('fl-agy-dist-'), 'agy-acp.js');
-      await build({ entryPoints: [path.resolve(__dirname, '../../../agent-core/main/agents/agyAcpMain.ts')], bundle: true, platform: 'node', format: 'cjs', target: 'node20', outfile: script, logLevel: 'silent' });
-      const log = path.join(bin, 'calls.jsonl');
-      writeFileSync(log, '');
-      process.env.FAKE_AGY_LOG = log;
-      try {
-        const dir = await gitRepo();
-        const core = makeCore(dir, { agyAdapterScript: script, agentCommand: (id) => (id === 'antigravity' ? { command: agy, args: [] } : { command: '', args: [] }) });
-        const chat = await core.createChat('antigravity');
-        await core.send(chat.id, 'hello there');
-        let view = core.chat(chat.id)!;
-        expect(view.session?.options.find((o) => o.category === 'mode')?.current).toBe('manual');
-        expect(view.session?.agent).toMatchObject({ name: 'agy', version: '1.4.3' });
-        expect(view.items.at(-1)).toMatchObject({ kind: 'notice', tone: 'error' });
-        expect(readFileSync(log, 'utf8')).not.toContain('--input-format');
+  /** A core whose Antigravity is the built adapter over the fake agy (test/fixtures/agy-acp-test-entry.ts). */
+  async function agyCore(dir: string, over: Parameters<typeof makeCore>[1] = {}) {
+    const script = path.join(tmpDir('fl-agy-dist-'), 'agy-acp.js');
+    await build({
+      entryPoints: [path.resolve(__dirname, 'fixtures/agy-acp-test-entry.ts')],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node20',
+      outfile: script,
+      logLevel: 'silent',
+      alias: { '@friedliver/main': path.resolve(__dirname, '../../../agent-core/main') },
+    });
+    const logDir = tmpDir('fl-agy-log-');
+    const log = path.join(logDir, 'calls.jsonl');
+    writeFileSync(log, '');
+    Object.assign(process.env, { FAKE_AGY_LOG: log, FAKE_AGY_SCRIPT: FAKE_AGY, FAKE_TALK_READ: JSON.stringify(NODE_READ), FAKE_TALK_WRITE: JSON.stringify([logDir]) });
+    const core = makeCore(dir, { agyAdapterScript: script, agentCommand: (id) => (id === 'antigravity' ? { command: process.execPath, args: [] } : { command: process.execPath, args: [DEMO_AGENT] }), ...over });
+    const calls = () =>
+      readFileSync(log, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { argv: string[]; cwd: string })
+        .filter((c) => c.argv.includes('--input-format'));
+    return { core, calls };
+  }
+  afterEach(() => {
+    for (const k of ['FAKE_AGY_LOG', 'FAKE_AGY_SCRIPT', 'FAKE_TALK_READ', 'FAKE_TALK_WRITE']) delete process.env[k];
+  });
 
-        await core.setApproval(chat.id, 'edits');
-        await core.send(chat.id, 'hello again');
-        view = core.chat(chat.id)!;
-        expect(view.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('')).toBe('You said: hello again');
-        const turn = readFileSync(log, 'utf8')
-          .trim()
-          .split('\n')
-          .map((l) => JSON.parse(l) as { argv: string[]; cwd: string })
-          .find((c) => c.argv.includes('--input-format'))!;
-        expect(turn.cwd).toBe(dir);
-        expect(turn.argv).toEqual(expect.arrayContaining(['--mode', 'accept-edits', '--sandbox']));
-      } finally {
-        delete process.env.FAKE_AGY_LOG;
-      }
+  it.skipIf(process.platform !== 'darwin')(
+    'end to end: Manual talks in its own folder; Edit automatically answers in the project',
+    async () => {
+      const dir = await gitRepo();
+      const { core, calls } = await agyCore(dir);
+      const chat = await core.createChat('antigravity');
+      await core.send(chat.id, 'hello there');
+      let view = core.chat(chat.id)!;
+      expect(view.session?.options.find((o) => o.category === 'mode')?.current).toBe('read-only');
+      expect(view.session?.agent).toMatchObject({ name: 'agy', version: '1.4.3' });
+      expect(view.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('')).toBe('You said: hello there');
+      expect(path.basename(calls()[0].cwd)).toMatch(/^friedliver-agy-talk-/);
+
+      await core.setApproval(chat.id, 'edits');
+      await core.send(chat.id, 'hello again');
+      view = core.chat(chat.id)!;
+      expect(view.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : [])).join('')).toContain('You said: hello again');
+      expect(calls()[1].cwd).toBe(dir);
+      expect(calls()[1].argv).toEqual(expect.arrayContaining(['--mode', 'accept-edits', '--sandbox']));
     },
     30_000,
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
+    'end to end: /discuss with Antigravity runs its turns talk only, with a stance the card reads, from Start and Continue',
+    async () => {
+      const dir = await gitRepo();
+      const { core, calls } = await agyCore(dir, { discussSettings: () => ({ maxRounds: 1 }) });
+      const c = await core.createChat('claude');
+      await core.discuss(c.id, ['antigravity'], 'Postgres or MySQL for the audit log?');
+      const card = () => core.chat(c.id)!.items.filter((i): i is DiscussionItem => i.kind === 'discussion');
+      expect(card()[0]).toMatchObject({ state: 'done', ended: 'rounds' });
+      expect(card()[0].turns.map((t) => t.by)).toEqual(['claude', 'antigravity']);
+      // The fake agy echoes the turn prompt, whose example stance block parses, as the Demo agent's does.
+      expect(card()[0].turns[1].stance).toBeDefined();
+      expect(calls().every((call) => path.basename(call.cwd).startsWith('friedliver-agy-talk-'))).toBe(true);
+      await core.discussions.continue(card()[0].id);
+      expect(card()[1]).toMatchObject({ state: 'done' });
+      expect(card()[1].turns.filter((t) => t.by === 'antigravity')).toHaveLength(2);
+      expect(calls().every((call) => path.basename(call.cwd).startsWith('friedliver-agy-talk-'))).toBe(true);
+    },
+    60_000,
   );
 });

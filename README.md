@@ -153,12 +153,18 @@ taking the agent's default:
 your Antigravity plan offers) has no ACP mode, so FriedLiver runs it through
 its own adapter over agy's documented headless mode (`--output-format
 stream-json`). Headless agy can't stop to ask for approval, and its tools never
-pass through FriedLiver, so FriedLiver runs it only where agy's own flags hold:
-**Edit automatically** lets agy edit files itself (`--mode accept-edits
---sandbox`; commands are refused unless your agy settings allow them) and
-**Auto** is `--dangerously-skip-permissions`. **Manual** runs nothing (the chat
-says to pick one of those), there is no Plan, and since agy has no mode that
-enforces read only it never takes part in Inline Edit or /discuss. agy also
+pass through FriedLiver. **Edit automatically** lets agy edit files itself
+(`--mode accept-edits --sandbox`; commands are refused unless your agy settings
+allow them) and **Auto** is `--dangerously-skip-permissions`. **Manual**,
+**Plan**, /discuss, Inline Edit and consultations are **talk only**: agy runs
+in an empty folder of its own under a deny-by-default macOS sandbox (it can
+start nothing but itself, read no project file, and write only that folder
+and its own state under `~/.gemini`). FriedLiver gives it project excerpts
+from its own index, and agy asks for more in a `need` block in its reply
+(`{"need":[{"read":"src/a.ts","lines":"1-120"},{"search":"jsonb"}]}`), which
+FriedLiver answers through the same read-only index tools, inside the project,
+never secrets or ignored files, at most 5 requests a round, 3 rounds and about
+24,000 characters a turn. agy also
 has no flag to ignore a repository's own agy config (`.agents/hooks.json`,
 MCP servers, settings), so every agy process runs in a macOS sandbox
 (`sandbox-exec`): it can't read or write any `.agents`, `.agent`, `_agents`,

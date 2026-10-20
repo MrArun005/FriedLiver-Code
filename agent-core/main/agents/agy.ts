@@ -5,8 +5,9 @@
 // prints NDJSON events (init, step_update…, result) and `--input-format stream-json` reads the
 // prompt as {"event":"user",…} on stdin, so a prompt never sits in the process list. Headless
 // agy can't stop to ask for approval: a tool that needs one is refused. So FriedLiver's levels
-// become agy's own flags per turn (agyModeArgs), and Manual runs nothing. agy has no mode that
-// enforces read only (its plan mode is an instruction, not a block), so none is offered.
+// become agy's own flags per turn (agyModeArgs). Manual, Plan, /discuss and read-only chats are
+// talk only: agy runs in an empty folder under a deny-by-default sandbox (talkProfile), and
+// FriedLiver reads the project for it (parseNeeds) through its own index.
 import { readdirSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
@@ -16,22 +17,20 @@ export interface AgyChoice {
   description?: string;
 }
 
-/** Why Manual runs nothing. */
-export const MANUAL_REFUSAL =
-  'Antigravity can’t ask before it edits or runs a command, so FriedLiver doesn’t run it in Manual. Switch this chat to Edit automatically (it edits files; commands are refused) or Auto.';
-
 /**
  * FriedLiver's levels as agy runs them. Names and descriptions say what each does, so
- * FriedLiver's modeClass reads them right: manual is Manual, accept-edits is Edit
- * automatically, full is Auto. Nothing here reads as read-only or plan (readOnlyChoice).
+ * FriedLiver's modeClass and readOnlyChoice read them right: read-only is Manual and every
+ * read-only use, plan is Plan, accept-edits is Edit automatically, full is Auto.
  */
 export const AGY_MODES: AgyChoice[] = [
-  { value: 'manual', name: 'Manual', description: 'Runs nothing: agy can’t stop to ask inside FriedLiver' },
+  { value: 'read-only', name: 'Read only', description: 'Talk only: no files, commands or tools of its own; FriedLiver reads the project for it' },
+  { value: 'plan', name: 'Plan', description: 'Talk only, planning: FriedLiver reads the project for it; nothing changes' },
   { value: 'accept-edits', name: 'Accept edits', description: 'Edits files without asking; commands are refused unless allowed in agy’s own settings' },
   { value: 'full', name: 'Full access', description: 'Auto-approves all tool requests: edits and commands' },
 ];
-export type AgyMode = 'manual' | 'accept-edits' | 'full';
+export type AgyMode = 'read-only' | 'plan' | 'accept-edits' | 'full';
 export const isAgyMode = (v: unknown): v is AgyMode => AGY_MODES.some((m) => m.value === v);
+export const isTalkMode = (m: AgyMode): m is 'read-only' | 'plan' => m === 'read-only' || m === 'plan';
 
 /**
  * The workspace config agy reads. Sources: antigravity.google/docs/hooks ("`.agents/hooks.json`
@@ -164,6 +163,186 @@ export function seatbeltProfile(home: string): string {
   ].join('\n');
 }
 
+// ---- Talk only ----
+
+/**
+ * The system services agy 1.4.3 needs, found by running it under the profile: keychain
+ * (`/usr/bin/security`, its sign-in), TLS trust, DNS, user lookup, logging, preferences.
+ */
+const TALK_SERVICES = [
+  'com.apple.SecurityServer',
+  'com.apple.securityd.xpc',
+  'com.apple.trustd',
+  'com.apple.trustd.agent',
+  'com.apple.ocspd',
+  'com.apple.dnssd.service',
+  'com.apple.mDNSResponder',
+  'com.apple.system.opendirectoryd.libinfo',
+  'com.apple.system.opendirectoryd.membership',
+  'com.apple.system.notification_center',
+  'com.apple.logd',
+  'com.apple.system.logger',
+  'com.apple.diagnosticd',
+  'com.apple.cfprefsd.daemon',
+  'com.apple.cfprefsd.agent',
+  'com.apple.SystemConfiguration.configd',
+  'com.apple.SystemConfiguration.DNSConfiguration',
+  'com.apple.networkd',
+];
+
+export interface TalkSandbox {
+  /** The agy binary (a real path): the only program that may start, with /usr/bin/security for its keychain sign-in. */
+  agy: string;
+  /** The session's empty folder: agy's working folder, and the only place it may write besides its own state. */
+  scratch: string;
+  /** The user's real home folder. */
+  home: string;
+  /** Tests: more to read (Node's install, the fake agy) or write (its call log). */
+  read?: string[];
+  write?: string[];
+}
+
+/**
+ * Talk only, deny by default: agy may start only itself and `security`; read only the system,
+ * its own binary, `~/.gemini` (its settings and sign-in state) and the keychain, plus the empty
+ * session folder; write only that folder and its own state under `~/.gemini`; reach the network
+ * outbound (macOS profiles can't filter by host name) and its own localhost server. No project
+ * file, no shell, no other program. All paths must be real paths.
+ */
+export function talkProfile(s: TalkSandbox): string {
+  const sub = (paths: string[]) => paths.map((p) => `(subpath ${sbString(p)})`).join(' ');
+  const gemini = path.join(s.home, '.gemini');
+  return [
+    '(version 1)',
+    '(deny default)',
+    '(allow process-fork)',
+    `(allow process-exec (literal ${sbString(s.agy)}) (literal "/usr/bin/security"))`,
+    '(allow signal (target same-sandbox))',
+    '(allow sysctl-read)',
+    `(allow mach-lookup (global-name ${TALK_SERVICES.map(sbString).join(' ')}))`,
+    '(allow ipc-posix-shm-read-data ipc-posix-shm-read-metadata)',
+    '(allow system-socket)',
+    '(allow network-outbound)',
+    '(allow network-bind network-inbound (local ip "localhost:*"))',
+    '(allow file-read-metadata)',
+    `(allow file-read* (literal "/") ${sub(['/usr/lib', '/usr/share', '/System', '/Library/Keychains', '/private/etc', '/private/var/db/timezone', '/dev'])} (literal "/usr/bin/security") (literal ${sbString(s.agy)}) ${sub([s.scratch, gemini, path.join(s.home, 'Library', 'Keychains'), ...(s.read ?? [])])})`,
+    `(allow file-write* (literal "/dev/null") (literal "/dev/tty") ${sub([s.scratch, ...AGY_STATE.map((p) => path.join(gemini, p)), ...(s.write ?? [])])})`,
+  ].join('\n');
+}
+
+/** How much FriedLiver reads for agy in one turn. */
+export const TALK_LIMITS = {
+  /** Times agy may ask for more before it must answer. */
+  rounds: 3,
+  /** Requests FriedLiver fulfils per round; the rest are refused. */
+  needs: 5,
+  /** Characters of one answer, and of all answers in a turn. */
+  answerChars: 6000,
+  turnChars: 24_000,
+  /** Lines one read may span. */
+  lines: 300,
+  /** Characters of a search, and of the excerpts FriedLiver adds before agy's first look. */
+  query: 200,
+  startChars: 6000,
+};
+
+/** What agy is told in talk only. */
+export function talkPreamble(plan: boolean): string {
+  return [
+    '[FriedLiver: talk only]',
+    'You are answering inside FriedLiver. You cannot read files, run commands or use any tool here: they fail. FriedLiver reads the project for you.',
+    ...(plan ? ['Plan only: outline the steps and the files they touch; change nothing.'] : []),
+    `To see more, end your reply with one fenced block, and FriedLiver answers it (at most ${TALK_LIMITS.needs} items, ${TALK_LIMITS.rounds} times):`,
+    '~~~need',
+    '{"need":[{"read":"src/app.ts","lines":"1-120"},{"search":"refresh token"},{"outline":"src/app.ts"}]}',
+    '~~~',
+    'Paths are relative to the project folder. Otherwise answer in full, including any block the message asks for.',
+  ].join('\n');
+}
+
+export type Need = { kind: 'read'; path: string; lines?: [number, number] } | { kind: 'search'; query: string } | { kind: 'outline'; path: string };
+
+/** Mirrors projectIndex.ts isSecret: names FriedLiver never reads for an agent. */
+const SECRET =
+  /^(\.env(\..*)?|.*\.pem|.*\.key|id_(rsa|dsa|ecdsa|ed25519).*|.*\.p12|.*\.pfx|\.npmrc|\.netrc|\.pypirc|\.git-credentials|credentials.*|.*\.tfstate.*|.*\.tfvars|secrets\..*|.*\.keystore|.*\.jks|service-account.*\.json)$/i;
+
+/** A project path as agy wrote it, made safe: relative, inside the project, no secrets. Else why not. */
+export function safePath(raw: unknown): { path: string } | { refused: string } {
+  if (typeof raw !== 'string' || !raw.trim() || raw.length > 512 || /[\0\r\n]/.test(raw)) return { refused: 'not a path' };
+  const p = raw.trim().replace(/\\/g, '/');
+  if (p.startsWith('/') || /^[a-z]:/i.test(p) || p.startsWith('~')) return { refused: `${raw}: not inside the project` };
+  const norm = path.posix.normalize(p);
+  if (norm === '..' || norm.startsWith('../')) return { refused: `${raw}: not inside the project` };
+  if (norm.split('/').some((part) => SECRET.test(part) || /^\.(git|ssh|aws|gnupg)$/i.test(part))) return { refused: `${raw}: may hold secrets` };
+  return { path: norm === '.' ? '' : norm };
+}
+
+/**
+ * agy's reply split into what it said and what it asked FriedLiver to read (its last `need`
+ * block, fenced with ~~~ or ```). At most `max` requests are kept; the rest, and anything
+ * unsafe or malformed, come back in `refused`.
+ */
+export function parseNeeds(reply: string, max = TALK_LIMITS.needs): { text: string; needs: Need[]; refused: string[] } {
+  const blocks = [...reply.matchAll(/(^|\n)(~~~|```)need[ \t]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/g)];
+  const last = blocks.at(-1);
+  if (!last) return { text: reply, needs: [], refused: [] };
+  const text = (reply.slice(0, last.index) + reply.slice(last.index! + last[0].length)).trim();
+  let items: unknown;
+  try {
+    items = (JSON.parse(last[3]) as { need?: unknown }).need;
+  } catch {
+    return { text, needs: [], refused: ['the need block isn’t JSON'] };
+  }
+  if (!Array.isArray(items)) return { text, needs: [], refused: ['the need block has no "need" list'] };
+  const needs: Need[] = [];
+  const refused: string[] = [];
+  for (const item of items) {
+    if (needs.length >= max) {
+      refused.push(`more than ${max} requests`);
+      break;
+    }
+    const it = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    if (typeof it.search === 'string') {
+      const q = it.search.trim().slice(0, TALK_LIMITS.query);
+      if (q && !/[\0\r\n]/.test(q)) needs.push({ kind: 'search', query: q });
+      else refused.push('an empty search');
+      continue;
+    }
+    const target = it.read ?? it.outline;
+    const safe = safePath(target);
+    if ('refused' in safe) {
+      refused.push(safe.refused);
+      continue;
+    }
+    if (it.outline !== undefined) {
+      needs.push({ kind: 'outline', path: safe.path });
+      continue;
+    }
+    const m = typeof it.lines === 'string' ? /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(it.lines) : null;
+    if (it.lines !== undefined && !m) {
+      refused.push(`${safe.path}: lines must be like "1-120"`);
+      continue;
+    }
+    if (m) {
+      const a = Math.max(1, Number(m[1]));
+      const b = Math.min(Number(m[2]), a + TALK_LIMITS.lines - 1);
+      if (b < a) {
+        refused.push(`${safe.path}: lines must be like "1-120"`);
+        continue;
+      }
+      needs.push({ kind: 'read', path: safe.path, lines: [a, b] });
+    } else needs.push({ kind: 'read', path: safe.path });
+  }
+  return { text, needs, refused };
+}
+
+/** A request as FriedLiver's read-only index tool call (bridge/mcp.ts). */
+export function needCall(n: Need): { name: string; args: Record<string, unknown>; title: string } {
+  if (n.kind === 'search') return { name: 'index_search', args: { query: n.query, limit: 5, budget: 1500 }, title: `Search the project: ${n.query}` };
+  if (n.kind === 'outline') return { name: 'index_outline', args: { path: n.path }, title: `Outline ${n.path}` };
+  return { name: 'index_read', args: { path: n.path, ...(n.lines ? { lines: n.lines } : {}) }, title: `Read ${n.path}${n.lines ? ` ${n.lines[0]}-${n.lines[1]}` : ''}` };
+}
+
 /** agy's own choice: no --model / --effort flag. */
 export const AGY_DEFAULT = 'default';
 export const AGY_EFFORTS: AgyChoice[] = [
@@ -172,8 +351,11 @@ export const AGY_EFFORTS: AgyChoice[] = [
 ];
 
 /** Flags per level that runs (Manual runs nothing). agy's --sandbox restricts its terminal. */
-export function agyModeArgs(mode: Exclude<AgyMode, 'manual'>): string[] {
-  return mode === 'full' ? ['--dangerously-skip-permissions'] : ['--mode', 'accept-edits', '--sandbox'];
+export function agyModeArgs(mode: AgyMode): string[] {
+  if (mode === 'full') return ['--dangerously-skip-permissions'];
+  if (mode === 'accept-edits') return ['--mode', 'accept-edits', '--sandbox'];
+  // Talk only: the OS sandbox is the guard; agy's own flags only keep it from trying.
+  return [...(mode === 'plan' ? ['--mode', 'plan'] : []), '--sandbox'];
 }
 
 /** Flags FriedLiver sets itself, dropped from the user's extra arguments; `true`: takes a value. */
@@ -213,7 +395,7 @@ export function extraArgs(args: readonly string[]): string[] {
 }
 
 export interface TurnChoices {
-  mode: Exclude<AgyMode, 'manual'>;
+  mode: AgyMode;
   model: string;
   effort: string;
   /** agy's conversation, from the session's earlier turns. */

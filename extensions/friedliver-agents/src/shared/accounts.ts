@@ -245,7 +245,7 @@ export const CLI_ACCOUNTS: Record<VendorKey, CliAccount> = {
   antigravity: {
     signIn: { command: 'agy', then: 'Choose Google OAuth and finish in the browser, then type /quit.' },
     signOut: { command: 'agy', then: 'Type /logout, which signs out and clears its saved tokens.' },
-    note: 'Google’s Antigravity CLI. It has no ACP mode, so FriedLiver runs it through its own adapter with the same login. It can’t stop to ask, so it runs only in Edit automatically or Auto, never read only (Inline Edit, /discuss), and only on macOS, in a sandbox that hides a repository’s agy config.',
+    note: 'Google’s Antigravity CLI. It has no ACP mode, so FriedLiver runs it through its own adapter with the same login. It can’t stop to ask, so Manual, Plan and /discuss are talk only (FriedLiver reads the project for it, in a deny-by-default sandbox); Edit automatically and Auto run it in the project. macOS only for now.',
   },
 };
 

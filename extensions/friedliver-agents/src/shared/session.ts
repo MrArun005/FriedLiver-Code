@@ -304,18 +304,10 @@ const KNOWN_MODES: Partial<Record<AgentKey, Partial<Record<ApprovalLevel | 'plan
   // Gemini writes through FriedLiver, which shows each write as a diff to accept, so Ask
   // uses Auto Edit: one decision per edit, not Gemini's question and then the diff. Shell commands still ask.
   gemini: { ask: ['autoEdit'], edits: ['autoEdit'], full: ['yolo'], plan: ['plan'] },
-  // FriedLiver's agy adapter (agyAcp.ts): headless agy can't ask, so Manual runs nothing; no plan mode it enforces.
-  antigravity: { ask: ['manual'], edits: ['accept-edits'], full: ['full'] },
+  // FriedLiver's agy adapter (agyAcp.ts): headless agy can't ask, so Manual and Plan are its talk-only modes.
+  antigravity: { ask: ['read-only'], edits: ['accept-edits'], full: ['full'], plan: ['plan'] },
 };
 
-/**
- * Agents with no mode that holds them to read only, so never in a read-only chat (Inline Edit)
- * or a /discuss, where FriedLiver promises nobody acts: Antigravity (agy's plan mode is an
- * instruction, not a block, and its tools never pass through FriedLiver).
- */
-export const NO_READ_ONLY: readonly AgentKey[] = ['antigravity'];
-export const noReadOnlyText = (name: string): string =>
-  `${name} can’t work read only: agy has no mode FriedLiver can hold to read only, so it can’t take part in Inline Edit or /discuss. Pick another agent there.`;
 
 /** Fallback order when no mode matches a level exactly. */
 const LEVEL_CLASSES: Record<ApprovalLevel | 'plan', ModeClass[]> = { ask: ['ask'], edits: ['edits'], full: ['full', 'auto', 'edits'], plan: ['plan'] };
