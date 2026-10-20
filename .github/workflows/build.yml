@@ -154,6 +154,21 @@ jobs:
             echo "$requirement" | grep -q 'certificate root = H"' || { echo "::error::the designated requirement doesn't name the signing certificate"; exit 1; }
             if echo "$requirement" | grep -q 'cdhash'; then echo "::error::the designated requirement is a cdhash"; exit 1; fi
           fi
+      # Patch 0040: a gallery extension installs only after its Open VSX signature checks out against the
+      # pinned key. Fails when the check didn't run or didn't succeed, which is also how an Open VSX key
+      # renewal shows up (docs/EXTENSION-SIGNATURES.md).
+      - name: Install an extension from Open VSX, signature checked (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          tmp=$(mktemp -d)
+          "VSCode-$TARGET/bin/friedliver" --user-data-dir "$tmp/data" --extensions-dir "$tmp/ext" --log trace \
+            --install-extension redhat.vscode-yaml 2>&1 | tee "$tmp/install.log"
+          grep -q "Extension 'redhat.vscode-yaml' v.* was successfully installed" "$tmp/install.log" \
+            || { echo "::error::redhat.vscode-yaml didn't install"; exit 1; }
+          grep -rhE "Extension signature verification result for redhat\.vscode-yaml@[^:]+: Success\." "$tmp/install.log" "$tmp/data/logs" \
+            || { echo "::error::the install didn't report a successful Open VSX signature check"; exit 1; }
+          rm -rf "$tmp"
       - name: Remove the signing keychain (macOS)
         if: always() && runner.os == 'macOS'
         run: |
