@@ -273,6 +273,7 @@ describe('workbench harness', () => {
   it('runs builds only from trusted runs of build.yml', () => {
     expect(() => checkRun(good)).not.toThrow();
     expect(() => checkRun({ ...good, head_branch: 'main', event: 'push' })).not.toThrow();
+    expect(() => checkRun({ ...good, head_branch: 'design/v2-workbench' })).not.toThrow();
     expect(() => checkRun({ ...good, head_repository: { full_name: 'evil/FriedLiver-Code' } })).toThrow(/fork/);
     expect(() => checkRun({ ...good, event: 'pull_request' })).toThrow(/event/);
     expect(() => checkRun({ ...good, path: '.github/workflows/ci.yml' })).toThrow(/build.yml/);
