@@ -955,7 +955,7 @@ export class Controller {
           void this.core.consult(m.chatId, m.agent, m.text, 'user', [], m.fresh).catch((err: unknown) => this.error(err));
           return;
         case 'discuss':
-          void this.core.discuss(m.chatId, m.agents, m.text).catch((err: unknown) => this.error(err));
+          void this.core.discuss(m.chatId, m.participants, m.text).catch((err: unknown) => this.error(err));
           return;
         case 'discussion':
           if (m.act === 'point') return this.core.discussions.addPoint(m.id, m.text!);
