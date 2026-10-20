@@ -91,9 +91,8 @@ export class AccountsPage implements vscode.Disposable {
   }
 
   view(): AccountsView {
-    const showDemo = this.showDemo();
     const defaults = this.core().agentDefaults();
-    const cards = shownAgents(showDemo).map((agent): AccountCard => {
+    const cards = shownAgents(this.showDemo()).map((agent): AccountCard => {
       const record = this.accounts.record(agent);
       const keys = isVendor(agent) ? this.keyViews(agent) : [];
       const envKey = isVendor(agent) && !keys.some((k) => k.active) ? KEY_SETUPS[agent].flatMap((s) => s.fields).find((f) => f.secret && process.env[f.env])?.env : undefined;
@@ -114,7 +113,7 @@ export class AccountsPage implements vscode.Disposable {
       return active ? { ...card, active } : card;
     });
     const links = vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin';
-    return { cards, showDemo, links, system: this.systemView(), ...(this.focus ? { focus: this.focus } : {}) };
+    return { cards, links, system: this.systemView(), ...(this.focus ? { focus: this.focus } : {}) };
   }
 
   private systemView(): SystemSettingsView {
@@ -177,9 +176,6 @@ export class AccountsPage implements vscode.Disposable {
         return;
       case 'setLinks':
         await vscode.workspace.getConfiguration('friedliver.links').update('openIn', m.mode, vscode.ConfigurationTarget.Global);
-        return;
-      case 'openSettings':
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'friedliver.showDemoAgent');
         return;
       case 'setSystem':
         await this.setSystem(m.key, m.value);

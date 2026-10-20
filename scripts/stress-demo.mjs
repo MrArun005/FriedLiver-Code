@@ -92,8 +92,7 @@ writeFileSync(`${ws}/.vscode/settings.json`, JSON.stringify({ 'editor.quickSugge
 mkdirSync(`${dir}/ud/User`, { recursive: true });
 // Nothing reaches the network.
 const extraSettings = Object.fromEntries(opts.setting.map((kv) => [kv.slice(0, kv.indexOf('=')), JSON.parse(kv.slice(kv.indexOf('=') + 1))]));
-// The Demo agent is hidden from pickers unless turned on.
-writeFileSync(`${dir}/ud/User/settings.json`, JSON.stringify({ 'friedliver.update.mode': 'off', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off', 'extensions.autoCheckUpdates': false, 'friedliver.showDemoAgent': true, ...extraSettings }, null, 2));
+writeFileSync(`${dir}/ud/User/settings.json`, JSON.stringify({ 'friedliver.update.mode': 'off', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off', 'extensions.autoCheckUpdates': false, ...extraSettings }, null, 2));
 mkdirSync(`${dir}/profiles`, { recursive: true });
 
 const launched = Date.now();
@@ -101,7 +100,7 @@ const app = await electron.launch({
   executablePath: exe,
   // Real agents start each session's MCP servers, the FriedLiver tools among them, when the
   // session starts; the demo agent does too with this, so their processes count.
-  env: { ...process.env, ...(opts['no-bridges'] ? {} : { FAKE_AGENT_START_MCP: '1' }) },
+  env: { ...process.env, FRIEDLIVER_TEST_AGENTS: '1', ...(opts['no-bridges'] ? {} : { FAKE_AGENT_START_MCP: '1' }) },
   args: [
     ws,
     '--no-sandbox',
