@@ -17,6 +17,8 @@ export const MARKS: Record<AgentKey | 'agent', Mark> = {
   codex: { d: 'M6 2.5c-1.4 0-2 .6-2 1.8v1.5c0 1-.5 1.7-1.5 2.2 1 .5 1.5 1.2 1.5 2.2v1.5c0 1.2.6 1.8 2 1.8M10 2.5c1.4 0 2 .6 2 1.8v1.5c0 1 .5 1.7 1.5 2.2-1 .5-1.5 1.2-1.5 2.2v1.5c0 1.2-.6 1.8-2 1.8' },
   // A four-point sparkle.
   gemini: { d: 'M8 1.75C8.5 5.5 10.5 7.5 14.25 8 10.5 8.5 8.5 10.5 8 14.25 7.5 10.5 5.5 8.5 1.75 8 5.5 7.5 7.5 5.5 8 1.75Z' },
+  // An arrow lifting off a baseline.
+  antigravity: { d: 'M8 11.25V2.75M4.75 6 8 2.75 11.25 6M3.25 13.75h9.5' },
   demo: FRIEDLIVER_MARK,
   // Any other agent: a small robot face.
   agent: { d: 'M2.5 5h11v8h-11zM8 2.25V5M6 8.5v1M10 8.5v1' },
