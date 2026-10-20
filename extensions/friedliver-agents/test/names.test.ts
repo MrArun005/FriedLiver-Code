@@ -25,7 +25,7 @@ describe('naming a chat', () => {
   it('the status bar names chats by topic, never by a numbered label', () => {
     const one = statusTexts([fix], [fix]);
     expect(one.auto?.text).toBe('$(zap) Auto: Fix the login redirect');
-    expect(one.working?.text).toBe('$(sync~spin) 1 working');
+    expect(one.working?.text).toBe('$(loading~spin) 1 agent working');
     const many = statusTexts([fix, tests, fresh], [fix, tests]);
     expect(many.auto?.text).toBe('$(zap) Auto: 2 chats');
     expect(many.auto?.tooltip).toContain('“Fix the login redirect” (Claude), “Add tests for the cart” (Codex)');

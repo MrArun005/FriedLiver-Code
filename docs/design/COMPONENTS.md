@@ -85,7 +85,7 @@ OKLCH is the source; hex is what the theme JSON holds. Neutrals are warm graphit
 | `--accent-press` | accent 88% + bg | | | | pressed |
 | **`--decision`** | `friedliver.decision` → `notificationsInfoIcon.foreground` | **.74 .13 250 / .53 .16 256** | **#67b0f9** | **#1e6ac5** | needs-you marks and counts only |
 | `--focus` | `focusBorder` (made opaque) | .88 .005 60 / .3 .006 70 | #dad7d4 | #302d2b | keyboard focus ring (neutral) |
-| `--status-working` | `charts.green` | .78 .15 150 / .5 .14 150 | #67d283 | #007835 | the working arc, progress |
+| `--status-working` | `descriptionForeground` (owner, 2026-10-20: a warm neutral) | = `--fg-2` | #aca8a5 | #5e5c59 | the working arc, progress. Green (`charts.green`, `--status-done`) means done or success only |
 | `--error` (= failed) | `errorForeground` | .7 .175 20 / .53 .2 25 | #f86970 | #c51d28 | failed, danger |
 | `--warn` | `editorWarning.foreground` | .83 .13 82 / .5 .115 70 | #f1bf5b | #8a5600 | warnings |
 | `--added` / `--removed` | `gitDecoration.added/deletedResourceForeground` | | #67d283 / #f86970 | #007835 / #c51d28 | diff |
@@ -145,7 +145,7 @@ Raw `--r-1/3/4/5/6/8/10/12/14` stay as the ramp; components use the families.
 - Webviews: `src/webview/ui/icon.tsx` (B2: stroke 1.2 → 1.5; add `files, extensions, debug, scm, agents, sliders, bell, sideL, sideR, panelB, folder, sync, braces, book, clone, error, filter, fork, menu, keyboard, arrowRight, minus, square` from `review/v2/src/mock.js`).
 - Workbench: the **FriedLiver Icons** product icon theme (§6.21) renders the same glyphs.
 - File icons are neutral (`--fg-2`); language is not colour-coded.
-- **The mark** (`friedliverMark.ts`) is drawn as a line (2px at 48, 1.5px at 14–16) with a 16% fill in `--brand`. It appears in the title bar, the welcome hero, the palette footer, the Welcome tab and empty states; nowhere is it a control.
+- **The mark** (`friedliverMark.ts`; owner, 2026-10-21: the Beacon mockups' outline mark is the logo) is drawn as a line (2px at 40 and up, 1.5px below) with a 16% fill in `--brand`. Webviews draw it with `BrandMark` (`src/webview/ui/brandMark.tsx`, `.fl-brand`): the Welcome hero (48), empty states (40), the Agents & Accounts header (20). It also appears in the title bar, the palette footer and the Welcome tab; nowhere is it a control.
 
 ### 1.7 Lines
 
@@ -381,11 +381,21 @@ As v1 §2.20 with v2 tokens: header 26, 11px/500 `--fg-2`, `--border` below, sti
 
 ### 2.22 Agent puck `.fl-avatar` (was "Avatar"; class kept)
 
-Round (50%). Sizes xs 14 (status bar), sm 16, md 20, lg 32, marker 28. Fill: the agent's hue at 16%; its mark (§2.22b) in the hue at 70% of the box. **Working:** a 1.5px gap in the surface colour and a 3px `--status-working` ring that breathes (opacity .6 ↔ 1 over 2.4s; static under reduced motion). Stacks overlap by 4px with a 2px surface-colour ring. Always `role=img` + a name ("Claude, working").
+Round (50%). Sizes xs 14 (status bar), sm 16, md 20, lg 32, marker 28. Fill: neutral `--pill-bg` (the logo brings its colour; 2026-10-21); its mark (§2.22b) at 70% of the box. **Working:** a 1.5px gap in the surface colour and a 2px (B2: 3px crowded the name beside a 16px puck) `--status-working` ring that breathes (opacity .6 ↔ 1 over 2.4s; static under reduced motion). Stacks overlap by 4px with a 2px surface-colour ring. Always `role=img` + a name ("Claude, working").
 
 ### 2.22b Agent mark `.fl-mark`
 
-As v1 §2.22b (16 box, no fill/border, rest in the text colour, hue on hover/selected), stroke 1.5. B2: Codex's mark moves off `{ }` (it reads as a JSON file icon) to its own glyph; Claude's burst and Gemini's sparkle stay.
+**Since 2026-10-21 (owner): the known agents show their vendor's own logo**, used nominatively (to say which agent is which), unaltered but for size, at 70% of a neutral puck (`--pill-bg`) so each keeps its clear space; 16px minimum. One source: `src/webview/ui/logos.ts`; colours are tokens (`--logo-*`).
+
+| Agent | Mark | Source | Colour |
+|---|---|---|---|
+| Claude | the Claude spark | https://claude.ai (Simple Icons `claude`, CC0 data) | `--logo-claude` #d97757 |
+| Codex | OpenAI's mark | https://openai.com/brand (Simple Icons `openai`) | monochrome, as the guidelines ask: `--logo-openai` = `--fg` |
+| Gemini | the Google Gemini spark | https://gemini.google.com (Simple Icons `googlegemini`) | `--logo-gemini` #8e75b2 |
+| Antigravity | Google Antigravity's mark, full colour | https://antigravity.google/favicon.svg | as published |
+| any other agent | a neutral robot glyph (16 grid, 1.5 stroke) | ours | `--fg-2` |
+
+Drawn everywhere an agent is named: tabs and editor-tab icons (`scripts/agent-icons.mjs` writes `media/agent-<kind>[-light].svg`), chat rows, pucks, board/list/map, /discuss participants, pickers, accounts cards. The earlier redraw (a figure-eight for Codex) is superseded.
 
 ### 2.23 Status mark `.fl-status` (was "Status dot"; `.fl-dot` stays as an alias)
 
@@ -416,7 +426,7 @@ Divider: 1px `--hairline`, margin 4 0; vertical 1×16. **Empty state:** unboxed,
 
 ### 2.27 Composer (layout and behaviour frozen; visuals restyled)
 
-The owner's "complete change" authorises new visuals; DOM, sizes and behaviour stay. Box: `--r-12`, `--input-bg`, 1px `--hairline`, `--rim` + `--shadow-composer`; focus: border `--focus` 60% + halo. Bar (gap 4): + and / quiet icon buttons (26); agent pill md (mark + name); model pill md ("Sonnet 4.5 · High", tooltip "Model and how long it thinks"); mode pill md ("Edits land, Rewind undoes" / "Ask before edits"; in a discussion: "All 3 agents" and "Read-only: no files change" instead of agent/model); mic (unchanged blue); **send: 26, `--r-ctl`; `--pill-bg` + `--fg-2` when empty; `--send-bg` (the accent) + white + `--sheen` when there is text.** Placeholder fits one line ("Ask Claude… @ mention, / commands"). ⌃⌘I focuses it from anywhere. B2 updates `test/composer-frozen.test.ts` and the harness's computed-style baselines on purpose (HANDOFF §B2.3).
+The owner's "complete change" authorises new visuals; DOM, sizes and behaviour stay. **Width (owner, 2026-10-20, "use the whole screen"):** the composer and the banners over it span the chat column on the transcript's gutters (no 680px centred column); replies and markdown tables use the full message width (number columns right-aligned, tabular). **Stop** (the send while an agent works) is the pill fill, so the accent only ever means "send". Box: `--r-12`, `--input-bg`, 1px `--hairline`, `--rim` + `--shadow-composer`; focus: border `--focus` 60% + halo. Bar (gap 4): + and / quiet icon buttons (26); agent pill md (mark + name); model pill md ("Sonnet 4.5 · High", tooltip "Model and how long it thinks"); mode pill md ("Edits land, Rewind undoes" / "Ask before edits"; in a discussion: "All 3 agents" and "Read-only: no files change" instead of agent/model); mic (unchanged blue); **send: 26, `--r-ctl`; `--pill-bg` + `--fg-2` when empty; `--send-bg` (the accent) + white + `--sheen` when there is text.** Placeholder fits one line ("Ask Claude… @ mention, / commands"). ⌃⌘I focuses it from anywhere. B2 updates `test/composer-frozen.test.ts` and the harness's computed-style baselines on purpose (HANDOFF §B2.3).
 
 ### 2.28 Workbench components (v1) → §6
 
@@ -432,7 +442,7 @@ Page = chat page: head (discuss icon, the question at `--t-hero` 20/600, a pill 
 
 ### 2.31 Subagent detail · 2.32 Timestamp
 
-As v1 §2.31 and §2.32, on v2 tokens (pucks, status marks, `--r-box`).
+As v1 §2.31 and §2.32, on v2 tokens (pucks, status marks, `--r-box`). §2.32 v2: a message's time floats over its first line's end (with Copy) or the prompt box's corner, only while hovered or focused; it takes no room at rest and moves nothing when it shows.
 
 ### 2.33 Needs-you pill `.fl-needs` (new)
 
@@ -448,7 +458,7 @@ Page head: h1 "Agents" (`--t-hero`), Segmented Board / List / Map, a filter Inpu
 
 ### 2.36 Ask box `.fl-ask` (new)
 
-The welcome hero input: 52 tall, `--r-12`, `--input-bg`, 1px `--field-border`, `--rim` + `--elev-1`, max 640; agents icon, 14px placeholder "What do you want to build or change? Claude will start on it.", a primary "Start ↵" inside at the end. Beside it: "or type /discuss to have your agents argue it out first" (12px `--fg-2`).
+The welcome hero input (`AskBox`, `src/webview/ui/controls.tsx`): 52 tall, `--r-12`, `--input-bg`, 1px `--field-border`, `--rim` + `--elev-1`, max 640; agents icon, 14px placeholder "What do you want to build or change? Claude will start on it.", a primary "Start ↵" inside at the end. Beside it: "or type /discuss to have your agents argue it out first" (12px `--fg-2`).
 
 ### 2.37 Selection mark (new)
 

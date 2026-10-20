@@ -348,14 +348,18 @@ const MarkdownBlock = memo(
       case 'ul':
       case 'ol':
         return <List list={b} cwd={cwd} />;
-      case 'table':
+      case 'table': {
+        // A column of numbers aligns right (tabular digits), unless the markdown set its own alignment.
+        const cellText = (c: Inline[]) => c.map((x) => ('v' in x ? x.v : '')).join('').trim();
+        const numeric = b.head.map((_, n) => b.rows.length > 0 && b.rows.every((r) => /^[-+−]?[$€£¥]?[\d.,]+\s*(%|[kKMGB]|ms|s|x|×)?$/.test(cellText(r[n] ?? []))));
+        const align = b.head.map((_, n) => b.align[n] || (numeric[n] ? 'right' : undefined));
         return (
           <div class="md-table">
             <table>
               <thead>
                 <tr>
                   {b.head.map((c, n) => (
-                    <th key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                    <th key={n} style={align[n] ? { textAlign: align[n] } : undefined}>
                       {inline(c, cwd)}
                     </th>
                   ))}
@@ -365,7 +369,7 @@ const MarkdownBlock = memo(
                 {b.rows.map((r, k) => (
                   <tr key={k}>
                     {r.map((c, n) => (
-                      <td key={n} style={b.align[n] ? { textAlign: b.align[n] } : undefined}>
+                      <td key={n} data-num={numeric[n] ? '' : undefined} style={align[n] ? { textAlign: align[n] } : undefined}>
                         {inline(c, cwd)}
                       </td>
                     ))}
@@ -375,6 +379,7 @@ const MarkdownBlock = memo(
             </table>
           </div>
         );
+      }
       case 'mono':
         return <pre class="md-mono">{b.text}</pre>;
       case 'pre':
