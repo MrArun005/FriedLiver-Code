@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global NodeFilter -- used inside page.evaluate */
+/* global NodeFilter, getComputedStyle, innerHeight, innerWidth -- used inside page.evaluate */
 // Design System v2 "Beacon", phase B2: the real webviews, in FriedLiver Dark and Light, beside the v2 mocks.
 // Serves the UI harness (ui-harness.mjs --serve), renders every screen at 1440×900 and 1280×800 (and 640 / 480
 // for the narrow ones; Windows at 1440), runs the objective gates on each render, writes a side-by-side
