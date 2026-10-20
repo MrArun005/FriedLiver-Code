@@ -86,13 +86,13 @@ jobs:
           $tool.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       # Pinned to commits; the build never pushes, so the token isn't left in .git/config.
       # Full history with tags: a build of main stamps the newest release it contains (friedliverStamp in scripts/lib.mjs).
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           # release.yml's commit; empty (the pushed commit) otherwise.
           ref: ${{ inputs.sha }}
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           # Release builds start from an empty npm cache.
@@ -175,14 +175,14 @@ jobs:
         run: Compress-Archive -Path "VSCode-$($env:TARGET)/*" -DestinationPath "$($env:ARTIFACT).zip"
 
       # Portable app (unzip and run) and the installer, as separate downloads.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}-installer
           path: installers/*
@@ -200,17 +200,17 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       # Playwright comes from the Agents extension's lockfile; only its library is used (no browsers).
       - name: Playwright
         working-directory: extensions/friedliver-agents
         run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: friedliver-fork-macos-arm64
           path: build
@@ -220,7 +220,7 @@ jobs:
           echo "APP=$(ls -d "$PWD"/build/app/*.app | head -1)" >> "$GITHUB_ENV"
       - name: Screenshots
         run: node scripts/workbench-shots.mjs --app "$APP" --out shots
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: workbench-shots
@@ -235,7 +235,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: friedliver-fork-*
           path: release
