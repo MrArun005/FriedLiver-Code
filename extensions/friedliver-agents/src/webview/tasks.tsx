@@ -44,7 +44,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
+import { Avatar, Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, usageTotalLines, usageTotals, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, HandoffTargets, PipeMenu, PipeTargets } from './connect';
@@ -432,12 +432,12 @@ function Manager() {
               {!query && <Kbd>/</Kbd>}
             </label>
           )}
-          <div class="seg views" role="tablist" aria-label="View">
+          <div class="fl-seg seg views" role="tablist" aria-label="View">
             {VIEWS.map((v, i) => (
               <button
                 key={v.id}
                 role="tab"
-                class="seg-item"
+                class="fl-seg__item seg-item"
                 aria-selected={view === v.id}
                 aria-controls="view"
                 tabIndex={view === v.id ? 0 : -1}
@@ -545,13 +545,13 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         {several && <span class="hint">same task, {agents.length} agents</span>}
         <TaskOptions agents={agents} defaults={defaults} choices={choices} onChange={(agent, key, value) => setChoices((c) => ({ ...c, [agent]: { ...c[agent], [key]: value } }))} />
         <span class="spacer" />
-        <div class="seg approval-seg" role="radiogroup" aria-label="Without asking" onKeyDown={radioKeys}>
+        <div class="fl-seg seg approval-seg" role="radiogroup" aria-label="Without asking" onKeyDown={radioKeys}>
           {APPROVAL_LEVELS.map((l) => (
             <button
               key={l}
               type="button"
               role="radio"
-              class="seg-item"
+              class="fl-seg__item seg-item"
               data-level={l}
               aria-checked={approval === l}
               tabIndex={approval === l ? 0 : -1}
@@ -603,7 +603,8 @@ function Board({ state, chats, outside, now, focusId, onFocus }: { state: AppSta
             <h2 class="col-head">
               <Dot state={col.id} still={col.cards.length === 0} />
               {STATUS_TITLES[col.id]}
-              <span class="col-count">{col.cards.length + col.outside.length}</span>
+              <Count n={col.cards.length + col.outside.length} loud={col.id === 'needs-you' && col.cards.length + col.outside.length > 0} />
+              {col.id === 'needs-you' && <span class="col-sub">{needsSummary(col.cards.map((c) => models.get(c.id)!))}</span>}
             </h2>
             {col.cards.length + col.outside.length === 0 && <div class="column-empty">{col.empty}</div>}
             {col.cards.map((c) => (
@@ -620,6 +621,13 @@ function Board({ state, chats, outside, now, focusId, onFocus }: { state: AppSta
       </div>
     </>
   );
+}
+
+/** "2 questions · 1 approval": what the Needs-you column waits on, in words (§2.35). */
+function needsSummary(models: CardModel[]): string {
+  const kinds = models.flatMap((m) => (m.line.decision ? [m.line.decision.kind === 'question' ? 'question' : 'approval'] : []));
+  const n = (k: string) => kinds.filter((x) => x === k).length;
+  return [n('question') && `${n('question')} question${n('question') === 1 ? '' : 's'}`, n('approval') && `${n('approval')} approval${n('approval') === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
 }
 
 /** Inline answers to whatever the chat waits on: the approval card, compact; a question opens the chat. */
@@ -701,7 +709,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       }}
     >
       <div class="card-top">
-        <Glyph agent={chat.agent} size="sm" />
+        <Avatar agent={chat.agent} size="sm" working={chat.busy} />
         <span class="card-who" title={chatTip(chat)}>
           {agentName(chat.agent)}
         </span>

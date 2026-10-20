@@ -50,9 +50,9 @@ function Page() {
             <h2>Open links in</h2>
             <p class="hint">Links you click in FriedLiver, its editor and terminal. In chats and the Agent Manager, hold {MAC ? '⌘' : 'Ctrl'} to open one the other way.</p>
           </div>
-          <div class="seg" role="radiogroup" aria-label="Open links in">
+          <div class="fl-seg seg" role="radiogroup" aria-label="Open links in">
             {(['builtin', 'external'] as const).map((mode) => (
-              <button key={mode} type="button" role="radio" class="seg-item" aria-checked={view.links === mode} onClick={() => send({ type: 'setLinks', mode })}>
+              <button key={mode} type="button" role="radio" class="fl-seg__item seg-item" aria-checked={view.links === mode} onClick={() => send({ type: 'setLinks', mode })}>
                 {mode === 'builtin' ? 'FriedLiver browser' : 'System browser'}
               </button>
             ))}

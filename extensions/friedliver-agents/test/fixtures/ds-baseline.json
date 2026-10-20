@@ -14,13 +14,11 @@
     },
     "webview.css": {
       "colour": 8,
-      "px": 108,
-      "effect": 6,
+      "px": 79,
+      "effect": 5,
       "restyle": [
         ".acct-tag",
         ".all-count",
-        ".approval-seg .seg-item",
-        ".approval-seg .seg-item[data-level='full'][aria-checked='true']",
         ".apv-pre .copy-btn",
         ".apv-pre .copy-btn:focus-visible",
         ".apv-pre:hover .copy-btn",
@@ -48,7 +46,6 @@
         ".search",
         ".search input",
         ".search:focus-within",
-        ".seg",
         ".seg-bar",
         ".seg-count",
         ".th-btn",
@@ -90,10 +87,6 @@
         "button.sa-head",
         "button.sa-head:hover",
         "button.sa-manager",
-        "button.seg-item",
-        "button.seg-item:hover:not(:disabled)",
-        "button.seg-item[aria-checked='true']",
-        "button.seg-item[aria-selected='true']",
         "button.seg-item[aria-selected='true'] .seg-count",
         "button.starter",
         "button.starter:hover",
@@ -125,9 +118,9 @@
   },
   "totals": {
     "colour": 9,
-    "px": 184,
-    "effect": 7,
-    "restyle": 92,
+    "px": 155,
+    "effect": 6,
+    "restyle": 85,
     "rawControls": 57
   }
 }

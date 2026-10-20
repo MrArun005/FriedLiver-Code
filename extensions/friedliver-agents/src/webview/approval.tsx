@@ -223,7 +223,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
   );
   return (
     <section
-      class="fl-card fl-card--bare apv"
+      class={cx('fl-card fl-card--bare apv', compact && 'fl-card--ghost')}
       data-enter=""
       id={`item-${a.id}`}
       data-risk={a.risk.tone}

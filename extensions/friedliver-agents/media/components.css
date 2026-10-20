@@ -761,6 +761,14 @@ button.fl-pill:focus-visible {
 .fl-seg--block {
   display: flex;
 }
+/* Wrap: more options than one row holds (an agent picker in a narrow popover); rows of 22 segments. */
+.fl-seg--wrap {
+  flex-wrap: wrap;
+  height: auto;
+}
+.fl-seg--wrap .fl-seg__item {
+  height: var(--h-sm);
+}
 .fl-seg--block .fl-seg__item {
   flex: 1;
 }
@@ -3017,16 +3025,15 @@ button.fl-row,
   height: 70%;
   color: var(--hue);
 }
-/* Working: a 1.5px gap in the surface colour (--av-ring), then a 3px ring that breathes (.6 ↔ 1 over 2.4s).
+/* Working: a 1.5px gap in the surface colour (--av-ring), then a 2px ring that breathes (.6 ↔ 1 over 2.4s;
+   v2 drew 3px, which crowded the agent's name beside a 16px puck).
    The ring fades in over --dur-slow when work starts; under reduced motion it holds still. */
 .fl-avatar[data-working]::after {
   content: '';
   position: absolute;
-  inset: -4.5px;
+  inset: -3.5px;
   border-radius: var(--r-round);
-  box-shadow:
-    inset 0 0 0 3px var(--status-working),
-    0 0 0 0 transparent;
+  box-shadow: inset 0 0 0 2px var(--status-working);
   pointer-events: none;
   animation:
     fadeIn var(--dur-slow) var(--ease-out),

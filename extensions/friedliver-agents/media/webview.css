@@ -82,18 +82,19 @@ h3 {
 /* ---- Small things: tags, chips, badges, counts ---- */
 
 .chip .icon {
-  width: 12px;
-  height: 12px;
+  width: var(--i-xs);
+  height: var(--i-xs);
 }
 .count {
   display: inline-block;
-  min-width: 16px;
-  height: 16px;
+  min-width: var(--h-2xs);
+  height: var(--h-2xs);
   padding: 0 var(--sp-1);
   border-radius: var(--r-pill);
-  font-size: var(--t-75);
-  font-weight: 600;
-  line-height: 16px;
+  font-size: var(--t-85);
+  font-weight: var(--w-strong);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--h-2xs);
   text-align: center;
   color: var(--fg);
   background: var(--pill-bg);
@@ -104,15 +105,16 @@ h3 {
 }
 .col-count {
   font-size: var(--t-85);
-  font-weight: 400;
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-2);
 }
 /* File references in steps and change lists. */
 button.ref {
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
+  height: var(--h-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
   font-family: var(--mono);
   font-size: var(--t-85);
   color: var(--fg-2);
@@ -132,7 +134,7 @@ button.ref:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  gap: 2px;
+  gap: var(--sp-half);
 }
 .code-ref button.ref {
   min-width: 0;
@@ -141,15 +143,15 @@ button.ref:hover:not(:disabled) {
   white-space: nowrap;
 }
 .code-ref .ref .icon {
-  width: 12px;
-  height: 12px;
+  width: var(--i-xs);
+  height: var(--i-xs);
   color: var(--fg-2);
 }
 /* Badges: links between chats, shared files. */
 
 .badge .icon {
-  width: 12px;
-  height: 12px;
+  width: var(--i-xs);
+  height: var(--i-xs);
 }
 
 .badge[data-kind='pipe'] .icon {
@@ -157,52 +159,27 @@ button.ref:hover:not(:disabled) {
 }
 
 .auto-badge .icon {
-  width: 12px;
-  height: 12px;
+  width: var(--i-xs);
+  height: var(--i-xs);
 }
 
-/* Segmented controls: the view switch, agent radios. */
-.seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-6);
-  background: var(--input-bg);
-}
-button.seg-item {
-  height: 22px;
-  border: 0;
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-4);
-  color: var(--fg-2);
-}
-button.seg-item:hover:not(:disabled) {
-  color: var(--fg);
-  background: var(--hover-bg);
-}
-button.seg-item[aria-selected='true'],
-button.seg-item[aria-checked='true'] {
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-}
-/* A filter field: the slash palette's look. */
+/* A filter field (§2.11 Search): a field's look, a 14 glyph at 8, text inset 30. */
 .search {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 30px;
-  padding: 0 var(--sp-3);
-  border-radius: var(--r-4);
+  height: var(--h-md);
+  padding: 0 var(--sp-1) 0 var(--sp-2);
+  border-radius: var(--r-ctl);
   background: var(--input-bg);
   color: var(--fg-2);
 }
 .search:focus-within {
-  box-shadow: inset 0 0 0 1px var(--focus);
+  border-color: var(--focus);
 }
 .search .icon {
-  width: 14px;
-  height: 14px;
+  width: var(--i-sm);
+  height: var(--i-sm);
 }
 .search input {
   flex: 1;
@@ -334,59 +311,65 @@ button.seg-item[aria-checked='true'] {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px var(--sp-3);
+  gap: var(--sp-2) var(--sp-3);
 }
+/* The page title (§2.35): 20/600, tracked in. */
 .mgr-title h1 {
-  font-size: var(--t-title);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  margin: 0;
+  color: var(--sel-fg);
+  font-size: var(--t-hero);
+  font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
+  line-height: var(--lh-tight);
 }
 .mgr-counts {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 2px;
+  gap: var(--sp-1) var(--sp-4);
+  margin-top: var(--sp-1);
   font-size: var(--t-90);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-2);
 }
 .count-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 button.count-item {
   color: var(--fg-2);
   font-size: var(--t-90);
 }
 button.count-item .icon {
-  width: 13px;
-  height: 13px;
+  width: var(--i-sm);
+  height: var(--i-sm);
 }
 .mgr-head .search {
-  width: min(320px, 100%);
+  width: min(240px, 100%);
 }
-/* A field on the page in every theme: Light themes' input fill is the page's own white, so it gets an outline. */
+/* A field on the page in every theme: its 3:1 edge. */
 .search {
   border: 1px solid var(--field-border);
 }
 
+/* New task: the composer's material (§2.27): the input tone, a hairline, the rim, r12. */
 .new-task {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-12);
+  background: var(--input-bg);
 }
 .new-task:focus-within {
-  border-color: var(--focus);
+  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
 }
 .new-task textarea {
-  min-height: 42px;
-  padding: 10px var(--sp-4) 2px;
+  min-height: var(--sp-10);
+  padding: var(--sp-3) var(--sp-4) var(--sp-half);
   border: 0;
   background: transparent;
-  font-size: var(--t-title);
+  color: var(--sel-fg);
+  font-size: var(--t-lg);
   resize: none;
   outline: none;
 }
@@ -395,44 +378,31 @@ button.count-item .icon {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--sp-2);
-  padding: 6px 10px 10px;
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
 }
 .agent-pick {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .agent-option {
-  height: 28px;
-  padding: 0 10px 0 5px;
+  height: var(--h-md);
+  padding: 0 var(--sp-3) 0 var(--sp-1);
   border-radius: var(--r-pill);
-  border-color: var(--border);
+  border-color: transparent;
   background: transparent;
   color: var(--fg-2);
-  font-weight: 500;
+  font-weight: var(--w-medium);
 }
 .agent-option[aria-pressed='true'] {
-  color: var(--fg);
-  background: var(--pill-bg);
-  border-color: color-mix(in srgb, var(--hue) 55%, var(--border));
-}
-.agent-option:has(.fl-avatar[data-agent='claude']) {
-  --hue: var(--hue-claude);
-}
-.agent-option:has(.fl-avatar[data-agent='codex']) {
-  --hue: var(--hue-codex);
-}
-.agent-option:has(.fl-avatar[data-agent='gemini']) {
-  --hue: var(--hue-gemini);
-}
-.agent-option:has(.fl-avatar[data-agent='demo']) {
-  --hue: var(--hue-demo);
+  color: var(--sel-fg);
+  background: var(--sel-bg);
 }
 .check {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 30px;
+  height: var(--h-md);
   padding: 0 var(--sp-2);
   color: var(--fg-2);
   font-size: var(--t-90);
@@ -443,27 +413,26 @@ button.count-item .icon {
   flex-direction: column;
   gap: var(--sp-4);
 }
+/* An empty view (§2.26): unboxed, start-aligned, voiced. */
 .empty-view {
-  padding: 40px var(--sp-4);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
+  padding: var(--sp-3) var(--sp-1);
   color: var(--fg-2);
-  text-align: center;
 }
 .empty-view h2 {
-  font-size: var(--t-title);
-  font-weight: 600;
+  margin: 0;
   color: var(--fg);
+  font-size: var(--t-lead);
+  font-weight: var(--w-medium);
 }
 .empty-view p {
   margin: var(--sp-1) 0 0;
 }
 
-/* Board */
+/* Board (§2.35): columns 16 apart, no column fill; a 26 head with a hairline under it. */
 .columns {
   display: grid;
   grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
-  gap: var(--sp-5);
+  gap: var(--sp-4);
   align-items: start;
 }
 @media (max-width: 960px) {
@@ -474,25 +443,35 @@ button.count-item .icon {
 .column {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 .col-head {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 26px;
-  font-size: var(--t-90);
-  font-weight: 500;
+  height: var(--h-md);
+  margin: 0 0 var(--sp-1);
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--sel-fg);
+  font-size: var(--t-100);
+  font-weight: var(--w-strong);
+  white-space: nowrap;
+}
+.col-sub {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-2);
+  font-size: var(--t-85);
+  font-weight: var(--w-regular);
 }
 .column-empty {
-  padding: var(--sp-5) var(--sp-4);
-  border-radius: var(--r-8);
-  background: var(--input-bg);
+  padding: var(--sp-3) var(--sp-1);
   color: var(--fg-2);
   font-size: var(--t-90);
-  text-align: center;
 }
 /* A chat's subagents: small cards tucked under its card. */
 .sub-cards {
@@ -533,7 +512,8 @@ button.count-item .icon {
   align-items: center;
   gap: var(--sp-1) var(--sp-2);
   min-width: 0;
-  font-size: var(--t-90);
+  font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-2);
 }
 .card-top > span:not(.chip) {
@@ -542,24 +522,26 @@ button.count-item .icon {
 
 .card-who {
   color: var(--fg-2);
-  font-weight: 500;
+  font-weight: var(--w-medium);
 }
-/* At most two lines, then an ellipsis; the whole title is in the tooltip. */
+/* At most two lines, then an ellipsis; the whole title is in the tooltip. 13/500 in the strong text. */
 .card-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  margin: 0;
+  color: var(--sel-fg);
   font-size: var(--t-100);
-  font-weight: 600;
-  line-height: 1.35;
+  font-weight: var(--w-medium);
+  line-height: 1.4;
 }
 .title-btn {
   display: inline;
   height: auto;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--r-1);
   background: none;
   color: var(--fg);
   font: inherit;
@@ -577,20 +559,21 @@ button.count-item .icon {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  font-size: var(--t-100);
-  color: var(--fg);
+  font-size: var(--t-90);
+  color: var(--fg-2);
 }
+/* A question waiting on you reads in the strong text; the bullseye beside it says it's yours. */
 .card-state[data-decision] {
-  color: var(--decision);
-  font-weight: 500;
+  color: var(--sel-fg);
+  font-weight: var(--w-regular);
 }
 .card-state-text {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .card-code {
-  padding: 6px var(--sp-2);
-  border-radius: var(--r-4);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-ctl);
   font-size: var(--t-90);
   color: var(--fg);
   overflow-wrap: anywhere;
@@ -606,11 +589,10 @@ button.count-item .icon {
 }
 .card-quote {
   /* Vertical room as transparent borders, not padding: the clamp clips at the padding edge, so a padding would show a sliver of line 4. */
-  padding: 0 10px;
-  border-top: 6px solid transparent;
-  border-bottom: 6px solid transparent;
-  border-left: 2px solid var(--decision-line);
-  border-radius: 2px;
+  padding: 0 var(--sp-3);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 2px solid var(--hairline);
   font-size: var(--t-90);
   color: var(--fg-2);
   overflow-wrap: anywhere;
@@ -619,11 +601,12 @@ button.count-item .icon {
 .card-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   min-width: 0;
   overflow: hidden;
   font-size: var(--t-85);
-  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh);
   color: var(--fg-2);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -639,11 +622,11 @@ button.count-item .icon {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  margin-right: 4px;
+  margin-right: var(--sp-1);
 }
 .meta-item .icon {
-  width: 13px;
-  height: 13px;
+  width: var(--i-sm);
+  height: var(--i-sm);
 }
 .card-top .card-connect + .pop,
 .card-top .card-more {
@@ -653,15 +636,15 @@ button.count-item .icon {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 2px;
+  gap: var(--sp-2);
   min-width: 0;
-  min-height: 26px;
+  min-height: var(--h-md);
 }
 /* Hand off, Ask and Pipe to: on hover or keyboard focus only (they are in ⋯ as well). */
 .card-connect {
   flex: none;
   display: flex;
-  gap: 2px;
+  gap: var(--sp-half);
   opacity: 0;
   transition: opacity var(--ease-toggle);
 }
@@ -677,9 +660,9 @@ button.count-item .icon {
   flex-direction: column;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--menu-bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-box);
+  background: var(--input-bg);
 }
 .compare-head {
   display: flex;
@@ -692,8 +675,10 @@ button.count-item .icon {
   color: var(--fg-2);
 }
 .compare-head h2 {
+  margin: 0;
+  color: var(--sel-fg);
   font-size: var(--t-100);
-  font-weight: 600;
+  font-weight: var(--w-strong);
 }
 .compare-title {
   min-width: 0;
@@ -715,13 +700,10 @@ button.count-item .icon {
   flex-direction: column;
   gap: var(--sp-2);
   min-width: 0;
-  padding: 10px var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
+  padding: var(--sp-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-box);
   background: var(--bg);
-}
-.compare-col[data-status='needs-you'] {
-  border-color: var(--decision-line);
 }
 .compare-top {
   display: flex;
@@ -1801,15 +1783,9 @@ button.viewer-thumb[aria-selected='true'] {
 .task-options .fl-select {
   max-width: 130px;
 }
-.approval-seg .seg-item {
-  gap: 3px;
-}
-.approval-seg .seg-item[data-level='full'][aria-checked='true'] {
-  color: var(--error);
-}
 .approval-seg .icon {
-  width: 11px;
-  height: 11px;
+  width: var(--i-xs);
+  height: var(--i-xs);
 }
 .map-node .node-auto rect {
   fill: color-mix(in srgb, var(--error) 22%, transparent);
@@ -3187,6 +3163,14 @@ button.cc-map-node:hover {
   gap: var(--sp-1) var(--sp-2);
   min-height: var(--h-xl);
   padding: var(--sp-2) var(--sp-3);
+}
+.task-card .apv {
+  margin: 0;
+}
+/* On a board card the request is part of the card (no box in a box): its head sits on the card's own padding. */
+.task-card .apv-hd {
+  min-height: 0;
+  padding: 0;
 }
 .apv-row .apv-hd {
   min-height: var(--sp-8);

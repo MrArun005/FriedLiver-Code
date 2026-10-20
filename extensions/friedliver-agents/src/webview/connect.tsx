@@ -94,9 +94,9 @@ export function AskMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-
         return (
           <div class="ask-form">
             <div class="fl-menu__title" aria-hidden="true">{again ? `Ask in “${clip(chatName(again), 32)}”, reply comes back here` : 'Ask, reply comes back here'}</div>
-            <div class="seg" role="radiogroup" aria-label="Agent" onKeyDown={radioKeys}>
+            <div class="fl-seg fl-seg--wrap seg" role="radiogroup" aria-label="Agent" onKeyDown={radioKeys}>
               {agents.map((a) => (
-                <button key={a} type="button" role="radio" aria-checked={a === agent} tabIndex={a === agent ? 0 : -1} class="seg-item" onClick={() => setAgent(a)}>
+                <button key={a} type="button" role="radio" aria-checked={a === agent} tabIndex={a === agent ? 0 : -1} class="fl-seg__item seg-item" onClick={() => setAgent(a)}>
                   <Glyph agent={a} size="sm" /> {AGENT_FACES[a].name}
                   <SignInMark agent={a} />
                 </button>
