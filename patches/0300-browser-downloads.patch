@@ -420,10 +420,10 @@ index 00000000..44b885f7
 +}
 diff --git a/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
 new file mode 100644
-index 00000000..ca0c9492
+index 00000000..5c7f3fb8
 --- /dev/null
 +++ b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,462 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): saves what the integrated browser downloads.
 + *
@@ -431,7 +431,9 @@ index 00000000..ca0c9492
 + *    unique name, or where the user picks when friedliver.browser.downloadAsk is on.
 + *  - Only http(s) sources (and blobs web pages make); everything else is refused before a byte is written.
 + *  - A download an agent or the page started (no user gesture, or a page an agent acted on since the
-+ *    user last did), or one over 500 MB, is paused until the user allows it.
++ *    user last did), or one over 500 MB, is paused until the user allows it. It is written to a
++ *    staging folder (Chromium may already put its first chunk on disk while it is paused:
++ *    scripts/downloads-probe.cjs) and moved into the downloads folder only once it is finished.
 + *  - Downloads that start during an agent's browser call are that call's alone (DownloadAttribution).
 + *  - Nothing is ever opened or run automatically. Finished files keep (or get) the OS's
 + *    downloaded-from-the-internet mark: com.apple.quarantine on macOS, Zone.Identifier on Windows.
@@ -470,6 +472,8 @@ index 00000000..ca0c9492
 +	session?: Electron.Session;
 +	claimed: boolean;
 +	waiters: (() => void)[];
++	/** Where a download that waited is written until it is finished and moved to d.path. */
++	staged?: string;
 +}
 +
 +export class BrowserDownloadsMainService extends Disposable implements IBrowserDownloadsMainService {
@@ -550,10 +554,29 @@ index 00000000..ca0c9492
 +				return;
 +			}
 +		}
++		// An agent's or the page's download, or a large one, goes no further until the user allows it.
++		const wait = who.waitingFor ?? (!ask && needsSizeConfirm(base.totalBytes) ? 'large' : undefined);
 +		const file = join(folder, uniqueFilename(name, candidate => this.taken(join(folder, candidate))));
++		if (wait) {
++			const staging = join(app.getPath('userData'), 'BrowserDownloadsPending');
++			try {
++				fs.mkdirSync(staging, { recursive: true });
++			} catch (err) {
++				event.preventDefault();
++				this.add(entry);
++				this.transition(entry, 'fail', `Can't write to ${staging}`);
++				this.logService.error(`[browser downloads] ${staging}: ${err}`);
++				return;
++			}
++			entry.staged = join(staging, base.id);
++		}
 +		this.reserved.add(file.toLowerCase());
 +		entry.item = item;
-+		if (ask) {
++		if (entry.staged) {
++			item.setSavePath(entry.staged);
++			base.path = file;
++			base.filename = basename(file);
++		} else if (ask) {
 +			// Electron shows its Save dialog after this handler returns; the size goes in its title.
 +			const size = base.totalBytes > 0 ? ` (${formatBytes(base.totalBytes)})` : '';
 +			item.setSaveDialogOptions({ title: `Save ${basename(file)}${size}`, message: `Save ${basename(file)}${size} from ${hostOf(url)}`, defaultPath: file });
@@ -563,8 +586,6 @@ index 00000000..ca0c9492
 +			base.filename = basename(file);
 +		}
 +
-+		// An agent's or the page's download, or a large one, writes nothing until the user allows it.
-+		const wait = who.waitingFor ?? (!ask && needsSizeConfirm(base.totalBytes) ? 'large' : undefined);
 +		if (wait) {
 +			item.pause();
 +			base.state = 'awaiting';
@@ -579,11 +600,15 @@ index 00000000..ca0c9492
 +			this.progress.schedule();
 +		});
 +		item.once('done', (_e, state) => {
-+			this.reserved.delete(file.toLowerCase());
 +			this.measure(entry);
 +			if (state === 'completed') {
-+				void this.finish(entry);
++				// The name stays reserved until a staged file has been moved there.
++				void this.finish(entry).finally(() => this.reserved.delete(file.toLowerCase()));
 +			} else {
++				this.reserved.delete(file.toLowerCase());
++				if (entry.staged) {
++					void fs.promises.rm(entry.staged, { force: true }).catch(() => { });
++				}
 +				this.transition(entry, state === 'cancelled' ? 'cancel' : 'fail', state === 'interrupted' ? 'Interrupted (network or disk error)' : undefined);
 +			}
 +		});
@@ -599,7 +624,7 @@ index 00000000..ca0c9492
 +		entry.d.totalBytes = Math.max(0, item.getTotalBytes());
 +		entry.d.bytesPerSecond = Math.max(0, item.getCurrentBytesPerSecond());
 +		const chosen = item.getSavePath();
-+		if (chosen && chosen !== entry.d.path) {
++		if (!entry.staged && chosen && chosen !== entry.d.path) {
 +			entry.d.path = chosen;
 +			entry.d.filename = basename(chosen);
 +		}
@@ -608,6 +633,9 @@ index 00000000..ca0c9492
 +	private async finish(entry: Entry): Promise<void> {
 +		const file = entry.d.path;
 +		try {
++			if (entry.staged) {
++				await moveNoOverwrite(entry.staged, file);
++			}
 +			await markFromInternet(file, entry.d.url);
 +			entry.d.receivedBytes = (await fs.promises.stat(file)).size;
 +			entry.d.sha256 = await sha256(file);
@@ -821,6 +849,19 @@ index 00000000..ca0c9492
 +	});
 +}
 +
++/** Moves a finished staged download into place, never over an existing file (a hard link, or an exclusive copy across volumes). */
++async function moveNoOverwrite(from: string, to: string): Promise<void> {
++	try {
++		await fs.promises.link(from, to);
++	} catch (err) {
++		if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
++			throw new Error(`${basename(to)} appeared in the folder meanwhile; the download was not saved over it`);
++		}
++		await fs.promises.copyFile(from, to, fs.constants.COPYFILE_EXCL);
++	}
++	await fs.promises.rm(from, { force: true });
++}
++
 +function run(cmd: string, args: string[]): Promise<boolean> {
 +	return new Promise(resolve => execFile(cmd, args, { timeout: 10_000 }, err => resolve(!err)));
 +}
@@ -924,12 +965,12 @@ index 7a69461a..98c621be 100644
  	const url = Object.entries(viewState ?? {}).find(([key]) => key === 'url')?.[1];
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
 new file mode 100644
-index 00000000..ed3eed4d
+index 00000000..ae2e7140
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserDownloadsFeature.ts
 @@ -0,0 +1,472 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  FriedLiver (patch 0300): downloads in the browser panel (COMPONENTS.md §2.33).
++ *  FriedLiver (patch 0300): downloads in the browser panel (COMPONENTS.md §2.39).
 + *  - Indicator: an IconButton in the browser's actions toolbar, with a progress ring and a Count of
 + *    active downloads, shown once there is any download.
 + *  - Popover: the list (name, size, progress and speed, state) with Cancel, Retry, Open, Show in
@@ -1451,12 +1492,12 @@ index 096492d9..24321e91 100644
  
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
 new file mode 100644
-index 00000000..9f9894e2
+index 00000000..fc8ce2d0
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
 @@ -0,0 +1,310 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  FriedLiver (patch 0300): browser downloads, COMPONENTS.md §2.33.
++ *  FriedLiver (patch 0300): browser downloads, COMPONENTS.md §2.39.
 + *  Only design-system tokens (--fl-*, generated from tokens.css into the workbench) and theme
 + *  colours: test/browserDownloads.test.ts checks it. High contrast reads the same tokens, which
 + *  the token sheet maps to the HC theme (outlines instead of fills).

@@ -22,6 +22,12 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   {
+    // Electron main-process scripts (CommonJS), like the downloads probe.
+    files: ['scripts/**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', process: 'readonly', console: 'readonly', setTimeout: 'readonly', setInterval: 'readonly', clearInterval: 'readonly' } },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-non-null-assertion': 'off',
