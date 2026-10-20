@@ -1,8 +1,9 @@
-# Extension signatures (FL-18): research and plan
+# Extension signatures (FL-18, FL-37)
 
-Status: work in progress (2026-10-19). Patch 0040 still turns signature checks off.
-`docs/extension-signatures-draft.diff` is the draft change to upstream 1.142.0,
-made against the tree with patches 0010-0030 applied. It is not in `patches/` yet.
+Patch `0040-open-vsx-signatures` checks every extension installed from Open VSX
+against Open VSX's own signature, with the registry key pinned in the app.
+`extensions.verifySignature` is on by default again. This page is the research
+behind it and how it behaves.
 
 ## Findings
 
@@ -19,6 +20,9 @@ made against the tree with patches 0010-0030 applied. It is not in `patches/` ye
   over the manifest.
 - **Public key:** `https://open-vsx.org/api/-/public-key/14ccb407-4e79-41ed-be5a-6d608325c45a`
   = `MCowBQYDK2VwAyEAje+vAaSS1zHV5WHCJSa5UXvxRo6+yerEU3IEmtuEuF4=` (SPKI, Ed25519).
+  Pinned on 2026-10-20 after three checks: the endpoint itself, the Wayback
+  Machine's independent copy of 2026-02-18 (same bytes), and a real signature
+  (redhat.vscode-yaml 2.1.2026102008 verifies; one flipped byte doesn't).
   Fourteen extensions sampled (2021-2026 versions) all name this one key. The
   gallery query (`/vscode/gallery/extensionquery`) lists it as the
   `Microsoft.VisualStudio.Services.PublicKey` file, next to `VsixSignature`.
@@ -48,52 +52,53 @@ made against the tree with patches 0010-0030 applied. It is not in `patches/` ye
   That is why patch 0040 turned checks off. A private marketplace can serve a
   real manifest that requires signatures.
 
-## Recommended approach (implemented in the draft diff)
+## How it works (patch 0040)
 
-1. `node/openVsxSignature.ts`: pure node:crypto Ed25519 check. The Open VSX key
-   is pinned by its id and never fetched.
-   - `valid`: a pinned key signed these bytes.
-   - `invalid`: the gallery names a pinned key, but the signature is missing,
-     malformed or doesn't match. A CDN attacker can't downgrade this to a prompt.
-   - `unknownKey`: anything else.
+1. `node/openVsxSignature.ts`: `checkOpenVsxSignature` is a pure `node:crypto`
+   Ed25519 check. The Open VSX key is pinned by its id and never fetched.
+   - `Success`: a pinned key signed exactly these bytes.
+   - `SignatureIsNotValid`: the gallery names a pinned key, but the signature is
+     missing, malformed or doesn't match. A CDN attacker can't downgrade this to
+     a prompt, and a gallery entry with no signature asset at all is the same.
+   - `NotSigned`: no signature, and no pinned key named.
+   - `Untrusted`: a signature no pinned key matches, and no pinned key named.
 2. `ExtensionSignatureVerificationService` uses it in place of vsce-sign. The
-   downloader passes the gallery's PublicKey asset; a new
-   `IGalleryExtensionAssets.publicKey` comes from the file's `source`.
+   downloader passes the gallery's PublicKey asset
+   (`IGalleryExtensionAssets.publicKey`, from the file's `source`). A check that
+   throws is reported as not executed.
 3. `common/extensionSignaturePolicy.ts` `decideSignature(status, required, allowed)`:
    - Success: install.
-   - Tampered codes, or a required signature that isn't valid: refuse. No
-     override, and the "Install Anyway (Don't Verify)" buttons are removed.
-   - NotSigned, unknown key, or the verifier failed: ask.
-4. `extensions.verifySignature` goes back to default true. A marketplace that
-   requires signatures is checked even when the setting is off or
-   `donotVerifySignature` is passed.
-5. Prompt: "This extension isn't signed by Open VSX. Install anyway?"
-   - Install Anyway adds the id to the new `extensions.allowUnsigned` setting
-     (application scope) and reruns the install with the context flag
-     `friedliver.allowUnsigned`.
-   - The rerun is still verified, so a tampered package is still refused.
-   - The CLI prints the same message, which names the setting.
-6. The synthesized manifest sets `allPublicRepositorySigned: false` for Open VSX.
-   VSIX files installed from disk keep upstream behaviour.
+   - A mismatch, or a required signature that isn't valid: refuse. No override;
+     the "Install Anyway (Don't Verify Signature)" buttons are gone.
+   - Not signed, unknown key, or the check couldn't run: ask.
+4. A marketplace whose manifest requires signatures is checked even when the
+   setting is off or `donotVerifySignature` is passed. FriedLiver's synthesized
+   manifest for Open VSX sets `allPublicRepositorySigned: false`, since Open VSX
+   makes no such promise. Dev builds and linux-armhf are checked too (upstream
+   skipped both).
+5. The prompt: "This extension isn't signed by Open VSX. Install anyway?"
+   - Install Anyway adds the id to `extensions.allowUnsigned` (application
+     scope: user settings only, never a workspace) and reruns the install with
+     the context flag `friedliver.allowUnsigned`.
+   - The rerun is still checked, so a tampered package is still refused.
+   - The CLI prints the same refusal, naming the setting.
+6. VSIX files installed from disk keep upstream behaviour (no signature check).
 
-The draft type-checks with upstream's TypeScript 6. A targeted tsc run over the
-changed files shows the same 80 pre-existing missing-typings errors on base and
-on the draft, and none new.
+## Checks
 
-## Left to do
+- `test/extensionSignatures.test.ts` runs both new files from the patch with a
+  key generated in the test: valid, tampered, missing (asks), unknown key
+  (asks), the check failing (asks), a required signature (refused), the pinned
+  key named with the signature missing or broken (refused), and the pinned key
+  itself.
+- `build.yml` (Linux) installs `redhat.vscode-yaml` from Open VSX into the
+  built app with `--log trace` and fails unless the log says the check
+  succeeded. This also catches an Open VSX key renewal.
 
-- Turn the draft into `patches/0040-open-vsx-signatures.patch` (rename the patch)
-  and check that all patches apply to 1.142.0.
-- Vitest tests (`writePatchedFile`), each with a generated key:
-  - valid signature
-  - tampered file
-  - missing signature with a pinned key id (refuse)
-  - unknown key, or the verifier failed (ask)
-  - required signature (refuse)
-  - the `decideSignature` matrix
-- Update SECURITY.md (FL-18 becomes Fixed, plus a new entry), README patch
-  table, DEFAULTS.md and BUILD.md.
-- build.yml (Linux): `friedliver --install-extension redhat.vscode-yaml --log trace`
-  with temporary dirs, and grep for `Extension signature verification result ... Success`.
-  This also catches an Open VSX key renewal.
-- Run build.yml with workflow_dispatch until green, then open the PR.
+## When Open VSX renews its key
+
+`ovsx.integrity.key-pair=renew` re-signs everything with a new key, and the
+gallery names the new id. Until FriedLiver pins it, installs ask (unknown key)
+and the build check fails. Add the new id and key to `OPEN_VSX_PUBLIC_KEYS`
+after checking it the same three ways, and keep the old one while extensions
+signed with it are still served.

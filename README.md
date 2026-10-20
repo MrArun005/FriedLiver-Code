@@ -223,7 +223,7 @@ Patches:
 | `0010-drop-builtin-copilot` | No built-in Copilot extension; runs without `defaultChatAgent` |
 | `0020-disable-builtin-ai-by-default` | `chat.disableAIFeatures` defaults to true, and the Chat view hides with it; without `defaultChatAgent` the setting still sets `chatSetupHidden`, so Copilot's Welcome entries, Agents-window banner and terminal hint stay hidden |
 | `0030-installers-without-microsoft-only-parts` | Installers build without the Windows appx package and the tunnel CLI |
-| `0040-extensions-without-vsce-sign` | Open VSX installs work without Microsoft's signature-check binary (signature checks are off; see [SECURITY.md](SECURITY.md), FL-18) |
+| `0040-open-vsx-signatures` | Extensions from Open VSX are checked against Open VSX's Ed25519 signature with a pinned key instead of Microsoft's verifier: a mismatch is refused, an unsigned one asks first and `extensions.allowUnsigned` remembers the answer ([docs/EXTENSION-SIGNATURES.md](docs/EXTENSION-SIGNATURES.md), SECURITY.md FL-37) |
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 | `0110-modern-workbench` | The workbench built from the design system: imports the generated tokens and `workbench/friedliver.css` (buttons, fields, menus, the palette, toasts, dialogs from COMPONENTS.md); menu rows and toast sizes read the tokens; custom menus and dialogs on macOS. High contrast untouched |
 | `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |

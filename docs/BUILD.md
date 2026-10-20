@@ -441,10 +441,11 @@ Packaged build, `bench/fixture`, 1440×900, under xvfb with software rendering
 
 ## Known gaps
 
-- **No extension signature checks.** Patch 0040 turns off
-  `extensions.verifySignature`, because the verifier (`@vscode/vsce-sign`) ships
-  only with Microsoft's builds. Extensions come over HTTPS from Open VSX, whose
-  list of malicious extensions still applies. See [SECURITY.md](../SECURITY.md).
+- **Open VSX key renewals need a FriedLiver update.** Patch 0040 checks
+  extension signatures with Open VSX's Ed25519 key pinned in the app
+  ([EXTENSION-SIGNATURES.md](EXTENSION-SIGNATURES.md)). When Open VSX renews it,
+  every extension asks before installing until a release pins the new key;
+  `build.yml`'s Linux install check fails first.
 - **No Apple- or Microsoft-issued signatures.** Windows SmartScreen and macOS
   Gatekeeper warn on first launch. macOS builds carry a self-signed
   certificate (stable privacy grants, see above); removing the warnings needs
