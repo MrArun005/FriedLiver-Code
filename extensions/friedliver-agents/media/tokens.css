@@ -61,6 +61,8 @@
   --ctl-border-active: transparent;
   /* High Contrast draws selection and hover as outlines (fills are off there). */
   --sel-outline: none;
+  /* Selected rows, tabs and nav items carry a 2px leading bar in the strong text colour (3:1+ on every surface). */
+  --sel-bar: inset 2px 0 0 var(--sel-fg);
   --hover-outline: none;
   --line: 1px;
   --line-half: 0.5px;
@@ -86,7 +88,7 @@
   --accent: var(--fl-accent, var(--accent-bg));
   --send-bg: var(--fl-accent, var(--accent-bg));
   --send-fg: var(--accent-fg);
-  --focus-border: var(--vscode-focusBorder, #67b0f9);
+  --focus-border: var(--vscode-focusBorder, #dad7d4);
   /* Switches, checkboxes and radios take the accent when on, with a white knob or check (every platform's convention). */
   --button-bg: var(--accent-bg);
   --button-fg: var(--accent-fg);
@@ -107,9 +109,10 @@
   --mic-bg: #0078d4;
   --mic-hover: #026ec1;
   --mic-fg: #fff;
-  /* "Needs you", focus and links: the decision blue, oklch(.74 .13 250) dark / (.53 .16 256) light. Blue is
-     the system talking to you, in small marks only (a bullseye, a count, a ring on the focused card); it
-     never fills a button. */
+  /* "Needs you" and links: the decision blue, oklch(.74 .13 250) dark / (.53 .16 256) light, in small marks
+     only (the bullseye, a count, a link); it never fills a button or rings a card. Keyboard focus is a
+     neutral ring (focusBorder, oklch(.88 .005 60) dark / (.3 .006 70) light), 3:1 on every surface and on
+     the accent fill, so it never reads as an error or a selection. */
   --decision: var(--vscode-friedliver-decision, var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue, #67b0f9)));
   --decision-fg: var(--vscode-friedliver-decisionForeground, var(--bg));
   --decision-soft: color-mix(in srgb, var(--decision) 12%, transparent);
@@ -208,6 +211,8 @@
   --h-sm: 22px;
   --h-md: 26px;
   --h-lg: 32px;
+  /* Palette and welcome list rows (two-part rows: a title and its context). */
+  --h-xl: 40px;
   --h-touch: 44px;
   /* Icon boxes: the glyph's square. Stroke is 1.5px at every size (vector-effect: non-scaling-stroke). */
   --i-xs: 12px;
@@ -346,7 +351,8 @@ body.vscode-high-contrast-light {
   --ctl-border-active: var(--vscode-contrastActiveBorder, #f38518);
   --focus: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder, #f38518));
   --focus-halo: 0 0 0 0 transparent;
-  --sel-outline: 1px solid var(--ctl-border-active);
+  /* Selection is the contrast border; only keyboard focus is the active (orange) border, 2px. */
+  --sel-outline: 1px solid var(--border);
   --hover-outline: 1px dashed var(--ctl-border-active);
   --sel-bg: transparent;
   --hover-bg: transparent;

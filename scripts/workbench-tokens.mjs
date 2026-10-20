@@ -5,6 +5,7 @@
 //     own unprefixed variables (references to undefined names, e.g. --vscode-*, are left alone);
 //   - :root -> .monaco-workbench, body.vscode-light -> .monaco-workbench.vs,
 //     body.vscode-dark -> .monaco-workbench.vs-dark, body.vscode-high-contrast -> .monaco-workbench.hc-black,
+//     body[data-platform=windows|linux] -> .monaco-workbench.windows|.linux (the v2 platform layer),
 //     body.vscode-high-contrast-light -> .monaco-workbench.hc-light;
 //   - width media queries (webview layout, e.g. the chat gutter) are dropped; preference queries stay.
 // prepare.mjs writes the result into the upstream tree as src/vs/workbench/browser/media/friedliver-tokens.css.
