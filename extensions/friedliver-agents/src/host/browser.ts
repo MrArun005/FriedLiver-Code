@@ -13,12 +13,15 @@ import type { BrowserCall } from '../bridge/protocol';
 import { userSetting } from './settings';
 import { estimateTokens } from '../shared/tokens';
 import { extractPage, PageMemory, toSelector, type PageData } from './pageText';
+import { commandsApi, withAgentDownloads, type DownloadInfo, type DownloadsApi } from './browserDownloads';
 import { ConsoleLog, clampBrowserWidth, imageTokens, ownTab, saveScreenshot, shotParams, relaxLocalhostCors, type PausedResponse } from './browserRules';
 
 const WIDTH_KEY = 'friedliver.browser.width';
 const URL_KEY = 'friedliver.browser.lastUrl';
 const LOAD_TIMEOUT_MS = 15_000;
 const CDP_TIMEOUT_MS = 30_000;
+/** Tools that act on the page: a download they start is the agent's, and waits for the user's OK. */
+const ACTS = new Set<BrowserCall['tool']>(['browser_open', 'browser_click', 'browser_type', 'browser_back', 'browser_reload']);
 const LOCAL_PATTERNS = ['http://localhost*', 'https://localhost*', 'http://127.0.0.1*', 'https://127.0.0.1*', 'http://[::1]*', 'https://[::1]*'];
 
 type CdpMessage = { id?: number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { message?: string }; sessionId?: string };
@@ -197,6 +200,8 @@ export class BrowserPanel implements vscode.Disposable {
   onSaved?: (chatId: string, naive: number, sent: number) => void;
   /** Each chat's last snapshot, for re-snapshots that send only the change. */
   private readonly pages = new PageMemory();
+  /** The editor's downloads (patch 0300); its commands are missing in stock VS Code, and then nothing changes. */
+  private readonly downloads: DownloadsApi = commandsApi((command, ...args) => vscode.commands.executeCommand(command, ...args));
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -277,8 +282,16 @@ export class BrowserPanel implements vscode.Disposable {
     }
   }
 
-  /** One agent tool call (bridgeRequests.ts already checked the URL and got the user's OK). */
-  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string, chatId = ''): Promise<string> {
+  /**
+   * One agent tool call (bridgeRequests.ts already checked the URL and got the user's OK). A download
+   * an acting call starts waits for `askDownload`; the answer, and where the file went, end the output.
+   */
+  async call(call: BrowserCall, signal: AbortSignal, expectOrigin?: string, chatId = '', askDownload?: (d: DownloadInfo) => Promise<boolean>): Promise<string> {
+    if (!ACTS.has(call.tool) || !this.supported()) return this.run(call, signal, expectOrigin, chatId);
+    return withAgentDownloads(this.downloads, () => this.run(call, signal, expectOrigin, chatId), { ask: askDownload, signal });
+  }
+
+  private async run(call: BrowserCall, signal: AbortSignal, expectOrigin: string | undefined, chatId: string): Promise<string> {
     // An OK given for one origin never acts on another: checked right before acting, after the target is found again.
     const sameOrigin = async (cdp: Cdp) => {
       if (expectOrigin === undefined) return;

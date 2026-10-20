@@ -62,6 +62,14 @@ describe('GitHub workflows', () => {
         }
       });
 
+      it('never fetch a package outside a lockfile (npx -y) in a job that gets secrets', () => {
+        const jobs = text.slice(text.indexOf('\njobs:\n')).split(/\n(?= {2}[\w-]+:\n)/).slice(1);
+        expect(jobs.length).toBeGreaterThan(0);
+        for (const job of jobs) {
+          if (/\bsecrets\./.test(job)) expect(job, job.split('\n')[0]).not.toMatch(/\bnpx\s+(-y|--yes)\b/);
+        }
+      });
+
       it('never runs pull requests from forks with write access', () => {
         const code = text.replace(/(^|\s)#.*$/gm, '');
         expect(code).not.toMatch(/pull_request_target|workflow_run/);
