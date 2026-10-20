@@ -36,6 +36,8 @@ const builds = [
   { ...node, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js' },
   // The offline demo agent, started with the editor's own runtime.
   { ...node, entryPoints: [path.join(core, 'demo/fakeAgent.mjs')], outfile: 'dist/demo-agent.js' },
+  // Antigravity: FriedLiver's ACP adapter for `agy`, which has no ACP mode; also started with the editor's runtime.
+  { ...node, entryPoints: [path.join(core, 'main/agents/agyAcpMain.ts')], outfile: 'dist/agy-acp.js' },
   // The FriedLiver tools: an MCP server each agent session starts, which talks to the editor over a local socket.
   { ...node, entryPoints: ['src/bridge/server.ts'], outfile: 'dist/bridge.js' },
   // The browser tools for Claude Code outside FriedLiver: the stdio server its ~/.claude.json entry starts.

@@ -97,6 +97,7 @@ check from install to two agents talking to each other.
 | Claude | `npm install -g @agentclientprotocol/claude-agent-acp` | Claude Code's own login in a terminal (subscription or Anthropic Console): approve on claude.ai; or an Anthropic API key |
 | Codex | `npm install -g @agentclientprotocol/codex-acp` | Your browser opens OpenAI's sign-in page (ChatGPT), or an OpenAI API key |
 | Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page, or a Gemini API key, or Vertex AI |
+| Antigravity | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` (Google's installer, to `~/.local/bin/agy`; Windows: `irm https://antigravity.google/cli/install.ps1 \| iex`) | Run `agy` once in a terminal: it opens Google's sign-in page (Google AI Free, Pro or Ultra plan) |
 
    The older `@zed-industries/*` packages are deprecated and lack the effort
    and plan options; Agents & Accounts says when an installed adapter is too old.
@@ -147,6 +148,39 @@ taking the agent's default:
 | Commands | Claude runs them. In Ask and Auto-accept edits its request shows the command and folder | Codex runs them in its sandbox; Read-only asks before anything that writes, Workspace access runs workspace commands without asking | Gemini runs them after its own request, shown with the command | FriedLiver runs them after Run |
 | Ask / Auto-accept edits / Full auto | Manual / Accept edits / Bypass permissions (Auto when Bypass isn't offered) | Read-only / Workspace access / Full access | Auto Edit (FriedLiver reviews each write) / Auto Edit / YOLO | Ask / Accept edits / Full access |
 | Undo and "Changed N files" | A git snapshot at the start of each turn, for every agent; outside git, from the content FriedLiver saw before each edit | same | same, plus FriedLiver's own record of its writes | same |
+
+**Antigravity** (Google's `agy` CLI, with the Gemini, Claude and GPT-OSS models
+your Antigravity plan offers) has no ACP mode, so FriedLiver runs it through
+its own adapter over agy's documented headless mode (`--output-format
+stream-json`). Headless agy can't stop to ask for approval, and its tools never
+pass through FriedLiver. **Edit automatically** lets agy edit files itself
+(`--mode accept-edits --sandbox`; commands are refused unless your agy settings
+allow them) and **Auto** is `--dangerously-skip-permissions`. **Manual**,
+**Plan**, /discuss, Inline Edit and consultations are **talk only**: agy runs
+in an empty folder of its own under a deny-by-default macOS sandbox (it can
+start nothing but itself, read no project file, and write only that folder
+and its own state under `~/.gemini`). FriedLiver gives it project excerpts
+from its own index, and agy asks for more in a `need` block in its reply
+(`{"need":[{"read":"src/a.ts","lines":"1-120"},{"search":"jsonb"}]}`), which
+FriedLiver answers through the same read-only index tools, inside the project,
+never secrets or ignored files, at most 5 requests a round, 3 rounds and about
+24,000 characters a turn. A prompt FriedLiver marks read only (a discussion,
+a read-only chat) always runs talk only, and such a chat's level can't be
+changed until that ends. agy also
+has no flag to ignore a repository's own agy config (`.agents/hooks.json`,
+MCP servers, settings), so every agy process runs in a macOS sandbox
+(`sandbox-exec`): it can't read or write any `.agents`, `.agent`, `_agents`,
+`_agent` or `.gemini` folder anywhere (any case), and can write your own
+`~/.gemini` only where agy keeps its state, so no turn can leave config for the
+next. On top of that FriedLiver checks the project (up to the repository root
+git reports) before and after each turn and refuses anything but markdown rules
+and workflows there. It won't run in your home folder. **Antigravity is
+macOS-only in FriedLiver for now**: Linux and Windows have no equal sandbox
+wired up yet, so it refuses to start there. Its
+edits don't pass through FriedLiver's diff review, but the per-turn git
+snapshot still undoes them. It can be asked, consulted and handed off to like
+any agent; it can't call FriedLiver's own tools, since agy reads MCP servers
+only from its own config.
 
 "Always allow" on a command adds a rule (that exact command, or a program and
 its subcommand) for this workspace, kept in your profile, never in the
