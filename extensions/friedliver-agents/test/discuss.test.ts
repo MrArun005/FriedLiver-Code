@@ -1,24 +1,31 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge, turnPrompt, type DiscussHost } from '../src/host/discuss';
+import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge, summaryPrompt, turnPrompt, type DiscussHost } from '../src/host/discuss';
 import { parseSaved, settleRestored } from '../src/host/persist';
 import {
   allAgree,
   carryOutText,
   confidenceOf,
+  discussMeta,
   discussingLabel,
   fallbackConclusion,
   parseConclusion,
   parseDiscuss,
   parseStance,
   stanceOf,
+  savedDiscussion,
   stripStance,
   withoutDiscussionTurns,
   type DiscussionItem,
 } from '../src/shared/discuss';
 import { EMPTY_STATE, reduce, type Action, type AgentKey, type AppState, type ChatView, type Item } from '../src/shared/model';
 import { slashAction } from '../src/shared/view';
+import { parseWebviewMessage } from '../src/shared/messages';
+import { discussView } from '../src/shared/discussView';
+import type { ChatSession } from '../src/shared/session';
+import type { ModelCatalog } from '../src/shared/discussMentions';
+import { CATALOG } from './fixtures/models';
 import { disposeCores, gitRepo, makeCore, waitFor } from './helpers';
 
 afterEach(disposeCores);
@@ -45,17 +52,20 @@ const chat = (id: string, agent: AgentKey, over: Partial<ChatView> = {}): ChatVi
 
 type Reply = string | ((prompt: string, n: number) => string | Promise<string>);
 
-/** A host whose agents answer from a script: `replies[agent][n]` is its n-th answer (the last one repeats). */
-function fakeHost(replies: Partial<Record<AgentKey, Reply[]>>, settings: { maxRounds?: number; tokenBudget?: number } = {}) {
-  let state: AppState = reduce(EMPTY_STATE, { t: 'created', chat: chat('chat-1', 'claude') });
+/**
+ * A host whose agents answer from a script: `replies[who][n]` is its n-th answer (the last one repeats);
+ * `who` is the agent, or "agent/model" for a participant on a model. `models`: what each agent reports.
+ */
+function fakeHost(replies: Partial<Record<string, Reply[]>>, settings: { maxRounds?: number; tokenBudget?: number } = {}, models?: ModelCatalog, starter: Partial<ChatView> = {}) {
+  let state: AppState = reduce(EMPTY_STATE, { t: 'created', chat: chat('chat-1', 'claude', starter) });
   let next = 1;
-  const asked: { agent: AgentKey; prompt: string }[] = [];
+  const asked: { agent: string; prompt: string }[] = [];
   const guards: [string, boolean][] = [];
   const sent: [string, string, string?][] = [];
   const cancelled: string[] = [];
-  const participants: AgentKey[] = [];
-  const said = new Map<AgentKey, number>();
-  const answer = async (agent: AgentKey, prompt: string) => {
+  const participants: string[] = [];
+  const said = new Map<string, number>();
+  const answer = async (agent: string, prompt: string) => {
     asked.push({ agent, prompt });
     const list = replies[agent] ?? ['ok'];
     const n = said.get(agent) ?? 0;
@@ -72,12 +82,15 @@ function fakeHost(replies: Partial<Record<AgentKey, Reply[]>>, settings: { maxRo
     },
     id: (p) => `${p}-${next++}`,
     settings: () => settings,
-    participant: async (_source, agent) => {
-      participants.push(agent);
-      const id = `chat-${agent}`;
+    participant: async (_source, agent, model, taken) => {
+      const who = model ? `${agent}/${model}` : agent;
+      participants.push(who);
+      const id = `chat-${who}`;
+      expect(taken).not.toContain(id);
       if (!state.chats.some((c) => c.id === id)) state = reduce(state, { t: 'created', chat: chat(id, agent) });
       return id;
     },
+    ...(models ? { models: (agent: AgentKey) => models[agent] ?? [] } : {}),
     prompt: async (chatId, text) => {
       state = reduce(state, { t: 'items', chatId, items: [{ kind: 'link', linkId: 'discussion', role: 'piped-in', chatId, agent: 'claude', label: 'Discussion', text, by: 'user' }] });
       const reply = await answer('claude', text);
@@ -85,8 +98,8 @@ function fakeHost(replies: Partial<Record<AgentKey, Reply[]>>, settings: { maxRo
       return { stopReason: reply ? 'end_turn' : 'cancelled', reply };
     },
     ask: async (_source, chatId, agent, text) => {
-      expect(chatId).toBe(`chat-${agent}`);
-      const reply = await answer(agent, text);
+      expect(chatId.startsWith(`chat-${agent}`)).toBe(true);
+      const reply = await answer(chatId.slice('chat-'.length), text);
       if (!reply) throw new Error('stopped without answering');
       return reply;
     },
@@ -211,6 +224,19 @@ describe('/discuss: the orchestrator', () => {
       ['chat-gemini', true],
       ['chat-1', false],
       ['chat-gemini', false],
+    ]);
+  });
+
+  it('Antigravity takes part like any agent: its chat goes read only (talk only) before its first turn', async () => {
+    const h = fakeHost({ claude: [`P${stance('Postgres', ['x'])}`, CONCLUSION], antigravity: [`M${stance('MySQL', ['y'])}`] }, { maxRounds: 1 });
+    await h.discussions.start('chat-1', [{ agent: 'antigravity' }], 'q');
+    expect(h.d()).toMatchObject({ state: 'done', ended: 'rounds' });
+    expect(h.asked.map((a) => a.agent)).toEqual(['claude', 'antigravity', 'claude']);
+    expect(h.guards).toEqual([
+      ['chat-1', true],
+      ['chat-antigravity', true],
+      ['chat-1', false],
+      ['chat-antigravity', false],
     ]);
   });
 
@@ -366,16 +392,27 @@ describe('/discuss: conclusions', () => {
 
 describe('/discuss: the command', () => {
   it('reads the mentions and the question', () => {
-    expect(parseDiscuss('/discuss @gemini @codex Postgres or MySQL?', 'claude')).toEqual({ agents: ['gemini', 'codex'], question: 'Postgres or MySQL?' });
-    expect(parseDiscuss('/discuss @gpt, @claude: which ORM', 'claude')).toEqual({ agents: ['codex'], question: 'which ORM' });
+    expect(parseDiscuss('/discuss @gemini @codex Postgres or MySQL?', 'claude')).toEqual({ participants: [{ agent: 'gemini' }, { agent: 'codex' }], question: 'Postgres or MySQL?', problems: [] });
+    expect(parseDiscuss('/discuss @gpt, @claude: which ORM', 'claude')).toEqual({ participants: [{ agent: 'codex' }], question: 'which ORM', problems: [] });
     expect(parseDiscuss('/discuss @gemini', 'claude')).toBe('incomplete');
     expect(parseDiscuss('/discuss which?', 'claude')).toBe('incomplete');
     expect(parseDiscuss('/discussion x', 'claude')).toBeNull();
   });
   it('goes through the composer’s slash command path', () => {
     const c = chat('chat-1', 'claude');
-    expect(slashAction('/discuss @gemini @codex Postgres or MySQL?', c, [c], [])).toEqual({ type: 'discuss', chatId: 'chat-1', agents: ['gemini', 'codex'], text: 'Postgres or MySQL?' });
+    expect(slashAction('/discuss @gemini @codex Postgres or MySQL?', c, [c], [])).toEqual({ type: 'discuss', chatId: 'chat-1', participants: [{ agent: 'gemini' }, { agent: 'codex' }], text: 'Postgres or MySQL?' });
     expect(slashAction('/discuss @gemini', c, [c], [])).toBe('incomplete');
+  });
+  it('sends models and waits while a mention is ambiguous or unknown', () => {
+    const c = chat('chat-1', 'claude');
+    expect(slashAction('/discuss Postgres or MySQL? @opus @sonnet @gemini', c, [c], [], CATALOG)).toEqual({
+      type: 'discuss',
+      chatId: 'chat-1',
+      participants: [{ agent: 'claude', model: 'claude-opus-4-5' }, { agent: 'claude', model: 'claude-sonnet-4-5' }, { agent: 'gemini' }],
+      text: 'Postgres or MySQL?',
+    });
+    expect(slashAction('/discuss @gpt-5.6 q', c, [c], [], CATALOG)).toBe('incomplete');
+    expect(slashAction('/discuss @nope @gemini q', c, [c], [], CATALOG)).toBe('incomplete');
   });
 });
 
@@ -628,5 +665,165 @@ describe('/discuss: the chat header says so while it runs', () => {
     expect(discussingLabel([user, { ...d, state: 'done', ended: 'agreed' }])).toBeUndefined();
     expect(discussingLabel([user, { ...d, continued: true }])).toBeUndefined();
     expect(discussingLabel([user])).toBeUndefined();
+  });
+});
+
+describe('/discuss: participants on models', () => {
+  const OPUS = 'claude/claude-opus-4-5';
+  const SONNET = 'claude/claude-sonnet-4-5';
+  /** A Claude chat on Opus 4.5, as its session reports it. */
+  const onOpus: ChatSession = {
+    options: [{ id: 'model', name: 'Model', category: 'model', type: 'select', current: 'claude-opus-4-5', choices: CATALOG.claude!, via: 'option' }],
+    commands: [],
+    live: true,
+  };
+  const stanceTo = (position: string, replyTo: string, disagree: string[] = ['x']) =>
+    `\n\n\`\`\`stance\n${JSON.stringify({ position, replyTo, quote: 'their words', agree: [], disagree, confidence: 0.7 })}\n\`\`\``;
+
+  it('the same agent twice: Claude · Opus and Claude · Sonnet, each in its own chat, then Gemini', async () => {
+    const h = fakeHost(
+      {
+        claude: [
+          `Postgres.${stance('Postgres', ['ops'])}`,
+          '```conclusion\n{"agreed":["a"],"disagreed":[{"point":"p","sides":[{"agent":"Claude · Opus 4.5","view":"v1"},{"agent":"' + SONNET + '","view":"v2"},{"agent":"claude","view":"dropped: two Claudes"}]}],"next":"n","carryOut":"Claude · Sonnet 4.5"}\n```',
+        ],
+        [SONNET]: [`MySQL.${stanceTo('MySQL', 'Claude · Opus 4.5')}`],
+        gemini: [`MySQL.${stanceTo('MySQL', SONNET)}`],
+      },
+      { maxRounds: 1 },
+      CATALOG,
+      { session: onOpus },
+    );
+    await h.discussions.start('chat-1', [{ agent: 'claude', model: 'claude-sonnet-4-5' }, 'gemini', { agent: 'claude', model: 'claude-opus-4-5' }], 'Postgres or MySQL?');
+    const d = h.d();
+    expect(d.participants).toEqual([
+      { agent: 'claude', model: 'claude-opus-4-5', modelName: 'Opus 4.5', chatId: 'chat-1' },
+      { agent: 'claude', model: 'claude-sonnet-4-5', modelName: 'Sonnet 4.5', chatId: `chat-${SONNET}` },
+      { agent: 'gemini', chatId: 'chat-gemini' },
+    ]);
+    expect(h.participants).toEqual([SONNET, 'gemini']);
+    expect(d.turns.map((t) => t.by)).toEqual([OPUS, SONNET, 'gemini']);
+    // Replies name a participant by its name or key.
+    expect(d.turns[1].stance?.re).toEqual({ agent: OPUS, quote: 'their words' });
+    expect(d.turns[2].stance?.re).toEqual({ agent: SONNET, quote: 'their words' });
+    // Each is told who it is and who the others are, by model.
+    const sonnetPrompt = h.asked.find((a) => a.agent === SONNET)!.prompt;
+    expect(sonnetPrompt).toContain('You are Claude · Sonnet 4.5, discussing a question with Claude · Opus 4.5 and Gemini');
+    expect(sonnetPrompt).toContain('Claude · Opus 4.5 (round 1):');
+    // The summing up names them by key; a bare "claude" fits two participants, so that side is dropped.
+    expect(h.asked.at(-1)!.prompt).toContain(`"${OPUS}" (Claude · Opus 4.5), "${SONNET}" (Claude · Sonnet 4.5), "gemini" (Gemini)`);
+    expect(d.conclusion).toMatchObject({ by: OPUS, carryOut: SONNET, disagreed: [{ point: 'p', sides: [{ agent: OPUS, view: 'v1' }, { agent: SONNET, view: 'v2' }] }] });
+    // The card's names.
+    const v = discussView(d);
+    expect(v.agents).toEqual([OPUS, SONNET, 'gemini']);
+    expect(v.agents.map(v.name)).toEqual(['Claude · Opus 4.5', 'Claude · Sonnet 4.5', 'Gemini']);
+    expect(v.outcome?.sides.flatMap((s) => s.agents)).toEqual([OPUS, SONNET, 'gemini']);
+    expect(discussMeta({ ...d, state: 'running', speaking: SONNET })).toBe('Round 1 of 1 · Claude · Sonnet 4.5 is speaking');
+    // Carry out with the second Claude: a message to its chat.
+    await h.discussions.carryOut(d.id, SONNET);
+    expect(h.d().carried).toBe(SONNET);
+    expect(h.sent.at(-1)?.[2]).toBe(`chat-${SONNET}`);
+  });
+
+  it('without models, nothing changes: the starter keeps its plain name', async () => {
+    const h = fakeHost({}, { maxRounds: 1 }, CATALOG, { session: onOpus });
+    await h.discussions.start('chat-1', ['gemini'], 'q');
+    expect(h.d().participants.map((p) => p.model)).toEqual([undefined, undefined]);
+    expect(h.d().turns.map((t) => t.by)).toEqual(['claude', 'gemini']);
+  });
+
+  it("refuses its own model only, and a model the agent doesn't offer", async () => {
+    const h = fakeHost({}, {}, CATALOG, { session: onOpus });
+    await expect(h.discussions.start('chat-1', [{ agent: 'claude', model: 'claude-opus-4-5' }, 'claude'], 'q')).rejects.toThrow(/at least one other agent or model/);
+    await expect(h.discussions.start('chat-1', [{ agent: 'gemini', model: 'gpt-5.6-terra' }], 'q')).rejects.toThrow("Gemini doesn't offer the model gpt-5.6-terra.");
+    expect(h.state.chats[0].items).toEqual([]);
+  });
+
+  it('turn prompts work by key for old and new discussions alike', () => {
+    const d: DiscussionItem = {
+      kind: 'discussion',
+      id: 'discuss-1',
+      question: 'Q?',
+      participants: [{ agent: 'claude', model: 'claude-opus-4-5', modelName: 'Opus 4.5' }, { agent: 'claude', model: 'claude-sonnet-4-5', modelName: 'Sonnet 4.5' }],
+      maxRounds: 2,
+      round: 1,
+      state: 'running',
+      turns: [{ by: OPUS, round: 1, text: 'A' }],
+      tokens: 0,
+      budget: 1000,
+    };
+    expect(turnPrompt(d, SONNET)).toContain('You are Claude · Sonnet 4.5, discussing a question with Claude · Opus 4.5');
+    expect(turnPrompt(d, SONNET)).toContain('Claude · Opus 4.5 (round 1):\nA');
+    expect(summaryPrompt(d, 'rounds')).toContain(`"carryOut": "${OPUS}|${SONNET}"`);
+    expect(summaryPrompt({ ...d, participants: [{ agent: 'claude' }, { agent: 'gemini' }], turns: [] }, 'rounds')).not.toContain('Name participants by these keys');
+  });
+
+  it('saved with models, read back as it was; a turn by someone not taking part is dropped', () => {
+    const d: DiscussionItem = {
+      kind: 'discussion',
+      id: 'discuss-1',
+      question: 'Postgres or MySQL?',
+      participants: [
+        { agent: 'claude', model: 'claude-opus-4-5', modelName: 'Opus 4.5', chatId: 'chat-1' },
+        { agent: 'claude', model: 'claude-sonnet-4-5', modelName: 'Sonnet 4.5', chatId: 'chat-2' },
+        { agent: 'gemini', chatId: 'chat-3' },
+      ],
+      maxRounds: 2,
+      round: 1,
+      state: 'done',
+      ended: 'rounds',
+      turns: [
+        { by: OPUS, round: 1, text: 'P', stance: { position: 'Postgres', agree: [], disagree: ['x'], parsed: true } },
+        { by: SONNET, round: 1, text: 'M', stance: { position: 'MySQL', agree: [], disagree: ['y'], re: { agent: OPUS, quote: 'q' }, parsed: true } },
+        { by: 'gemini', round: 1, text: 'M' },
+      ],
+      tokens: 10,
+      budget: 1000,
+      span: 0,
+      conclusion: { agreed: [], disagreed: [{ point: 'p', sides: [{ agent: SONNET, view: 'v' }] }], next: 'n', by: OPUS, carryOut: SONNET },
+      carried: SONNET,
+    };
+    const raw = JSON.parse(JSON.stringify(d)) as Record<string, unknown>;
+    expect(savedDiscussion(raw, 0)).toEqual(d);
+    const bad = { ...raw, turns: [...(raw.turns as unknown[]), { by: 'claude/haiku', round: 1, text: 'H' }, { by: 'claude', round: 1, text: 'C' }] };
+    expect(savedDiscussion(bad, 0)!.turns).toHaveLength(3);
+    // The same participant twice is kept once.
+    expect(savedDiscussion({ ...raw, participants: [...(raw.participants as unknown[]), { agent: 'gemini' }] }, 0)!.participants).toHaveLength(3);
+  });
+
+  it('an old discussion (agents only) still reads and draws by agent name', () => {
+    const old = savedDiscussion(
+      {
+        id: 'discuss-1',
+        question: 'Q?',
+        participants: [{ agent: 'claude', chatId: 'c1' }, { agent: 'codex' }],
+        turns: [{ by: 'codex', round: 1, text: 'T', stance: { position: 'p', agree: [], disagree: [], re: { agent: 'claude', quote: 'q' }, parsed: true } }],
+        state: 'done',
+        ended: 'agreed',
+        conclusion: { agreed: [], disagreed: [], next: 'n', by: 'claude', carryOut: 'codex' },
+        carried: 'codex',
+      },
+      0,
+    )!;
+    expect(old.turns[0].stance?.re).toEqual({ agent: 'claude', quote: 'q' });
+    expect(old.conclusion?.carryOut).toBe('codex');
+    expect(old.carried).toBe('codex');
+    expect(discussView(old).agents.map(discussView(old).name)).toEqual(['Claude', 'Codex']);
+  });
+
+  it('the webview message carries agents and models; a bad model or key is refused', () => {
+    expect(parseWebviewMessage({ type: 'discuss', chatId: 'chat-1', participants: [{ agent: 'claude', model: 'claude-opus-4-5' }, { agent: 'gemini' }, { agent: 'gemini' }], text: 'q' })).toEqual({
+      type: 'discuss',
+      chatId: 'chat-1',
+      participants: [{ agent: 'claude', model: 'claude-opus-4-5' }, { agent: 'gemini' }],
+      text: 'q',
+    });
+    expect(parseWebviewMessage({ type: 'discuss', chatId: 'chat-1', participants: [{ agent: 'claude', model: 'a b' }], text: 'q' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'discuss', chatId: 'chat-1', participants: [{ agent: 'nobody' }], text: 'q' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'discuss', chatId: 'chat-1', agents: ['gemini'], text: 'q' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'discussion', id: 'discuss-1', act: 'carry', agent: SONNET })).toEqual({ type: 'discussion', id: 'discuss-1', act: 'carry', agent: SONNET });
+    expect(parseWebviewMessage({ type: 'discussion', id: 'discuss-1', act: 'carry', agent: 'gemini' })).toEqual({ type: 'discussion', id: 'discuss-1', act: 'carry', agent: 'gemini' });
+    expect(parseWebviewMessage({ type: 'discussion', id: 'discuss-1', act: 'carry', agent: 'nobody/x' })).toBeNull();
+    expect(parseWebviewMessage({ type: 'discussion', id: 'discuss-1', act: 'carry', agent: 'claude/a b' })).toBeNull();
   });
 });
