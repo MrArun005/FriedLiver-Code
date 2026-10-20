@@ -36,7 +36,7 @@ const list = (chats: Named[]) => chats.map((c) => `“${short(chatName(c), 60)}�
 /** The status bar's "N working" and "Auto: …" items. */
 export function statusTexts(busy: Named[], full: Named[]): { working?: { text: string; tooltip: string }; auto?: { text: string; tooltip: string } } {
   return {
-    ...(busy.length ? { working: { text: `$(sync~spin) ${busy.length} working`, tooltip: `${list(busy)} ${busy.length === 1 ? 'is' : 'are'} working. Open the Agent Manager.` } } : {}),
+    ...(busy.length ? { working: { text: `$(loading~spin) ${busy.length} agent${busy.length === 1 ? '' : 's'} working`, tooltip: `${list(busy)} ${busy.length === 1 ? 'is' : 'are'} working. Open the Agent Manager.` } } : {}),
     ...(full.length
       ? {
           auto: {

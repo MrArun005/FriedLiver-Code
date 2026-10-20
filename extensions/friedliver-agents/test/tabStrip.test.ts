@@ -42,14 +42,15 @@ describe('a mark on every tab', () => {
     for (const a of AGENT_KEYS) {
       const svg = readFileSync(path.join(__dirname, `../media/agent-${a}.svg`), 'utf8');
       const m = markFor(a);
-      expect(svg, a).toContain(`d="${m.d}"`);
+      if (m.svg) expect(svg, a).toContain(m.svg);
+      else expect(svg, a).toContain(`d="${m.d}"`);
       if (m.fill) expect(svg, a).toContain(`d="${m.fill}"`);
     }
   });
 
-  it('every mark is a 16-grid drawing (crisp at 1x and 2x)', () => {
+  it('every mark is a drawing on a whole-number grid (crisp at 1x and 2x); a vendor logo may be its own layers', () => {
     for (const m of Object.values(MARKS)) {
-      expect(m.d.length).toBeGreaterThan(0);
+      expect(m.d.length || m.svg?.length).toBeGreaterThan(0);
       expect(m.viewBox ?? '0 0 16 16').toMatch(/^-?\d+ -?\d+ \d+ \d+$/);
     }
   });
