@@ -1,5 +1,5 @@
 diff --git a/src/vs/base/browser/ui/menu/menu.ts b/src/vs/base/browser/ui/menu/menu.ts
-index f6b4122a..0d5c0172 100644
+index f6b4122a..04298af3 100644
 --- a/src/vs/base/browser/ui/menu/menu.ts
 +++ b/src/vs/base/browser/ui/menu/menu.ts
 @@ -1163,11 +1163,11 @@ ${formatRule(Codicon.menuSubmenu)}
@@ -10,8 +10,9 @@ index f6b4122a..0d5c0172 100644
 +	height: var(--fl-h-md, 24px);
  	align-items: center;
  	position: relative;
- 	margin: 0 4px;
+-	margin: 0 4px;
 -	border-radius: var(--vscode-cornerRadius-medium);
++	margin: 0 calc(var(--fl-sp-1, 4px) + var(--fl-sp-half, 0px)); /* FriedLiver: rows inset 6, concentric with the 12 float (§2.13) */
 +	border-radius: var(--fl-r-row, var(--vscode-cornerRadius-medium)); /* FriedLiver: Menu §2.13 rows */
  }
  
@@ -43,6 +44,179 @@ index f6b4122a..0d5c0172 100644
  	padding: 0;
  	border-radius: 0;
  }
+diff --git a/src/vs/platform/quickinput/browser/quickAccess.ts b/src/vs/platform/quickinput/browser/quickAccess.ts
+index 54dfc47e..3882d8f6 100644
+--- a/src/vs/platform/quickinput/browser/quickAccess.ts
++++ b/src/vs/platform/quickinput/browser/quickAccess.ts
+@@ -12,6 +12,8 @@ import { IInstantiationService } from '../../instantiation/common/instantiation.
+ import { DefaultQuickAccessFilterValue, Extensions, IQuickAccessController, IQuickAccessOptions, IQuickAccessProvider, IQuickAccessProviderDescriptor, IQuickAccessRegistry } from '../common/quickAccess.js';
+ import { IQuickInputService, IQuickPick, IQuickPickItem, ItemActivation } from '../common/quickInput.js';
+ import { Registry } from '../../registry/common/platform.js';
++import { $, addDisposableListener, append } from '../../../base/browser/dom.js';
++import { localize } from '../../../nls.js';
+ 
+ export class QuickAccessController extends Disposable implements IQuickAccessController {
+ 
+@@ -123,6 +125,9 @@ export class QuickAccessController extends Disposable implements IQuickAccessCon
+ 		}
+ 		picker.contextKey = descriptor?.contextKey;
+ 		picker.filterValue = (value: string) => value.substring(descriptor ? descriptor.prefix.length : 0);
++		if (!options?.anchor && !picker.hideInput) {
++			picker.widget = this.createScopes(picker, descriptor, disposables); // FriedLiver: scope chips (§2.13)
++		}
+ 
+ 		// Pick mode: setup a promise that can be resolved
+ 		// with the selected items and prevent execution
+@@ -236,6 +241,38 @@ export class QuickAccessController extends Disposable implements IQuickAccessCon
+ 		return disposables;
+ 	}
+ 
++	/**
++	 * FriedLiver: the palette's scope chips (COMPONENTS.md §2.13). Each chip switches the prefix and keeps the
++	 * typed filter; the chip whose provider is showing is pressed. Agents shows only when a provider owns `~`.
++	 */
++	private createScopes(picker: IQuickPick<IQuickPickItem, { useSeparators: true }>, descriptor: IQuickAccessProviderDescriptor | undefined, disposables: DisposableStore): HTMLElement {
++		const scopes: { label: string; prefix: string }[] = [
++			{ label: localize('scopeFiles', "Files"), prefix: '' },
++			{ label: localize('scopeCommands', "Commands"), prefix: '>' },
++			{ label: localize('scopeSymbols', "Symbols"), prefix: '#' },
++		];
++		if (this.registry.getQuickAccessProvider('~', this.contextKeyService)?.prefix === '~') {
++			scopes.push({ label: localize('scopeAgents', "Agents"), prefix: '~' });
++		}
++		const row = $('.quick-input-scopes');
++		row.setAttribute('role', 'toolbar');
++		row.setAttribute('aria-label', localize('scopes', "Search in"));
++		const current = descriptor?.prefix ?? '';
++		for (const scope of scopes) {
++			const chip = append(row, $('button.quick-input-scope', { type: 'button' }, scope.label));
++			chip.title = scope.prefix ? localize('scopePrefix', "{0}: type {1} first", scope.label, scope.prefix) : localize('scopeNoPrefix', "{0}: no prefix", scope.label);
++			const on = scope.prefix === current;
++			chip.classList.toggle('checked', on);
++			chip.setAttribute('aria-pressed', String(on));
++			disposables.add(addDisposableListener(chip, 'mousedown', e => e.preventDefault())); // keep focus in the filter
++			disposables.add(addDisposableListener(chip, 'click', () => {
++				const filter = picker.value.substring(current.length);
++				this.show(scope.prefix + filter, { preserveValue: true });
++			}));
++		}
++		return row;
++	}
++
+ 	private getOrInstantiateProvider(value: string, enabledProviderPrefixes?: string[]): [IQuickAccessProvider | undefined, IQuickAccessProviderDescriptor | undefined] {
+ 		const providerDescriptor = this.registry.getQuickAccessProvider(value, this.contextKeyService);
+ 		if (!providerDescriptor || enabledProviderPrefixes && !enabledProviderPrefixes?.includes(providerDescriptor.prefix)) {
+diff --git a/src/vs/platform/quickinput/browser/quickInput.ts b/src/vs/platform/quickinput/browser/quickInput.ts
+index 8996e42e..b1af204b 100644
+--- a/src/vs/platform/quickinput/browser/quickInput.ts
++++ b/src/vs/platform/quickinput/browser/quickInput.ts
+@@ -523,6 +523,23 @@ export abstract class QuickInput extends Disposable implements IQuickInput {
+ 
+ export class QuickPick<T extends IQuickPickItem, O extends { useSeparators: boolean } = { useSeparators: false }> extends QuickInput implements IQuickPick<T, O> {
+ 
++	// FriedLiver: an element under the filter (the palette's scope chips), as QuickWidget renders its widget.
++	private _flWidget: HTMLElement | undefined;
++	private _flWidgetUpdated = false;
++
++	get widget(): HTMLElement | undefined {
++		return this._flWidget;
++	}
++
++	set widget(widget: unknown) {
++		const element = widget as HTMLElement | undefined;
++		if (this._flWidget !== element) {
++			this._flWidget = element;
++			this._flWidgetUpdated = true;
++			this.update();
++		}
++	}
++
+ 	private static readonly DEFAULT_ARIA_LABEL = localize('quickInputBox.ariaLabel', "Type to narrow down results.");
+ 
+ 	private _value = '';
+@@ -1030,6 +1047,14 @@ export class QuickPick<T extends IQuickPickItem, O extends { useSeparators: bool
+ 		if (!this.visible) {
+ 			return;
+ 		}
++		if (this._flWidgetUpdated) {
++			this._flWidgetUpdated = false;
++			if (this._flWidget) {
++				dom.reset(this.ui.widget, this._flWidget);
++			} else {
++				dom.reset(this.ui.widget);
++			}
++		}
+ 		// store the scrollTop before it is reset
+ 		const scrollTopBefore = this.keepScrollPosition ? this.scrollTop : 0;
+ 		const hasDescription = !!this.description;
+diff --git a/src/vs/platform/quickinput/browser/quickInputController.ts b/src/vs/platform/quickinput/browser/quickInputController.ts
+index cb673cd1..c5db516d 100644
+--- a/src/vs/platform/quickinput/browser/quickInputController.ts
++++ b/src/vs/platform/quickinput/browser/quickInputController.ts
+@@ -64,7 +64,7 @@ type QuickInputOverlayLayoutCorrection = {
+ };
+ 
+ export class QuickInputController extends Disposable {
+-	private static readonly MAX_WIDTH = 600; // Max total width of quick input widget
++	private static readonly MAX_WIDTH = 640; // Max total width of quick input widget (FriedLiver: --w-palette)
+ 
+ 	private idPrefix: string;
+ 	private ui: QuickInputUI | undefined;
+diff --git a/src/vs/platform/quickinput/browser/quickInputList.ts b/src/vs/platform/quickinput/browser/quickInputList.ts
+index 768fa41b..4c2c6125 100644
+--- a/src/vs/platform/quickinput/browser/quickInputList.ts
++++ b/src/vs/platform/quickinput/browser/quickInputList.ts
+@@ -278,7 +278,7 @@ class QuickInputItemDelegate implements IListVirtualDelegate<IQuickPickElement>
+ 		if (element instanceof QuickPickSeparatorElement) {
+ 			return 30;
+ 		}
+-		return element.saneDetail ? 44 : 22;
++		return element.saneDetail ? 44 : 40; // FriedLiver: palette rows are 40 (--h-xl), two-line 44 (COMPONENTS.md §2.13)
+ 	}
+ 
+ 	getTemplateId(element: IQuickPickElement): string {
+@@ -1413,7 +1413,7 @@ export class QuickInputList extends Disposable {
+ 	layout(maxHeight?: number): void {
+ 		this._tree.getHTMLElement().style.maxHeight = maxHeight ? `${
+ 			// Make sure height aligns with list item heights
+-			Math.floor(maxHeight / 44) * 44
++			Math.floor(maxHeight / 40) * 40 // FriedLiver: whole 40px rows
+ 			// Add some extra height so that it's clear there's more to scroll
+ 			+ 6
+ 			}px` : '';
+diff --git a/src/vs/platform/quickinput/common/quickInput.ts b/src/vs/platform/quickinput/common/quickInput.ts
+index b914743f..ed82cd88 100644
+--- a/src/vs/platform/quickinput/common/quickInput.ts
++++ b/src/vs/platform/quickinput/common/quickInput.ts
+@@ -523,6 +523,11 @@ export enum QuickPickFocus {
+  */
+ export interface IQuickPick<T extends IQuickPickItem, O extends { useSeparators: boolean } = { useSeparators: false }> extends IQuickInput {
+ 
++	/**
++	 * FriedLiver: an HTML element rendered under the filter (the palette's scope chips, COMPONENTS.md §2.13).
++	 */
++	widget?: unknown /* HTMLElement */ | undefined;
++
+ 	/**
+ 	 * The type of the quick input.
+ 	 */
+diff --git a/src/vs/workbench/browser/layout.ts b/src/vs/workbench/browser/layout.ts
+index 75f9238f..7fce29fd 100644
+--- a/src/vs/workbench/browser/layout.ts
++++ b/src/vs/workbench/browser/layout.ts
+@@ -267,9 +267,9 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
+ 
+ 		const isCommandCenterVisible = titlebarVisible && this.configurationService.getValue<boolean>(LayoutSettings.COMMAND_CENTER) !== false;
+ 		if (isCommandCenterVisible) {
+-			// If the command center is visible then the quickinput
+-			// should go over the title bar and the banner
+-			quickPickTop = 6;
++			// FriedLiver: the palette opens 4px under the title bar, so the command center stays
++			// visible above it (COMPONENTS.md §2.13 palette variant)
++			quickPickTop = top + 4;
+ 		}
+ 
+ 		return { top, quickPickTop };
 diff --git a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts b/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
 index 38e72282..cb47599b 100644
 --- a/src/vs/workbench/browser/parts/notifications/notificationsCenter.ts
@@ -70,7 +244,7 @@ index 0b62b580..3c7821e2 100644
  
  	private static readonly PURGE_TIMEOUT: { [severity: number]: number } = {
 diff --git a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
-index ebb6b6f9..9e7f6de6 100644
+index ebb6b6f9..ef5102f8 100644
 --- a/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
 +++ b/src/vs/workbench/browser/parts/notifications/notificationsViewer.ts
 @@ -39,7 +39,7 @@ import { logNotificationInteraction, NotificationTelemetrySurface } from '../../
@@ -91,6 +265,15 @@ index ebb6b6f9..9e7f6de6 100644
  
  		// Render message into offset helper
  		const renderedMessage = NotificationMessageRenderer.render(notification.message);
+@@ -513,7 +513,7 @@ export class NotificationTemplateRenderer extends Disposable {
+ 
+ 	private renderSource(notification: INotificationViewItem, sourceCustomHover: IManagedHover): void {
+ 		if (notification.expanded && notification.source) {
+-			this.template.source.textContent = localize('notificationSource', "Source: {0}", notification.source);
++			this.template.source.textContent = notification.source; // FriedLiver: the source in plain words, no "Source:" label (§6.12)
+ 			sourceCustomHover.update(notification.source);
+ 		} else {
+ 			this.template.source.textContent = '';
 diff --git a/src/vs/workbench/browser/style.ts b/src/vs/workbench/browser/style.ts
 index 9250ef3f..b3e411a0 100644
 --- a/src/vs/workbench/browser/style.ts
@@ -104,6 +287,19 @@ index 9250ef3f..b3e411a0 100644
  import { registerThemingParticipant } from '../../platform/theme/common/themeService.js';
  import { WORKBENCH_BACKGROUND, TITLE_BAR_ACTIVE_BACKGROUND } from '../common/theme.js';
  import { isWeb, isIOS } from '../../base/common/platform.js';
+diff --git a/src/vs/workbench/services/layout/browser/layoutService.ts b/src/vs/workbench/services/layout/browser/layoutService.ts
+index 6851c3b5..cb87551d 100644
+--- a/src/vs/workbench/services/layout/browser/layoutService.ts
++++ b/src/vs/workbench/services/layout/browser/layoutService.ts
+@@ -62,7 +62,7 @@ export const enum LayoutSettings {
+ export const enum ModernUIFrostedGlassOpacity {
+ 	Minimum = 50,
+ 	Maximum = 100,
+-	Default = 80
++	Default = 84 // FriedLiver: the spec's glass alpha
+ }
+ 
+ export const enum ModernUIEditorTabStyle {
 diff --git a/src/vs/workbench/electron-browser/desktop.contribution.ts b/src/vs/workbench/electron-browser/desktop.contribution.ts
 index 41250d7b..a609834a 100644
 --- a/src/vs/workbench/electron-browser/desktop.contribution.ts
@@ -134,16 +330,3 @@ index 41250d7b..a609834a 100644
  				'scope': ConfigurationScope.APPLICATION,
  				'description': localize('dialogStyle', "Adjust the appearance of dialogs to be native by the OS or custom."),
  				agentsWindow: { default: 'custom' },
-diff --git a/src/vs/workbench/services/layout/browser/layoutService.ts b/src/vs/workbench/services/layout/browser/layoutService.ts
-index 6851c3b5..cb87551d 100644
---- a/src/vs/workbench/services/layout/browser/layoutService.ts
-+++ b/src/vs/workbench/services/layout/browser/layoutService.ts
-@@ -62,7 +62,7 @@ export const enum LayoutSettings {
- export const enum ModernUIFrostedGlassOpacity {
- 	Minimum = 50,
- 	Maximum = 100,
--	Default = 80
-+	Default = 84 // FriedLiver: the spec's glass alpha
- }
- 
- export const enum ModernUIEditorTabStyle {

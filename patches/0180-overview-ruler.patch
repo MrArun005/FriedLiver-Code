@@ -1,0 +1,15 @@
+diff --git a/src/vs/editor/common/services/markerDecorationsService.ts b/src/vs/editor/common/services/markerDecorationsService.ts
+index c25a85a6..4a3efc2f 100644
+--- a/src/vs/editor/common/services/markerDecorationsService.ts
++++ b/src/vs/editor/common/services/markerDecorationsService.ts
+@@ -288,7 +288,9 @@ class MarkerDecorations extends Disposable {
+ 			showIfCollapsed: true,
+ 			overviewRuler: {
+ 				color,
+-				position: OverviewRulerLane.Right
++				// FriedLiver: an error is a full-width band, so the ruler's marks differ by shape as well as colour:
++				// changes in the start lane, find matches in the centre, warnings at the end (COMPONENTS.md §6.6)
++				position: marker.severity === MarkerSeverity.Error ? OverviewRulerLane.Full : OverviewRulerLane.Right
+ 			},
+ 			minimap,
+ 			zIndex,
