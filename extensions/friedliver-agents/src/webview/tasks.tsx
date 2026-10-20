@@ -638,7 +638,7 @@ function Decide({ chat, line }: { chat: ChatView; line: CardLine }) {
   if (d.kind === 'question') {
     return (
       <div class="actions">
-        <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
+        <Button size="sm" onClick={() => open(chat.id)}>
           Answer
         </Button>
       </div>
@@ -1040,7 +1040,7 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
   }
   if (d.kind === 'review') {
     return (
-      <Button variant="primary" size="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
+      <Button variant="secondary" size="sm" onClick={() => send({ type: 'review', reviewId: d.id, action: 'open' })}>
         Review
       </Button>
     );
@@ -1049,27 +1049,27 @@ function RowDecision({ chat, line }: { chat: ChatView; line: CardLine }) {
   const item = chat.items.find((i): i is Approvable => decisionId(i) === d.id && i.kind !== 'question');
   if (item && approvalOf(item, chat).hold) {
     return (
-      <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
+      <Button variant="secondary" size="sm" onClick={() => open(chat.id)}>
         Review
       </Button>
     );
   }
   if (d.kind === 'command') {
     return (
-      <Button variant="primary" icon="play" size="sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
+      <Button variant="secondary" icon="play" size="sm" onClick={() => send({ type: 'command', commandId: d.id, approve: true })}>
         Run
       </Button>
     );
   }
   if (d.kind === 'bridge') {
     return (
-      <Button variant="primary" size="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
+      <Button variant="secondary" size="sm" onClick={() => send({ type: 'bridge', requestId: d.id, answer: 'allow' })}>
         Allow
       </Button>
     );
   }
   return (
-    <Button variant="primary" size="sm" onClick={() => open(chat.id)}>
+    <Button variant="secondary" size="sm" onClick={() => open(chat.id)}>
       Answer
     </Button>
   );

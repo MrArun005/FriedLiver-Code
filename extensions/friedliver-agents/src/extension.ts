@@ -45,7 +45,7 @@ import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type App
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
 import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
-import { agentName, chatName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
+import { agentName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
 import { codexModelVisibility } from './host/codexModels';
 
@@ -1110,7 +1110,9 @@ export class Controller {
     }
     const roots = this.core.roots();
     const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
-    const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)}: ${clip(chatName(chat), 40)}`, cwd: folder });
+    // An agent's terminal is its own tab, "<Agent> · <command>", with the agent's mark (COMPONENTS.md v2 §6.7).
+    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${chat.agent}${kind}.svg`);
+    const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)} · ${clip(command, 40)}`, cwd: folder, iconPath: { light: mark('-light'), dark: mark('') } });
     terminal.show();
     terminal.sendText(command, true);
   }

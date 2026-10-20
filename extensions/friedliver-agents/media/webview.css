@@ -835,12 +835,7 @@ th[aria-sort] .th-btn {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
-.chat-table tr[data-status='needs-you'] td:first-child {
-  box-shadow: inset 2px 0 var(--decision);
-}
-.chat-table tr[data-status='needs-you'] td {
-  background: var(--decision-soft);
-}
+/* Needs-you rows carry the bullseye, not a blue tint or bar (blue is marks only, §0). */
 .c-status {
   width: 116px;
 }
@@ -1240,13 +1235,7 @@ svg[data-lit] .map-file-line:not(.lit) {
   stroke: var(--focus);
   stroke-width: 2;
 }
-.map-node[data-status='needs-you'] .box {
-  fill: color-mix(in srgb, var(--decision) 12%, var(--menu-bg));
-  stroke: color-mix(in srgb, var(--decision) 55%, var(--menu-bg));
-}
-.map-node[data-status='error'] .box {
-  stroke: color-mix(in srgb, var(--error) 55%, var(--menu-bg));
-}
+/* A node's state is its status mark and ring, never a blue or red box (§0: blue marks only; no red borders). */
 .map-node .ring {
   fill: none;
   stroke-width: 1.5;
