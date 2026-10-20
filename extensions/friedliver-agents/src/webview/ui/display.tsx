@@ -121,7 +121,8 @@ export function ChipButton({
 
 export function Count({ n, loud, label }: { n: number | string; loud?: boolean; label?: string }) {
   return (
-    <span class={cx('fl-count', loud && 'fl-count--loud')} title={label} aria-label={label}>
+    // Keyed by its value: a new number mounts afresh and bumps once (§2.6).
+    <span key={String(n)} class={cx('fl-count', loud && 'fl-count--loud')} title={label} aria-label={label}>
       {n}
     </span>
   );
@@ -131,13 +132,14 @@ export const Kbd = ({ children, inline }: { children: ComponentChildren; inline?
   typeof children === 'string' ? <Keycaps keys={children} inline={inline} /> : <kbd class={cx('fl-kbd', inline && 'fl-kbd--inline')}>{children}</kbd>;
 
 /**
- * The agent's tile (§2.22): its letter, or with `mark` its Mark (§2.22b) in its hue. `size` 'marker' is
- * the /discuss meter's marker (§2.30, 28).
+ * The agent's puck (§2.22): round, its Mark (§2.22b) in its hue (`mark={false}`: v1's letter, for the
+ * phone's tiny rows). `working` adds the breathing ring. `size` 'marker' is the /discuss meter's (§2.30, 28).
  */
-export function Avatar({ agent, size, mark }: { agent: AgentKey; size?: 'sm' | 'md' | 'lg' | 'marker'; mark?: boolean }) {
+export function Avatar({ agent, size, mark = true, working }: { agent: AgentKey; size?: 'xs' | 'sm' | 'md' | 'lg' | 'marker'; mark?: boolean; working?: boolean }) {
   const face = AGENT_FACES[agent];
+  const name = working ? `${face.name}, working` : face.name;
   return (
-    <span class={cx('fl-avatar', size && size !== 'md' && `fl-avatar--${size}`, mark && 'fl-avatar--mark')} data-agent={agent} title={face.name} aria-label={face.name} role="img">
+    <span class={cx('fl-avatar', size && size !== 'md' && `fl-avatar--${size}`, mark && 'fl-avatar--mark')} data-agent={agent} data-working={working ? '' : undefined} title={name} aria-label={name} role="img">
       {mark ? (
         <span class="fl-mark" aria-hidden="true">
           <MarkSvg agent={agent} />
