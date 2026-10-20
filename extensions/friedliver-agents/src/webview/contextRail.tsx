@@ -56,6 +56,8 @@ export function ContextRail({ chat }: { chat: ChatView }) {
           </div>
         </div>
       </section>
+      {/* "In this chat" (your messages, to jump to) draws here from the transcript. */}
+      <section id="ctx-jump" class="ctx-jump" />
       {f.changed.length > 0 && (
         <section>
           <h3>

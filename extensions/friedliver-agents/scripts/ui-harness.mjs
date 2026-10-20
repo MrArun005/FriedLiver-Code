@@ -886,14 +886,15 @@ async function shoot() {
     await p.close();
   }
   {
-    // The composer: centred, 640px at most; one row; orange border on focus.
+    // The composer: the whole chat column on the transcript's gutters (owner: use the whole screen); one row.
     for (const width of [480, 900, 1600]) {
       const p = await open('surface=chat&select=chat-c5', width, 700);
       const r = await p.evaluate(() => {
         const c = document.querySelector('.composer').getBoundingClientRect();
-        return { w: c.width, left: c.left, right: window.innerWidth - c.right };
+        const col = document.querySelector('.chat-col').getBoundingClientRect();
+        return { left: c.left - col.left, right: col.right - c.right };
       });
-      check(r.w <= 680.5 && Math.abs(r.left - r.right) <= 1 && (width > 712 || r.left >= 15.5), `at ${width}px the composer is centred, ${Math.round(r.w)}px wide (<= 680, 16px gutters)`);
+      check(Math.abs(r.left - r.right) <= 1 && r.left >= 15.5 && r.left <= 20.5, `at ${width}px the composer spans the chat column on its gutters (${Math.round(r.left)} / ${Math.round(r.right)}px)`);
       await p.close();
     }
     for (const [width, id] of [[320, 'chat-c6'], [480, 'chat-c6'], [640, 'chat-c6'], [320, 'chat-c5'], [900, 'chat-pay&fixture=subagents']]) {

@@ -338,7 +338,7 @@ function Meter({ v, round, compact }: { v: DiscussView; round: number; compact?:
   return (
     <div class="fl-discuss__meter" data-compact={compact ? '' : undefined} role="img" aria-label={`Where each agent stands. ${said}`}>
       <div class="fl-discuss__axis">
-        <span />
+        <span class="fl-discuss__axis-h">Where each agent stands</span>
         <div class="fl-discuss__ends">
           <b>
             <Icon name="arrowLeft" />
@@ -350,29 +350,25 @@ function Meter({ v, round, compact }: { v: DiscussView; round: number; compact?:
             <Icon name="send" />
           </b>
         </div>
+        <span />
       </div>
       {m.lanes.map((l) => {
-        const lo = Math.min(l.x, ...l.trail);
-        const hi = Math.max(l.x, ...l.trail);
         return (
           <div key={l.agent} class="fl-discuss__lane">
-            <div class="fl-discuss__who">
+            <div class="fl-discuss__who" title={v.name(l.agent)}>
               <Avatar agent={agentOf(l.agent)} mark />
-              <span>{v.name(l.agent)}</span>
+              <span class="fl-discuss__name">{v.name(l.agent)}</span>
             </div>
             <div class="fl-discuss__track">
               <i class="fl-discuss__mid" />
-              {l.trail.length > 0 && <i class="fl-discuss__trail" style={{ '--x': `${lo}%`, '--w': `${hi - lo}%` }} />}
-              {l.trail.map((x) => (
-                <i key={x} class="fl-discuss__ghost" style={{ '--x': `${x}%` }} />
-              ))}
+              {/* v2 (§2.30): one puck per agent, no trail or ghosts; the round history lives in Rounds. */}
               <span class="fl-discuss__marker" style={{ '--x': `${l.x}%` }} data-speaking={l.speaking ? '' : undefined}>
-                <Avatar agent={agentOf(l.agent)} size="marker" mark />
-              </span>
-              <span class="fl-discuss__val" style={{ '--x': `${l.x}%` }} data-end={l.x < 50 ? 'start' : l.x > 50 ? 'end' : undefined} data-speaking={l.speaking ? '' : undefined}>
-                {l.label}
+                <Avatar agent={agentOf(l.agent)} size="marker" mark working={l.speaking} />
               </span>
             </div>
+            <span class="fl-discuss__val" data-speaking={l.speaking ? '' : undefined}>
+              {l.label}
+            </span>
           </div>
         );
       })}
@@ -396,10 +392,6 @@ function Steps({ d }: { d: DiscussionItem }) {
           </Fragment>
         );
       })}
-      <span class="fl-discuss__legend">
-        <i class="fl-discuss__ghost" />
-        earlier rounds
-      </span>
     </div>
   );
 }

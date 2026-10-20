@@ -13,8 +13,10 @@ const MEDIA = path.resolve(__dirname, '..', 'extensions', 'friedliver-agents', '
 const START = '/* ---- Composer (§2.1';
 const END = '/* ---- Banners above the composer';
 // Change only with the owner's sign-off on the new composer.
-// 2026-10-20: owner-authorised v2 restyle (HANDOFF-v2 §B2.3): colours, radii, shadows and the send state only; DOM, sizes and spacing unchanged.
-const APPROVED = '5840d5bcaba5d2a36ca44a2fc9413aa92de720cf24e37d0acee6119f6a465aef';
+// 2026-10-20: owner-authorised v2 restyle (HANDOFF-v2 §B2.3): colours, radii, shadows and the send state; and, on the
+// owner's later order ("use the whole screen"), the composer spans the chat's width on the transcript's gutters
+// instead of a 680px centred column. DOM and controls unchanged.
+const APPROVED = '50368a4295fc9519b5801f1bc8266e8c4937e1bb44f200787e1f5b70f993f469';
 
 describe('approved composer', () => {
   it('keeps its styles', () => {

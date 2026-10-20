@@ -1,4 +1,5 @@
 import { Fragment, render } from 'preact';
+import { createPortal } from 'preact/compat';
 import { DiscussionCard } from './discussion';
 import { discussingLabel, parseDiscuss, withoutDiscussionTurns } from '../shared/discuss';
 import { applyDiscussMention, currentModel, discussMentionAt, mentionSuggestions, modelCatalog, type Choice, type MentionProblem } from '../shared/discussMentions';
@@ -213,6 +214,7 @@ function App() {
               conflictKey={JSON.stringify(conflicts)}
               reveal={reveal}
               onSelect={select}
+              rail={rail}
             />
             <Composer
               key={chat.id}
@@ -690,6 +692,8 @@ interface TranscriptProps {
   conflictKey: string;
   reveal: { id: string; n: number } | null;
   onSelect: Select;
+  /** The context rail is shown: "In this chat" moves into it (its slot, #ctx-jump). */
+  rail?: boolean;
 }
 
 /** Drawn again when this chat, or what it shows of the others, changed: not for every chunk another agent streams. */
@@ -701,7 +705,8 @@ const Transcript = memo(
     a.conflictKey === b.conflictKey &&
     a.state.images === b.state.images &&
     a.reveal === b.reveal &&
-    a.onSelect === b.onSelect,
+    a.onSelect === b.onSelect &&
+    a.rail === b.rail,
 );
 
 /** The ids a notification can reveal an item by (its element is item-<id>). */
@@ -713,7 +718,10 @@ function revealIds(i: Item): string[] {
 /** Groups shown at first, and added each time you scroll up to the earliest one shown. */
 const WINDOW = 120;
 
-function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect }: TranscriptProps) {
+function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect, rail }: TranscriptProps) {
+  // With the context rail, "In this chat" draws in the rail's slot (§2.34) instead of beside the transcript.
+  const [railSlot, setRailSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => setRailSlot(rail ? document.getElementById('ctx-jump') : null), [rail]);
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // Only the newest groups are in the page; scrolling up to the first one shown brings earlier ones in.
@@ -810,7 +818,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     }
   };
   return (
-    <div class="transcript-wrap" data-jump={jump ? '' : undefined}>
+    <div class="transcript-wrap" data-jump={jump && !rail ? "" : undefined}>
     <div
       class="transcript"
       ref={box}
@@ -859,16 +867,20 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
           </div>
         </div>
       )}
-      {jump && (
-        <nav class="jump-list" aria-label="In this chat">
-          <b>In this chat</b>
-          {asks.map((a) => (
-            <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
-              {clip(a.text, 60)}
-            </button>
-          ))}
-        </nav>
-      )}
+      {jump &&
+        (() => {
+          const nav = (
+            <nav class="jump-list" aria-label="In this chat" data-rail={railSlot ? '' : undefined}>
+              <b>In this chat</b>
+              {asks.map((a) => (
+                <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
+                  {clip(a.text, 60)}
+                </button>
+              ))}
+            </nav>
+          );
+          return railSlot ? createPortal(nav, railSlot) : rail ? null : nav;
+        })()}
     </div>
   );
 }

@@ -1880,26 +1880,34 @@ textarea.fl-input {
   align-items: center;
   gap: var(--sp-1);
 }
+/* Positions (§2.30): unboxed; one grid for every lane (subgrid), so a long participant label ("Claude ·
+   Opus 4.5") never wraps and every track starts at the same x. who | track (1px --fg-2, a centre tick, one
+   puck) | the words. Compact (a side bar): who | track, the words hidden. */
 .fl-discuss__meter {
   display: grid;
-  gap: var(--sp-1);
-  padding: var(--sp-3) var(--sp-4) var(--sp-2);
-  border: var(--line) solid var(--hairline);
-  border-radius: var(--r-box);
-  background: var(--bg);
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, var(--discuss-tag-w));
+  column-gap: var(--sp-4);
+  row-gap: 0;
 }
 .fl-discuss__axis,
 .fl-discuss__lane {
   display: grid;
-  grid-template-columns: var(--discuss-who-w) minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: var(--sp-3);
+}
+.fl-discuss__axis-h {
+  color: var(--fg-2);
+  font-size: var(--t-90);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
 }
 .fl-discuss__ends {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  min-width: 0;
   font-size: var(--t-85);
   color: var(--fg-2);
 }
@@ -1908,14 +1916,14 @@ textarea.fl-input {
   align-items: center;
   gap: var(--sp-1);
   min-width: 0;
-  font-size: var(--t-title);
+  font-size: var(--t-100);
   font-weight: var(--w-strong);
   color: var(--sel-fg);
 }
 .fl-discuss__ends .icon {
   flex: none;
-  width: var(--i-md);
-  height: var(--i-md);
+  width: var(--i-sm);
+  height: var(--i-sm);
   color: var(--fg-2);
 }
 .fl-discuss__who {
@@ -1923,6 +1931,13 @@ textarea.fl-input {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  color: var(--fg);
+  font-size: var(--t-90);
+  white-space: nowrap;
+}
+.fl-discuss__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fl-discuss__track {
   position: relative;
@@ -1938,40 +1953,15 @@ textarea.fl-input {
   right: 0;
   top: 50%;
   height: var(--line);
-  background: var(--border);
+  background: var(--fg-2);
 }
 .fl-discuss__mid {
   position: absolute;
   left: 50%;
-  top: var(--sp-2);
-  bottom: var(--sp-2);
+  top: var(--sp-3);
+  bottom: var(--sp-3);
   width: var(--line);
-  background: var(--border);
-}
-.fl-discuss__trail {
-  position: absolute;
-  left: var(--x);
-  width: var(--w);
-  top: calc(50% - 1px);
-  height: 2px;
-  border-radius: var(--r-pill);
-  background: var(--fg-50);
-}
-.fl-discuss__ghost {
-  position: absolute;
-  left: var(--x);
-  top: 50%;
-  width: var(--sp-2);
-  height: var(--sp-2);
-  margin: calc(var(--sp-1) * -1) 0 0 calc(var(--sp-1) * -1);
-  border-radius: var(--r-round);
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1.5px var(--fg-2);
-}
-.fl-discuss__legend > .fl-discuss__ghost {
-  position: static;
-  margin: 0;
-  display: inline-block;
+  background: var(--fg-2);
 }
 .fl-discuss__marker {
   position: absolute;
@@ -1979,37 +1969,21 @@ textarea.fl-input {
   top: 50%;
   display: inline-grid;
   transform: translate(-50%, -50%);
-  border-radius: calc(var(--discuss-marker) / 4);
-  box-shadow: 0 0 0 3px var(--bg);
+  border-radius: var(--r-round);
+  box-shadow: 0 0 0 3px var(--card-surface, var(--input-bg));
+  transition: left var(--dur-spring) var(--spring-snap);
 }
 .fl-discuss__marker > .fl-avatar {
-  background: color-mix(in srgb, var(--hue) 22%, var(--bg));
-}
-.fl-discuss__marker[data-speaking] {
-  box-shadow:
-    0 0 0 3px var(--bg),
-    0 0 0 5px var(--status-working);
+  --av-ring: var(--input-bg);
+  background: color-mix(in srgb, var(--hue) 22%, var(--input-bg));
 }
 .fl-discuss__val {
-  position: absolute;
-  left: var(--x);
-  top: calc(50% + var(--discuss-marker) / 2 + var(--sp-half));
-  transform: translateX(-50%);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--t-75);
+  font-size: var(--t-85);
   color: var(--fg-2);
-}
-.fl-discuss__val[data-speaking] {
-  top: calc(50% + var(--discuss-marker) / 2 + var(--sp-1));
-}
-.fl-discuss__val[data-end='start'] {
-  transform: translateX(-20%);
-}
-.fl-discuss__val[data-end='end'] {
-  transform: translateX(-80%);
-}
-.fl-discuss__meter[data-compact] .fl-discuss__val {
-  display: none;
 }
 .fl-discuss__rows {
   display: grid;
@@ -2205,7 +2179,8 @@ summary.fl-discuss__row:hover {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  font-size: var(--t-hero);
+  letter-spacing: var(--track-title);
+  font-size: var(--t-lead);
   font-weight: var(--w-strong);
   line-height: var(--lh-tight);
   color: var(--sel-fg);
@@ -2237,10 +2212,6 @@ summary.fl-discuss__row:hover {
   align-content: start;
   gap: var(--sp-1);
   min-width: 0;
-  padding: var(--sp-3);
-  border: var(--line) solid var(--hairline);
-  border-radius: var(--r-box);
-  background: var(--bg);
 }
 .fl-discuss__side-head {
   display: flex;
@@ -2249,16 +2220,22 @@ summary.fl-discuss__row:hover {
   gap: var(--sp-1) var(--sp-2);
 }
 .fl-discuss__side-head > b {
-  font-size: var(--t-title);
+  font-size: var(--t-lead);
   font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
   color: var(--sel-fg);
 }
 .fl-discuss__side-who {
   font-size: var(--t-85);
   color: var(--fg-2);
 }
+/* "vs" on the single hairline between the two sides. */
 .fl-discuss__vs {
-  align-self: center;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  padding: 0 var(--sp-2);
+  background: linear-gradient(var(--hairline), var(--hairline)) center / var(--line) 100% no-repeat;
   font-size: var(--t-85);
   color: var(--fg-2);
 }
@@ -2359,16 +2336,20 @@ summary.fl-discuss__row:hover {
   .fl-discuss__tile {
     padding: var(--sp-2);
   }
-  .fl-discuss__axis,
-  .fl-discuss__lane {
+  /* The names go to their marks: who is the puck alone, the words are hidden. */
+  .fl-discuss__meter,
+  .fl-discuss__meter[data-compact] {
     grid-template-columns: var(--i-lg) minmax(0, 1fr);
-    gap: var(--sp-2);
+    column-gap: var(--sp-2);
   }
-  .fl-discuss__who > span:not(.fl-avatar) {
+  .fl-discuss__who > span:not(.fl-avatar),
+  .fl-discuss__val {
     display: none;
   }
-  .fl-discuss__meter {
-    padding: var(--sp-2) var(--sp-3);
+  /* Keeps its cell (so the ends sit over the tracks), unseen. */
+  .fl-discuss__axis-h {
+    visibility: hidden;
+    overflow: hidden;
   }
   .fl-discuss__ends b {
     font-size: var(--t-100);
@@ -3340,12 +3321,11 @@ button.fl-row,
   position: relative;
   z-index: var(--z-composer);
   flex: none;
-  padding: 0 var(--sp-4) var(--sp-4);
+  padding: 0 var(--gutter) var(--sp-4);
 }
+/* The whole chat width, on the transcript's gutters (owner, 2026-10-20: use the whole screen). */
 .composer-col {
   position: relative;
-  max-width: 680px;
-  margin: 0 auto;
 }
 .composer {
   container-type: inline-size;

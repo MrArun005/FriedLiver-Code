@@ -14,7 +14,7 @@
     },
     "webview.css": {
       "colour": 8,
-      "px": 79,
+      "px": 75,
       "effect": 5,
       "restyle": [
         ".acct-tag",
@@ -36,11 +36,8 @@
         ".map-group .group-pill-text",
         ".map-you .you-badge-text",
         ".mini-badge",
-        ".msg-tools .copy-btn",
-        ".msg-tools .copy-btn:focus-visible",
         ".new-task textarea",
         ".perms h2 .count",
-        ".prose:hover .msg-tools .copy-btn",
         ".reopen .fl-menu__title",
         ".rewind-btn:focus-visible",
         ".search",
@@ -118,9 +115,9 @@
   },
   "totals": {
     "colour": 9,
-    "px": 155,
+    "px": 151,
     "effect": 6,
-    "restyle": 85,
+    "restyle": 82,
     "rawControls": 57
   }
 }

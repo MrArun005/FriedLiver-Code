@@ -2235,11 +2235,11 @@ body[data-surface='chat'] {
   flex: 1 1 auto;
   min-width: 0;
   margin: var(--sp-1) 0;
-  padding: var(--sp-1) 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-6);
-  background: var(--input-bg);
-  color: var(--fg);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-box);
+  background: color-mix(in srgb, var(--sel-fg) 5%, var(--input-bg));
+  color: var(--sel-fg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -2314,10 +2314,18 @@ button.rewind-btn {
 .rewind-btn:focus-visible {
   opacity: 1;
 }
-/* Its time (§2.32), left of Rewind on the first line; floated, so it never adds a line. */
+/* Its time (§2.32) floats over the box's top-right corner, left of Rewind, only while hovered or focused:
+   it takes no room at rest and moves nothing when it shows (owner, 2026-10-20). */
 .user-msg .msg-when {
-  float: right;
-  margin-left: var(--sp-2);
+  position: absolute;
+  top: var(--sp-1);
+  right: var(--sp-2);
+  padding-left: var(--sp-2);
+  background: inherit;
+  pointer-events: none;
+}
+.user-msg .bubble:has(.rewind-btn) .msg-when {
+  right: calc(var(--sp-2) + var(--h-sm) + var(--sp-1));
 }
 
 /* The agent's reply: plain text, Claude Code's paragraph rhythm. */
@@ -2377,21 +2385,33 @@ button.rewind-btn {
 }
 .md-table {
   max-width: 100%;
-  margin: var(--sp-1) 0;
+  margin: var(--sp-2) 0;
   overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-box);
 }
+/* The whole message width (owner: use the whole screen): columns share it; numbers right-aligned, tabular. */
 .md-table table {
+  width: 100%;
   border-collapse: collapse;
 }
 .md-table th,
 .md-table td {
-  padding: 2px 6px;
-  border: 1px solid var(--border);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--hairline);
   text-align: left;
   vertical-align: top;
 }
+.md-table tr:last-child td {
+  border-bottom: 0;
+}
 .md-table th {
-  font-weight: 600;
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  font-weight: var(--w-medium);
+}
+.md-table td[data-num] {
+  font-variant-numeric: tabular-nums;
 }
 .md pre.md-mono {
   margin: var(--sp-2) 0;
@@ -2429,22 +2449,25 @@ button.rewind-btn {
 .path-link code {
   color: inherit;
 }
-/* Floated so the reply's first line wraps around it instead of running under it. */
+/* The reply's time and Copy (§2.32): over the first line's end, on the page tone, only while the reply is
+   hovered or focused. No room taken at rest, no shift when they show (owner, 2026-10-20). */
 .msg-tools {
-  float: right;
-  margin-left: var(--sp-2);
-}
-.msg-tools .copy-btn {
+  position: absolute;
+  top: var(--sp-1);
+  right: 0;
+  z-index: var(--z-content);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding-left: var(--sp-3);
+  background: linear-gradient(to right, transparent, var(--bg) var(--sp-3));
   opacity: 0;
+  pointer-events: none;
 }
-.prose:hover .msg-tools .copy-btn,
-.msg-tools .copy-btn:focus-visible {
+.prose:hover .msg-tools,
+.prose:focus-within .msg-tools {
   opacity: 1;
-}
-/* Left of Copy, floated so it sits on the reply's first line as the box's corner time does, not centred on the button. */
-.msg-tools .msg-when {
-  float: left;
-  margin-right: var(--sp-1);
+  pointer-events: auto;
 }
 
 /* Code blocks: the code on its own tone, no border, no header; the tools show on hover. */
@@ -4090,22 +4113,32 @@ button[aria-pressed='true'] .icon path {
   top: var(--sp-5);
   right: var(--sp-5);
   width: 210px;
-  max-height: calc(100% - 40px);
+  max-height: calc(100% - var(--sp-10));
   overflow-y: auto;
   font-size: var(--t-90);
   color: var(--fg-2);
 }
+/* In the context rail: a section like the others. */
+.jump-list[data-rail] {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+}
+.ctx-jump:empty {
+  display: none;
+}
 .jump-list b {
   display: block;
-  margin-bottom: 6px;
-  font-weight: 600;
-  color: var(--fg-50);
+  margin-bottom: var(--sp-2);
+  font-weight: var(--w-strong);
+  color: var(--fg);
 }
 button.jump-item {
   display: block;
   width: 100%;
-  padding: 2px var(--sp-2);
-  border-left: 2px solid var(--border);
+  padding: var(--sp-half) var(--sp-2);
+  border-left: 2px solid var(--hairline);
   color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4115,8 +4148,8 @@ button.jump-item:hover {
   color: var(--fg);
 }
 button.jump-item[aria-current='true'] {
-  border-left-color: var(--fg-2);
-  color: var(--fg);
+  border-left-color: var(--sel-fg);
+  color: var(--sel-fg);
 }
 @media (max-width: 1200px) {
   .transcript-wrap[data-jump] .transcript {
