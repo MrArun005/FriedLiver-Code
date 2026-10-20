@@ -1,0 +1,142 @@
+diff --git a/src/vs/platform/list/browser/listDensity.ts b/src/vs/platform/list/browser/listDensity.ts
+new file mode 100644
+index 00000000..468e6de4
+--- /dev/null
++++ b/src/vs/platform/list/browser/listDensity.ts
+@@ -0,0 +1,19 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver: tree row density (COMPONENTS.md §2.19, §6.3). Comfortable rows are 24 tall (WCAG 2.5.8
++ *  target size), compact rows 22 (upstream's height). Read by the Explorer, Source Control, Outline and
++ *  Search delegates; listService.ts updates it from `workbench.list.density` whenever a workbench tree
++ *  is created, so a change applies to views opened afterwards (and to every view after a reload).
++ *--------------------------------------------------------------------------------------------*/
++
++export const LIST_DENSITY_SETTING = 'workbench.list.density';
++
++let rowHeight = 24;
++
++/** The height of one tree row at the current density. */
++export function listRowHeight(): number {
++	return rowHeight;
++}
++
++export function setListDensity(value: unknown): void {
++	rowHeight = value === 'compact' ? 22 : 24;
++}
+diff --git a/src/vs/platform/list/browser/listService.ts b/src/vs/platform/list/browser/listService.ts
+index af2dbd92..f04923bd 100644
+--- a/src/vs/platform/list/browser/listService.ts
++++ b/src/vs/platform/list/browser/listService.ts
+@@ -29,6 +29,7 @@ import { IKeybindingService } from '../../keybinding/common/keybinding.js';
+ import { ResultKind } from '../../keybinding/common/keybindingResolver.js';
+ import { Registry } from '../../registry/common/platform.js';
+ import { defaultFindWidgetStyles, defaultListStyles, getListStyles, IStyleOverride } from '../../theme/browser/defaultStyles.js';
++import { LIST_DENSITY_SETTING, setListDensity } from './listDensity.js';
+ 
+ export type ListWidget = List<any> | PagedList<any> | ObjectTree<any, any> | DataTree<any, any, any> | AsyncDataTree<any, any, any> | Table<any>;
+ export type WorkbenchListWidget = WorkbenchList<any> | WorkbenchPagedList<any> | WorkbenchObjectTree<any, any> | WorkbenchCompressibleObjectTree<any, any> | WorkbenchDataTree<any, any, any> | WorkbenchAsyncDataTree<any, any, any> | WorkbenchCompressibleAsyncDataTree<any, any, any> | WorkbenchTable<any>;
+@@ -1115,6 +1116,7 @@ function workbenchTreeDataPreamble<T, TFilterData, TOptions extends IAbstractTre
+ 	const contextViewService = accessor.get(IContextViewService);
+ 	const contextKeyService = accessor.get(IContextKeyService);
+ 	const instantiationService = accessor.get(IInstantiationService);
++	setListDensity(configurationService.getValue(LIST_DENSITY_SETTING)); // FriedLiver: row density for the delegates
+ 
+ 	const getTypeNavigationMode = () => {
+ 		// give priority to the context key value to specify a value
+@@ -1421,6 +1423,16 @@ configurationRegistry.registerConfiguration({
+ 			maximum: 40,
+ 			description: localize('tree indent setting', "Controls tree indentation in pixels.")
+ 		},
++		[LIST_DENSITY_SETTING]: {
++			type: 'string',
++			enum: ['comfortable', 'compact'],
++			enumDescriptions: [
++				localize('listDensity.comfortable', "Rows are 24 pixels tall: easier to hit."),
++				localize('listDensity.compact', "Rows are 22 pixels tall: more fit on screen.")
++			],
++			default: 'comfortable',
++			description: localize('listDensity', "Controls how tall the rows of the Explorer, Source Control, Outline and Search trees are. Views opened after the change use it; reload the window to apply it everywhere.")
++		},
+ 		[treeRenderIndentGuidesKey]: {
+ 			type: 'string',
+ 			enum: ['none', 'onHover', 'always'],
+diff --git a/src/vs/workbench/contrib/codeEditor/browser/outline/documentSymbolsTree.ts b/src/vs/workbench/contrib/codeEditor/browser/outline/documentSymbolsTree.ts
+index c6298b30..e09cdf23 100644
+--- a/src/vs/workbench/contrib/codeEditor/browser/outline/documentSymbolsTree.ts
++++ b/src/vs/workbench/contrib/codeEditor/browser/outline/documentSymbolsTree.ts
+@@ -31,6 +31,7 @@ import { IThemeService } from '../../../../../platform/theme/common/themeService
+ import { fillEditorsDragData } from '../../../../browser/dnd.js';
+ import { IOutlineComparator, OutlineConfigKeys, OutlineTarget } from '../../../../services/outline/browser/outline.js';
+ import './documentSymbolsTree.css';
++import { listRowHeight } from '../../../../../platform/list/browser/listDensity.js';
+ 
+ export type DocumentSymbolItem = OutlineGroup | OutlineElement;
+ 
+@@ -158,7 +159,7 @@ class DocumentSymbolTemplate {
+ export class DocumentSymbolVirtualDelegate implements IListVirtualDelegate<DocumentSymbolItem> {
+ 
+ 	getHeight(_element: DocumentSymbolItem): number {
+-		return 22;
++		return listRowHeight(); // FriedLiver: 24 comfortable / 22 compact
+ 	}
+ 
+ 	getTemplateId(element: DocumentSymbolItem): string {
+diff --git a/src/vs/workbench/contrib/files/browser/views/explorerViewer.ts b/src/vs/workbench/contrib/files/browser/views/explorerViewer.ts
+index 8178f4c4..b6bcbd08 100644
+--- a/src/vs/workbench/contrib/files/browser/views/explorerViewer.ts
++++ b/src/vs/workbench/contrib/files/browser/views/explorerViewer.ts
+@@ -74,10 +74,11 @@ import { IContextKey, IContextKeyService } from '../../../../../platform/context
+ import { CountBadge } from '../../../../../base/browser/ui/countBadge/countBadge.js';
+ import { listFilterMatchHighlight, listFilterMatchHighlightBorder } from '../../../../../platform/theme/common/colorRegistry.js';
+ import { asCssVariable } from '../../../../../platform/theme/common/colorUtils.js';
++import { listRowHeight } from '../../../../../platform/list/browser/listDensity.js';
+ 
+ export class ExplorerDelegate implements IListVirtualDelegate<ExplorerItem> {
+ 
+-	static readonly ITEM_HEIGHT = 22;
++	static get ITEM_HEIGHT(): number { return listRowHeight(); } // FriedLiver: 24 comfortable / 22 compact
+ 
+ 	getHeight(element: ExplorerItem): number {
+ 		return ExplorerDelegate.ITEM_HEIGHT;
+diff --git a/src/vs/workbench/contrib/scm/browser/scmViewPane.ts b/src/vs/workbench/contrib/scm/browser/scmViewPane.ts
+index 25a50546..5d502682 100644
+--- a/src/vs/workbench/contrib/scm/browser/scmViewPane.ts
++++ b/src/vs/workbench/contrib/scm/browser/scmViewPane.ts
+@@ -75,6 +75,7 @@ import { AccessibilityVerbositySettingId } from '../../accessibility/browser/acc
+ import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
+ import { AccessibilityCommandId } from '../../accessibility/common/accessibilityCommands.js';
+ import { SCMInputWidget } from './scmInput.js';
++import { listRowHeight } from '../../../../platform/list/browser/listDensity.js';
+ 
+ type TreeElement = ISCMRepository | ISCMInput | ISCMActionButton | ISCMResourceGroup | ISCMResource | IResourceNode<ISCMResource, ISCMResourceGroup>;
+ 
+@@ -679,7 +680,7 @@ class ListDelegate implements IListVirtualDelegate<TreeElement> {
+ 		} else if (isSCMActionButton(element)) {
+ 			return ActionButtonRenderer.DEFAULT_HEIGHT + 8;
+ 		} else {
+-			return 22;
++			return listRowHeight(); // FriedLiver: 24 comfortable / 22 compact
+ 		}
+ 	}
+ 
+diff --git a/src/vs/workbench/contrib/search/browser/searchResultsView.ts b/src/vs/workbench/contrib/search/browser/searchResultsView.ts
+index 994769dc..51bf26e6 100644
+--- a/src/vs/workbench/contrib/search/browser/searchResultsView.ts
++++ b/src/vs/workbench/contrib/search/browser/searchResultsView.ts
+@@ -35,6 +35,7 @@ import { IHoverService } from '../../../../platform/hover/browser/hover.js';
+ import { Codicon } from '../../../../base/common/codicons.js';
+ import { ISearchTreeMatch, isSearchTreeMatch, RenderableMatch, ITextSearchHeading, ISearchTreeFolderMatch, ISearchTreeFileMatch, isSearchTreeFileMatch, isSearchTreeFolderMatch, isTextSearchHeading, ISearchModel, isSearchTreeFolderMatchWorkspaceRoot, isSearchTreeFolderMatchNoRoot, isPlainTextSearchHeading } from './searchTreeModel/searchTreeCommon.js';
+ import { isSearchTreeAIFileMatch } from './AISearch/aiSearchModelBase.js';
++import { listRowHeight } from '../../../../platform/list/browser/listDensity.js';
+ 
+ interface IFolderMatchTemplate {
+ 	label: IResourceLabel;
+@@ -78,7 +79,7 @@ interface IMatchTemplate {
+ 
+ export class SearchDelegate implements IListVirtualDelegate<RenderableMatch> {
+ 
+-	public static ITEM_HEIGHT = 22;
++	public static get ITEM_HEIGHT(): number { return listRowHeight(); } // FriedLiver: 24 comfortable / 22 compact
+ 
+ 	getHeight(element: RenderableMatch): number {
+ 		return SearchDelegate.ITEM_HEIGHT;

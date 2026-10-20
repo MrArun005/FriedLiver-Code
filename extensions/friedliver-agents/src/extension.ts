@@ -1443,7 +1443,9 @@ export class Controller {
     const n = waiting.length;
     // The title bar's Needs-you pill (§2.33; patch 0160 renders the friedliver/titleBar menu): how many chats wait on you.
     void vscode.commands.executeCommand('setContext', 'friedliver.needsYouCount', this.core.snapshot.chats.filter((c) => !c.archived && needsYou(c)).length);
-    if (n === 0) {
+    // In the FriedLiver app the title-bar pill (custom title bar only) replaces the Inbox status item.
+    const pill = vscode.env.appName.startsWith('FriedLiver') && vscode.workspace.getConfiguration('window').get('titleBarStyle') !== 'native';
+    if (n === 0 || pill) {
       this.statusItem.hide();
     } else {
       this.statusItem.text = `$(inbox) Inbox · ${n}`;
