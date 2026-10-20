@@ -6,7 +6,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newestVersion, prBody, tagCommit, updateBuildDoc, updateReadme } from '../scripts/check-upstream.mjs';
 import { checkRun, parseRef } from '../scripts/fetch-build.mjs';
-import { diffStyles } from '../scripts/workbench-shots.mjs';
+import { diffStyles, summarize } from '../scripts/workbench-shots.mjs';
 import { codesignArgs, friedliverStamp, friedliverVersion, gitReleaseState, keepChromiumLocale, newestReleaseTag, matchesIntegrity, pinnedSha256, sha256File, shasumFor, vscodeSysrootAsset } from '../scripts/lib.mjs';
 
 const root = path.resolve(__dirname, '..');
@@ -273,12 +273,23 @@ describe('workbench harness', () => {
   it('runs builds only from trusted runs of build.yml', () => {
     expect(() => checkRun(good)).not.toThrow();
     expect(() => checkRun({ ...good, head_branch: 'main', event: 'push' })).not.toThrow();
+    expect(() => checkRun({ ...good, head_branch: 'design/v2-workbench' })).not.toThrow();
     expect(() => checkRun({ ...good, head_repository: { full_name: 'evil/FriedLiver-Code' } })).toThrow(/fork/);
     expect(() => checkRun({ ...good, event: 'pull_request' })).toThrow(/event/);
     expect(() => checkRun({ ...good, path: '.github/workflows/ci.yml' })).toThrow(/build.yml/);
     expect(() => checkRun({ ...good, head_branch: 'feat/x' })).toThrow(/branch/);
     expect(() => checkRun({ ...good, head_branch: 'ui/../main' })).toThrow(/branch/);
     expect(() => checkRun({ ...good, conclusion: 'failure' })).toThrow(/conclusion/);
+  });
+
+  it('sums the design gates over every shot of a run', () => {
+    const s = summarize('mac/fl-dark/1440x900', {
+      a: { textFails: 2, ui: [{}], accentGroups: 1, off2Count: 5, off2Styled: 1, offscreen: [] },
+      b: { textFails: 1, ui: [], accentGroups: 3, off2Count: 0, off2Styled: 0, offscreen: ['x'] },
+      c: { error: 'page closed' },
+    });
+    expect(s).toMatchObject({ text: 3, ui: 1, accentMax: 3, off2: 5, off2Styled: 1, offscreen: 1 });
+    expect(s.line).toContain('2 shots');
   });
 
   it('reports every composer style that changed', () => {

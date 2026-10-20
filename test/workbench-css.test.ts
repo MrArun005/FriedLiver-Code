@@ -64,7 +64,7 @@ describe('workbench/friedliver.css', () => {
   it('re-points theme colours only at tokens', () => {
     const offenders = declarations()
       .filter(({ prop }) => prop.startsWith('--vscode-'))
-      .filter(({ value }) => !/^(?:var\(--fl-[\w-]+\)|transparent|color-mix\(.*var\(--fl-.*\))$/.test(value))
+      .filter(({ value }) => !/^(?:var\(--fl-[\w-]+\)(?:, var\(--fl-[\w-]+\))*|transparent|color-mix\(.*var\(--fl-.*\))$/.test(value))
       .map(({ prop, value }) => `${prop}: ${value}`);
     expect(offenders).toEqual([]);
   });
@@ -77,8 +77,10 @@ describe('workbench/friedliver.css', () => {
   });
 
   it('leaves high contrast to upstream', () => {
-    const selectors = [...CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(^|})\s*([^{}@]+)\{/g)].map((m) => m[2].trim());
-    for (const sel of selectors.flatMap((s) => s.split(',').map((x) => x.trim()))) {
+    // Keyframe steps (from, to, 40%) are not selectors.
+    const rules = CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}/g, '');
+    const selectors = [...rules.matchAll(/(^|})\s*([^{}@]+)\{/g)].map((m) => m[2].trim());
+    for (const sel of selectors.flatMap((s) => s.split(/,(?![^(]*\))/).map((x) => x.trim()))) {
       expect(sel, sel).toMatch(/^\.monaco-workbench(?:\.[\w-]+)*(?::not\(\.[\w-]+\))*:not\(\.hc-black\):not\(\.hc-light\)/);
     }
   });
