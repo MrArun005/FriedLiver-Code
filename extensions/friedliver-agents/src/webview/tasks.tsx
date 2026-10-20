@@ -486,8 +486,8 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
   const roster = useRoster();
   const shown = roster.agents;
   const [saved, setSaved] = usePersisted<AgentKey[]>('agents', ['claude']);
-  // Until you pick, the choice leaves out agents the Accounts page found not installed (and hidden ones,
-  // like Demo once turned off); an agent you pick yourself stays picked whatever its status.
+  // Until you pick, the choice leaves out agents the Accounts page found not installed (and hidden ones);
+  // an agent you pick yourself stays picked whatever its status.
   const [touched, setTouched] = useState(false);
   const kept = saved.filter((a) => shown.includes(a));
   const agents: AgentKey[] = touched && kept.length ? kept : preselectAgents(roster, saved);

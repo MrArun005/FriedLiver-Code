@@ -40,8 +40,8 @@ What changes from stock VS Code:
   and Graphite. Quiet chrome, loud decisions: regions separate by tone instead
   of lines, overlays float on soft shadows, and only a decision gets the
   accent color ([screenshots](docs/screenshots/workbench/)). A first-run
-  walkthrough (Help → Welcome) shows the Demo agent, sign-in, the Agent
-  Manager and `@gemini`.
+  walkthrough (Help → Welcome) shows sign-in, the Agent Manager and
+  `@gemini`.
 - **No telemetry, no experiments, no update service.** Every 4 hours the Agents
   extension asks GitHub whether a newer FriedLiver release is out and offers to
   install it (checksum-verified; `friedliver.update.mode: off` turns that off). It has its own
@@ -80,11 +80,9 @@ First time with real accounts? [docs/TRY-IT.md](docs/TRY-IT.md) is a 10-minute
 check from install to two agents talking to each other.
 
 1. Open a folder. The Agents panel opens on the right.
-2. No account yet? Turn on `friedliver.showDemoAgent`, pick **Demo** (a fake
-   local agent, no account, no network) and type `tour`: a plan, an edit you
-   review as a diff, a command you approve, an image. Accept is Ctrl/Cmd+Alt+Y
-   and Reject is Ctrl/Cmd+Alt+N. The "decisions waiting" item in the status bar
-   jumps to whatever waits on you.
+2. Edits wait for you as diffs: Accept is Ctrl/Cmd+Alt+Y and Reject is
+   Ctrl/Cmd+Alt+N. The "decisions waiting" item in the status bar jumps to
+   whatever waits on you.
 3. For the real agents, install a CLI once, then sign in from **FriedLiver:
    Agents & Accounts** (also in the New chat menu and the Accounts view). It has
    a card per agent: its status and version, its own sign-in methods, an API key
@@ -119,11 +117,10 @@ check from install to two agents talking to each other.
    it). `friedliver.voice.language` (`auto` = the system language, or e.g.
    `en-IN`, `hi-IN`) and `friedliver.voice.silenceSeconds` tune it.
 5. Connect them. In a chat, start a message with `@gemini` (or `@codex`,
-   `@claude`, `@demo`) to ask that agent; the answer comes back as a card you
+   `@claude`, `@antigravity`) to ask that agent; the answer comes back as a card you
    can send on. **Hand off**, **Ask** and **Pipe to** in the chat's header and
-   on Agent Manager cards do the rest. With the Demo agent, `ask demo <question>`
-   shows an agent asking another agent: you get Allow, Allow for this chat, or
-   Deny.
+   on Agent Manager cards do the rest. When an agent asks another agent, you
+   get Allow, Allow for this chat, or Deny.
 
 The command palette has the rest under "FriedLiver": Agent Manager, Run a Task
 on Several Agents, Hand Off to Another Agent, Ask Another Agent, Pipe a Chat's
@@ -137,17 +134,17 @@ only. `friedliver.notify.decisions` and `.finished` choose the notifications.
 
 ### What FriedLiver controls for each agent
 
-Claude and Codex edit files and run commands themselves; Gemini and the Demo
-agent write through FriedLiver. So the review looks different per agent, and
+Claude and Codex edit files and run commands themselves; Gemini writes through
+FriedLiver. So the review looks different per agent, and
 FriedLiver sets each agent's own mode to match the chat's level instead of
 taking the agent's default:
 
-| | Claude | Codex | Gemini | Demo |
-|---|---|---|---|---|
-| Edits | Claude writes the file. In Ask, its request shows the diff first (**Open diff** shows the whole file) | Codex writes the file. In Ask (Read-only), its request shows the diff first | Through FriedLiver: in Ask each write opens as a diff you accept or change | Through FriedLiver, like Gemini |
-| Commands | Claude runs them. In Ask and Auto-accept edits its request shows the command and folder | Codex runs them in its sandbox; Read-only asks before anything that writes, Workspace access runs workspace commands without asking | Gemini runs them after its own request, shown with the command | FriedLiver runs them after Run |
-| Ask / Auto-accept edits / Full auto | Manual / Accept edits / Bypass permissions (Auto when Bypass isn't offered) | Read-only / Workspace access / Full access | Auto Edit (FriedLiver reviews each write) / Auto Edit / YOLO | Ask / Accept edits / Full access |
-| Undo and "Changed N files" | A git snapshot at the start of each turn, for every agent; outside git, from the content FriedLiver saw before each edit | same | same, plus FriedLiver's own record of its writes | same |
+| | Claude | Codex | Gemini |
+|---|---|---|---|
+| Edits | Claude writes the file. In Ask, its request shows the diff first (**Open diff** shows the whole file) | Codex writes the file. In Ask (Read-only), its request shows the diff first | Through FriedLiver: in Ask each write opens as a diff you accept or change |
+| Commands | Claude runs them. In Ask and Auto-accept edits its request shows the command and folder | Codex runs them in its sandbox; Read-only asks before anything that writes, Workspace access runs workspace commands without asking | Gemini runs them after its own request, shown with the command |
+| Ask / Auto-accept edits / Full auto | Manual / Accept edits / Bypass permissions (Auto when Bypass isn't offered) | Read-only / Workspace access / Full access | Auto Edit (FriedLiver reviews each write) / Auto Edit / YOLO |
+| Undo and "Changed N files" | A git snapshot at the start of each turn, for every agent; outside git, from the content FriedLiver saw before each edit | same | same, plus FriedLiver's own record of its writes |
 
 **Antigravity** (Google's `agy` CLI, with the Gemini, Claude and GPT-OSS models
 your Antigravity plan offers) has no ACP mode, so FriedLiver runs it through
@@ -204,7 +201,7 @@ approved commands ([details](docs/EDITOR.md)):
 
 - **Edit with Agent** (Ctrl/Cmd+I, or right-click): select code, describe the
   change, and the edit opens there as a diff to accept or reject. Start with
-  `@claude`, `@codex`, `@gemini` or `@demo` to pick the agent; otherwise it's
+  `@claude`, `@codex`, `@gemini` or `@antigravity` to pick the agent; otherwise it's
   the one you last used for edits. Errors and warnings get **Fix with Agent**
   in their quick fixes.
 - **Ask About Selection** sends your question with the code to a chat, and
@@ -213,8 +210,6 @@ approved commands ([details](docs/EDITOR.md)):
 - **Review My Changes** (Source Control title bar) gives an agent your
   uncommitted diff in a new "Review: \<branch\>" chat. Say "fix it" there to
   get the fixes as reviewed edits.
-
-With the Demo agent, try `@demo uppercase` on a selection.
 
 ### In VS Code or Antigravity instead
 
@@ -245,7 +240,7 @@ prerequisites per OS, time, disk and memory: [docs/BUILD.md](docs/BUILD.md).
 | `branding/` | The FriedLiver mark (`mark.svg`, the outline logo) and `make-branding.mjs`, which generates `icon.png` and `overlay/` from it (Windows and macOS icons, installer pictures, watermark) |
 | `extensions/friedliver-agents/` | The Agents panel, Agent Manager and reviews |
 | `extensions/friedliver-theme/` | Color themes generated from `palette.json`, and the workbench defaults |
-| `agent-core/` | The ACP client the agents extension bundles, and the offline Demo agent ([README](agent-core/README.md)) |
+| `agent-core/` | The ACP client the agents extension bundles, and the fake agent the tests drive ([README](agent-core/README.md)) |
 | `scripts/` | `fetch`, `prepare`, `build`, `dev`, `screenshot`, `check-upstream` (plain Node, any OS); `checksums.json` pins downloads that publish no checksums |
 | `docs/` | [BUILD.md](docs/BUILD.md), [DEFAULTS.md](docs/DEFAULTS.md), [EDITOR.md](docs/EDITOR.md), [memory-plan.md](docs/memory-plan.md), [benchmarks.md](docs/benchmarks.md) |
 | `SECURITY.md` | Threat model, how to report a vulnerability, audit findings |
@@ -286,12 +281,13 @@ node scripts/ui-harness.mjs                      # the webviews from a fixture, 
 ```
 
 After a packaged build, `xvfb-run -a node scripts/e2e-demo.mjs
-VSCode-linux-x64/friedliver /tmp/fle` drives the real app with the Demo agent
+VSCode-linux-x64/friedliver /tmp/fle` drives the real app with the fake test agent (it sets
+`FRIEDLIVER_TEST_AGENTS=1`, which a user's FriedLiver never has)
 (an @mention, an agent asking another agent, the Agent Manager) and saves the
 screenshots in `docs/screenshots/app/`.
 
 `xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/stress-demo.mjs
-VSCode-linux-x64/friedliver /tmp/fls` runs 15 Demo chats at once (`--agents 1`
+VSCode-linux-x64/friedliver /tmp/fls` runs 15 fake-agent chats at once (`--agents 1`
 for a baseline) with the Agent Manager open beside an editor, and prints memory
 by process, CPU, long tasks, typing latency and how far the views lag behind.
 `--scenario idle` measures memory at rest instead. The numbers are in

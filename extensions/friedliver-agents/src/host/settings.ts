@@ -20,3 +20,9 @@ export function userSetting<T>(inspected: InspectedSetting<T> | undefined): { va
     ignored: inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined,
   };
 }
+
+/**
+ * The fake Demo agent is for tests and the UI harness only: it runs when FRIEDLIVER_TEST_AGENTS=1,
+ * which packaged builds never set. Without it pickers leave it out and a Demo chat can't start.
+ */
+export const testAgentsOn = (): boolean => process.env.FRIEDLIVER_TEST_AGENTS === '1';
