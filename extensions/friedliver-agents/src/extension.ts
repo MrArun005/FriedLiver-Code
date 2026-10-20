@@ -688,7 +688,8 @@ export class Controller {
         if (shown === `${title}\0${agent}`) return;
         shown = `${title}\0${agent}`;
         panel.title = title;
-        panel.iconPath = agent ? icon(`agent-${agent}`) : icon('agents');
+        // The agent's mark in its v2 hue: the dark theme's hue, and a deeper one on light themes (scripts/agent-icons.mjs).
+        panel.iconPath = agent ? { dark: icon(`agent-${agent}`), light: icon(`agent-${agent}-light`) } : icon('agents');
       };
     this.addSurface(surface, panel.title, panel);
     this.retitle();

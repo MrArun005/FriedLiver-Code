@@ -55,6 +55,7 @@
       }
     ],
     "configurationDefaults": {
+      "chat.fontFamily": "Geist, system-ui, sans-serif",
       "[friedliver-output]": {
         "editor.wordWrap": "on",
         "editor.wrappingIndent": "same"
@@ -595,32 +596,32 @@
       },
       {
         "id": "friedliver.agentClaude",
-        "description": "Claude's hue, used for its letter glyph.",
+        "description": "Claude's hue, for its mark and puck (oklch .8 .09 55 dark, .5 .12 50 light).",
         "defaults": {
-          "dark": "#e8b48c",
-          "light": "#8a4c24",
-          "highContrast": "#e8b48c",
-          "highContrastLight": "#8a4c24"
+          "dark": "#ebaf86",
+          "light": "#984b16",
+          "highContrast": "#ebaf86",
+          "highContrastLight": "#984b16"
         }
       },
       {
         "id": "friedliver.agentCodex",
-        "description": "Codex's hue, used for its letter glyph.",
+        "description": "Codex's hue, for its mark and puck (oklch .83 .08 180 dark, .5 .09 180 light).",
         "defaults": {
-          "dark": "#86d8c4",
-          "light": "#0b6e60",
-          "highContrast": "#86d8c4",
-          "highContrastLight": "#0b6e60"
+          "dark": "#8bd9c9",
+          "light": "#037465",
+          "highContrast": "#8bd9c9",
+          "highContrastLight": "#037465"
         }
       },
       {
         "id": "friedliver.agentGemini",
-        "description": "Gemini's hue, used for its letter glyph.",
+        "description": "Gemini's hue, for its mark and puck (oklch .79 .09 275 dark, .5 .14 275 light).",
         "defaults": {
-          "dark": "#a9b4ff",
-          "light": "#4450c4",
-          "highContrast": "#a9b4ff",
-          "highContrastLight": "#4450c4"
+          "dark": "#a9b6f5",
+          "light": "#4e59b1",
+          "highContrast": "#a9b6f5",
+          "highContrastLight": "#4e59b1"
         }
       },
       {

@@ -140,7 +140,9 @@ function readTheme(name) {
     "--vscode-font-family: system-ui, 'Ubuntu', 'Droid Sans', sans-serif;",
     '--vscode-font-size: 13px;',
     '--vscode-font-weight: normal;',
-    "--vscode-editor-font-family: 'Droid Sans Mono', monospace;",
+    // FriedLiver's defaults: Geist Mono in the editor (patch 0100), Geist for chat (this extension's configurationDefaults).
+    "--vscode-editor-font-family: 'Geist Mono', monospace;",
+    "--vscode-chat-font-family: Geist, system-ui, sans-serif;",
     '--vscode-editor-font-size: 13px;',
   );
   return { kind, colors, css: `:root { ${vars.join(' ')} }` };
@@ -265,13 +267,14 @@ function page(params) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>${theme.css} body { background-color: ${background}; }</style>
+<link rel="stylesheet" href="/media/fonts.css">
 <link rel="stylesheet" href="/media/tokens.css">
 <link rel="stylesheet" href="/media/webview.css">
 <link rel="stylesheet" href="/media/components.css">
 <title>${surface} · harness</title>
 <script>${stub}</script>
 </head>
-<body class="vscode-${theme.kind}" data-accent="#D97757" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${params.get('platform') === 'linux' ? 'linux' : 'darwin'}">
+<body class="vscode-${theme.kind}" data-accent="#D97757" data-surface="${surface}"${params.get('list') === '1' ? ' data-view="list"' : ''} data-platform="${{ win: 'windows', windows: 'windows', linux: 'linux' }[params.get('platform')] ?? 'mac'}">
 <div id="root"></div>
 <script src="/media/dist/${surface}.js"></script>
 </body>

@@ -76,7 +76,7 @@ import { agentOverride } from '../shared/session';
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** The mic button: dictation through the app's macOS speech helper (host/dictation.ts). */
-const MAC = document.body.dataset.platform === 'darwin';
+const MAC = document.body.dataset.platform === 'mac';
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
 

@@ -6,6 +6,7 @@ import { messageTime, messageTimeTitle, type MessageStamp } from '../../shared/v
 import { IconButton, cx } from './controls';
 import { markFor } from './marks';
 import { useTooltip } from './overlays';
+import { Keycaps } from './keycap';
 
 export type Tone = 'working' | 'done' | 'failed' | 'waiting' | 'warn' | 'accent' | 'muted' | 'info' | 'success' | 'error' | 'routine' | 'review' | 'careful';
 
@@ -126,7 +127,8 @@ export function Count({ n, loud, label }: { n: number | string; loud?: boolean; 
   );
 }
 
-export const Kbd = ({ children, inline }: { children: ComponentChildren; inline?: boolean }) => <kbd class={cx('fl-kbd', inline && 'fl-kbd--inline')}>{children}</kbd>;
+export const Kbd = ({ children, inline }: { children: ComponentChildren; inline?: boolean }) =>
+  typeof children === 'string' ? <Keycaps keys={children} inline={inline} /> : <kbd class={cx('fl-kbd', inline && 'fl-kbd--inline')}>{children}</kbd>;
 
 /**
  * The agent's tile (§2.22): its letter, or with `mark` its Mark (§2.22b) in its hue. `size` 'marker' is
@@ -151,8 +153,9 @@ function MarkSvg({ agent }: { agent: string }) {
   const m = markFor(agent);
   return (
     <svg viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
-      {m.fill && <path d={m.fill} fill="currentColor" />}
-      <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+      {/* The FriedLiver mark is a line drawing with a 16% fill (§1.6). */}
+      {m.fill && <path d={m.fill} fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />}
+      <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }

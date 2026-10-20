@@ -4,6 +4,7 @@
 import { createElement, type ButtonHTMLAttributes, type ComponentChildren, type InputHTMLAttributes, type Ref, type TextareaHTMLAttributes } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Icon, type IconName } from './icon';
+import { Keycaps } from './keycap';
 
 export type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'quiet-danger' | 'brand' | 'link' | 'text';
 export type Size = 'sm' | 'md' | 'lg' | 'touch';
@@ -49,7 +50,7 @@ export function Button({ variant, size, icon, iconEnd, kbd, loading, block, trun
     >
       {icon && <Icon name={icon} />}
       {children}
-      {kbd && <kbd class="fl-kbd fl-kbd--inline">{kbd}</kbd>}
+      {kbd && <Keycaps keys={kbd} inline class="fl-btn__k" />}
       {iconEnd && <Icon name={iconEnd} />}
       {loading && <span class="fl-spinner" aria-hidden="true" />}
     </button>
@@ -322,7 +323,7 @@ export function ChoiceRow({
         <span>{label}</span>
         {desc && <span class="fl-radio__desc">{desc}</span>}
       </span>
-      {kbd && <kbd class="fl-kbd fl-radio__key">{kbd}</kbd>}
+      {kbd && <Keycaps keys={kbd} class="fl-radio__key" />}
     </button>
   );
 }

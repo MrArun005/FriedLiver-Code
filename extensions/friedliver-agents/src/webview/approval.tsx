@@ -39,8 +39,6 @@ export interface CardKeys {
 }
 export const cardKeys = new Map<string, CardKeys>();
 
-const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
-const MOD = MAC ? '⌘' : 'Ctrl+';
 
 /** `code` in a rule set in mono; the rest as text. */
 function Ticks({ text }: { text: string }) {
@@ -455,7 +453,7 @@ function Preview({ a, item, chat, state, diff }: { a: Approval; item: Approvable
               <span class="plus">+{item.added}</span> <span class="minus">−{item.removed}</span>
             </span>
             <span class="spacer" />
-            <Button variant="quiet" size="sm" kbd={`${MOD}D`} onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
+            <Button variant="quiet" size="sm" kbd="⌘D" onClick={() => send({ type: 'review', reviewId: item.reviewId, action: 'open' })}>
               Open the diff
             </Button>
           </div>
@@ -510,7 +508,7 @@ function MiniDiff({ file, chat, open: startOpen, diff, requestId }: { file: Prop
         </span>
         <span class="spacer" />
         {file.full && (
-          <Button variant="quiet" size="sm" kbd={diff ? `${MOD}D` : undefined} title="The whole file with this change, read-only" onClick={() => send(diff ?? { type: 'permissionDiff', requestId, path: file.path })}>
+          <Button variant="quiet" size="sm" kbd={diff ? "⌘D" : undefined} title="The whole file with this change, read-only" onClick={() => send(diff ?? { type: 'permissionDiff', requestId, path: file.path })}>
             Full diff
           </Button>
         )}

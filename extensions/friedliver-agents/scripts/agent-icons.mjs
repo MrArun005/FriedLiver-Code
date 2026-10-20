@@ -12,13 +12,18 @@ const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-marks-')), 'mark
 process.on('exit', () => fs.rmSync(path.dirname(out), { recursive: true, force: true }));
 await build({ entryPoints: [path.join(ext, 'src/webview/ui/marks.ts')], bundle: true, format: 'esm', outfile: out, logLevel: 'error' });
 const { markFor } = await import(pathToFileURL(out).href);
-// The --hue-* fallbacks in media/tokens.css: an editor tab icon is a file, so it can't read the theme.
-const HUE = { claude: '#d97757', codex: '#89d185', gemini: '#57a3f8', antigravity: '#8c8c8c', demo: '#8c8c8c' };
-for (const [agent, colour] of Object.entries(HUE)) {
-  const m = markFor(agent);
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="${m.viewBox ?? '0 0 16 16'}">` +
-    (m.fill ? `<path d="${m.fill}" fill="${colour}"/>` : '') +
-    `<path d="${m.d}" fill="none" stroke="${colour}" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>\n`;
-  fs.writeFileSync(path.join(ext, `media/agent-${agent}.svg`), svg);
-}
+// The agents' v2 hues (package.json friedliver.agent* defaults; tokens.css --hue-*): an editor tab icon is a
+// file, so it can't read the theme; the tab gets { dark, light } (extension.ts). Neutral agents use --fg-2.
+const HUE = {
+  dark: { claude: '#ebaf86', codex: '#8bd9c9', gemini: '#a9b6f5', antigravity: '#aca8a5', demo: '#aca8a5' },
+  light: { claude: '#984b16', codex: '#037465', gemini: '#4e59b1', antigravity: '#5e5c59', demo: '#5e5c59' },
+};
+for (const [kind, hues] of Object.entries(HUE))
+  for (const [agent, colour] of Object.entries(hues)) {
+    const m = markFor(agent);
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="${m.viewBox ?? '0 0 16 16'}">` +
+      (m.fill ? `<path d="${m.fill}" fill="${colour}" fill-opacity=".16" stroke="${colour}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>` : '') +
+      `<path d="${m.d}" fill="none" stroke="${colour}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>\n`;
+    fs.writeFileSync(path.join(ext, `media/agent-${agent}${kind === 'light' ? '-light' : ''}.svg`), svg);
+  }
