@@ -1,7 +1,7 @@
 import type { Action, AppState, ImageItem } from '../shared/model';
 
-/** The kinds of webview: the chat (side view or center panel), the Agent Manager, the Images view. */
-export type SurfaceKind = 'chat' | 'tasks' | 'images';
+/** The kinds of webview: the chat (side view or center panel), the Agent Manager, the Images view, the Welcome page. */
+export type SurfaceKind = 'chat' | 'tasks' | 'images' | 'welcome';
 
 /**
  * Images are data: URIs of up to 8 MB, and each webview holds its own copy
@@ -10,18 +10,18 @@ export type SurfaceKind = 'chat' | 'tasks' | 'images';
  * files steps read are not among them: the gallery asks for their thumbnails.
  */
 export function showsImage(kind: SurfaceKind, image: ImageItem): boolean {
-  return kind !== 'chat' || image.from === 'you';
+  return kind === 'welcome' ? false : kind !== 'chat' || image.from === 'you';
 }
 
 /** The state as a surface of this kind gets it. */
 export function stateFor(kind: SurfaceKind, state: AppState): AppState {
-  if (kind !== 'chat' || state.images.every((i) => showsImage(kind, i))) return state;
+  if (kind === 'tasks' || kind === 'images' || state.images.every((i) => showsImage(kind, i))) return state;
   return { ...state, images: state.images.filter((i) => showsImage(kind, i)) };
 }
 
 /** The actions a surface of this kind gets: the same, less images it doesn't show. Folded in order, they keep it at stateFor(kind, host state). */
 export function actionsFor(kind: SurfaceKind, actions: Action[]): Action[] {
-  if (kind !== 'chat') return actions;
+  if (kind === 'tasks' || kind === 'images') return actions;
   let out: Action[] | undefined;
   actions.forEach((a, n) => {
     const next = a.t === 'image' ? (showsImage(kind, a.image) ? a : null) : a.t === 'restore' ? { ...a, state: stateFor(kind, a.state) } : a;

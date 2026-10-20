@@ -3265,6 +3265,47 @@ button.fl-row,
   margin-top: var(--sp-1);
 }
 
+/* ---- Ask box (§2.36): the Welcome hero's input, 52 tall, r12, the field edge, rim + elevation 1; a primary
+   "Start ⏎" inside at its end. Full width of its row (owner: use the whole screen). ---- */
+
+.fl-ask {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 52px;
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  border: var(--line) solid var(--field-border);
+  border-radius: var(--r-12);
+  background: var(--input-bg);
+  box-shadow: var(--rim), var(--elev-1);
+  color: var(--fg-2);
+  cursor: text;
+}
+.fl-ask:focus-within {
+  border-color: var(--focus);
+  box-shadow: var(--rim), var(--elev-1), var(--focus-halo);
+}
+.fl-ask > .icon {
+  flex: none;
+  width: var(--i-lg);
+  height: var(--i-lg);
+}
+.fl-ask > input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sel-fg);
+  font: inherit;
+  font-size: var(--t-lg);
+  outline: none;
+}
+.fl-ask > input::placeholder {
+  color: var(--placeholder);
+}
+
 /* ---- Banner (§2.26): inline, full width, --r-box; a tone tints it 8% ---- */
 
 .fl-banner {

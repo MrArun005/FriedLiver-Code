@@ -18,6 +18,7 @@
     "onStartupFinished",
     "onFileSystem:friedliver-proposed",
     "onWebviewPanel:friedliver.tasks",
+    "onWebviewPanel:friedliver.welcome",
     "onWebviewPanel:friedliver.chatPanel",
     "onWebviewPanel:friedliver.accountsPanel"
   ],
@@ -156,6 +157,11 @@
         "title": "Agent Manager",
         "category": "FriedLiver",
         "icon": "$(checklist)"
+      },
+      {
+        "command": "friedliver.welcome",
+        "title": "Welcome",
+        "category": "FriedLiver"
       },
       {
         "command": "friedliver.nextDecision",
@@ -674,6 +680,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Lets an agent read the chat that handed it its task, or that consulted it, without asking each time. Off by default: reading another chat waits for your OK. Read from your user settings only."
+        },
+        "friedliver.welcome.onEmptyWindow": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Open the FriedLiver Welcome page (live agents, recent folders, an Ask box) in a window with no folder."
         },
         "friedliver.chat.fontFamily": {
           "type": "string",

@@ -128,6 +128,9 @@ export class Controller {
   private agentsView?: vscode.WebviewView;
   private chatPanel?: vscode.WebviewPanel;
   private tasksPanel?: vscode.WebviewPanel;
+  /** The Welcome page (COMPONENTS.md v2 §2.38) and the recent folders it was last sent, by index. */
+  private welcomePanel?: vscode.WebviewPanel;
+  private recent: vscode.Uri[] = [];
   /** Where the Diagnose Claude Code Sessions command writes. */
   private claudeReport?: vscode.OutputChannel;
   /** Claude Code sessions from outside FriedLiver, as the Manager last got them. */
@@ -370,6 +373,7 @@ export class Controller {
       vscode.window.registerWebviewViewProvider('friedliver.images', { resolveWebviewView: (view) => this.resolveView(view, 'images', 'Images') }),
       { dispose: () => this.scaler.dispose() },
       vscode.window.registerWebviewPanelSerializer('friedliver.tasks', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'tasks') }),
+      vscode.window.registerWebviewPanelSerializer('friedliver.welcome', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'welcome') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'chat') }),
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
       registerBeforeProvider(() => this.core),
@@ -410,6 +414,10 @@ export class Controller {
     if (context.extensionMode !== vscode.ExtensionMode.Test) void this.connectClaude(false);
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
+    command('friedliver.welcome', () => this.openWelcome());
+    // An empty window opens on the Welcome page (§6.15: the stock walkthrough can't show live agents).
+    if (context.extensionMode !== vscode.ExtensionMode.Test && !vscode.workspace.workspaceFolders?.length && !vscode.window.visibleTextEditors.length && vscode.workspace.getConfiguration('friedliver.welcome').get<boolean>('onEmptyWindow', true))
+      setTimeout(() => this.openWelcome(), 0);
     command('friedliver.nextDecision', () => this.nextDecision());
     command('friedliver.openInbox', () => this.openInbox());
     command('friedliver.review.accept', (reviewId?: unknown) => {
@@ -677,9 +685,10 @@ export class Controller {
       visible: () => panel.visible,
     };
     if (kind === 'chat') this.chatPanel = panel;
+    else if (kind === 'welcome') this.welcomePanel = panel;
     else this.tasksPanel = panel;
     const icon = (name: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `${name}.svg`);
-    panel.iconPath = icon('agents');
+    panel.iconPath = kind === 'welcome' ? { dark: icon('agent-demo'), light: icon('agent-demo-light') } : icon('agents');
     // A chat tab is titled like Claude Code's: the topic of the chat it has open, with that agent's face.
     let shown = '';
     if (kind === 'chat')
@@ -696,6 +705,7 @@ export class Controller {
     panel.onDidDispose(() => {
       if (this.chatPanel === panel) this.chatPanel = undefined;
       if (this.tasksPanel === panel) this.tasksPanel = undefined;
+      if (this.welcomePanel === panel) this.welcomePanel = undefined;
     });
   }
 
@@ -773,11 +783,12 @@ export class Controller {
             this.inboxWanted = false;
             post(surface, { type: 'showInbox' });
           }
-          if (surface.kind !== 'chat') {
+          if (surface.kind === 'tasks' || surface.kind === 'images') {
             if (this.claudeImages.length) post(surface, { type: 'claudeImages', sessions: this.claudeImages });
             post(surface, { type: 'imageStore', store: this.imageInfo() });
             this.refreshClaudeSessions();
           }
+          if (surface.kind === 'welcome') void this.sendRecent(surface);
           if (surface.kind === 'chat') {
             this.replay = this.replay.filter((r) => r.until > Date.now());
             for (const r of this.replay) post(surface, r.message);
@@ -896,6 +907,8 @@ export class Controller {
           if (approval === null) return;
           const chat = await this.core.createChat(m.agent, { worktree: m.worktree, title: m.prompt, choices: m.choices?.[m.agent], approval, messageFollows: true });
           void this.core.send(chat.id, m.prompt).catch((err: unknown) => this.error(err));
+          // From the Welcome page: the new chat opens, so you watch it start.
+          if (surface.kind === 'welcome') await this.showChat(chat.id);
           return;
         }
         case 'openChat':
@@ -947,6 +960,18 @@ export class Controller {
         case 'openTasks':
           this.openTasks();
           return;
+        case 'openFolder':
+          await vscode.commands.executeCommand('workbench.action.files.openFolder');
+          return;
+        case 'cloneRepo':
+          await vscode.commands.executeCommand('git.clone');
+          return;
+        case 'openRecent': {
+          // An index into the list this host sent: the webview never names a path.
+          const uri = this.recent[m.index];
+          if (uri) await vscode.commands.executeCommand('vscode.openFolder', uri);
+          return;
+        }
         case 'handoff': {
           const chat = await this.core.handoff(m.chatId, m.agent, m.fresh);
           this.selectOn(surface, chat.id);
@@ -1228,6 +1253,33 @@ export class Controller {
   /** While you look at the Agent Manager, a diff an agent opens goes beside it, unfocused, instead of covering it. */
   private besideManager(): ReviewPlacement | undefined {
     return this.tasksPanel?.active ? { viewColumn: vscode.ViewColumn.Beside, focus: false } : undefined;
+  }
+
+  /** The Welcome page (COMPONENTS.md v2 §2.38): live agents, recent folders, an Ask box. */
+  openWelcome(): void {
+    if (this.welcomePanel) {
+      this.welcomePanel.reveal();
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel('friedliver.welcome', 'Welcome', vscode.ViewColumn.Active, { retainContextWhenHidden: false });
+    this.adoptPanel(panel, 'welcome');
+  }
+
+  /** Recent folders for the Welcome page, newest first: the window's own first. */
+  private async sendRecent(surface: Surface): Promise<void> {
+    type Recent = { workspaces?: ({ folderUri?: vscode.Uri; label?: string } | undefined)[] };
+    const got = await Promise.resolve(vscode.commands.executeCommand<Recent>('_workbench.getRecentlyOpened')).catch(() => undefined);
+    const current = vscode.workspace.workspaceFolders?.[0]?.uri.toString();
+    this.recent = (got?.workspaces ?? []).flatMap((w) => (w?.folderUri ? [w.folderUri] : [])).slice(0, 8);
+    const home = os.homedir();
+    post(surface, {
+      type: 'recent',
+      items: this.recent.map((u) => ({
+        name: path.basename(u.fsPath) || u.fsPath,
+        path: u.scheme === 'file' ? (u.fsPath.startsWith(home) ? `~${u.fsPath.slice(home.length)}` : u.fsPath) : u.toString(),
+        ...(u.toString() === current ? { current: true } : {}),
+      })),
+    });
   }
 
   openTasks(): void {

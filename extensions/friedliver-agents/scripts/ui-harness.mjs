@@ -181,7 +181,7 @@ function withTabs(state, n) {
 }
 
 function page(params) {
-  const surface = ['tasks', 'chat', 'images', 'permissions', 'accounts'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
+  const surface = ['tasks', 'chat', 'images', 'permissions', 'accounts', 'welcome'].includes(params.get('surface')) ? params.get('surface') : 'tasks';
   const theme = readTheme(params.get('theme') ?? 'black-blue');
   const side = params.get('side') === '1';
   const background = side ? theme.colors['sideBar.background'] : theme.colors['editor.background'];
@@ -253,6 +253,8 @@ function page(params) {
             window.postMessage({ type: m.type, path: m.path, ...(src ? { src } : {}) }, '*');
           });
         }
+        // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none).
+        if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && !location.search.includes('firstRun=1')) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
         if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
         // An outside subagent's detail, as the host sends it while the sheet follows its transcript.
         if (m && m.type === 'watchSubagent' && m.id && details && details[m.id]) setTimeout(() => window.postMessage({ type: 'subagentDetail', detail: details[m.id] }, '*'), 0);

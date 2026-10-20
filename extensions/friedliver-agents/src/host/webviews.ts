@@ -15,7 +15,7 @@ export const STYLESHEETS = ['fonts.css', 'tokens.css', 'webview.css', 'component
 export function platformName(platform: NodeJS.Platform = process.platform): 'mac' | 'windows' | 'linux' {
   return platform === 'darwin' ? 'mac' : platform === 'win32' ? 'windows' : 'linux';
 }
-export type Script = 'chat' | 'tasks' | 'images';
+export type Script = 'chat' | 'tasks' | 'images' | 'welcome';
 
 /** One webview showing agent state: the side view, the center chat, the task board or images. */
 export interface Surface {

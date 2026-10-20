@@ -381,3 +381,27 @@ export function selectTrigger(value: ComponentChildren, placeholder = 'Choose…
     </>
   );
 }
+
+/**
+ * The Ask box (§2.36): the Welcome hero's one input, 52 tall, with an icon and the primary action inside at
+ * its end (`children`). Enter submits.
+ */
+export function AskBox({ value, onInput, onSubmit, placeholder, label, children }: { value: string; onInput(v: string): void; onSubmit(): void; placeholder: string; label: string; children?: ComponentChildren }) {
+  return (
+    <label class="fl-ask">
+      <Icon name="agents" />
+      <input
+        value={value}
+        placeholder={placeholder}
+        aria-label={label}
+        onInput={(e) => onInput(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || e.isComposing) return;
+          e.preventDefault();
+          onSubmit();
+        }}
+      />
+      {children}
+    </label>
+  );
+}
