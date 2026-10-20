@@ -1,7 +1,7 @@
 {
   "name": "friedliver-theme",
   "displayName": "FriedLiver Themes",
-  "description": "The FriedLiver Control Room color themes and workbench defaults.",
+  "description": "The FriedLiver color themes (Design System v2: FriedLiver Dark and Light) and workbench defaults.",
   "version": "1.0.0",
   "publisher": "friedliver",
   "license": "MIT",
@@ -13,6 +13,18 @@
   ],
   "contributes": {
     "themes": [
+      {
+        "id": "FriedLiver Dark",
+        "label": "FriedLiver Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/friedliver-dark-color-theme.json"
+      },
+      {
+        "id": "FriedLiver Light",
+        "label": "FriedLiver Light",
+        "uiTheme": "vs",
+        "path": "./themes/friedliver-light-color-theme.json"
+      },
       {
         "id": "FriedLiver Black Blue",
         "label": "FriedLiver Black Blue",
@@ -39,9 +51,9 @@
       }
     ],
     "configurationDefaults": {
-      "workbench.colorTheme": "FriedLiver Black Blue",
-      "workbench.preferredDarkColorTheme": "FriedLiver Black Blue",
-      "workbench.preferredLightColorTheme": "FriedLiver Light Blue",
+      "workbench.colorTheme": "FriedLiver Dark",
+      "workbench.preferredDarkColorTheme": "FriedLiver Dark",
+      "workbench.preferredLightColorTheme": "FriedLiver Light",
       "editor.fontFamily": "'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace",
       "editor.fontSize": 13,
       "editor.lineHeight": 1.55,
