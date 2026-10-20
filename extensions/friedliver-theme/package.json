@@ -111,7 +111,36 @@
         "**/.turbo/**": true,
         "**/.parcel-cache/**": true,
         "**/.gradle/**": true
+      },
+      "workbench.tree.renderIndentGuides": "always",
+      "workbench.list.density": "comfortable",
+      "workbench.hover.delay": 500,
+      "workbench.editor.tabSizing": "shrink",
+      "workbench.editor.useModal": "off",
+      "workbench.settings.editor": "ui",
+      "workbench.settings.useSplitJSON": false,
+      "workbench.welcomePage.walkthroughs.openOnInstall": false,
+      "window.titleBarStyle": "custom",
+      "editor.inlineSuggest.showToolbar": "never",
+      "scm.diffDecorationsGutterPattern": {
+        "added": false,
+        "modified": true
+      },
+      "diffEditor.renderSideBySideInlineBreakpoint": 900,
+      "diffEditor.experimental.showMoves": true,
+      "workbench.experimental.modernUIEditorTabStyle": "pill"
+    },
+    "colors": [
+      {
+        "id": "friedliver.brand",
+        "description": "The FriedLiver mark (title bar, welcome); never a control.",
+        "defaults": {
+          "dark": "#e2884f",
+          "light": "#c4622a",
+          "highContrast": "#e2884f",
+          "highContrastLight": "#c4622a"
+        }
       }
-    }
+    ]
   }
 }

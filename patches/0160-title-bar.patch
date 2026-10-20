@@ -11,6 +11,19 @@ index 7e31cd31..c5fef9dc 100644
  
  /** Centers macOS traffic lights vertically, optionally keeping their horizontal inset independent of height. */
  export function getMacOSWindowControlsPosition(height: number, osVersion: string, horizontalInset?: number): IPoint | null {
+diff --git a/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts b/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts
+index e8edbe1b..ee331113 100644
+--- a/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts
++++ b/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts
+@@ -52,7 +52,7 @@ export class ActivitybarPart extends Part {
+ 
+ 	/** Narrower dimensions used when the floating panels (Modern UI) experiment is enabled. */
+ 	static readonly FLOATING_ACTION_HEIGHT = 36;
+-	static readonly FLOATING_ACTIVITYBAR_WIDTH = 36;
++	static readonly FLOATING_ACTIVITYBAR_WIDTH = 48; // FriedLiver: the nav rail is 48 wide with 32px items (COMPONENTS.md §6.2)
+ 	static readonly FLOATING_COMPACT_ACTIVITYBAR_WIDTH = 28;
+ 
+ 	/**
 diff --git a/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts b/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
 index 8aacc2e7..5c8b3648 100644
 --- a/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
