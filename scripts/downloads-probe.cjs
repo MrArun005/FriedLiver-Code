@@ -37,11 +37,18 @@ fs.mkdirSync(staging);
 fs.mkdirSync(dir);
 const results = [];
 let failed = false;
+// Each line prints as it comes, so a hang shows where it stopped.
+const say = (line) => (results.push(line), console.log(line));
 function check(name, ok, detail = '') {
-  results.push(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`);
+  say(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`);
   if (!ok) failed = true;
 }
-const note = (name, detail) => results.push(`info ${name}: ${detail}`);
+const note = (name, detail) => say(`info ${name}: ${detail}`);
+let step = 'start';
+setTimeout(() => {
+  console.log(`FAIL timed out at: ${step}`);
+  app.exit(1);
+}, 120_000).unref();
 
 const PAGE = `<!doctype html><body style="margin:0">
 <a id="file" href="/file.bin" download style="position:absolute;left:10px;top:10px;width:120px;height:40px;display:block">file</a>
@@ -113,6 +120,7 @@ async function main() {
   await win.loadURL(`${origin}/`);
   note('electron', process.versions.electron);
 
+  step = '1. a real click';
   // 1. A real click: input-event, a user gesture, paused writes nothing, resume finishes it.
   let next = nextDownload(win);
   await click(win, '#file');
@@ -143,6 +151,7 @@ async function main() {
   if (process.platform === 'darwin') check('macOS quarantine mark present', !!quarantine(file1), quarantine(file1));
   if (process.platform === 'win32') check('Windows Mark of the Web present (ZoneId=3)', /ZoneId=3/.test(zone(file1) ?? ''), zone(file1)?.replace(/\r?\n/g, ' '));
 
+  step = '2. a page script download';
   // 2. A page script's download, no gesture; cancelled while paused leaves nothing. A fresh document
   // first: a click's user activation lasts seconds (the web's transient activation).
   await win.loadURL(`${origin}/`);
@@ -159,6 +168,7 @@ async function main() {
   const left = [...fs.readdirSync(staging), ...fs.readdirSync(dir)].filter((f) => f.startsWith('script.bin') || f.endsWith('.crdownload'));
   check('a cancelled download leaves no file', left.length === 0, left.join(', '));
 
+  step = '3. a click-made blob';
   // 3. A blob a click handler makes: blob: URL with a user gesture.
   next = nextDownload(win);
   await click(win, '#blob');
@@ -168,6 +178,7 @@ async function main() {
   item.resume();
   check('the blob download completes', (await done) === 'completed');
 
+  step = '4. a CDP click';
   // 4. CDP's click (what browser_click sends): reported only.
   inputs.length = 0;
   const dbg = win.webContents.debugger;
@@ -185,9 +196,9 @@ async function main() {
 
 app.whenReady().then(main).catch((err) => {
   failed = true;
-  results.push(`FAIL ${err && err.stack || err}`);
+  say(`FAIL ${err && err.stack || err}`);
 }).finally(() => {
-  console.log(`downloads probe on ${process.platform}-${process.arch}\n${results.join('\n')}`);
+  console.log(`\ndownloads probe on ${process.platform}-${process.arch}\n${results.join('\n')}`);
   server.close();
   fs.rmSync(root, { recursive: true, force: true });
   app.exit(failed ? 1 : 0);
