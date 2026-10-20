@@ -1,4 +1,5 @@
-// Generates the four FriedLiver color themes from ../palette.json.
+// Generates the FriedLiver color themes from ../palette.json (Design System v2's FriedLiver Dark and
+// Light first, then the four Control Room themes). Palette values may be hex or "oklch(L C H [/ A])".
 //
 //   node extensions/friedliver-theme/scripts/generate-themes.mjs          write themes/*.json
 //   node extensions/friedliver-theme/scripts/generate-themes.mjs --check  exit 1 if they are stale
@@ -19,6 +20,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hexAll } from './oklch.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -35,7 +37,9 @@ function mix(x, y, t) {
 
 const NONE = '#00000000';
 
-export function buildTheme(def) {
+export function buildTheme(source) {
+  // Design System v2 palettes are written in OKLCH; everything below works on hex.
+  const def = hexAll(source);
   const c = def.colors;
   const s = def.syntax;
   const dark = def.type === 'dark';
@@ -1009,6 +1013,9 @@ export function buildTheme(def) {
     operator: s.delimiter,
     '*.deprecated': { strikethrough: true },
   };
+
+  // A palette may pin individual keys (v2: the floating surfaces, the decision blue, agent hues).
+  Object.assign(colors, def.overrides ?? {});
 
   return {
     $schema: 'vscode://schemas/color-theme',
