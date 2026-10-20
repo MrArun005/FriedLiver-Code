@@ -376,8 +376,12 @@ async function run(themeKey, size, out, failures, summary) {
 		await cmd('workbench.view.explorer', 500);
 	});
 	await step('23-breadcrumbs', async () => {
-		await win.locator('.tabs-container .tab', { hasText: 'format.ts' }).first().click({ timeout: 10_000 });
-		await wait(500);
+		// 16-welcome closed every editor: open format.ts again through quick open.
+		await cmd('workbench.action.quickOpen', 800);
+		await win.keyboard.type('format.ts', { delay: 40 });
+		await wait(1200);
+		await win.keyboard.press('Enter');
+		await wait(1200);
 		await cmd('breadcrumbs.focusAndSelect', 1200);
 		await shot('23-breadcrumbs');
 		await escape(2);
