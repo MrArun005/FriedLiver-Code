@@ -28,6 +28,14 @@ on:
         type: boolean
         required: false
         default: false
+      themes:
+        description: 'Themes to shoot, comma separated (fl-dark,fl-light,dark-2026,dark,light); empty = the default set'
+        required: false
+        default: ''
+      sizes:
+        description: 'Window sizes, comma separated (1440x900,1280x800); empty = both'
+        required: false
+        default: ''
   push:
     branches: ['ui/**']
     paths:
@@ -66,6 +74,8 @@ jobs:
       # Pushes record too; a dispatch can turn it off.
       RECORD: ${{ github.event_name != 'workflow_dispatch' || inputs.record }}
       PLATFORM: ${{ matrix.platform }}
+      THEMES: ${{ inputs.themes }}
+      SIZES: ${{ inputs.sizes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,6 +104,8 @@ jobs:
           [ -n "$WRITE_BASELINE" ] && flags+=(--write-baseline)
           [ -n "$STRICT_GATES" ] && flags+=(--strict-gates)
           [ "$RECORD" = true ] && flags+=(--record)
+          [ -n "$THEMES" ] && flags+=(--themes "$THEMES")
+          [ -n "$SIZES" ] && flags+=(--sizes "$SIZES")
           node scripts/workbench-shots.mjs --app "$APP" --out shots "${flags[@]}"
       - name: Summary
         if: always()
