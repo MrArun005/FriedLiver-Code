@@ -18,11 +18,15 @@
 //        &fixture=images (the design work's real images, ui-fixture-images.mjs; thumbnails through the host's own code)
 //        &fixture=approvals[&countdown=1] (approvals at every weight: routine, review, careful; ui-fixture-approvals.mjs)
 //        &fixture=discuss|discuss-before (/discuss: Postgres vs MySQL, running, split, agreed; before = the same question by /ask, ui-fixture-discuss.mjs)
+//        &fixture=discuss-models (/discuss between Claude · Opus, Claude · Sonnet and Gemini; chat-compose for the @ suggestions)
 //        &fixture=agent-errors (agent errors in plain words, and chats agent-to-agent goes back to, ui-fixture-agent-errors.mjs)
 //        &fixture=inbox|inbox-empty (the Decision Inbox: ten requests from five chats, or all of them answered, ui-fixture-inbox.mjs)
 //   --only images    run only the Images view's checks
 //   --only inbox     run only the Decision Inbox's checks (screenshots inbox-{1200,640}-{dark,light}.png to --out)
 //   --only discuss   run only the /discuss card's checks (screenshots {board-meter,board,meter,timeline}-{running,split,agreed}-{1200,640}-{dark,light}.png to --out)
+//   --only discuss-models  /discuss @models: the composer's @ suggestions (grouped by agent), the ambiguous and unknown
+//                   chips and their picker, and a card with the same agent on two models, Dark 2026: screenshots to
+//                   ~/code/FriedLiver-Code-design/review/discuss-models/
 //   --only approvals run only the approvals' checks (screenshots approvals-{chat,inbox,careful}-{1200,640}-{dark,light}.png to --out)
 //   --only agent-errors the agent-error notices and the hand-off/ask menus that reuse a chat (agent-errors-*.png to --out)
 //   --only gutter   nothing in the transcript past its gutter, 320 to 1200 px, dark and light [--gutter-shot before|after]
@@ -192,8 +196,8 @@ function page(params) {
             ? referenceFixture(Date.now())
             : params.get('fixture') === 'approvals'
               ? approvalsFixture(Date.now(), { countdown: params.get('countdown') === '1' })
-            : params.get('fixture') === 'discuss' || params.get('fixture') === 'discuss-before'
-              ? discussFixture(Date.now(), { before: params.get('fixture') === 'discuss-before' })
+            : params.get('fixture') === 'discuss' || params.get('fixture') === 'discuss-before' || params.get('fixture') === 'discuss-models'
+              ? discussFixture(Date.now(), { before: params.get('fixture') === 'discuss-before', models: params.get('fixture') === 'discuss-models' })
             : params.get('fixture') === 'agent-errors'
               ? agentErrorsFixture(Date.now())
             : params.get('fixture') === 'overflow'
@@ -354,7 +358,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { discuss: discussChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'manager-overflow': managerOverflowChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
+  const only = { discuss: discussChecks, 'discuss-models': discussModelsChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'manager-overflow': managerOverflowChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();
@@ -2461,6 +2465,89 @@ async function discussChecks({ open, check }) {
   await p.locator('.fl-discuss .fl-split-caret').click();
   check((await p.locator('.fl-menu [role^="menuitem"]').count()) === 3, 'the split menu lists every participant');
   await p.close();
+}
+
+async function discussModelsChecks({ open, check }) {
+  const out = path.join(os.homedir(), 'code/FriedLiver-Code-design/review/discuss-models');
+  fs.mkdirSync(out, { recursive: true });
+  const shot = async (p, name, element) => {
+    const file = path.join(out, `${name}.png`);
+    await (element ? p.locator(element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    console.log(`  ${file}`);
+  };
+  const menuText = (p) => p.locator('.mention-menu').innerText();
+  const type = async (p, text) => {
+    await p.locator('.composer textarea').fill('');
+    await p.locator('.composer textarea').pressSequentially(text);
+  };
+  for (const width of [900, 480]) {
+    const p = await open('surface=chat&theme=dark-2026&fixture=discuss-models&select=chat-compose', width, 760, 2);
+    await type(p, '/discuss Postgres or MySQL for the audit log? @');
+    await p.waitForSelector('.mention-menu');
+    const all = await menuText(p);
+    check(['Claude', 'Codex', 'Gemini', 'Opus 4.5', 'Sonnet 4.5', 'gpt-5.6-terra', '3.1 Pro'].every((s) => all.includes(s)), `${width}: after /discuss, @ lists the agents and their models`);
+    check((await p.locator('.mention-menu .cc-divider').count()) >= 2, `${width}: grouped by agent, each led by its own row`);
+    await shot(p, `autocomplete-all-${width}-dark`);
+    await p.keyboard.type('op');
+    check((await p.locator('.mention-menu [role="option"]').allInnerTexts()).join('|').includes('Opus 4.5'), `${width}: "@op" narrows to the Opus models (and Codex, as "openai")`);
+    check((await p.locator('.mention-menu .cc-menu-sub').allInnerTexts()).some((t) => t.includes('Claude')), `${width}: models without their agent's row sit under the agent's name`);
+    await shot(p, `autocomplete-op-${width}-dark`);
+    // Down to Opus 4.5 and Enter: the mention becomes "@opus ".
+    const rows = await p.locator('.mention-menu [role="option"]').allInnerTexts();
+    const opus = rows.findIndex((r) => r.includes('Opus 4.5'));
+    for (let i = 0; i < opus; i++) await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('Enter');
+    check((await p.locator('.composer textarea').inputValue()) === '/discuss Postgres or MySQL for the audit log? @opus ', `${width}: Enter puts in the model's short name`);
+    await p.close();
+  }
+  // The same agent twice, and a model the chat's own agent isn't on: Send hands the host (agent, model) pairs.
+  const send = await open('surface=chat&theme=dark-2026&fixture=discuss-models&select=chat-compose', 900, 760, 2);
+  await type(send, '/discuss @sonnet Postgres or MySQL? @gemini');
+  await send.evaluate(() => (window.__posted.length = 0));
+  // The first Enter takes the suggestion the caret is on ("@gemini "), the second sends.
+  await send.keyboard.press('Enter');
+  await send.keyboard.press('Enter');
+  const sent = await send.evaluate(() => window.__posted.filter((m) => m.type === 'discuss'));
+  check(
+    sent.length === 1 && JSON.stringify(sent[0].participants) === JSON.stringify([{ agent: 'claude', model: 'claude-sonnet-4-5' }, { agent: 'gemini' }]) && sent[0].text === 'Postgres or MySQL?',
+    'Send: Claude on Sonnet and Gemini join the Opus chat, the question without the mentions',
+  );
+  // Ambiguous: a chip asks which; Send opens its picker instead of sending.
+  await type(send, '/discuss @gpt-5.6 @gemini Which ORM for the audit log?');
+  await send.waitForSelector('.cc-chips .fl-pill');
+  check((await send.locator('.cc-chips .fl-pill').innerText()).includes('Which @gpt-5.6?'), 'an ambiguous model gets a chip asking which');
+  await shot(send, 'ambiguous-chip-900-dark');
+  await send.evaluate(() => (window.__posted.length = 0));
+  await send.keyboard.press('Enter');
+  check((await send.evaluate(() => window.__posted.filter((m) => m.type === 'discuss').length)) === 0, 'nothing is sent while a mention is ambiguous');
+  await send.waitForSelector('.mention-menu');
+  check((await menuText(send)).includes('gpt-5.6-luna'), 'Send opens the picker on it');
+  await shot(send, 'ambiguous-picker-900-dark');
+  await send.keyboard.press('ArrowDown');
+  await send.keyboard.press('Enter');
+  check((await send.locator('.composer textarea').inputValue()).startsWith('/discuss @gpt-5.6-luna '), 'picking settles it');
+  check((await send.locator('.cc-chips .fl-pill').count()) === 0, 'and the chip goes');
+  // Unknown: a clear error with the nearest names.
+  await type(send, '/discuss @opsu @gemini Which ORM?');
+  await send.waitForSelector('.cc-chips .fl-pill');
+  check((await send.locator('.cc-chips .fl-pill').innerText()).includes('No agent or model @opsu'), 'an unknown name gets an error chip');
+  await send.locator('.cc-chips .fl-pill__main').click();
+  await send.waitForSelector('.mention-menu');
+  check((await menuText(send)).includes('Opus'), 'its picker suggests the nearest names');
+  await shot(send, 'unknown-picker-900-dark');
+  await send.close();
+  // The card: Claude · Opus vs Claude · Sonnet vs Gemini, every layout, finished and running.
+  for (const layout of ['board+meter', 'board', 'meter', 'timeline'])
+    for (const [chat, name] of [['chat-main', 'split'], ['chat-running', 'running']]) {
+      const p = await open(`surface=chat&theme=dark-2026&fixture=discuss-models&select=${chat}&discussLayout=${encodeURIComponent(layout)}`, 1200, 1600, 2);
+      await p.waitForSelector(`.fl-discuss[data-layout="${layout}"]`);
+      await p.waitForTimeout(300);
+      const text = await p.locator('.fl-discuss').innerText();
+      check(text.includes('Claude · Opus 4.5') && text.includes('Claude · Sonnet 4.5') && text.includes('Gemini'), `${layout} ${name}: each participant named by agent and model`);
+      check(!/claude\/claude/.test(text), `${layout} ${name}: no raw participant keys`);
+      await shot(p, `card-${layout.replace('+', '-')}-${name}-1200-dark`, '.fl-discuss');
+      await p.close();
+    }
 }
 
 async function agentErrorsChecks({ open, check }) {
