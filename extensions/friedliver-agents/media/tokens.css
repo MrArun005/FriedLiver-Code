@@ -1,5 +1,5 @@
 /*
- * FriedLiver design tokens, Design System v2 "Lantern": the only file that holds raw colours, sizes,
+ * FriedLiver design tokens, Design System v2 "Beacon": the only file that holds raw colours, sizes,
  * shadows, blur and motion curves. Spec: ~/code/FriedLiver-Code-design/COMPONENTS.md v2 (§1 tokens;
  * mirrored in docs/design/COMPONENTS.md).
  *
@@ -18,19 +18,20 @@
 
 /* tokens:start */
 :root {
-  /* Surfaces: 60% page, 30% raised content, floating layers above. OKLCH (dark): page .198, input .235,
-     float .255, code .165, shell .175 (the workbench chrome; webviews sit on the page). */
-  --bg: var(--vscode-editor-background, #161514);
-  --input-bg: var(--vscode-input-background, #1f1e1c);
+  /* Surfaces: 60% page, 30% raised content, floating layers above. Warm graphite, OKLCH (dark, C .006
+     h 60): page .205, input .235, float .265, code .15, shell .168 (the workbench chrome; webviews sit on
+     the page). */
+  --bg: var(--vscode-editor-background, #191714);
+  --input-bg: var(--vscode-input-background, #201d1b);
   --field-border: transparent;
   --thumb: var(--bg);
-  --menu-bg: var(--vscode-menu-background, #242221);
-  --dialog-bg: var(--vscode-editorWidget-background, #242221);
-  --code-bg: var(--vscode-textCodeBlock-background, #0f0e0d);
-  --inline-code-bg: var(--vscode-textPreformat-background, #22201e);
+  --menu-bg: var(--vscode-menu-background, #252220);
+  --dialog-bg: var(--vscode-editorWidget-background, #252220);
+  --code-bg: var(--vscode-textCodeBlock-background, #100e0c);
+  --inline-code-bg: var(--vscode-textPreformat-background, #23201e);
   --tool-bg: var(--bg);
   /* State fills are the strong text colour at a low alpha, so they read on every surface they land on. */
-  --sel-bg: var(--vscode-list-activeSelectionBackground, #f8f6f51c);
+  --sel-bg: var(--vscode-list-activeSelectionBackground, #faf6f31c);
   --hover-bg: color-mix(in srgb, var(--sel-fg) 6%, transparent);
   --ghost-hover: color-mix(in srgb, var(--sel-fg) 8%, transparent);
   --pill-bg: color-mix(in srgb, var(--fg) 9%, transparent);
@@ -50,7 +51,7 @@
   --rim: inset 0 1px 0 0 #ffffff12;
 
   /* Lines: one hairline weight; containers 10% of the text colour, rows 6%. */
-  --border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, #2b2927)));
+  --border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, #24211f)));
   --hairline: color-mix(in srgb, var(--border) 60%, transparent);
   --dialog-border: color-mix(in srgb, var(--sel-fg) 12%, transparent);
   --option-ring: #ffffff1a;
@@ -63,34 +64,35 @@
   --line: 1px;
   --line-half: 0.5px;
 
-  /* Text: five colours. OKLCH (dark) .975 / .925 / .735 / .6 */
-  --sel-fg: var(--vscode-list-activeSelectionForeground, #f8f6f5);
-  --fg: var(--vscode-foreground, #e8e6e3);
-  --fg-2: var(--vscode-descriptionForeground, #aca9a5);
+  /* Text: five colours. OKLCH (dark) .975 / .925 / .735 / .62 */
+  --sel-fg: var(--vscode-list-activeSelectionForeground, #faf6f3);
+  --fg: var(--vscode-foreground, #e9e5e2);
+  --fg-2: var(--vscode-descriptionForeground, #aca8a5);
   --fg-50: color-mix(in srgb, var(--fg) 62%, transparent);
-  --placeholder: var(--vscode-input-placeholderForeground, #888682);
-  --disabled: var(--vscode-disabledForeground, #888682);
-  --link: var(--vscode-textLink-foreground, #61b2f4);
-  --inline-code-fg: var(--vscode-textPreformat-foreground, #c6c3c1);
+  --placeholder: var(--vscode-input-placeholderForeground, #898583);
+  --disabled: var(--vscode-disabledForeground, #898583);
+  --link: var(--vscode-textLink-foreground, #67b0f9);
+  --inline-code-fg: var(--vscode-textPreformat-foreground, #c7c3c0);
 
-  /* The one accent ("the lantern"): ember, oklch(.72 .135 48) with dark ink in dark themes,
-     oklch(.56 .15 42) with white ink in light ones. It marks the next key action on a surface and
-     nothing else: the primary button, the composer's send when there is something to send. */
-  --accent-bg: var(--vscode-button-background, #e88855);
-  --accent-fg: var(--vscode-button-foreground, #21120a);
-  --accent-hover: var(--vscode-button-hoverBackground, #f39762);
+  /* The one accent ("the beacon"): signal blue oklch(.54 .17 257) with white ink (5.1:1), the same in
+     dark and light. It marks the next key action on a surface and nothing else: the one primary button,
+     the composer's send when there is something to send. Needs-you, focus and links are the same hue,
+     lighter in dark themes (.74 .13 250) so they read 4.5:1 as text on the page. */
+  --accent-bg: var(--vscode-button-background, #1e6ccf);
+  --accent-fg: var(--vscode-button-foreground, #ffffff);
+  --accent-hover: var(--vscode-button-hoverBackground, #2773d7);
   --accent-press: color-mix(in srgb, var(--accent-bg) 88%, var(--bg));
   --accent: var(--fl-accent, var(--accent-bg));
   --send-bg: var(--fl-accent, var(--accent-bg));
   --send-fg: var(--accent-fg);
-  --focus-border: var(--vscode-focusBorder, #61b2f4);
+  --focus-border: var(--vscode-focusBorder, #67b0f9);
   /* Toggles, checkboxes and radios are neutral when on (the strong text colour), so the accent stays rare. */
   --button-bg: var(--sel-fg);
   --button-fg: var(--bg);
   --error: var(--vscode-errorForeground, #f86970);
   --warn: var(--vscode-editorWarning-foreground, #f1bf5b);
   --toggle-on: var(--button-bg);
-  --effort-fill: var(--vscode-inputOption-activeBorder, #343230);
+  --effort-fill: var(--vscode-inputOption-activeBorder, #353230);
   /* The one primary per surface is the accent. */
   --primary-bg: var(--accent-bg);
   --primary-fg: var(--accent-fg);
@@ -104,9 +106,10 @@
   --mic-bg: #0078d4;
   --mic-hover: #026ec1;
   --mic-fg: #fff;
-  /* "Needs you" and focus: the theme's info blue, oklch(.74 .125 245) dark / (.53 .16 252) light. Blue is
-     the system talking to you (focus, links, decisions); ember is your next move. */
-  --decision: var(--vscode-friedliver-decision, var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue, #61b2f4)));
+  /* "Needs you", focus and links: the signal blue's light step, oklch(.74 .13 250) dark / (.53 .16 256)
+     light. Blue means "this is for you": the decision waiting, the ring on what you are on, the button
+     that answers it. Status never borrows it except needs-you. */
+  --decision: var(--vscode-friedliver-decision, var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue, #67b0f9)));
   --decision-fg: var(--vscode-friedliver-decisionForeground, var(--bg));
   --decision-soft: color-mix(in srgb, var(--decision) 12%, transparent);
   --decision-line: color-mix(in srgb, var(--decision) 50%, transparent);
@@ -116,7 +119,8 @@
   --focus-off: 2px;
   --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus) 24%, transparent);
 
-  /* Status: working green (it breathes), done neutral, needs-you blue, failed red. Ember is never a status. */
+  /* Status: working green (it breathes), done neutral, needs-you blue, failed red. Each also has its own
+     shape (COMPONENTS.md §2.23): needs-you a ring, working a filled dot with a halo, done a check, failed a cross. */
   --status-working: var(--vscode-charts-green, #67d283);
   --status-done: var(--fg-2);
   --status-failed: var(--error);
@@ -126,7 +130,7 @@
   --tl-default: var(--fg-2);
   --added: var(--vscode-gitDecoration-addedResourceForeground, #67d283);
   --removed: var(--vscode-gitDecoration-deletedResourceForeground, #f86970);
-  --recording: var(--vscode-charts-blue, #61b2f4);
+  --recording: var(--vscode-charts-blue, #67b0f9);
 
   /* Agents */
   --hue-claude: var(--vscode-friedliver-agentClaude, var(--vscode-charts-orange, #ebaf86));
@@ -246,6 +250,8 @@
   --shadow-sheet: 0 -8px 32px #00000066;
   --shadow-flash: 0 0 0 4px var(--focus);
   --shadow-flash-end: 0 0 0 4px transparent;
+  /* The top-edge light on a filled button (primary, brand). */
+  --sheen: inset 0 1px 0 #ffffff26;
 
   /* Layers */
   --z-content: 1;

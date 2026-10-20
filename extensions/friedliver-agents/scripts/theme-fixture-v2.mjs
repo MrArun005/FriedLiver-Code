@@ -16,8 +16,8 @@ const FIXTURES = path.join(EXT, 'test', 'fixtures');
 
 // The agents' own colours in v2 (COMPONENTS.md v2 §1.1), oklch in the comment.
 const OWN = {
-  dark: { 'friedliver-decision': '#61b2f4', 'friedliver-decisionForeground': '#161514', 'friedliver-agentClaude': '#ebaf86' /* .8 .09 55 */, 'friedliver-agentCodex': '#8bd9c9' /* .83 .08 180 */, 'friedliver-agentGemini': '#a9b6f5' /* .79 .09 275 */ },
-  light: { 'friedliver-decision': '#006cc3', 'friedliver-decisionForeground': '#ffffff', 'friedliver-agentClaude': '#984b16' /* .5 .12 50 */, 'friedliver-agentCodex': '#037465' /* .5 .09 180 */, 'friedliver-agentGemini': '#4e59b1' /* .5 .14 275 */ },
+  dark: { 'friedliver-decision': '#67b0f9', 'friedliver-decisionForeground': '#191714', 'friedliver-agentClaude': '#ebaf86' /* .8 .09 55 */, 'friedliver-agentCodex': '#8bd9c9' /* .83 .08 180 */, 'friedliver-agentGemini': '#a9b6f5' /* .79 .09 275 */ },
+  light: { 'friedliver-decision': '#1e6ac5', 'friedliver-decisionForeground': '#ffffff', 'friedliver-agentClaude': '#984b16' /* .5 .12 50 */, 'friedliver-agentCodex': '#037465' /* .5 .09 180 */, 'friedliver-agentGemini': '#4e59b1' /* .5 .14 275 */ },
 };
 const FONTS = { 'chat-font-family': "'Geist', -apple-system, BlinkMacSystemFont, sans-serif", 'font-family': "'Geist', -apple-system, BlinkMacSystemFont, sans-serif", 'editor-font-family': "'Geist Mono', Menlo, monospace" };
 
