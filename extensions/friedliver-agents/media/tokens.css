@@ -123,10 +123,12 @@
   --focus-off: 2px;
   --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus) 24%, transparent);
 
-  /* Status: working green (it breathes), done neutral, needs-you blue, failed red. Each also has its own
-     shape (COMPONENTS.md §2.23): needs-you a ring, working a filled dot with a halo, done a check, failed a cross. */
-  --status-working: var(--vscode-charts-green, #67d283);
-  --status-done: var(--fg-2);
+  /* Status (COMPONENTS.md v2 §2.23; owner, 2026-10-20): working is the warm neutral --fg-2 on an open arc that
+     turns; green is kept for done and success; needs-you blue; failed
+     red. Each also has its own shape: needs-you a bullseye, working an open arc, done a check, failed ⊗,
+     idle a hollow ring, so colour is never the only signal (WCAG 1.4.1). */
+  --status-working: var(--fg-2);
+  --status-done: var(--vscode-charts-green, #67d283);
   --status-failed: var(--error);
   --status-waiting: var(--decision);
   --dot-idle: color-mix(in srgb, var(--fg-2) 45%, transparent);
@@ -141,6 +143,12 @@
   --hue-codex: var(--vscode-friedliver-agentCodex, var(--vscode-charts-green, #8bd9c9));
   --hue-gemini: var(--vscode-friedliver-agentGemini, var(--vscode-charts-blue, #a9b6f5));
   --hue-demo: var(--fg-2);
+  /* The agents' logos in their vendors' colours (ui/logos.ts). OpenAI's mark is monochrome: the text colour. */
+  --logo-claude: #d97757;
+  --logo-openai: var(--fg);
+  --logo-gemini: #8e75b2;
+  /* The FriedLiver mark only (oklch .72 .14 52 dark / .62 .15 48 light): never a control, never a status. */
+  --brand: #e2884f;
 
   /* Type: Geist for the UI, Geist Mono for code (both OFL, bundled). One base size (Cmd/Ctrl + = - 0
      scales --fl-font-size), em steps for components, px steps for page-level type. */
@@ -314,6 +322,7 @@ body.vscode-high-contrast-light {
   --thumb: #ffffff;
   --shadow-thumb: 0 0 0 1px #00000026, 0 1px 2px #00000029;
   --mic-idle: var(--fg);
+  --brand: #c4622a;
   --rim: inset 0 0 0 0 transparent;
   --elev-1: 0 0 0 1px #1a14100f, 0 1px 2px #1a14100f;
   --elev-2: 0 0 0 1px #1a141014, 0 4px 12px -2px #1a14101f;

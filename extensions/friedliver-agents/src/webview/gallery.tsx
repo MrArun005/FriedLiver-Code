@@ -22,7 +22,7 @@ import { AgentMark, Button, FilterPill, IconButton, Progress, Tab, Toast, ToastR
 
 const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 /** Done looking's key: Shift+Cmd+Backspace (Ctrl on Windows and Linux). */
-const DONE_KEY = MAC ? '⇧⌘⌫' : 'Ctrl+Shift+Backspace';
+const DONE_KEY = '⇧⌘⌫';
 
 
 interface Props {

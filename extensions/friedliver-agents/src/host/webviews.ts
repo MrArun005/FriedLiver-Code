@@ -5,11 +5,17 @@ import type { ChatView } from '../shared/model';
 
 
 /**
- * Tokens, the views' own layout, then the components last, so a component wins a tie with a view rule
- * and the frozen composer keeps the precedence it had at the end of webview.css (COMPONENTS.md §1.9).
+ * The bundled fonts, tokens, the views' own layout, then the components last, so a component wins a tie
+ * with a view rule and the frozen composer keeps the precedence it had at the end of webview.css
+ * (COMPONENTS.md §1.9).
  */
-export const STYLESHEETS = ['tokens.css', 'webview.css', 'components.css'];
-export type Script = 'chat' | 'tasks' | 'images';
+export const STYLESHEETS = ['fonts.css', 'tokens.css', 'webview.css', 'components.css'];
+
+/** The platform layer's name for this OS (COMPONENTS.md v2 §1.14): body[data-platform] in every webview. */
+export function platformName(platform: NodeJS.Platform = process.platform): 'mac' | 'windows' | 'linux' {
+  return platform === 'darwin' ? 'mac' : platform === 'win32' ? 'windows' : 'linux';
+}
+export type Script = 'chat' | 'tasks' | 'images' | 'welcome';
 
 /** One webview showing agent state: the side view, the center chat, the task board or images. */
 export interface Surface {
@@ -40,6 +46,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,
     `style-src ${webview.cspSource}`,
+    `font-src ${webview.cspSource}`,
     `script-src 'nonce-${nonce}'`,
   ].join('; ');
   return `<!doctype html>
@@ -51,7 +58,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 ${STYLESHEETS.map((f) => `<link rel="stylesheet" href="${media(f)}">`).join('\n')}
 <title>${escapeHtml(title)}</title>
 </head>
-<body data-surface="${script}"${list ? ' data-view="list"' : ''} data-platform="${process.platform}" data-font="${escapeHtml(chat.get<string>('fontFamily', ''))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}" data-font-size="${escapeHtml(String(chat.get<number>('fontSize', 13)))}">
+<body data-surface="${script}"${list ? ' data-view="list"' : ''} data-platform="${platformName()}" data-font="${escapeHtml(chat.get<string>('fontFamily', ''))}" data-accent="${escapeHtml(chat.get<string>('accentColor', '#D97757'))}" data-font-size="${escapeHtml(String(chat.get<number>('fontSize', 13)))}">
 <div id="root"></div>
 <script nonce="${nonce}" src="${media(`dist/${script}.js`)}"></script>
 </body>

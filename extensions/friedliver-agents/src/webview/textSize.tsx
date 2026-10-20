@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { TEXT_DEFAULT, defaultTextSize, textSizeKey } from '../shared/textSize';
 import { usePersisted } from './common';
 
-const MAC = document.body.dataset.platform === 'darwin';
+const MAC = document.body.dataset.platform === 'mac';
 const FALLBACK = defaultTextSize(document.body.dataset.fontSize);
 
 /**

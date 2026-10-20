@@ -285,7 +285,6 @@ export function useDecisionTarget(chat: ChatView): string | undefined {
   return target && decisionId(target);
 }
 
-const MAC = /Mac/.test(navigator.platform);
 
 /** A decision card's frame: clicking or focusing in it makes it the one the keys act on. */
 export function chooseOn(chat: ChatView, id: string) {
@@ -630,7 +629,7 @@ export function QuestionCard({ item, chat }: { item: Question; chat: ChatView })
           Skip
         </Button>
         {(!last || g.field.type !== 'choice') && (
-          <Button variant={on ? 'brand' : 'secondary'} kbd={MAC ? '⌘⏎' : 'Ctrl+⏎'} onClick={() => next(values)}>
+          <Button variant={on ? 'brand' : 'secondary'} kbd="⌘⏎" onClick={() => next(values)}>
             {last ? 'Submit' : 'Next'}
           </Button>
         )}
