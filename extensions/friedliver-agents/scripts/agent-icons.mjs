@@ -18,12 +18,18 @@ const HUE = {
   dark: { claude: '#ebaf86', codex: '#8bd9c9', gemini: '#a9b6f5', antigravity: '#aca8a5', demo: '#aca8a5' },
   light: { claude: '#984b16', codex: '#037465', gemini: '#4e59b1', antigravity: '#5e5c59', demo: '#5e5c59' },
 };
+// Logos keep their vendors' colours (ui/logos.ts; --logo-* in tokens.css); OpenAI's is monochrome.
+const LOGO = { dark: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#e9e5e2', 'var(--logo-gemini)': '#8e75b2' }, light: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#242220', 'var(--logo-gemini)': '#8e75b2' } };
 for (const [kind, hues] of Object.entries(HUE))
   for (const [agent, colour] of Object.entries(hues)) {
     const m = markFor(agent);
-    const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="${m.viewBox ?? '0 0 16 16'}">` +
-      (m.fill ? `<path d="${m.fill}" fill="${colour}" fill-opacity=".16" stroke="${colour}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>` : '') +
-      `<path d="${m.d}" fill="none" stroke="${colour}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>\n`;
+    const open = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="${m.viewBox ?? '0 0 16 16'}">`;
+    const svg = m.svg
+      ? `${open}${m.svg}</svg>\n`
+      : m.logo
+        ? `${open}<path d="${m.d}" fill="${LOGO[kind][m.logo.color]}"/></svg>\n`
+        : open +
+          (m.fill ? `<path d="${m.fill}" fill="${colour}" fill-opacity=".16" stroke="${colour}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>` : '') +
+          `<path d="${m.d}" fill="none" stroke="${colour}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>\n`;
     fs.writeFileSync(path.join(ext, `media/agent-${agent}${kind === 'light' ? '-light' : ''}.svg`), svg);
   }

@@ -372,6 +372,11 @@
   color: inherit;
   opacity: 0.75;
 }
+/* On the accent the second part keeps full ink (75% of white on ember drops under 4.5:1). */
+:is(.fl-btn--primary, .fl-btn--brand) .fl-btn__sub {
+  opacity: 1;
+  font-weight: var(--w-regular);
+}
 /* The key in a button (§2.1): a keycap at 11px after the label; outlined in currentColor on the primary,
    a 16% currentColor fill elsewhere. */
 .fl-btn .fl-btn__k,
@@ -395,12 +400,12 @@
   padding: 0;
   background: none;
 }
-:is(.fl-btn--primary, .fl-btn--brand) .fl-btn__k,
-:is(.fl-btn--primary, .fl-btn--brand) .fl-btn__k > .fl-kbd {
+:is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-btn__k,
+:is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-btn__k > .fl-kbd {
   background: transparent;
   box-shadow: inset 0 0 0 var(--line) color-mix(in srgb, currentColor 45%, transparent);
 }
-:is(.fl-btn--primary, .fl-btn--brand) .fl-kbds.fl-btn__k {
+:is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-kbds.fl-btn__k {
   box-shadow: none;
 }
 
@@ -2976,7 +2981,8 @@ button.fl-row,
   width: var(--av);
   height: var(--av);
   border-radius: var(--r-round);
-  background: color-mix(in srgb, var(--hue) 16%, transparent);
+  /* A neutral tile: the agent's logo brings its own colour (owner, 2026-10-21). */
+  background: var(--pill-bg);
   color: var(--hue);
   font-size: var(--t-85);
   font-weight: var(--w-strong);
@@ -3263,6 +3269,13 @@ button.fl-row,
   display: flex;
   gap: var(--sp-2);
   margin-top: var(--sp-1);
+}
+
+/* ---- The FriedLiver mark (§1.6, ui/brandMark.tsx): the outline logo in --brand ---- */
+
+.fl-brand {
+  flex: none;
+  color: var(--brand);
 }
 
 /* ---- Ask box (§2.36): the Welcome hero's input, 52 tall, r12, the field edge, rim + elevation 1; a primary
@@ -3638,7 +3651,15 @@ button.send-btn:active:not(:disabled) {
   background: var(--accent-press);
   transform: scale(var(--press-scale));
 }
-/* Nothing to send: the pill fill and secondary ink, not a faded accent. */
+/* Nothing to send, or Stop while the agent works: the pill fill, not the accent (the accent is for sending). */
+button.send-btn[data-stop] {
+  background: var(--pill-bg);
+  color: var(--fg);
+  box-shadow: none;
+}
+button.send-btn[data-stop]:hover:not(:disabled) {
+  background: var(--pill-hover);
+}
 button.send-btn:disabled {
   opacity: 1;
   background: var(--pill-bg);

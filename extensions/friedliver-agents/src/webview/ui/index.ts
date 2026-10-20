@@ -6,3 +6,4 @@ export * from './overlays';
 export * from './icon';
 export * from './keycap';
 export * from './keys';
+export * from './brandMark';

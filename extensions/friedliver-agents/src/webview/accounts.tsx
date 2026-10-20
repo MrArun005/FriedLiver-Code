@@ -8,7 +8,7 @@ import { age } from '../shared/model';
 import type { SessionOption } from '../shared/session';
 import { NEVER_ALWAYS, SYSTEM_TOOLS, SYSTEM_WORDS, unsupportedOn, type SystemSettingsView } from '../shared/system';
 import { Glyph, Icon, Popover, send } from './common';
-import { Button, IconButton, MenuItem, selectTrigger, Toggle } from './ui';
+import { BrandMark, Button, IconButton, MenuItem, selectTrigger, Toggle } from './ui';
 
 const KIND_TEXT: Record<MethodView['kind'], string> = { browser: 'in your browser', terminal: 'in a terminal', key: 'API key' };
 
@@ -38,7 +38,9 @@ function Page() {
   return (
     <main class="acct-page">
       <header class="acct-head">
-        <h1>Agents &amp; Accounts</h1>
+        <h1>
+          <BrandMark size={20} /> Agents &amp; Accounts
+        </h1>
         <p class="hint">
           Each agent signs in with its own company, through its own login or an API key you keep here. FriedLiver never sees a password; keys stay in the
           editor’s secret storage and go only to their own agent. Nothing here starts an agent until you press Check, Refresh or a sign-in.

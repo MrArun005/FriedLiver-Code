@@ -915,9 +915,9 @@ td.c-act > * + * {
 .cell-line {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   min-width: 0;
-  margin-top: 1px;
+  margin-top: var(--sp-half);
   font-size: var(--t-90);
   color: var(--fg-2);
 }
@@ -1082,12 +1082,11 @@ svg.map {
   fill: var(--decision);
 }
 .map-glyph rect {
-  fill: color-mix(in srgb, var(--hue) 16%, var(--menu-bg));
+  fill: color-mix(in srgb, var(--fg) 9%, var(--menu-bg));
 }
-.map-glyph text {
-  fill: var(--hue);
-  font-weight: 600;
-  text-anchor: middle;
+/* An unknown agent's line glyph takes the text colour; logos bring their own. */
+.map-glyph svg {
+  color: var(--fg-2);
 }
 .map-col-title {
   fill: var(--fg-2);
@@ -2054,7 +2053,7 @@ button.viewer-thumb[aria-selected='true'] {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
-  gap: 3px;
+  gap: var(--sp-half);
 }
 .seg-bar i {
   display: block;
@@ -2640,7 +2639,6 @@ button.step-main:active {
   color: var(--fg-2);
 }
 .step-text.mono {
-  padding-top: 1px;
   font-family: var(--mono);
   font-size: var(--t-85);
   color: var(--fg);
@@ -2798,7 +2796,7 @@ button.step-main:active {
 }
 .stats {
   display: inline-flex;
-  gap: 3px;
+  gap: var(--sp-1);
   font-family: var(--mono);
   font-size: var(--t-85);
 }
@@ -2840,10 +2838,10 @@ button.step-main:active {
   color: var(--fg-2);
 }
 .dl[data-op='add'] .dl-op {
-  color: var(--added);
+  color: color-mix(in srgb, var(--added) var(--tone-ink), var(--fg));
 }
 .dl[data-op='del'] .dl-op {
-  color: var(--removed);
+  color: color-mix(in srgb, var(--removed) var(--tone-ink), var(--fg));
 }
 .dl-more {
   color: var(--fg-2);
@@ -4470,9 +4468,18 @@ button.new-chat kbd {
   padding: var(--sp-5) var(--gutter);
 }
 .acct-head h1 {
-  font-size: var(--t-title);
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--t-hero);
+  font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
   color: var(--sel-fg);
+}
+/* The mark over an empty state (§2.26: the 40 line mark). */
+.empty-mark {
+  display: block;
+  margin-bottom: var(--sp-2);
 }
 .acct-head p {
   margin: var(--sp-1) 0 var(--sp-4);
@@ -4991,7 +4998,7 @@ button.inbox-history-row:hover:not(:disabled) {
 
 /* The count beside Inbox, in the view switch and the chat list: the decision colour while something waits. */
 .seg-count {
-  color: var(--decision);
+  color: inherit;
 }
 button.seg-item[aria-selected='true'] .seg-count {
   color: inherit;

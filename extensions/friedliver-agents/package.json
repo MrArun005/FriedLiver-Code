@@ -164,6 +164,11 @@
         "category": "FriedLiver"
       },
       {
+        "command": "friedliver.needsYou.open",
+        "title": "Open What Needs You",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.nextDecision",
         "title": "Go to Next Decision",
         "category": "FriedLiver"
@@ -354,6 +359,12 @@
       }
     ],
     "menus": {
+      "friedliver/titleBar": [
+        {
+          "command": "friedliver.needsYou.open",
+          "when": "friedliver.needsYouCount > 0"
+        }
+      ],
       "view/title": [
         {
           "command": "friedliver.accounts",

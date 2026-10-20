@@ -76,7 +76,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Avatar, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
+import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -638,6 +638,7 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
   const recent = recentChats(chats, undefined, 5).sort((a, b) => b.lastActivity - a.lastActivity);
   return (
     <div class="empty">
+      <BrandMark size={40} class="empty-mark" />
       <h2>Start a chat</h2>
       <div class="pick">
         {agents.map((agent) => (

@@ -44,7 +44,7 @@ import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
-import { chatOfSession, clip, linkResumeChats, panelTitle } from './shared/view';
+import { chatOfSession, clip, linkResumeChats, needsYou, panelTitle } from './shared/view';
 import { agentName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
 import { codexModelVisibility } from './host/codexModels';
@@ -415,6 +415,8 @@ export class Controller {
     command('friedliver.toggleCodeAndChat', () => this.toggleCodeAndChat());
     command('friedliver.openTasks', () => this.openTasks());
     command('friedliver.welcome', () => this.openWelcome());
+    // The title bar's Needs-you pill (§2.33) opens the Agent Manager, where Needs you is the first column.
+    command('friedliver.needsYou.open', () => this.openTasks());
     // An empty window opens on the Welcome page (§6.15: the stock walkthrough can't show live agents).
     if (context.extensionMode !== vscode.ExtensionMode.Test && !vscode.workspace.workspaceFolders?.length && !vscode.window.visibleTextEditors.length && vscode.workspace.getConfiguration('friedliver.welcome').get<boolean>('onEmptyWindow', true))
       setTimeout(() => this.openWelcome(), 0);
@@ -1439,6 +1441,8 @@ export class Controller {
     if (this.shownDecisions?.key === key && this.shownDecisions.view === this.agentsView) return;
     this.shownDecisions = { key, view: this.agentsView };
     const n = waiting.length;
+    // The title bar's Needs-you pill (§2.33; patch 0160 renders the friedliver/titleBar menu): how many chats wait on you.
+    void vscode.commands.executeCommand('setContext', 'friedliver.needsYouCount', this.core.snapshot.chats.filter((c) => !c.archived && needsYou(c)).length);
     if (n === 0) {
       this.statusItem.hide();
     } else {

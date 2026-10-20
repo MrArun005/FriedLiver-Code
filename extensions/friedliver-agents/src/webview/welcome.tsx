@@ -10,8 +10,7 @@ import { preselectAgents } from '../shared/accounts';
 import { ago, cardLine, needsYou, openChats, planProgress, statusOf } from '../shared/view';
 import { welcomeSummary } from '../shared/welcome';
 import { Dot, send, useHost, useNow, useRoster } from './common';
-import { AskBox, Avatar, Button, Count, Keycaps, Progress, Row } from './ui';
-import { FRIEDLIVER_MARK } from './ui/friedliverMark';
+import { AskBox, Avatar, BrandMark, Button, Count, Keycaps, Progress, Row } from './ui';
 
 const greeting = (d: Date) => (d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening');
 
@@ -38,10 +37,7 @@ function Welcome() {
   return (
     <main class="welcome">
       <header class="wl-hero">
-        <svg class="wl-mark" viewBox={FRIEDLIVER_MARK.viewBox} aria-hidden="true">
-          <path d={FRIEDLIVER_MARK.fill} fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
-          <path d={FRIEDLIVER_MARK.d} fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" />
-        </svg>
+        <BrandMark size={48} class="wl-mark" />
         <div class="wl-hello">
           <h1>{greeting(new Date(now))}</h1>
           <p>{sum.sentence}</p>

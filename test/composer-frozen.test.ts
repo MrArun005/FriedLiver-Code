@@ -15,8 +15,9 @@ const END = '/* ---- Banners above the composer';
 // Change only with the owner's sign-off on the new composer.
 // 2026-10-20: owner-authorised v2 restyle (HANDOFF-v2 §B2.3): colours, radii, shadows and the send state; and, on the
 // owner's later order ("use the whole screen"), the composer spans the chat's width on the transcript's gutters
-// instead of a 680px centred column. DOM and controls unchanged.
-const APPROVED = '50368a4295fc9519b5801f1bc8266e8c4937e1bb44f200787e1f5b70f993f469';
+// instead of a 680px centred column; and Stop (the send while an agent works) is the pill fill, so the accent
+// marks only sending. DOM and controls unchanged.
+const APPROVED = 'ce8a49b27092bdf28eb632454748fe14768457b858c255d4703b3b5fdc14e260';
 
 describe('approved composer', () => {
   it('keeps its styles', () => {

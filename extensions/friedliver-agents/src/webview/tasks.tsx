@@ -44,7 +44,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Avatar, Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
+import { Avatar, BrandMark, Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, usageTotalLines, usageTotals, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, HandoffTargets, PipeMenu, PipeTargets } from './connect';
@@ -467,6 +467,7 @@ function Manager() {
           {view !== 'images' && view !== 'inbox' && query && shown.length === 0 && outside.length === 0 && <div class="empty-view">No task matches “{query}”.</div>}
           {view !== 'images' && view !== 'inbox' && !query && shown.length === 0 && outside.length === 0 && (
             <div class="empty-view">
+              <BrandMark size={40} class="empty-mark" />
               <h2>{tally.archived ? 'No open tasks' : 'No tasks yet'}</h2>
               <p class="hint">Describe a task above, pick one or more agents, press ↩.</p>
             </div>

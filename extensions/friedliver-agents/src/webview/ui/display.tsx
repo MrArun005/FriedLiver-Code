@@ -151,10 +151,20 @@ export function Avatar({ agent, size, mark = true, working }: { agent: AgentKey;
   );
 }
 
-function MarkSvg({ agent }: { agent: string }) {
+/** An agent's mark as an <svg>; `box` places it inside another SVG (the map). */
+export function MarkSvg({ agent, box }: { agent: string; box?: { x: number; y: number; size: number } }) {
   const m = markFor(agent);
+  const at = box ? { x: box.x, y: box.y, width: box.size, height: box.size } : {};
+  // A vendor's multi-layer logo, as published (a static asset of ours, never agent text).
+  if (m.svg) return <svg {...at} viewBox={m.viewBox} aria-hidden="true" focusable="false" dangerouslySetInnerHTML={{ __html: m.svg }} />;
+  if (m.logo)
+    return (
+      <svg {...at} viewBox={m.viewBox} aria-hidden="true" focusable="false">
+        <path d={m.d} style={{ fill: m.logo.color }} />
+      </svg>
+    );
   return (
-    <svg viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
+    <svg {...at} viewBox={m.viewBox ?? '0 0 16 16'} aria-hidden="true" focusable="false">
       {/* The FriedLiver mark is a line drawing with a 16% fill (§1.6). */}
       {m.fill && <path d={m.fill} fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />}
       <path d={m.d} fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
