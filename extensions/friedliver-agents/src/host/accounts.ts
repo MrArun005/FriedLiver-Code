@@ -81,7 +81,8 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
   /** The agent's API key, when that is the setup saved for it. */
   apiKey(agent: VendorAgentId): string | undefined {
     const s = this.saved.get(agent);
-    return s?.setup === 'apiKey' ? s.values[KEY_ENV[agent]] : undefined;
+    const env = KEY_ENV[agent];
+    return s?.setup === 'apiKey' && env ? s.values[env] : undefined;
   }
 
   /** Any other saved setup (Gemini's Vertex AI), as the agent's environment. */
@@ -279,7 +280,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       agent ??
       (
         await vscode.window.showQuickPick(
-          VENDOR_AGENTS.map((a) => ({ label: AGENT_FACES[a].name, description: KEY_SETUPS[a].map((s) => s.name).join(', '), agent: a })),
+          VENDOR_AGENTS.filter((a) => KEY_SETUPS[a].length).map((a) => ({ label: AGENT_FACES[a].name, description: KEY_SETUPS[a].map((s) => s.name).join(', '), agent: a })),
           { title: 'Set an API key' },
         )
       )?.agent;

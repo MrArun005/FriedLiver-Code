@@ -287,8 +287,8 @@ export class AgentConnection {
     await this.request(sdk!.methods.agent.session.close, { sessionId });
   }
 
-  prompt(sessionId: string, prompt: acp.ContentBlock[]): Promise<acp.PromptResponse> {
-    return this.request(sdk!.methods.agent.session.prompt, { sessionId, prompt });
+  prompt(sessionId: string, prompt: acp.ContentBlock[], meta?: Record<string, unknown>): Promise<acp.PromptResponse> {
+    return this.request(sdk!.methods.agent.session.prompt, { sessionId, prompt, ...(meta ? { _meta: meta } : {}) });
   }
 
   cancel(sessionId: string): Promise<void> {

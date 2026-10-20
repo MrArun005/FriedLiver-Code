@@ -13,7 +13,7 @@ process.on('exit', () => fs.rmSync(path.dirname(out), { recursive: true, force: 
 await build({ entryPoints: [path.join(ext, 'src/webview/ui/marks.ts')], bundle: true, format: 'esm', outfile: out, logLevel: 'error' });
 const { markFor } = await import(pathToFileURL(out).href);
 // The --hue-* fallbacks in media/tokens.css: an editor tab icon is a file, so it can't read the theme.
-const HUE = { claude: '#d97757', codex: '#89d185', gemini: '#57a3f8', demo: '#8c8c8c' };
+const HUE = { claude: '#d97757', codex: '#89d185', gemini: '#57a3f8', antigravity: '#8c8c8c', demo: '#8c8c8c' };
 for (const [agent, colour] of Object.entries(HUE)) {
   const m = markFor(agent);
   const svg =
