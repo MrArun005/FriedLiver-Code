@@ -304,7 +304,10 @@ const KNOWN_MODES: Partial<Record<AgentKey, Partial<Record<ApprovalLevel | 'plan
   // Gemini writes through FriedLiver, which shows each write as a diff to accept, so Ask
   // uses Auto Edit: one decision per edit, not Gemini's question and then the diff. Shell commands still ask.
   gemini: { ask: ['autoEdit'], edits: ['autoEdit'], full: ['yolo'], plan: ['plan'] },
+  // FriedLiver's agy adapter (agyAcp.ts): headless agy can't ask, so Manual and Plan are its talk-only modes.
+  antigravity: { ask: ['read-only'], edits: ['accept-edits'], full: ['full'], plan: ['plan'] },
 };
+
 
 /** Fallback order when no mode matches a level exactly. */
 const LEVEL_CLASSES: Record<ApprovalLevel | 'plan', ModeClass[]> = { ask: ['ask'], edits: ['edits'], full: ['full', 'auto', 'edits'], plan: ['plan'] };

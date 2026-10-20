@@ -263,7 +263,7 @@ describe('@-mentions', () => {
   });
 
   it('filters agents by any of their names', () => {
-    expect(mentionOptions('').map((o) => o.agent)).toEqual(['claude', 'codex', 'gemini', 'demo']);
+    expect(mentionOptions('').map((o) => o.agent)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'demo']);
     expect(mentionOptions('g').map((o) => o.agent)).toEqual(['codex', 'gemini']);
     expect(mentionOptions('open').map((o) => o.agent)).toEqual(['codex']);
     expect(mentionOptions('xyz')).toEqual([]);
