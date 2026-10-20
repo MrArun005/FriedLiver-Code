@@ -317,6 +317,22 @@ it('sets the modern editor defaults and keeps the memory-related ones (docs/DEFA
     'typescript.tsserver.useSyntaxServer': 'never',
     'workbench.startupEditor': 'none',
     'extensions.experimental.deferredStartupFinishedActivation': true,
+    // Design System v2 §6 (Beacon workbench).
+    'window.titleBarStyle': 'custom',
+    'workbench.layoutControl.enabled': false,
+    'workbench.tree.renderIndentGuides': 'always',
+    'workbench.list.density': 'comfortable',
+    'workbench.hover.delay': 500,
+    'workbench.editor.tabSizing': 'shrink',
+    'workbench.editor.useModal': 'off',
+    'workbench.settings.editor': 'ui',
+    'workbench.settings.useSplitJSON': false,
+    'workbench.welcomePage.walkthroughs.openOnInstall': false,
+    'editor.inlineSuggest.showToolbar': 'never',
+    'scm.diffDecorationsGutterPattern': { added: false, modified: true },
+    'diffEditor.renderSideBySideInlineBreakpoint': 900,
+    'diffEditor.experimental.showMoves': true,
+    'workbench.experimental.modernUIEditorTabStyle': 'pill',
   });
   const watcherExclude = defaults['files.watcherExclude'] as Record<string, boolean>;
   for (const dir of ['node_modules/*', '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.next', '.nuxt', '.turbo', '.parcel-cache', '.gradle']) {

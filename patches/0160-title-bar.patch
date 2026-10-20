@@ -1,0 +1,269 @@
+diff --git a/src/vs/platform/window/common/window.ts b/src/vs/platform/window/common/window.ts
+index 7e31cd31..c5fef9dc 100644
+--- a/src/vs/platform/window/common/window.ts
++++ b/src/vs/platform/window/common/window.ts
+@@ -383,7 +383,7 @@ export function getWindowControlsStyle(configurationService: IConfigurationServi
+ 	return WindowControlsStyle.NATIVE; // default to native on all OS
+ }
+ 
+-export const DEFAULT_CUSTOM_TITLEBAR_HEIGHT = 35; // includes space for command center
++export const DEFAULT_CUSTOM_TITLEBAR_HEIGHT = 40; // includes space for command center (FriedLiver: 40, COMPONENTS.md §6.1)
+ 
+ /** Centers macOS traffic lights vertically, optionally keeping their horizontal inset independent of height. */
+ export function getMacOSWindowControlsPosition(height: number, osVersion: string, horizontalInset?: number): IPoint | null {
+diff --git a/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts b/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts
+index e8edbe1b..ee331113 100644
+--- a/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts
++++ b/src/vs/workbench/browser/parts/activitybar/activitybarPart.ts
+@@ -52,7 +52,7 @@ export class ActivitybarPart extends Part {
+ 
+ 	/** Narrower dimensions used when the floating panels (Modern UI) experiment is enabled. */
+ 	static readonly FLOATING_ACTION_HEIGHT = 36;
+-	static readonly FLOATING_ACTIVITYBAR_WIDTH = 36;
++	static readonly FLOATING_ACTIVITYBAR_WIDTH = 48; // FriedLiver: the nav rail is 48 wide with 32px items (COMPONENTS.md §6.2)
+ 	static readonly FLOATING_COMPACT_ACTIVITYBAR_WIDTH = 28;
+ 
+ 	/**
+diff --git a/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts b/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
+index 8aacc2e7..5c8b3648 100644
+--- a/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
++++ b/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
+@@ -4,6 +4,8 @@
+  *--------------------------------------------------------------------------------------------*/
+ 
+ import { isActiveDocument, reset } from '../../../../base/browser/dom.js';
++import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
++import { OS } from '../../../../base/common/platform.js';
+ import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
+ import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
+ import { IHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegate.js';
+@@ -186,11 +188,15 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
+ 							const labelElement = document.createElement('span');
+ 							labelElement.classList.add('search-label');
+ 							labelElement.textContent = label;
+-							if (isCompactMode) {
+-								reset(container, labelElement);
+-							} else {
+-								reset(container, searchIcon, labelElement);
++							// FriedLiver: always the search icon and the words, then the keycap at the end (§6.1)
++							container.classList.remove('compact-mode');
++							const keys = document.createElement('span');
++							keys.classList.add('fl-command-center-keys');
++							const keybinding = that._keybindingService.lookupKeybinding('workbench.action.quickOpen'); // Go to File's key (the pill runs quick open with modes)
++							if (keybinding) {
++								this._store.add(new KeybindingLabel(keys, OS)).set(keybinding);
+ 							}
++							reset(container, searchIcon, labelElement, keys);
+ 
+ 							const hover = this._store.add(that._hoverService.setupManagedHover(that._hoverDelegate, container, this.getTooltip()));
+ 
+@@ -214,6 +220,9 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
+ 						}
+ 
+ 						private _getLabel(): string {
++							if (!that._windowTitle.isCustomTitleFormat()) {
++								return localize('friedliver.commandCenter', "Go to file, run a command, ask an agent"); // FriedLiver §6.1
++							}
+ 							const { prefix, suffix } = that._windowTitle.getTitleDecorations();
+ 							let label = that._windowTitle.workspaceName;
+ 							if (that._windowTitle.isCustomTitleFormat()) {
+diff --git a/src/vs/workbench/browser/parts/titlebar/friedliverTitle.ts b/src/vs/workbench/browser/parts/titlebar/friedliverTitle.ts
+new file mode 100644
+index 00000000..d9f684da
+--- /dev/null
++++ b/src/vs/workbench/browser/parts/titlebar/friedliverTitle.ts
+@@ -0,0 +1,129 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver: the title bar's own pieces (COMPONENTS.md §6.1, §2.33).
++ *  - The FriedLiver mark (a line drawing, 16px) after the macOS traffic lights.
++ *  - The project name at the start (the command center no longer shows it).
++ *  - The Needs-you pill: the Agents extension contributes `friedliver.needsYou.open` to the
++ *    `friedliver/titleBar` menu and sets the `friedliver.needsYouCount` context key; this renders it as
++ *    "◉ 3 need you" (bullseye + words), hidden at 0. The extension API can't draw in the title bar, so
++ *    this is the slot.
++ *--------------------------------------------------------------------------------------------*/
++
++import { $, append } from '../../../../base/browser/dom.js';
++import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
++import { IAction } from '../../../../base/common/actions.js';
++import { Disposable } from '../../../../base/common/lifecycle.js';
++import { localize } from '../../../../nls.js';
++import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
++import { WindowTitle } from './windowTitle.js';
++
++export const NEEDS_YOU_COMMAND = 'friedliver.needsYou.open';
++export const NEEDS_YOU_COUNT_KEY = 'friedliver.needsYouCount';
++
++const SVG = 'http://www.w3.org/2000/svg';
++
++function svg(viewBox: string, cls: string): SVGSVGElement {
++	const el = document.createElementNS(SVG, 'svg');
++	el.setAttribute('viewBox', viewBox);
++	el.setAttribute('class', cls);
++	el.setAttribute('aria-hidden', 'true');
++	return el;
++}
++
++function path(parent: SVGElement, d: string, attrs: Record<string, string>): void {
++	const el = document.createElementNS(SVG, 'path');
++	el.setAttribute('d', d);
++	for (const [k, v] of Object.entries(attrs)) {
++		el.setAttribute(k, v);
++	}
++	parent.appendChild(el);
++}
++
++/** The FriedLiver mark as a line (spec §1.6): the liver at 16% fill, the steam stroked. Colour: friedliver.brand. */
++export function createFriedLiverMark(): HTMLElement {
++	const box = $('span.fl-title-mark');
++	const el = svg('170 60 760 700', 'fl-mark-svg');
++	path(el, 'M200 500C190 380 292 318 424 318C522 318 566 338 604 350C619 336 636 330 656 330C748 328 846 340 884 372C910 394 900 420 862 436C762 480 662 548 562 628C522 660 484 678 456 688C446 718 414 738 382 728C300 716 212 640 200 500Z', { 'fill': 'currentColor', 'fill-opacity': '.16', 'stroke': 'currentColor', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke' });
++	path(el, 'M430 270C400 230 460 200 430 160C405 128 440 104 432 84M560 285C532 245 590 215 562 175C540 145 572 122 566 102M690 300C664 266 716 240 692 206', { 'fill': 'none', 'stroke': 'currentColor', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' });
++	box.appendChild(el);
++	return box;
++}
++
++/** The project's name at the start of the title bar (13/600, --sel-fg). */
++export class FriedLiverProjectName extends Disposable {
++	constructor(container: HTMLElement, windowTitle: WindowTitle) {
++		super();
++		const label = append(container, $('span.fl-title-project'));
++		const update = () => {
++			label.textContent = windowTitle.workspaceName;
++			label.style.display = windowTitle.workspaceName ? '' : 'none';
++		};
++		update();
++		this._register(windowTitle.onDidChange(update));
++	}
++}
++
++/** The Needs-you pill (§2.33): bullseye + "3 need you"; hidden while nothing needs you. */
++export class NeedsYouActionViewItem extends BaseActionViewItem {
++
++	private countLabel: HTMLElement | undefined;
++
++	constructor(
++		action: IAction,
++		options: IBaseActionViewItemOptions,
++		@IContextKeyService private readonly contextKeyService: IContextKeyService,
++	) {
++		super(undefined, action, options);
++		const keys = new Set([NEEDS_YOU_COUNT_KEY]);
++		this._register(this.contextKeyService.onDidChangeContext(e => {
++			if (e.affectsSome(keys)) {
++				this.updateCount();
++			}
++		}));
++	}
++
++	private get count(): number {
++		const value = Number(this.contextKeyService.getContextKeyValue(NEEDS_YOU_COUNT_KEY));
++		return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
++	}
++
++	override render(container: HTMLElement): void {
++		super.render(container);
++		container.classList.add('fl-needs');
++		container.setAttribute('role', 'button');
++		const mark = svg('0 0 12 12', 'fl-bullseye');
++		const ring = document.createElementNS(SVG, 'circle');
++		ring.setAttribute('cx', '6');
++		ring.setAttribute('cy', '6');
++		ring.setAttribute('r', '5');
++		ring.setAttribute('fill', 'none');
++		ring.setAttribute('stroke', 'currentColor');
++		ring.setAttribute('stroke-width', '2');
++		const dot = document.createElementNS(SVG, 'circle');
++		dot.setAttribute('cx', '6');
++		dot.setAttribute('cy', '6');
++		dot.setAttribute('r', '2');
++		dot.setAttribute('fill', 'currentColor');
++		mark.append(ring, dot);
++		container.appendChild(mark);
++		this.countLabel = append(container, $('span.fl-needs-label'));
++		this.updateCount();
++	}
++
++	private updateCount(): void {
++		if (!this.element || !this.countLabel) {
++			return;
++		}
++		const n = this.count;
++		this.element.style.display = n ? '' : 'none';
++		this.countLabel.textContent = n === 1 ? localize('needsYou1', "1 needs you") : localize('needsYouN', "{0} need you", n);
++		this.element.setAttribute('aria-label', n === 1
++			? localize('needsYouAria1', "One agent needs you. Open the Agent Manager on Needs you.")
++			: localize('needsYouAriaN', "{0} agents need you. Open the Agent Manager on Needs you.", n));
++		this.updateTooltip();
++	}
++
++	protected override getTooltip(): string | undefined {
++		const n = this.count;
++		return n === 1 ? localize('needsYouTip1', "1 agent needs you: open the Agent Manager") : localize('needsYouTipN', "{0} agents need you: open the Agent Manager", n);
++	}
++}
+diff --git a/src/vs/workbench/browser/parts/titlebar/titlebarPart.ts b/src/vs/workbench/browser/parts/titlebar/titlebarPart.ts
+index bfc8839c..1b1068ea 100644
+--- a/src/vs/workbench/browser/parts/titlebar/titlebarPart.ts
++++ b/src/vs/workbench/browser/parts/titlebar/titlebarPart.ts
+@@ -58,6 +58,7 @@ import { safeIntl } from '../../../../base/common/date.js';
+ import { IsCompactTitleBarContext, TitleBarVisibleContext } from '../../../common/contextkeys.js';
+ import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
+ import { WORKBENCH_MENU_MOTION_CLASS, workbenchMenuCloseAnimation } from '../../actions/menuMotion.js';
++import { createFriedLiverMark, FriedLiverProjectName, NEEDS_YOU_COMMAND, NeedsYouActionViewItem } from './friedliverTitle.js';
+ 
+ export interface ITitleVariable {
+ 	readonly name: string;
+@@ -479,6 +480,11 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
+ 			this.appIcon = prepend(this.leftContent, $('a.window-appicon'));
+ 		}
+ 
++		// FriedLiver: the mark after the traffic lights (macOS; Windows and Linux show the app icon) (§6.1)
++		if (isMacintosh && !this.isAuxiliary && hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
++			this.leftContent.appendChild(createFriedLiverMark());
++		}
++
+ 		// Draggable region that we can manipulate for #52522
+ 		this.dragRegion = prepend(this.rootContainer, $('div.titlebar-drag-region'));
+ 
+@@ -492,6 +498,11 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
+ 			this.installMenubar();
+ 		}
+ 
++		// FriedLiver: the project name at the start; the command center keeps only the search (§6.1)
++		if (!this.isAuxiliary && hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
++			this._register(new FriedLiverProjectName(this.leftContent, this.windowTitle));
++		}
++
+ 		// Title
+ 		this.title = append(this.centerContent, $('div.window-title'));
+ 		this.createTitle();
+@@ -651,6 +662,11 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
+ 			}
+ 		}
+ 
++		// --- FriedLiver: the Needs-you pill (§2.33)
++		if (action.id === NEEDS_YOU_COMMAND) {
++			return this.instantiationService.createInstance(NeedsYouActionViewItem, action, options);
++		}
++
+ 		// --- Activity Actions
+ 		if (!this.isAuxiliary) {
+ 			if (action.id === GLOBAL_ACTIVITY_ID) {
+diff --git a/src/vs/workbench/services/actions/common/menusExtensionPoint.ts b/src/vs/workbench/services/actions/common/menusExtensionPoint.ts
+index e6c222d4..dc4087e1 100644
+--- a/src/vs/workbench/services/actions/common/menusExtensionPoint.ts
++++ b/src/vs/workbench/services/actions/common/menusExtensionPoint.ts
+@@ -149,6 +149,12 @@ const apiMenus: IAPIMenu[] = [
+ 		description: localize('menus.chatInputStatus', "The status indicator area at the rightmost end of the toolbar shown beneath the chat input"),
+ 		supportsSubmenus: false
+ 	},
++	{
++		key: 'friedliver/titleBar',
++		id: MenuId.TitleBar,
++		description: localize('menus.friedliverTitleBar', "FriedLiver: the title bar's right cluster (the Needs-you pill)"),
++		supportsSubmenus: false
++	},
+ 	{
+ 		key: 'scm/title',
+ 		id: MenuId.SCMTitle,

@@ -34,6 +34,13 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: node extensions/friedliver-theme/scripts/generate-themes.mjs --check
+      # The FriedLiver Icons font and the FriedLiver Files icons match glyphs.json (built by the hash-locked Python tools).
+      - name: Icons are up to date
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/icons"
+          "$RUNNER_TEMP/icons/bin/pip" install --require-hashes -r scripts/icon-font-requirements.txt
+          PYTHON="$RUNNER_TEMP/icons/bin/python" node scripts/build-icon-font.mjs --check
       # Mac & Windows control on each OS: its tests (programs mocked), the macOS scripts compiled with
       # osacompile, and on Windows the real PowerShell templates with harmless inputs (parse every
       # template, list processes, a clipboard round trip).

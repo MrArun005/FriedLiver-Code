@@ -1,0 +1,9 @@
+<!-- The FriedLiver mark (owner, 2026-10-21): the liver drawn as an outline with a 16% fill, and three
+     rising steam strokes. The one source of every logo asset (branding/make-branding.mjs) and of the
+     in-app mark (friedliverTitle.ts, friedliverMark.ts). Colour: currentColor (friedliver.brand:
+     #e2884f dark, #c4622a light). Strokes are in output pixels (vector-effect: non-scaling-stroke):
+     2px at 48, 1.5px at 14-16; app icons use the per-size table in make-branding.mjs. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="170 60 760 700" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path id="liver" d="M200 500C190 380 292 318 424 318C522 318 566 338 604 350C619 336 636 330 656 330C748 328 846 340 884 372C910 394 900 420 862 436C762 480 662 548 562 628C522 660 484 678 456 688C446 718 414 738 382 728C300 716 212 640 200 500Z" fill="currentColor" fill-opacity=".16" vector-effect="non-scaling-stroke"/>
+  <path id="steam" d="M430 270C400 230 460 200 430 160C405 128 440 104 432 84M560 285C532 245 590 215 562 175C540 145 572 122 566 102M690 300C664 266 716 240 692 206" vector-effect="non-scaling-stroke"/>
+</svg>
