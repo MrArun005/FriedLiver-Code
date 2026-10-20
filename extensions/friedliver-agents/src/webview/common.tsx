@@ -11,6 +11,7 @@ import { discussLayouts, type DiscussLayout } from '../shared/discussView';
 import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
 import { TAB_MIN, markWindow, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
+import type { AgentDefaults } from '../shared/session';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -58,6 +59,26 @@ export function useRoster(): AgentRoster {
     return () => void rosterWatchers.delete(wake);
   }, []);
   return roster;
+}
+
+/** Each agent's last known options (its models among them), as the host last sent them. */
+let agentDefaults: Partial<Record<AgentKey, AgentDefaults>> = {};
+const defaultsWatchers = new Set<() => void>();
+
+function setAgentDefaults(next: Partial<Record<AgentKey, AgentDefaults>>): void {
+  agentDefaults = next;
+  for (const wake of defaultsWatchers) wake();
+}
+
+/** The agents' cached options, drawing the component again when the host sends new ones. */
+export function useAgentDefaults(): Partial<Record<AgentKey, AgentDefaults>> {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    const wake = () => setN((n) => n + 1);
+    defaultsWatchers.add(wake);
+    return () => void defaultsWatchers.delete(wake);
+  }, []);
+  return agentDefaults;
 }
 
 /** friedliver.discuss.layout, drawing the card again when it changes. */
@@ -174,11 +195,14 @@ export function useHost(onMessage?: (m: HostMessage) => void) {
         setState(keyItems(undefined, m.state));
         setSelected(m.selected);
         if (m.roster) setRoster(m.roster);
+        if (m.defaults) setAgentDefaults(m.defaults);
         if (m.discussLayout) discussLayouts.set(m.discussLayout);
       } else if (m.type === 'discussLayout') {
         discussLayouts.set(m.layout);
       } else if (m.type === 'roster') {
         setRoster(m.roster);
+      } else if (m.type === 'defaults') {
+        setAgentDefaults(m.defaults);
       } else if (m.type === 'action') {
         setState((s) => keyItems(s, reduce(s, m.action)));
       } else if (m.type === 'actions') {
