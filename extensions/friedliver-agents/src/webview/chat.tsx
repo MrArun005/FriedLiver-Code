@@ -1,6 +1,7 @@
-import { render } from 'preact';
+import { Fragment, render } from 'preact';
 import { DiscussionCard } from './discussion';
-import { discussingLabel, withoutDiscussionTurns } from '../shared/discuss';
+import { discussingLabel, parseDiscuss, withoutDiscussionTurns } from '../shared/discuss';
+import { applyDiscussMention, currentModel, discussMentionAt, mentionSuggestions, modelCatalog, type Choice, type MentionProblem } from '../shared/discussMentions';
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
@@ -59,7 +60,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster } from './common';
 import { Viewer } from './viewer';
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
@@ -1229,6 +1230,15 @@ function Command({ item, chat }: { item: CommandItem; chat: ChatView }) {
   );
 }
 
+/** The /discuss mention chip's words: "Which @gpt-5.6?", "No agent or model @opsu". */
+const fixTitle = (p: MentionProblem): string => (p.kind === 'ambiguous' ? `Which @${p.mention.word}?` : `No agent or model @${p.mention.word}`);
+
+/** What the picker offers to settle it: the models it could mean, the nearest names, or everything when nothing is near. */
+function fixChoices(p: MentionProblem, catalog: ReturnType<typeof modelCatalog>, agents: readonly AgentKey[]): Choice[] {
+  const list = p.kind === 'ambiguous' ? p.options : p.suggestions;
+  return list.length ? list : mentionSuggestions('', catalog, agents);
+}
+
 /** Drafts kept per chat across reloads of the view: text only, the newest few chats. */
 const MAX_DRAFTS = 30;
 
@@ -1257,6 +1267,8 @@ function Composer({
   const [caret, setCaret] = useState(0);
   const [pick, setPick] = useState(0);
   const [shut, setShut] = useState(false);
+  /** The /discuss mention the picker is settling (its chip pressed, or Send pressed while it was unsettled). */
+  const [fixing, setFixing] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
   useEffect(() => area.current?.focus(), [chat.id, focusTick]);
@@ -1277,11 +1289,34 @@ function Composer({
   const commands = slashMenu(agentCommands);
   const slash = shut ? null : slashQuery(text, caret);
   const slashes = slash === null ? [] : slashOptions(commands, slash);
-  const menu: { key: string; title: string; label: string; agent?: (typeof mentions)[number]['agent']; choose(): void }[] = mentions.length
-    ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
-    : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
+  // After /discuss, an @ anywhere picks an agent or one of the models it reported; the same list settles the mentions.
+  const defaults = useAgentDefaults();
+  const catalog = useMemo(() => modelCatalog(defaults, state.chats), [defaults, state.chats]);
+  const plan = /^\s*\/discuss\b/i.test(text) ? parseDiscuss(text, { agent: chat.agent, model: currentModel(chat.session) }, catalog) : null;
+  const problem: MentionProblem | undefined = plan && plan !== 'incomplete' ? plan.problems[0] : undefined;
+  const discussAt = shut ? null : discussMentionAt(text, caret);
+  const fixes = problem && fixing && !shut ? fixChoices(problem, catalog, shownAgents) : [];
+  const models = fixes.length ? fixes : discussAt ? mentionSuggestions(discussAt.query, catalog, shownAgents) : [];
+  const at = fixes.length ? problem!.mention : discussAt;
+  const menu: { key: string; title: string; label: string; agent?: (typeof mentions)[number]['agent']; group?: string; head?: boolean; full?: string; choose(): void }[] = models.length
+    ? models.map((o) => ({
+        key: `${o.agent}-${o.model ?? ''}`,
+        title: o.name,
+        label: `@${o.insert}`,
+        agent: o.agent,
+        group: o.agent,
+        head: !o.model,
+        full: o.label,
+        choose: () => {
+          setFixing(false);
+          insert(applyDiscussMention(text, at!, o.insert));
+        },
+      }))
+    : mentions.length
+      ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
+      : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
   // "#" names a workspace file; the agent gets it as a file, not only as words.
-  const hash = shut || mentions.length || slashes.length ? null : hashQuery(text, caret);
+  const hash = shut || mentions.length || slashes.length || models.length ? null : hashQuery(text, caret);
   const asked = useRef('');
   useEffect(() => {
     if (!hash || asked.current === hash.query) return;
@@ -1318,8 +1353,15 @@ function Composer({
       return;
     }
     if (empty) return;
-    const action = slashAction(text, chat, state.chats, agentCommands);
-    if (action === 'incomplete') return;
+    const action = slashAction(text, chat, state.chats, agentCommands, catalog);
+    if (action === 'incomplete') {
+      // A /discuss mention to settle: the picker opens on it.
+      if (problem) {
+        setShut(false);
+        setFixing(true);
+      }
+      return;
+    }
     if (action) {
       send(action);
       reset();
@@ -1524,24 +1566,42 @@ function Composer({
           }}
         >
           {picking && (
-            <div class="cc-menu cc-typeahead mention-menu" id={listId} role="listbox" aria-label={mentions.length ? 'Ask an agent' : slashes.length ? 'Commands' : 'Files'}>
-              {menu.map((o) => (
-                <div
-                  key={o.key}
-                  id={`${listId}-${o.key}`}
-                  role="option"
-                  class="cc-item pick-row"
-                  aria-selected={o === picked}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    o.choose();
-                  }}
-                  onMouseMove={() => setPick(menu.indexOf(o))}
-                >
-                  {o.agent && <Glyph agent={o.agent} size="sm" />}
-                  <span class="cc-item-name">{o.title}</span>
-                  <span class="cc-item-value">{o.label}</span>
-                </div>
+            <div
+              class="cc-menu cc-typeahead mention-menu"
+              id={listId}
+              role="listbox"
+              aria-label={fixes.length ? fixTitle(problem!) : models.length ? 'Agents and models' : mentions.length ? 'Ask an agent' : slashes.length ? 'Commands' : 'Files'}
+            >
+              {fixes.length > 0 && <div class="cc-menu-sub">{fixTitle(problem!)}</div>}
+              {menu.map((o, i) => (
+                <Fragment key={o.key}>
+                  {/* /discuss suggestions come grouped by agent: led by the agent's own row, else under its logo and name. */}
+                  {o.group &&
+                    o.group !== menu[i - 1]?.group &&
+                    (o.head ? (
+                      i > 0 && <div class="cc-divider" role="presentation" />
+                    ) : (
+                      <div class="cc-menu-sub" aria-hidden="true">
+                        <Glyph agent={o.agent!} size="sm" /> {AGENT_FACES[o.agent!].name}
+                      </div>
+                    ))}
+                  <div
+                    id={`${listId}-${o.key}`}
+                    role="option"
+                    class="cc-item pick-row"
+                    aria-selected={o === picked}
+                    aria-label={o.full}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      o.choose();
+                    }}
+                    onMouseMove={() => setPick(menu.indexOf(o))}
+                  >
+                    {o.agent && <Glyph agent={o.agent} size="sm" />}
+                    <span class="cc-item-name">{o.title}</span>
+                    <span class="cc-item-value">{o.label}</span>
+                  </div>
+                </Fragment>
               ))}
               {slashes.length > 0 && !agentCommands.length && !chat.session?.live && (
                 <div class="cc-item pick-row" aria-disabled="true">
@@ -1550,8 +1610,24 @@ function Composer({
               )}
             </div>
           )}
-          {(attachments.length > 0 || refs.length > 0) && (
+          {(attachments.length > 0 || refs.length > 0 || problem) && (
             <div class="cc-chips" data-over={attachments.length > 3 ? '' : undefined}>
+              {problem && (
+                <ChipButton
+                  icon={problem.kind === 'ambiguous' ? 'model' : 'alert'}
+                  tone={problem.kind === 'ambiguous' ? 'warn' : 'error'}
+                  title={problem.kind === 'ambiguous' ? 'Pick which one' : 'Pick an agent or model'}
+                  onPress={() => {
+                    setShut(false);
+                    setFixing(true);
+                    area.current?.focus();
+                  }}
+                  onRemove={() => insert({ text: text.slice(0, problem.mention.at) + text.slice(problem.mention.end).replace(/^ /, ''), caret: problem.mention.at })}
+                  removeLabel={`Remove @${problem.mention.word}`}
+                >
+                  {fixTitle(problem)}
+                </ChipButton>
+              )}
               {attachments.length > 3 && <span class="cc-chips-count">{attachments.length} images</span>}
               {attachments.map((a, i) => (
                 <AttachmentChip
@@ -1588,6 +1664,7 @@ function Composer({
                 setText(e.currentTarget.value);
                 track(e.currentTarget);
                 setShut(false);
+                setFixing(false);
                 setPick(0);
               }}
               onKeyUp={(e) => !['ArrowUp', 'ArrowDown'].includes(e.key) && track(e.currentTarget)}
