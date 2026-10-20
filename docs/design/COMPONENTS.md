@@ -85,7 +85,7 @@ OKLCH is the source; hex is what the theme JSON holds. Neutrals are warm graphit
 | `--accent-press` | accent 88% + bg | | | | pressed |
 | **`--decision`** | `friedliver.decision` → `notificationsInfoIcon.foreground` | **.74 .13 250 / .53 .16 256** | **#67b0f9** | **#1e6ac5** | needs-you marks and counts only |
 | `--focus` | `focusBorder` (made opaque) | .88 .005 60 / .3 .006 70 | #dad7d4 | #302d2b | keyboard focus ring (neutral) |
-| `--status-working` | `charts.green` | .78 .15 150 / .5 .14 150 | #67d283 | #007835 | the working arc, progress |
+| `--status-working` | `descriptionForeground` (a warm neutral; owner, 2026-10-20) | = `--fg-2` | #aca8a5 | #5e5c59 | the working arc, progress. Green (`charts.green`) means done or success only |
 | `--error` (= failed) | `errorForeground` | .7 .175 20 / .53 .2 25 | #f86970 | #c51d28 | failed, danger |
 | `--warn` | `editorWarning.foreground` | .83 .13 82 / .5 .115 70 | #f1bf5b | #8a5600 | warnings |
 | `--added` / `--removed` | `gitDecoration.added/deletedResourceForeground` | | #67d283 / #f86970 | #007835 / #c51d28 | diff |
@@ -331,7 +331,7 @@ The Input's look as a button; md 26, min 120, padding 0 8, gap 8; value ellipsis
 **Palette variant** (command palette, quick open, every quick input):
 - Width `--w-palette` 640; radius `--r-dialog` 14; glass + `--rim` + `--elev-4`; anchored 4px under the title bar, centred on the command center (which stays visible).
 - Filter row 52: a 20 search glyph `--fg-2`, 16px text `--sel-fg` (`--t-title`, `--track-title`), caret `--focus`, an "esc" Keycap at the end.
-- Scope chips below (pills md, transparent; selected `--sel-bg`): All · Files · Commands · Symbols · Agents. Prefixes are VS Code's (`>` commands, `@` symbol in file, `#` workspace symbol, `:` line); Agents use `~`. The prefix is in each chip's tooltip, not its label.
+- Scope chips below (pills sm 22, transparent; selected `--sel-bg`): Files · Commands · Symbols · Agents (Agents shows once a provider owns `~`). Prefixes are VS Code's (`>` commands, `@` symbol in file, `#` workspace symbol, `:` line); Agents use `~`. The prefix is in each chip's tooltip, not its label. **All** (one list mixing Files, Commands and Agents) needs a mixed quick-access provider; until one exists the workbench shows the four chips (patch 0110).
 - Group labels 11px/500 `--fg-2`, padding 8 8 4.
 - Rows **40** (`--h-xl`), `--r-8`, grid `16 icon | title | context | keys`; title 14px `--fg`, matched characters 600 `--sel-fg`; context 12px `--fg-2` right after the title (path, "new chat", a status mark + "needs you"); keycaps alone at the right edge. Agent rows lead with a puck.
 - Selected row: fill only (sel-fg 13%), text `--sel-fg`.
@@ -385,7 +385,7 @@ Round (50%). Sizes xs 14 (status bar), sm 16, md 20, lg 32, marker 28. Fill: the
 
 ### 2.22b Agent mark `.fl-mark`
 
-As v1 §2.22b (16 box, no fill/border, rest in the text colour, hue on hover/selected), stroke 1.5. B2: Codex's mark moves off `{ }` (it reads as a JSON file icon) to its own glyph; Claude's burst and Gemini's sparkle stay.
+As v1 §2.22b (16 box, no fill/border, rest in the text colour, hue on hover/selected), stroke 1.5. Claude's burst and Gemini's sparkle stay. **Codex (owner, 2026-10-20): a closed loop, not `{ }`** (braces read as a JSON file icon in every list) and not OpenAI's logo: one 1.5px stroke tracing a horizontal figure-eight, `M4.75 5.5a2.5 2.5 0 1 0 0 5c1.6 0 2.4-1.3 3.25-2.5S9.65 5.5 11.25 5.5a2.5 2.5 0 1 1 0 5c-1.6 0-2.4-1.3-3.25-2.5S6.35 5.5 4.75 5.5z` on the 16 grid (x 2.25–13.75, y 5.5–10.5: it sits on the same optical centre as the burst and the sparkle). It stays vendor-neutral: a glyph for "the agent that runs your code", in Codex's hue. B2 draws it in `icon.tsx` and reruns `scripts/agent-icons.mjs`.
 
 ### 2.23 Status mark `.fl-status` (was "Status dot"; `.fl-dot` stays as an alias)
 
@@ -503,7 +503,7 @@ Target: 40 tall, shell tone, no border. macOS: traffic lights, the 16px line mar
 - T: `titleBar.activeBackground/inactiveBackground` = shell; `titleBar.border` none; `commandCenter.*`.
 - D: `window.titleBarStyle: custom`, `window.commandCenter: true`, `workbench.layoutControl.enabled: false`, `window.menuBarVisibility: compact` (Windows under 1600).
 - C: `.part.titlebar` height via `--fl-title-h` 40; `.command-center .action-item.command-center-center` (exists in 0110).
-- P: `src/vs/platform/windows/electron-main/windowImpl.ts`: `trafficLightPosition {x: 16, y: 14}`; Windows `titleBarOverlay {height: 40, color: shell, symbolColor: fg}` (default `window.experimentalControlOverlay` on). `src/vs/workbench/browser/parts/titlebar/titlebarPart.ts`: the mark before the menubar, and a `MenuId.TitleBar` slot the Agents extension fills with the Needs-you pill (the extension API can't target the title bar, so the patch adds the slot).
+- P (0160): `DEFAULT_CUSTOM_TITLEBAR_HEIGHT` 35 → 40 in `src/vs/platform/window/common/window.ts`; upstream centres the traffic lights in that height (x 14, y 13 with macOS 26's 14px buttons) and sizes the Windows `titleBarOverlay` caption buttons (46×40) from it, so one constant moves both. The nav rail is 48 wide (`FLOATING_ACTIVITYBAR_WIDTH`). `src/vs/workbench/browser/parts/titlebar/titlebarPart.ts`: the mark before the menubar, and a `MenuId.TitleBar` slot the Agents extension fills with the Needs-you pill (the extension API can't target the title bar, so the patch adds the slot).
 
 ### 6.2 Activity bar (nav rail)
 Target: 48 wide, shell; items IconButton lg 32, `--r-8`, 20 stroke icons (product icon theme), `--fg-2` → `--fg`; selected: `--sel-bg` + a 3×16 `--sel-fg` pill flush at the start edge (the same on Windows); badges: neutral Count; Agents' badge loud with a 2px shell ring. Tooltips name the view and the count ("Agents · 3 need you").
@@ -527,7 +527,7 @@ Target: strip 32 on the page tone; tabs 26, `--r-ctl`, gap 2; active = the raise
 A 22 row; 12px `--fg-2`, last segment `--fg`; 12 chevrons at 70%; segments are quiet sm buttons (`--r-ctl`). T `breadcrumb.*`; C `.monaco-breadcrumbs .monaco-breadcrumb-item`.
 
 ### 6.6 Editor chrome (gutter, minimap, scrollbars)
-Target: line numbers `.6 .006 60` (4.5:1), active line number `--fg`; the current line a slight lift (`editor.lineHighlightBackground` .215), no border; gutter change bars 2px: added solid green, modified **hatched** straw, deleted a red wedge; the ember caret; minimap off; an overview ruler of 14 with shape-coded marks (added: start half; agent edits: end half in blue; modified: a 2px band; error: a 4px full-width band) and a 6px pill slider; sticky scroll on; inline suggestions as dotted-underlined ghost text followed by "suggestion · Tab accepts".
+Target: line numbers `.6 .006 60` (4.5:1), active line number `--fg`; the current line a slight lift (`editor.lineHighlightBackground` .215), no border; gutter change bars 2px: added solid green, modified **hatched** straw, deleted a red wedge; the ember caret; minimap off; an overview ruler of 14 with shape-coded marks (changes in the start third; find matches in the centre; warnings in the end third; **errors a full-width band**, patch 0180) and a 6px pill slider; sticky scroll on; inline suggestions as dotted-underlined ghost text. Open: agent edits as an end-half blue mark (B2 decorates them) and the "suggestion · Tab accepts" hint after the ghost text (an injected-text decoration in `ghostTextView.ts`; deferred because ordering two injected texts at one column needs an editor change).
 - T: `editorLineNumber.*`, `editor.lineHighlightBackground`, `editorCursor.foreground` ember, `editorGutter.added/modified/deletedBackground`, `editorOverviewRuler.*`, `scrollbarSlider.*`, `editorGhostText.foreground` fg-2.
 - D: `editor.minimap.enabled: false`, `scm.diffDecorationsGutterPattern: {"added": false, "modified": true}`, `editor.overviewRulerBorder: false`, `editor.fontFamily` Geist Mono, `editor.lineHeight: 1.55`, `editor.cursorBlinking: smooth`, `editor.cursorSmoothCaretAnimation: on`, `editor.inlineSuggest.showToolbar: never`.
 - C: `.monaco-editor .ghost-text-decoration` (dotted underline), scrollbar rules (0110).
@@ -613,4 +613,8 @@ Workbench: Geist + Geist Mono are bundled (0100). v2 changes the Windows UI stac
 | Panels | attached, tone-separated, full width | Figma UI3's reversal; the owner's full-width rule |
 | Composer | visuals restyled, layout frozen | The owner's "complete change" order |
 | Keys | no shadowed VS Code defaults or quick-open prefixes; agents on ⌘K chords and `~`; ⌃⌘I focuses chat; ⌃⌘N new chat; approval keys only while the card has focus | Power-user critic, rounds 4–9 |
-| Open (owner) | (1) blue for needs-you vs a warm amber (the taste critic asked every round); (2) the Codex mark redraw; (3) "Ask before edits" on by default for first-run users; (4) green for working vs a warm neutral arc | Not decided in Phase A |
+| Needs-you colour (owner, 2026-10-20) | blue, marks and links only, never a fill | Owner rule, confirmed |
+| Working (owner, 2026-10-20) | a warm neutral animated arc (`--status-working` = `--fg-2`); green only for done/success | Removes a fourth hue (taste critic) |
+| First run (owner, 2026-10-20) | "Ask before edits" stays the first-run default | Newcomer critic |
+| Codex mark (owner, 2026-10-20) | a closed figure-eight loop (§2.22b), vendor-neutral | `{ }` read as a JSON file |
+| Active tab | Modern UI pill tabs (`modernUIEditorTabStyle: pill`) with the 2px top line on the active pill's fill; height 24 (Modern UI's pill height; the strip's 32 is unchanged) | Spec §6.4 with upstream's pill geometry |

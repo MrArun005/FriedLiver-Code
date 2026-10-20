@@ -49,3 +49,16 @@ index 4db6d89a..1e14279d 100644
  	}
  }
  
+diff --git a/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts b/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts
+index 9637a692..ebff2d0b 100644
+--- a/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts
++++ b/src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts
+@@ -126,7 +126,7 @@ export class SettingsEditor2 extends EditorPane {
+ 	private static SETTING_UPDATE_SLOW_DEBOUNCE: number = 1000;
+ 	private static CONFIG_SCHEMA_UPDATE_DELAYER = 500;
+ 	private static TOC_MIN_WIDTH: number = 100;
+-	private static TOC_RESET_WIDTH: number = 200;
++	private static TOC_RESET_WIDTH: number = 232; // FriedLiver: the settings TOC is 232 wide (COMPONENTS.md §6.14)
+ 	private static EDITOR_MIN_WIDTH: number = 500;
+ 	// Below NARROW_TOTAL_WIDTH, we only render the editor rather than the ToC.
+ 	private static NARROW_TOTAL_WIDTH: number = this.TOC_RESET_WIDTH + this.EDITOR_MIN_WIDTH;

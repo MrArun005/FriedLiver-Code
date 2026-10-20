@@ -217,6 +217,9 @@
     },
     "symbol-keyword": {
       "fontCharacter": "\\E043"
+    },
+    "menubar-more": {
+      "fontCharacter": "\\E044"
     }
   }
 }
