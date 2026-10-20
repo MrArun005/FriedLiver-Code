@@ -97,6 +97,7 @@ check from install to two agents talking to each other.
 | Claude | `npm install -g @agentclientprotocol/claude-agent-acp` | Claude Code's own login in a terminal (subscription or Anthropic Console): approve on claude.ai; or an Anthropic API key |
 | Codex | `npm install -g @agentclientprotocol/codex-acp` | Your browser opens OpenAI's sign-in page (ChatGPT), or an OpenAI API key |
 | Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page, or a Gemini API key, or Vertex AI |
+| Antigravity | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` (Google's installer, to `~/.local/bin/agy`; Windows: `irm https://antigravity.google/cli/install.ps1 \| iex`) | Run `agy` once in a terminal: it opens Google's sign-in page (Google AI Free, Pro or Ultra plan) |
 
    The older `@zed-industries/*` packages are deprecated and lack the effort
    and plan options; Agents & Accounts says when an installed adapter is too old.
@@ -147,6 +148,20 @@ taking the agent's default:
 | Commands | Claude runs them. In Ask and Auto-accept edits its request shows the command and folder | Codex runs them in its sandbox; Read-only asks before anything that writes, Workspace access runs workspace commands without asking | Gemini runs them after its own request, shown with the command | FriedLiver runs them after Run |
 | Ask / Auto-accept edits / Full auto | Manual / Accept edits / Bypass permissions (Auto when Bypass isn't offered) | Read-only / Workspace access / Full access | Auto Edit (FriedLiver reviews each write) / Auto Edit / YOLO | Ask / Accept edits / Full access |
 | Undo and "Changed N files" | A git snapshot at the start of each turn, for every agent; outside git, from the content FriedLiver saw before each edit | same | same, plus FriedLiver's own record of its writes | same |
+
+**Antigravity** (Google's `agy` CLI, with the Gemini, Claude and GPT-OSS models
+your Antigravity plan offers) has no ACP mode, so FriedLiver runs it through
+its own adapter over agy's documented headless mode (`--output-format
+stream-json`). Headless agy can't stop to ask for approval, so FriedLiver sets
+agy's own flags per level instead of asking: **Manual** is read only (agy works
+in an empty folder, so it sees no project files and runs no commands), **Plan**
+reads the project in agy's plan mode, **Edit automatically** lets agy edit
+files itself (`--mode accept-edits`; commands are refused unless your agy
+settings allow them) and **Auto** is `--dangerously-skip-permissions`. Its
+edits don't pass through FriedLiver's diff review, but the per-turn git
+snapshot still undoes them. It can be asked, consulted, handed off to and
+joined to /discuss like any agent; it can't call FriedLiver's own tools,
+since agy reads MCP servers only from its own config.
 
 "Always allow" on a command adds a rule (that exact command, or a program and
 its subcommand) for this workspace, kept in your profile, never in the

@@ -8,6 +8,7 @@ import { AgentStartError, agentErrorMessage } from '@friedliver/main/agents/agen
 import { readIfExists, readTextFile, writeTextFile } from '@friedliver/main/agents/fileAccess';
 import { AgentHub, AuthRequiredError, NoSessionError, type SessionStart } from '@friedliver/main/agents/hub';
 import { DEFAULT_AGENTS, demoAgentSpec, type AgentSpec, type VendorAgentId } from '@friedliver/main/agents/registry';
+import { findProgram } from '@friedliver/main/agents/processes';
 import { allowedSignInUrl, signInMethods } from '@friedliver/main/agents/signIn';
 import { visibleText, type TerminalListener } from '@friedliver/main/agents/terminals';
 import { TurnLog } from '@friedliver/main/agents/turnLog';
@@ -87,13 +88,13 @@ import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridg
 
 const READ_ONLY = 'This chat only proposes text: FriedLiver refuses file access, commands and tools in it.';
 
-/** Each vendor's key goes only to that vendor's agent process. */
-export const KEY_ENV: Record<VendorAgentId, string> = {
+/** Each vendor's key goes only to that vendor's agent process. Antigravity has none: agy signs in with Google itself. */
+export const KEY_ENV: Partial<Record<VendorAgentId, string>> = {
   claude: 'ANTHROPIC_API_KEY',
   codex: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
 };
-export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini'];
+export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini', 'antigravity'];
 
 const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 /** Files larger than this aren't read to show a permission request's whole diff. */
@@ -156,6 +157,11 @@ export interface CoreOptions {
   folders(): string[];
   clientVersion: string;
   demoAgentScript: string;
+  /**
+   * FriedLiver's ACP adapter for agy (dist/agy-acp.js), which has no ACP mode. Without it the
+   * Antigravity command must speak ACP itself, like the other agents' (the tests' demo agent).
+   */
+  agyAdapterScript?: string;
   agentCommand(id: VendorAgentId): { command: string; args: string[] };
   apiKey(id: VendorAgentId): string | undefined;
   /** Other credentials FriedLiver keeps for the agent (Gemini's Vertex AI settings), as its environment. */
@@ -468,12 +474,24 @@ export class AgentCore {
     const base = DEFAULT_AGENTS[id];
     const { command, args } = this.options.agentCommand(id);
     const key = this.options.apiKey(id);
-    return {
+    const keyEnv = KEY_ENV[id];
+    const spec: AgentSpec = {
       ...base,
       label: AGENT_FACES[id].name,
       command: command.trim() || base.command,
       args,
-      env: { ...base.env, ...(key ? { [KEY_ENV[id]]: key } : {}), ...this.options.credentialEnv?.(id) },
+      env: { ...base.env, ...(key && keyEnv ? { [keyEnv]: key } : {}), ...this.options.credentialEnv?.(id) },
+    };
+    const adapter = this.options.agyAdapterScript;
+    if (id !== 'antigravity' || !adapter) return spec;
+    // agy itself when it isn't installed, so starting it fails as "not installed" naming agy.
+    const agy = findProgram(spec.command);
+    if (!agy) return { ...spec, args: [] };
+    return {
+      ...spec,
+      command: process.execPath,
+      args: [adapter],
+      env: { ...spec.env, ELECTRON_RUN_AS_NODE: '1', FRIEDLIVER_AGY: agy, FRIEDLIVER_AGY_ARGS: JSON.stringify(args) },
     };
   }
 
