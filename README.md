@@ -158,10 +158,13 @@ pass through FriedLiver, so FriedLiver runs it only where agy's own flags hold:
 --sandbox`; commands are refused unless your agy settings allow them) and
 **Auto** is `--dangerously-skip-permissions`. **Manual** runs nothing (the chat
 says to pick one of those), there is no Plan, and since agy has no mode that
-enforces read only it never takes part in Inline Edit or /discuss. FriedLiver
-also won't start agy in a folder whose own agy config could run code or change
-its settings (`.agents/mcp_config.json`, `hooks.json`, `plugins/`,
-`settings.json`, `.gemini/settings.json`): agy has no flag to ignore it. Its
+enforces read only it never takes part in Inline Edit or /discuss. agy has no
+flag to ignore a repository's own agy config, so FriedLiver fails closed: it
+won't start agy while the project (up to the repository root) has anything in
+`.agents/`, `.agent/`, `_agents/`, `_agent/` or `.gemini/` (any case) beyond
+markdown rules and workflows and agy's own artifacts (no MCP servers, hooks,
+plugins, skills, settings or symlinks), and a turn that leaves such files
+behind stops agy and ends that chat's session. Its
 edits don't pass through FriedLiver's diff review, but the per-turn git
 snapshot still undoes them. It can be asked, consulted and handed off to like
 any agent; it can't call FriedLiver's own tools, since agy reads MCP servers

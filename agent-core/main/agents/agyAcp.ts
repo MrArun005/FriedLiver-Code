@@ -52,11 +52,15 @@ interface Session {
   models: AgyChoice[];
   /** agy's conversation, from the session's earlier turns. */
   conversationId?: string;
+  /** Why the session is over (agy left workspace config): every later prompt is refused with it. */
+  ended?: string;
   running?: { child: ChildProcess; cancelled: boolean };
 }
 
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_STDERR = 40;
+/** How often a running turn's workspace is checked for config agy wrote. ponytail: polling; fs.watch if this ever costs. */
+const WATCH_MS = 250;
 const internal = (details: string) => new acp.RequestError(-32603, 'Internal error', { details });
 
 export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
@@ -115,24 +119,35 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
   }
 
   async function turn(s: Session, sessionId: string, text: string, notify: (u: acp.SessionUpdate) => Promise<void>): Promise<acp.StopReason> {
+    if (s.ended) throw internal(s.ended);
     const mode = s.mode;
     if (mode === 'manual') throw internal(MANUAL_REFUSAL);
+    const named = (files: string[]) => files.map((f) => path.relative(s.cwd, f) || f).join(', ');
     // Checked before every turn: the repository may add it at any time.
     const config = workspaceConfig(s.cwd);
     if (config.length) {
       throw internal(
-        `Antigravity won’t run in this folder: agy would load its config here (${config.map((f) => path.relative(s.cwd, f) || f).join(', ')}), which can start programs or change what it may do, and agy has no way to ignore it. Remove it, or use another agent here.`,
+        `Antigravity won’t run in this folder: agy would load its config here (${named(config)}), and only text rules and workflows are allowed there, since agy has no way to ignore the rest (MCP servers, hooks, plugins, skills, settings). Remove it, or use another agent here.`,
       );
     }
     const seen = (id: unknown) => {
       if (typeof id === 'string' && id) s.conversationId = id;
     };
+    let watch: ReturnType<typeof setInterval> | undefined;
     try {
       const child = run(turnArgs({ mode, model: s.model, effort: s.effort, conversationId: s.conversationId }, opts.extraArgs), s.cwd);
       // agy may exit before it reads stdin (a refused flag): that is its answer, not the adapter's crash.
       child.stdin?.on('error', () => {});
       const running = { child, cancelled: false };
       s.running = running;
+      // agy's own tools may write config it would load next: watched during the turn, checked after it.
+      let leaked: string[] | undefined;
+      watch = setInterval(() => {
+        const found = workspaceConfig(s.cwd);
+        if (!found.length || leaked) return;
+        leaked = found;
+        if (child.pid) killProcessTree(child.pid);
+      }, WATCH_MS);
       const stderr: string[] = [];
       let signIn = false;
       child.stderr?.setEncoding('utf8').on('data', (d: string) => {
@@ -196,6 +211,12 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
         }
       }
       await exited.catch(() => null);
+      clearInterval(watch);
+      const left = leaked ?? workspaceConfig(s.cwd);
+      if (left.length) {
+        s.ended = `agy left config it would load on its next turn (${named(left)}), so FriedLiver stopped it and this session has ended. Check and remove those files, then start a new chat.`;
+        throw internal(s.ended);
+      }
       if (running.cancelled) return 'cancelled';
       const why = result?.error ?? stderr.join('\n');
       if (signIn || needsSignIn(why)) throw acp.RequestError.authRequired(undefined, 'Antigravity needs a sign-in: run `agy` in a terminal.');
@@ -204,6 +225,7 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
       if (!said && result?.response) await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: result.response } });
       return stop;
     } finally {
+      clearInterval(watch);
       s.running = undefined;
     }
   }

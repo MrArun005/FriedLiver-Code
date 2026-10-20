@@ -295,6 +295,20 @@ describe('/discuss: the orchestrator', () => {
     expect(cards[1].turns.map((t) => t.round)).toEqual([1, 1, 2, 2]);
   });
 
+  it('no round ever runs with an agent nothing holds to read only (Antigravity), from Start or Continue', async () => {
+    const h = fakeHost({ claude: [`P${stance('Postgres', ['x'])}`, CONCLUSION], gemini: [`M${stance('MySQL', ['y'])}`] }, { maxRounds: 1 });
+    await expect(h.discussions.start('chat-1', ['antigravity'], 'q')).rejects.toThrow(/Antigravity can’t work read only/);
+    await h.discussions.start('chat-1', ['gemini'], 'q');
+    // A finished card naming Antigravity (from an older version, or restored state).
+    const old: DiscussionItem = { ...h.d(), id: 'discuss-old', participants: [{ agent: 'claude', chatId: 'chat-1' }, { agent: 'antigravity' }] };
+    h.host.dispatch({ t: 'items', chatId: 'chat-1', items: [old] });
+    const asked = h.asked.length;
+    const guards = h.guards.length;
+    await expect(h.discussions.continue('discuss-old')).rejects.toThrow(/Antigravity can’t work read only/);
+    expect(h.asked).toHaveLength(asked);
+    expect(h.guards).toHaveLength(guards);
+  });
+
   it('Carry out hands the conclusion to the starting chat, or to the other agent’s chat', async () => {
     const h = fakeHost({ claude: [`P${stance('Postgres', ['x'])}`, CONCLUSION], gemini: [`M${stance('MySQL', ['y'])}`] }, { maxRounds: 1 });
     await h.discussions.start('chat-1', ['gemini'], 'Postgres or MySQL?');

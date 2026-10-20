@@ -218,6 +218,9 @@ export class Discussions {
       await this.host.guard(cid, true);
     };
     try {
+      // Every way into the rounds (Start, Continue) comes here: an agent nothing holds to read only never takes part.
+      const loose = this.get(chatId, id)?.participants.find((p) => NO_READ_ONLY.includes(p.agent));
+      if (loose) throw new Error(noReadOnlyText(speakerName(loose.agent)));
       await guard(chatId);
       await this.conclude(chatId, id, live, await this.rounds(chatId, id, live, guard));
     } catch (err) {

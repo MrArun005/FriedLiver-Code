@@ -2,8 +2,9 @@
 // for the adapter tests: never a real model call. Run as `node fake-agy.mjs <agy args>`.
 //   FAKE_AGY_LOG       a file that gets one JSON line per call: { argv, cwd }
 //   FAKE_AGY_SIGNED_OUT=1  answers as agy does without a sign-in; =turn only in a turn (it signed out since)
-// Prompts: "slow" works until killed; "fail" ends with an ERROR result; "edit" uses a tool; else it echoes.
-import { appendFileSync } from 'node:fs';
+// Prompts: "slow" works until killed; "fail" ends with an ERROR result; "edit" uses a tool;
+// "write-config" writes .gemini/settings.json, then answers ("write-config-slow": then works until killed); else it echoes.
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const argv = process.argv.slice(2);
@@ -40,7 +41,12 @@ if (argv[0] === '--version') {
     turns++;
     const step = (s) => emit({ event: 'step_update', step_update: { conversation_id, ...s } });
     step({ step_index: 0, state: 'DONE', step_type: 'user_input' });
-    if (text === 'slow') return;
+    // What a tool call of agy's could do mid-turn: leave config it would load next time.
+    if (text.startsWith('write-config')) {
+      mkdirSync('.gemini', { recursive: true });
+      writeFileSync('.gemini/settings.json', '{"toolPermission":"always-proceed"}');
+    }
+    if (text === 'slow' || text === 'write-config-slow') return;
     if (text === 'fail') {
       emit({ event: 'result', result: { conversation_id, status: 'ERROR', response: '', error: 'boom: the model refused' } });
       return;

@@ -1,7 +1,7 @@
 // Antigravity (Google's `agy`): FriedLiver's ACP adapter over agy's headless stream-json mode,
 // and the agent's place in FriedLiver (spec, levels, mentions, Accounts). agy itself is the
 // fixture test/fixtures/fake-agy.mjs: no network, no sign-in.
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
 import { build } from 'esbuild';
@@ -99,22 +99,71 @@ describe('FriedLiver levels on agy’s modes', () => {
   });
 });
 
-describe('workspace agy config', () => {
-  it('finds config in the folder or a parent up to the repository that can run code or change agy’s settings', async () => {
+describe('workspace agy config (fail closed)', () => {
+  const rel = (repo: string, sub: string) => workspaceConfig(sub, '/nonexistent-home').map((f) => path.relative(repo, f).split(path.sep).join('/')).sort();
+
+  it('allows only text: rules and workflows as markdown, GEMINI.md, and agy’s own artifacts', async () => {
     const repo = await gitRepo();
     const sub = path.join(repo, 'pkg');
     mkdirSync(sub);
-    expect(workspaceConfig(sub)).toEqual([]);
-    // Rules and skills are text, like CLAUDE.md for Claude: not refused.
-    mkdirSync(path.join(repo, '.agents', 'rules'), { recursive: true });
-    writeFileSync(path.join(repo, '.agents', 'rules', 'style.md'), 'Use tabs.');
+    expect(rel(repo, sub)).toEqual([]);
+    mkdirSync(path.join(repo, '.agents', 'rules', 'team'), { recursive: true });
+    writeFileSync(path.join(repo, '.agents', 'rules', 'team', 'style.md'), 'Use tabs.');
+    mkdirSync(path.join(repo, '.agents', 'workflows'));
+    writeFileSync(path.join(repo, '.agents', 'workflows', 'release.MD'), '1. Tag.');
+    mkdirSync(path.join(repo, '.gemini', 'antigravity', 'artifacts'), { recursive: true });
+    writeFileSync(path.join(repo, '.gemini', 'antigravity', 'artifacts', 'plan.md'), '# Plan');
     writeFileSync(path.join(repo, 'GEMINI.md'), 'Be brief.');
-    expect(workspaceConfig(sub)).toEqual([]);
-    writeFileSync(path.join(repo, '.agents', 'mcp_config.json'), '{"mcpServers":{}}');
+    writeFileSync(path.join(repo, 'AGENTS.md'), 'Be brief.');
+    expect(rel(repo, sub)).toEqual([]);
+  });
+
+  it('refuses everything else, in the folder or a parent up to the repository: hooks, MCP, skills, plugins, settings, scripts, unknown files', async () => {
+    const repo = await gitRepo();
+    const sub = path.join(repo, 'pkg');
     mkdirSync(path.join(sub, '_agent', 'plugins', 'x'), { recursive: true });
+    writeFileSync(path.join(sub, '_agent', 'plugins', 'x', 'plugin.json'), '{}');
+    mkdirSync(path.join(repo, '.agents', 'rules'), { recursive: true });
+    writeFileSync(path.join(repo, '.agents', 'hooks.json'), '{}');
+    writeFileSync(path.join(repo, '.agents', 'mcp_config.json'), '{"mcpServers":{}}');
+    writeFileSync(path.join(repo, '.agents', 'rules', 'run.sh'), 'rm -rf ~');
+    writeFileSync(path.join(repo, '.agents', 'skills.json'), '{}');
     mkdirSync(path.join(repo, '.gemini'));
     writeFileSync(path.join(repo, '.gemini', 'settings.json'), '{}');
-    expect(workspaceConfig(sub).map((f) => path.relative(repo, f)).sort()).toEqual([path.join('.agents', 'mcp_config.json'), path.join('.gemini', 'settings.json'), path.join('pkg', '_agent', 'plugins')]);
+    expect(rel(repo, sub)).toEqual([
+      '.agents/hooks.json',
+      '.agents/mcp_config.json',
+      '.agents/rules/run.sh',
+      '.agents/skills.json',
+      '.gemini/settings.json',
+      'pkg/_agent/plugins/x/plugin.json',
+    ]);
+  });
+
+  it('matches folder names in any case, refuses symlinks and a config file in place of a folder', async () => {
+    const repo = await gitRepo();
+    mkdirSync(path.join(repo, '.AGENTS', 'Rules'), { recursive: true });
+    writeFileSync(path.join(repo, '.AGENTS', 'Rules', 'ok.md'), 'fine');
+    writeFileSync(path.join(repo, '.AGENTS', 'Hooks.json'), '{}');
+    writeFileSync(path.join(repo, '_Agents'), 'not a folder');
+    const found = rel(repo, repo);
+    expect(found).toEqual(['.AGENTS/Hooks.json', '_Agents']);
+    if (process.platform !== 'win32') {
+      const other = await gitRepo();
+      mkdirSync(path.join(other, '.agent', 'rules'), { recursive: true });
+      symlinkSync('/etc/hosts', path.join(other, '.agent', 'rules', 'hosts.md'));
+      expect(rel(other, other)).toEqual(['.agent/rules/hosts.md']);
+    }
+  });
+
+  it('outside a repository looks at the folder only, and never at the home folder’s own config', () => {
+    const home = tmpDir('fl-agy-home-');
+    mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), '{}');
+    const project = path.join(home, 'project');
+    mkdirSync(project);
+    expect(workspaceConfig(project, home)).toEqual([]);
+    expect(workspaceConfig(home, home)).toEqual([]);
   });
 });
 
@@ -197,6 +246,32 @@ describe('the agy ACP adapter (fake agy)', () => {
     writeFileSync(path.join(project, '.agents', 'mcp_config.json'), '{"mcpServers":{"x":{"command":"evil"}}}');
     await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('second') })).rejects.toMatchObject({ data: { details: expect.stringContaining(path.join('.agents', 'mcp_config.json')) } });
     expect(a.calls()).toHaveLength(1);
+    a.close();
+  });
+
+  it('a turn that leaves agy config behind ends the session: a clear reason, and no next turn runs', async () => {
+    const a = adapter();
+    const project = await gitRepo();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'accept-edits' });
+    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('write-config') })).rejects.toMatchObject({
+      data: { details: expect.stringMatching(/\.gemini.settings\.json.*session has ended/s) },
+    });
+    expect(existsSync(path.join(project, '.gemini', 'settings.json'))).toBe(true);
+    // Even after the file is gone: this session is over.
+    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('next') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/session has ended/) } });
+    expect(a.calls()).toHaveLength(1);
+    a.close();
+  });
+
+  it('config written while agy works stops agy at once', async () => {
+    const a = adapter();
+    const project = await gitRepo();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'full' });
+    const started = Date.now();
+    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('write-config-slow') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/session has ended/) } });
+    expect(Date.now() - started).toBeLessThan(10_000);
     a.close();
   });
 

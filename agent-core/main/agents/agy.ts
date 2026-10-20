@@ -7,7 +7,8 @@
 // agy can't stop to ask for approval: a tool that needs one is refused. So FriedLiver's levels
 // become agy's own flags per turn (agyModeArgs), and Manual runs nothing. agy has no mode that
 // enforces read only (its plan mode is an instruction, not a block), so none is offered.
-import { existsSync } from 'node:fs';
+import { readdirSync, type Dirent } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export interface AgyChoice {
@@ -33,22 +34,83 @@ export const AGY_MODES: AgyChoice[] = [
 export type AgyMode = 'manual' | 'accept-edits' | 'full';
 export const isAgyMode = (v: unknown): v is AgyMode => AGY_MODES.some((m) => m.value === v);
 
-/** The agy config folders it reads at a workspace's root (agy 1.4.3 docs: `.agents/`, or `.agent/`, `_agents/`, `_agent/`). */
-const AGENT_DIRS = ['.agents', '.agent', '_agents', '_agent'];
-/** In them, what can start programs or change agy's settings: MCP servers, hooks, plugins, settings. Rules, skills and workflows are text. */
-const RISKY = ['mcp_config.json', 'hooks.json', 'plugins', 'settings.json'];
+/**
+ * The config folders agy reads in a workspace, any case: `.agents/` (or `.agent/`, `_agents/`,
+ * `_agent/`; agy 1.4.3's own docs: rules, skills, workflows, `mcp_config.json`, `hooks.json` —
+ * "Hooks run shell commands with your full permissions"), and `.gemini/` (Gemini CLI's
+ * workspace settings, where agy also keeps artifacts).
+ */
+const CONFIG_DIRS = new Set(['.agents', '.agent', '_agents', '_agent', '.gemini']);
+/**
+ * What may be in them: text only, by an allowlist, so anything new agy learns to load is refused
+ * until it is listed here. Rules and workflows are markdown; agy's own artifacts and transcript
+ * are its output. Paths are lower-cased, relative to the config folder.
+ */
+const TEXT_ONLY: Record<string, RegExp> = {
+  agents: /^(rules|workflows)\/[^/]+(\/[^/]+)*\.md$/,
+  gemini: /^antigravity\/(artifacts\/[^/]+(\/[^/]+)*|transcript\.jsonl)$/,
+};
+/** Files looked at per config folder; past it the folder counts as unsafe (a check that stops early proves nothing). */
+const MAX_CONFIG_FILES = 500;
+
+/** A config folder's entries that aren't plain text files on the allowlist (a symlink never is). */
+function unsafeIn(dir: string, allowed: RegExp): string[] {
+  const bad: string[] = [];
+  let seen = 0;
+  const walk = (rel: string): void => {
+    for (const e of readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (++seen > MAX_CONFIG_FILES) throw new Error('too many files');
+      if (e.isDirectory()) walk(r);
+      else if (!e.isFile() || !allowed.test(r.toLowerCase())) bad.push(path.join(dir, ...r.split('/')));
+    }
+  };
+  try {
+    walk('');
+  } catch {
+    return [dir];
+  }
+  return bad;
+}
 
 /**
- * A repository's agy config that could run code or change what agy may do, in `cwd` or a parent
- * up to the repository root. agy has no flag to ignore it, so FriedLiver won't start agy there.
+ * Fail closed: anything in an agy config folder (`cwd` or a parent up to the repository root)
+ * that isn't text on the allowlist: MCP servers, hooks, plugins, skills, settings, symlinks, or
+ * what agy may load next. agy has no flag to ignore a workspace's config, so FriedLiver won't
+ * start agy while there is any, and ends the session when a turn leaves some.
  */
-export function workspaceConfig(cwd: string): string[] {
-  const found: string[] = [];
-  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
-    for (const d of AGENT_DIRS) for (const f of RISKY) if (existsSync(path.join(dir, d, f))) found.push(path.join(dir, d, f));
-    if (existsSync(path.join(dir, '.gemini', 'settings.json'))) found.push(path.join(dir, '.gemini', 'settings.json'));
-    if (existsSync(path.join(dir, '.git')) || path.dirname(dir) === dir) return found;
+export function workspaceConfig(cwd: string, home = os.homedir()): string[] {
+  const list = (dir: string): Dirent[] => {
+    try {
+      return readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+  };
+  // The folder, and its parents up to the repository root; outside a repository the folder only.
+  // Never the home folder itself: its ~/.gemini is the user's own config.
+  const start = path.resolve(cwd);
+  let dirs: string[] = [];
+  for (let dir = start; ; dir = path.dirname(dir)) {
+    dirs.push(dir);
+    if (list(dir).some((e) => e.name === '.git')) break;
+    if (path.dirname(dir) === dir) {
+      dirs = [start];
+      break;
+    }
   }
+  dirs = dirs.filter((d) => d !== path.resolve(home));
+  const found: string[] = [];
+  for (const dir of dirs) {
+    for (const e of list(dir)) {
+      const name = e.name.toLowerCase();
+      if (!CONFIG_DIRS.has(name)) continue;
+      const full = path.join(dir, e.name);
+      if (!e.isDirectory()) found.push(full);
+      else found.push(...unsafeIn(full, name === '.gemini' ? TEXT_ONLY.gemini : TEXT_ONLY.agents));
+    }
+  }
+  return found;
 }
 
 /** agy's own choice: no --model / --effort flag. */
