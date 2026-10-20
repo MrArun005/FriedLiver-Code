@@ -83,6 +83,7 @@ import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposal
 import { loginExtras } from './signin';
 import { mergeOffered, type AccountRecord } from '../shared/accounts';
 import { relativeFile, rewoundHistory } from './transcript';
+import { testAgentsOn } from './settings';
 import { RULES_CAP, type Rules } from './sharedRules';
 import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge } from './discuss';
 import { currentModel, modelCatalog, sameModel, type Who } from '../shared/discussMentions';
@@ -156,12 +157,6 @@ export interface CoreUi {
   /** The text of an open editor with unsaved changes, so agents read what the user sees. */
   unsavedText?(file: string): string | undefined;
 }
-
-/**
- * The fake Demo agent is for tests and the UI harness only: it runs when FRIEDLIVER_TEST_AGENTS=1,
- * which packaged builds never set. Without it pickers leave it out and a Demo chat can't start.
- */
-export const testAgentsOn = (): boolean => process.env.FRIEDLIVER_TEST_AGENTS === '1';
 
 export interface CoreOptions {
   folders(): string[];

@@ -4,10 +4,10 @@
 // WorkspaceEdit, so Ctrl/Cmd+Z undoes it. The logic is in inlineEdit.ts.
 import * as vscode from 'vscode';
 import { AGENT_FACES, isAgentKey, type AgentKey } from '../shared/model';
-import { testAgentsOn, type AgentCore } from './core';
+import type { AgentCore } from './core';
 import type { Span } from './editorPrompt';
 import { applyReplacement, inlinePrompt, runInline, type InlineRun } from './inlineEdit';
-import { userSetting } from './settings';
+import { testAgentsOn, userSetting } from './settings';
 
 const SCHEME = 'friedliver-inline';
 const PENDING = 'friedliver.inlineEdit.pending';

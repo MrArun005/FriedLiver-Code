@@ -42,7 +42,7 @@ document.addEventListener('click', onLink, true);
 document.addEventListener('auxclick', onLink, true);
 
 /** Which agents pickers offer and each one's last known sign-in; every agent until the host says. */
-let roster: AgentRoster = { agents: [...AGENT_KEYS], signIn: {} };
+let roster: AgentRoster = { agents: AGENT_KEYS.filter((a) => a !== 'demo'), signIn: {} };
 const rosterWatchers = new Set<() => void>();
 
 function setRoster(next: AgentRoster): void {

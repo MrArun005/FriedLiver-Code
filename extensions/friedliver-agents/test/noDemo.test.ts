@@ -4,8 +4,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { testAgentsOn } from '../src/host/core';
 import type { SavedState } from '../src/host/persist';
+import { testAgentsOn } from '../src/host/settings';
+import { agentList } from '../src/host/transcript';
 import { shownAgents } from '../src/shared/accounts';
 import { EMPTY_STATE, type ChatView } from '../src/shared/model';
 import { disposeCores, gitRepo, makeCore } from './helpers';
@@ -25,6 +26,8 @@ it('pickers, New Chat, the roster and the Agent Manager leave Demo out', () => {
   packaged();
   expect(testAgentsOn()).toBe(false);
   expect(shownAgents(testAgentsOn())).not.toContain('demo');
+  // list_agents, what an agent learns it may ask.
+  expect(agentList()).not.toMatch(/demo/i);
 });
 
 it('a Demo chat cannot start', () => {

@@ -7,14 +7,14 @@ import path from 'node:path';
 import * as vscode from 'vscode';
 import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef } from '../shared/model';
 import { agentName, chatName, chatRef } from '../shared/names';
-import { testAgentsOn, type AgentCore, type PendingReview, type SendOptions } from './core';
+import type { AgentCore, PendingReview, SendOptions } from './core';
 
 import { EditChats, runEdit, type EditOutcome } from './editFlow';
 import { EDIT_AGENT_HINT, editPrompt, lineSpan, parseEditInput, problemInstruction, refLabel, referenceBlock, referencesContext, type SpanKind } from './editorPrompt';
 import { branchName, collectChanges, reviewMessage, reviewPrompt } from './gitChanges';
 import { insideRoots } from './paths';
 import type { ReviewPlacement } from './review';
-import { userSetting } from './settings';
+import { testAgentsOn, userSetting } from './settings';
 
 /** An agent a setting or saved choice may name: not the removed Demo agent, outside tests. */
 const usable = (v: unknown): v is AgentKey => isAgentKey(v) && (v !== 'demo' || testAgentsOn());
