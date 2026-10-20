@@ -13,7 +13,8 @@ const MEDIA = path.resolve(__dirname, '..', 'extensions', 'friedliver-agents', '
 const START = '/* ---- Composer (§2.1';
 const END = '/* ---- Banners above the composer';
 // Change only with the owner's sign-off on the new composer.
-const APPROVED = '55b16fb5d2b0669d520938102b661efd24162884f1e08940c1ba8e61b5eab129';
+// 2026-10-20: owner-authorised v2 restyle (HANDOFF-v2 §B2.3): colours, radii, shadows and the send state only; DOM, sizes and spacing unchanged.
+const APPROVED = '5840d5bcaba5d2a36ca44a2fc9413aa92de720cf24e37d0acee6119f6a465aef';
 
 describe('approved composer', () => {
   it('keeps its styles', () => {

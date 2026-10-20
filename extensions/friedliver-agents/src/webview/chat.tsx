@@ -59,8 +59,12 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster } from './common';
+import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useHost, usePersisted, useRoster, useWidth } from './common';
 import { Viewer } from './viewer';
+import { ContextRail } from './contextRail';
+
+/** The chat page's width from which it shows the context rail (COMPONENTS.md v2 §2.34). */
+const RAIL_MIN = 1100;
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
 import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
@@ -70,7 +74,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
+import { AgentMark, Avatar, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -83,6 +87,7 @@ const LIST = document.body.dataset.view === 'list';
 type Select = (chatId: string) => void;
 
 function App() {
+  const width = useWidth();
   // Images and code references waiting in each chat's composer, so they go with that chat's next message only.
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
@@ -167,6 +172,8 @@ function App() {
     );
   }
 
+  // A wide chat page (an editor tab) gets the context rail (§2.34); a side bar keeps the one column.
+  const rail = width >= RAIL_MIN;
   // The image viewer: the open chat's images, transcript order, opened on the one clicked; focus goes back to it on close.
   const gallery = viewer && chat ? chatGallery(chat, state.images) : [];
   const viewerAt = gallery.findIndex((g) => g.path === viewer?.path);
@@ -195,6 +202,8 @@ function App() {
         {chat ? (
           <>
             <ChatHeader chat={chat} state={state} onSelect={select} />
+            <div class="chat-body" data-rail={rail ? '' : undefined}>
+            <div class="chat-col">
             <Transcript
               chat={chat}
               state={state}
@@ -215,6 +224,9 @@ function App() {
               found={found?.chatId === chat.id ? found : null}
               linked={state.chats.filter((c) => c.origin?.chatId === chat.id && !c.archived)}
             />
+            </div>
+            {rail && <ContextRail chat={chat} />}
+            </div>
           </>
         ) : (
           <Empty chats={state.chats} onSelect={select} />
@@ -466,6 +478,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
       <header class="chat-head">
         <div class="chat-head-text">
           <div class="chat-head-row">
+            <Avatar agent={chat.agent} working={chat.busy} />
             <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
               {chat.title}
             </button>
@@ -518,6 +531,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
           </Popover>
         )}
         <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
+          <Dot state={status} still={status !== 'working'} />
           {chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status]}
         </Pill>
         <div class="chat-head-actions">

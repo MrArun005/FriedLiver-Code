@@ -3346,37 +3346,20 @@ button.fl-row,
   display: flex;
   flex-direction: column;
   background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  box-shadow: var(--shadow-composer);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-12);
+  box-shadow: var(--rim), var(--shadow-composer);
 }
-/* The mode's colour: the focus ring and the send button. */
-.composer,
-.composer[data-mode='ask'] {
-  --mode: var(--accent);
+/* v2 (§2.27, owner-authorised restyle): the send is the one accent in every mode (the mode button says the
+   mode); focus is the neutral ring at 60% with its halo. */
+.composer {
+  --mode: var(--focus);
   --mode-send: var(--send-bg);
   --mode-send-fg: var(--send-fg);
 }
-.composer[data-mode='edits'] {
-  --mode: var(--fg);
-  --mode-send: var(--fg);
-  --mode-send-fg: var(--tool-bg);
-}
-.composer[data-mode='plan'] {
-  --mode: var(--focus-border);
-  --mode-send: var(--button-bg);
-  --mode-send-fg: var(--button-fg);
-}
-.composer[data-mode='full'] {
-  --mode: var(--error);
-  --mode-send: var(--error);
-  --mode-send-fg: var(--button-fg);
-}
 .composer:focus-within {
-  border-color: var(--mode);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--mode) 12%, transparent),
-    0 1px 2px color-mix(in srgb, var(--mode) 20%, transparent);
+  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
+  box-shadow: var(--rim), var(--shadow-composer), var(--focus-halo);
 }
 /* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
 .cc-chips {
@@ -3384,7 +3367,7 @@ button.fl-row,
   align-items: center;
   gap: var(--sp-1);
   padding: 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hairline);
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -3407,8 +3390,8 @@ button.fl-row,
   height: 24px;
   max-width: 180px;
   padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-ctl);
   background: var(--chip-bg);
   font-size: var(--t-85);
   font-weight: 500;
@@ -3482,9 +3465,9 @@ button.cc-chip-remove:hover {
   field-sizing: content;
   padding: 10px 36px 10px 14px;
   border: 0;
-  border-radius: var(--r-8);
+  border-radius: var(--r-12);
   background: transparent;
-  color: var(--fg);
+  color: var(--sel-fg);
   caret-color: var(--fg);
   font-size: var(--t-100);
   line-height: 1.5;
@@ -3520,7 +3503,7 @@ button.cc-mic .icon {
   gap: 2px;
   min-width: 0;
   padding: 5px;
-  border-top: 0.5px solid var(--border);
+  border-top: 0.5px solid var(--hairline);
   color: var(--fg-2);
 }
 button.cc-icon-btn {
@@ -3528,7 +3511,11 @@ button.cc-icon-btn {
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
+  color: var(--fg-2);
+  transition: background-color var(--dur-out) var(--ease-out);
+}
+button.cc-icon-btn:hover:not(:disabled) {
   color: var(--fg);
 }
 button.cc-icon-btn:hover:not(:disabled),
@@ -3545,6 +3532,7 @@ button.cc-pill {
   background: var(--pill-bg);
   color: var(--fg);
   font-size: var(--t-85);
+  font-weight: var(--w-medium);
   line-height: 18px;
   white-space: nowrap;
 }
@@ -3584,7 +3572,7 @@ button.cc-mode {
   height: 26px;
   gap: 0;
   padding: 0 var(--sp-2) 0 0;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   color: var(--fg);
   white-space: nowrap;
 }
@@ -3609,19 +3597,25 @@ button.send-btn {
   width: 26px;
   height: 26px;
   margin-left: 2px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   color: var(--mode-send-fg);
   background: var(--mode-send);
+  box-shadow: var(--sheen), var(--elev-1);
+  transition: transform var(--dur-pop) var(--spring-pop);
 }
 button.send-btn:hover:not(:disabled) {
-  background: var(--mode-send);
-  filter: brightness(1.1);
+  background: var(--accent-hover);
 }
 button.send-btn:active:not(:disabled) {
-  filter: brightness(0.9);
+  background: var(--accent-press);
+  transform: scale(var(--press-scale));
 }
+/* Nothing to send: the pill fill and secondary ink, not a faded accent. */
 button.send-btn:disabled {
-  opacity: 0.4;
+  opacity: 1;
+  background: var(--pill-bg);
+  color: var(--fg-2);
+  box-shadow: none;
 }
 /* Narrow: labels go before anything overlaps (the controls keep their tooltips). */
 @container (max-width: 420px) {

@@ -2127,6 +2127,80 @@ body[data-surface='chat'] {
   min-width: 0;
   min-height: 0;
 }
+/* A wide chat page: the transcript and composer, then the context rail (§2.34): 300 wide, 264 under 1300. */
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.chat-body[data-rail] {
+  grid-template-columns: minmax(0, 1fr) 300px;
+  border-top: var(--line) solid var(--hairline);
+}
+@media (max-width: 1300px) {
+  .chat-body[data-rail] {
+    grid-template-columns: minmax(0, 1fr) 264px;
+  }
+}
+.chat-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.ctx-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  border-left: var(--line) solid var(--hairline);
+}
+.ctx-rail h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  color: var(--fg);
+  font-size: var(--t-90);
+  font-weight: var(--w-strong);
+}
+.ctx-rail .fl-row {
+  margin: 0 calc(var(--sp-2) * -1);
+  width: calc(100% + var(--sp-4));
+}
+.ctx-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+.ctx-l {
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  font-variant-numeric: tabular-nums;
+}
+.ctx-v {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  color: var(--sel-fg);
+  font-variant-numeric: tabular-nums;
+}
+.ctx-more,
+.ctx-empty {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: var(--t-90);
+}
+.ctx-empty {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
 
 /* ---- Transcript (§2.8): full width, 20px gutters; messages 8px apart; a timeline for tools ---- */
 
@@ -3100,7 +3174,8 @@ button.cc-map-node:hover {
    Drawn with the components: Button (brand on the request the keys act on), SplitButton, the hold
    Button, Segmented, Pill, Countdown, MenuItem, and Card (bare: its rows pad themselves). */
 
-/* A request: a bare Card for review and careful, a ghost Card (one sentence row) for routine. Full width. */
+/* A request (§2.29): a bare Card for review and careful, a ghost Card (one sentence row) for routine. Full
+   width. Rows pad themselves at 12; the head, the preview and the foot are 8 apart. */
 .apv {
   margin: var(--sp-2) 0;
   container-type: inline-size;
@@ -3109,13 +3184,13 @@ button.cc-map-node:hover {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px var(--sp-2);
-  min-height: 40px;
-  padding: 6px 6px 6px var(--sp-3);
+  gap: var(--sp-1) var(--sp-2);
+  min-height: var(--h-xl);
+  padding: var(--sp-2) var(--sp-3);
 }
 .apv-row .apv-hd {
-  min-height: 36px;
-  padding: 4px 4px 4px var(--sp-3);
+  min-height: var(--sp-8);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
 }
 .apv-what {
   display: flex;
@@ -3124,22 +3199,25 @@ button.cc-map-node:hover {
   flex: 1 1 340px;
   min-width: 0;
 }
+/* The risk pill sits at the head's end (§2.29). */
+.apv-what > .fl-pill {
+  margin-left: auto;
+}
 .apv-kind {
   display: inline-flex;
   flex: none;
-  color: var(--fg-2);
 }
 .apv-what > .fl-avatar,
 .apv-what > .icon {
   flex: none;
 }
 .apv-what > .icon {
-  color: var(--fg-50);
+  color: var(--fg-2);
   transform: rotate(-90deg);
 }
 .apv-verb {
   flex: none;
-  font-weight: 600;
+  font-weight: var(--w-strong);
   color: var(--sel-fg);
 }
 .apv-tg {
@@ -3173,8 +3251,18 @@ button.cc-map-node:hover {
 .apv-act {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
   margin-left: auto;
+}
+/* The foot (§2.29): the answers at the end; Windows puts the primary first (Fluent order). */
+.apv-ft {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3) var(--sp-3);
+}
+body[data-platform='windows'] .apv-ft > .apv-act {
+  flex-direction: row-reverse;
 }
 /* Narrow: the actions get their own row, right-aligned. */
 @container (max-width: 560px) {
@@ -3189,6 +3277,9 @@ button.cc-map-node:hover {
   .apv .apv-what {
     flex-wrap: wrap;
     row-gap: var(--sp-half);
+  }
+  .apv .apv-what > .fl-pill {
+    margin-left: 0;
   }
   .apv .apv-tg,
   .apv .apv-label,
@@ -3235,25 +3326,34 @@ button.cc-map-node:hover {
   flex-direction: column;
   gap: var(--sp-2);
   min-width: 0;
-  padding: 0 var(--sp-2) var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-1);
 }
+/* "Why:" in the body text colour, 12px. */
 .apv-why {
-  padding: 0 var(--sp-1);
-  color: var(--fg-2);
+  color: var(--fg);
   font-size: var(--t-90);
 }
+.apv-why b {
+  color: var(--sel-fg);
+  font-weight: var(--w-medium);
+}
+/* The command well (§2.29): the code tone, --r-ctl, mono 12, the $ in --fg-2. */
 .apv-pre {
   position: relative;
-  border-radius: var(--r-4);
+  border-radius: var(--r-ctl);
   background: var(--code-bg);
 }
 .apv-pre pre {
   max-height: 16em;
   overflow: auto;
-  padding: var(--sp-2) 40px var(--sp-2) 10px;
+  padding: var(--sp-2) var(--sp-10) var(--sp-2) var(--sp-3);
   color: var(--sel-fg);
   font-size: var(--fs-mono);
+  line-height: var(--lh-code);
   white-space: pre-wrap;
+}
+.apv-pre pre .prompt {
+  color: var(--fg-2);
 }
 .apv-pre .copy-btn {
   position: absolute;
@@ -3268,7 +3368,8 @@ button.cc-map-node:hover {
 .apv-diff,
 .apv-commits {
   overflow: hidden;
-  border-radius: var(--r-4);
+  border: var(--line) solid var(--hairline);
+  border-radius: var(--r-ctl);
   background: var(--code-bg);
 }
 .apv-dh {
@@ -3276,8 +3377,9 @@ button.cc-map-node:hover {
   align-items: center;
   gap: var(--sp-2);
   min-height: var(--h-lg);
-  padding: 0 var(--sp-1) 0 10px;
-  border-bottom: 0.5px solid var(--border);
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  border-bottom: var(--line) solid var(--hairline);
+  background: var(--input-bg);
   color: var(--fg-2);
   font-size: var(--t-85);
 }
@@ -3303,8 +3405,8 @@ button.cc-map-node:hover {
 .apv-plan {
   max-height: 20em;
   overflow: auto;
-  padding: var(--sp-2) 10px;
-  border-radius: var(--r-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-ctl);
   background: var(--code-bg);
 }
 .apv-files {
@@ -3312,31 +3414,30 @@ button.cc-map-node:hover {
   flex-wrap: wrap;
   gap: var(--sp-1);
 }
+/* The effects (§2.29): plain sentences with a 12 glyph each, in a wrapping row. */
 .apv-risks {
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
   margin: 0;
-  padding: 0 var(--sp-1);
+  padding: 0;
   list-style: none;
   color: var(--fg);
+  font-size: var(--t-90);
 }
 .apv-risks li {
   display: flex;
   align-items: baseline;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
+  min-width: 0;
 }
-.apv-risks li::before {
-  content: '';
+.apv-risks li > .icon {
   flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: var(--r-round);
-  background: var(--error);
-  transform: translateY(-2px);
+  align-self: center;
+  color: var(--warn);
 }
-.apv-risks li[data-safer]::before {
-  background: var(--tl-success);
+.apv-risks li[data-safer] > .icon {
+  color: var(--fg-2);
 }
 .apv-risks code {
   min-width: 0;
@@ -3346,18 +3447,17 @@ button.cc-map-node:hover {
 .apv-risks .apv-safer {
   flex: none;
 }
-.apv-commits {
-  background: color-mix(in srgb, var(--error) 7%, var(--code-bg));
-}
 .apv-commit {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: 8ch minmax(0, 1fr) auto;
   gap: var(--sp-2);
-  padding: 2px 10px;
+  padding: var(--sp-half) var(--sp-3);
   font-size: var(--fs-mono);
+  border-left: 2px solid var(--removed);
+  background: color-mix(in srgb, var(--removed) 6%, transparent);
 }
 .apv-commit:last-child {
-  padding-bottom: 6px;
+  padding-bottom: var(--sp-1);
 }
 .apv-hash,
 .apv-author {
@@ -3368,43 +3468,43 @@ button.cc-map-node:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--removed);
+  color: color-mix(in srgb, var(--removed) var(--tone-ink), var(--fg));
 }
 .apv-author {
   font-family: var(--font);
   font-size: var(--t-90);
 }
 .apv-more-lines {
-  padding: 0 10px 6px;
-  color: var(--fg-50);
+  padding: 0 var(--sp-3) var(--sp-1);
+  color: var(--fg-2);
   font-size: var(--t-85);
 }
 .apv-site,
 .apv-msg {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-2);
   min-width: 0;
-  padding: var(--sp-2) 10px;
-  border-radius: var(--r-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-ctl);
   background: var(--code-bg);
 }
 .apv-msg {
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .apv-fav {
   flex: none;
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: var(--i-lg);
+  height: var(--i-lg);
   border-radius: var(--r-4);
-  background: color-mix(in srgb, var(--tl-success) 22%, transparent);
-  color: var(--tl-success);
+  background: var(--pill-bg);
+  color: var(--fg);
   font-size: var(--t-75);
-  font-weight: 600;
+  font-weight: var(--w-strong);
 }
 .apv-url {
   min-width: 0;
@@ -3420,7 +3520,7 @@ button.cc-map-node:hover {
 .apv-el {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 45%;
   margin-left: auto;
@@ -3433,42 +3533,41 @@ button.cc-map-node:hover {
 .apv-to {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   color: var(--fg-2);
   font-size: var(--t-85);
 }
 .apv-text {
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   color: var(--sel-fg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .apv-text > .icon {
   flex: none;
-  margin-top: 3px;
+  margin-top: var(--sp-half);
   color: var(--fg-2);
 }
 .apv-shares {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding-left: 24px;
+  gap: var(--sp-1);
+  padding-left: var(--sp-6);
   color: var(--fg-2);
   font-size: var(--t-85);
 }
 .apv-lock {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 var(--sp-3) 10px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3) var(--sp-2);
   color: var(--fg-2);
   font-size: var(--t-85);
 }
 .apv-warn {
-  padding: 0 var(--sp-1);
-  color: var(--warn);
+  color: color-mix(in srgb, var(--warn) var(--tone-ink), var(--fg));
   font-size: var(--t-85);
 }
 /* Routine, counting down: the bar drains linearly; Esc stops it. */
@@ -3477,33 +3576,32 @@ button.cc-map-node:hover {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 0 10px var(--sp-2) 34px;
+  padding: 0 var(--sp-3) var(--sp-2) var(--sp-8);
   color: var(--fg-2);
   font-size: var(--t-85);
 }
 /* The Countdown along the row's bottom edge. */
 .apv-auto-bar {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: 0;
 }
 /* "N more routine requests · Allow all". */
 .apv-batch {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  margin: 0 6px 6px;
-  padding: var(--sp-1) var(--sp-1) var(--sp-1) 10px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-6);
+  margin: 0 var(--sp-2) var(--sp-2);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+  border-top: var(--line) solid var(--hairline);
   color: var(--fg-2);
 }
 .inbox-main > .apv-batch {
   margin: 0;
 }
 .apv-batch b {
-  font-weight: 600;
+  font-weight: var(--w-strong);
   color: var(--fg);
 }
 .apv-batch-text {
@@ -3900,6 +3998,7 @@ button.all-btn {
   gap: var(--sp-2);
   min-width: 0;
   padding: var(--sp-2) var(--gutter);
+  container: chat-head / inline-size;
 }
 .chat-head-text {
   flex: 1;
@@ -3911,17 +4010,30 @@ button.all-btn {
   gap: var(--sp-2);
   min-width: 0;
 }
+/* The chat's name (§2.34): 13/600 in a side bar; on a wide page the page title, 20/600, tracked in. */
 button.chat-head-title {
   display: block;
   min-width: 0;
-  margin-left: -6px;
-  padding: 2px 6px;
-  border-radius: var(--r-4);
-  font-weight: 600;
-  color: var(--fg);
+  margin-left: calc(var(--sp-1) * -1);
+  padding: var(--sp-half) var(--sp-1);
+  border-radius: var(--r-ctl);
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+@container chat-head (min-width: 720px) {
+  button.chat-head-title {
+    font-size: var(--t-hero);
+    letter-spacing: var(--track-title);
+    line-height: var(--lh-tight);
+  }
+}
+@media (min-width: 720px) {
+  .chat-head {
+    padding-top: var(--sp-4);
+  }
 }
 button.chat-head-title:hover {
   background: var(--hover-bg);
@@ -3929,11 +4041,15 @@ button.chat-head-title:hover {
 .status-pill {
   flex: none;
 }
+.status-pill .fl-dot {
+  --dot: 10px;
+  margin-right: var(--sp-1);
+}
 .chat-head-actions {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--sp-half);
 }
 button[aria-pressed='true'] .icon path {
   fill: currentColor;
