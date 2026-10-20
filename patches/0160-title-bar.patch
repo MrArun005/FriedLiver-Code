@@ -49,7 +49,7 @@ index 8aacc2e7..5c8b3648 100644
 +							container.classList.remove('compact-mode');
 +							const keys = document.createElement('span');
 +							keys.classList.add('fl-command-center-keys');
-+							const keybinding = that._keybindingService.lookupKeybinding(action.id);
++							const keybinding = that._keybindingService.lookupKeybinding('workbench.action.quickOpen'); // Go to File's key (the pill runs quick open with modes)
 +							if (keybinding) {
 +								this._store.add(new KeybindingLabel(keys, OS)).set(keybinding);
  							}

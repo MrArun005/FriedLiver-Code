@@ -80,7 +80,7 @@ describe('workbench/friedliver.css', () => {
     // Keyframe steps (from, to, 40%) are not selectors.
     const rules = CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}/g, '');
     const selectors = [...rules.matchAll(/(^|})\s*([^{}@]+)\{/g)].map((m) => m[2].trim());
-    for (const sel of selectors.flatMap((s) => s.split(',').map((x) => x.trim()))) {
+    for (const sel of selectors.flatMap((s) => s.split(/,(?![^(]*\))/).map((x) => x.trim()))) {
       expect(sel, sel).toMatch(/^\.monaco-workbench(?:\.[\w-]+)*(?::not\(\.[\w-]+\))*:not\(\.hc-black\):not\(\.hc-light\)/);
     }
   });

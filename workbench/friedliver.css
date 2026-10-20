@@ -1180,3 +1180,78 @@
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-sash::before {
 	border-radius: var(--fl-r-pill);
 }
+
+/* ---- Review round 1 (real CI shots vs the mocks) ------------------------------------------- */
+
+/* Palette filter: a borderless 16px line on the palette's own glass, no field fill or halo. */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox,
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox.synthetic-focus {
+	border-color: transparent !important;
+	background-color: transparent !important;
+	box-shadow: none;
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox > .ibwrapper > .input {
+	background-color: transparent !important;
+}
+
+/* Toast actions are sm secondary buttons: the accent is spent once per screen (§0 principle 1). */
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts .monaco-button,
+.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-center .monaco-button {
+	--vscode-button-background: var(--fl-pill-bg);
+	--vscode-button-foreground: var(--fl-fg);
+	--vscode-button-hoverBackground: var(--fl-pill-hover);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-toasts .monaco-text-button:not(.secondary),
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) > .notifications-center .monaco-text-button:not(.secondary) {
+	box-shadow: none;
+}
+
+/* Rail badges are neutral Counts (§6.2); only the Agents badge is loud, and it lives in the agents view. */
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .badge .badge-content {
+	background-color: color-mix(in srgb, var(--fl-fg) 22%, var(--vscode-activityBar-background)) !important;
+	color: var(--fl-sel-fg) !important;
+}
+
+/* The panel sits under a hairline (§6.7), drawn inside so the layout doesn't move. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.panel.bottom {
+	box-shadow: inset 0 var(--fl-line) 0 var(--fl-hairline);
+}
+
+/* Settings rows (§6.14): title and description on the left, the control at the end (220-320). */
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(calc(5.5 * var(--fl-h-xl)), calc(8 * var(--fl-h-xl)));
+	column-gap: var(--fl-sp-6);
+	align-items: start;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents > * {
+	grid-column: 1;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents > .setting-item-value {
+	grid-column: 2;
+	grid-row: 1 / span 3;
+	align-self: center;
+	margin-top: 0;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-value .monaco-select-box,
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-value .monaco-inputbox {
+	width: 100% !important;
+	max-width: none;
+}
+
+/* Booleans: the words first, the switch at the end of the row. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-value-description {
+	display: flex;
+	flex-direction: row-reverse;
+	justify-content: space-between;
+	gap: var(--fl-sp-6);
+}
+
+.monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .monaco-custom-toggle.setting-value-checkbox {
+	margin-right: 0;
+}
