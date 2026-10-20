@@ -3,6 +3,7 @@
 import path from 'node:path';
 import { AGENT_FACES, AGENT_KEYS, lastReply, type AppState, type ChatView, type Item } from '../shared/model';
 import { turnsText } from '../shared/view';
+import { testAgentsOn } from './settings';
 
 /** Characters kept from one message in a hand-off or a read. */
 const MAX_MESSAGE = 2000;
@@ -209,8 +210,9 @@ export function chatList(state: Pick<AppState, 'chats' | 'links'>, callerId: str
 /** list_agents: the agents FriedLiver can start. */
 export function agentList(): string {
   const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', antigravity: 'Google models through the Antigravity CLI', demo: 'offline test agent; it echoes what it is told' };
+  const keys = AGENT_KEYS.filter((k) => k !== 'demo' || testAgentsOn());
   return [
-    ...AGENT_KEYS.map((k) => `${k} · ${AGENT_FACES[k].name}${about[k] ? ` (${about[k]})` : ''}`),
+    ...keys.map((k) => `${k} · ${AGENT_FACES[k].name}${about[k] ? ` (${about[k]})` : ''}`),
     '',
     'Pass the key as `agent` to ask_agent. An agent the user has not installed or signed in to answers with an error.',
   ].join('\n');

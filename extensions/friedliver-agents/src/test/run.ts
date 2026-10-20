@@ -52,6 +52,8 @@ async function main(): Promise<void> {
     // Stock builds gate the secondary side bar contribution behind a proposal; the fork allows it for built-ins.
     launchArgs: [workspace, '--enable-proposed-api=friedliver.friedliver-agents', '--no-sandbox', '--use-mock-keychain', '--password-store=basic', '--disable-gpu', '--disable-extensions', '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userData}`],
     extensionTestsEnv: {
+      // The fake Demo agent the suite drives; packaged builds never set this.
+      FRIEDLIVER_TEST_AGENTS: '1',
       FRIEDLIVER_SCREENSHOTS: process.env.FRIEDLIVER_SCREENSHOTS ?? path.join(extensionDevelopmentPath, 'screenshots'),
       FRIEDLIVER_WORKSPACE: workspace,
     },

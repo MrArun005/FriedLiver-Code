@@ -51,18 +51,9 @@ Codex), calls it so the agent records the choice, then checks. The page asks
 for keys in the editor's own password boxes; the page itself never receives a
 key, only "set" or "not set" (and the project and location for Vertex AI).
 
-## The Demo agent
-
-Demo is a fake agent that runs locally inside FriedLiver, with no account, no
-network and no AI model. It exists for trying the chat, reviews and approvals,
-and for the tests. `friedliver.showDemoAgent` (off by default, user settings
-only) shows it in the pickers, New chat, the Agent Manager and the `@` picker.
-Chats you already have with Demo still open, and **Start a Demo Chat** in the
-walkthrough works either way.
-
 ## Not verified against the real CLIs
 
 The flows were built from each adapter's published `initialize` and
-`authenticate` code and tested against the Demo agent standing in (browser
+`authenticate` code and tested against the tests' fake agent standing in (browser
 sign-in, `logout`, `_auth/status_update`, model lists), never with real
 accounts. See [TRY-IT.md](TRY-IT.md) for the first real run.
