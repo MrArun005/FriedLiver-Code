@@ -7,10 +7,11 @@ import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
 import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGY_MODES, TALK_LIMITS, extraArgs, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
+import { AGY_MODES, TALK_LIMITS, extraArgs, geminiFingerprint, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
 import { PLATFORM_REFUSAL, agyAgent, type AgyAdapterOptions } from '@friedliver/main/agents/agyAcp';
 import { findProgram } from '@friedliver/main/agents/processes';
 import { DEFAULT_AGENTS } from '@friedliver/main/agents/registry';
+import { READ_ONLY_PROMPT_META } from '../src/host/core';
 import { parseEditInput } from '../src/host/editorPrompt';
 import { cliLineFor, installCommandFor } from '../src/host/signin';
 import { CLI_ACCOUNTS, KEY_SETUPS } from '../src/shared/accounts';
@@ -260,6 +261,54 @@ describe.skipIf(process.platform !== 'darwin')('the macOS sandbox every agy proc
     }
     expect(readFileSync(path.join(g, 'antigravity-cli', 'settings.json'), 'utf8')).toBe('{"model":"x"}');
   });
+
+  it('writes in ~/.gemini only to data folders: not the updater, builtins, MCP or plugin data, project list, nor a config folder inside data', () => {
+    const home = tmpDir('fl-agy-home-');
+    const g = path.join(home, '.gemini');
+    for (const d of ['antigravity-cli/log', 'antigravity-cli/updater', 'antigravity-cli/builtin', 'antigravity-cli/mcp', 'antigravity-cli/plugin_data', 'config/projects']) mkdirSync(path.join(g, d), { recursive: true });
+    expect(inSandbox(home, home, `echo x > "${g}/antigravity-cli/log/a.log"`).code).toBe(0);
+    for (const target of ['antigravity-cli/updater/agy', 'antigravity-cli/builtin/skill.md', 'antigravity-cli/mcp/x.json', 'antigravity-cli/plugin_data/x', 'config/projects/p.json']) {
+      expect(inSandbox(home, home, `echo x > "${g}/${target}"`).code, target).not.toBe(0);
+    }
+    expect(inSandbox(home, home, `mkdir -p "${g}/antigravity-cli/log/.agents" && echo {} > "${g}/antigravity-cli/log/.agents/hooks.json"`).code).not.toBe(0);
+  });
+
+  it('refuses config folder names a case-insensitive volume would fold: ".agentſ", "_Agents", any dot name with non-ASCII', async () => {
+    const repo = await gitRepo();
+    for (const name of ['.agentſ', '_Agents', '.gemınί', '.Gemini']) expect(inSandbox(tmpDir('fl-agy-home-'), repo, `mkdir "${name}"`).code, name).not.toBe(0);
+    expect(inSandbox(tmpDir('fl-agy-home-'), repo, 'mkdir .notes && echo ok').code).toBe(0);
+    mkdirSync(path.join(repo, '_café'));
+    expect(workspaceConfig(repo, repo)).toEqual([path.join(repo, '_café')]);
+  });
+
+  it('lets nothing open apps, script them, or leave login items and shell start-up files', () => {
+    const home = tmpDir('fl-agy-home-');
+    for (const cmd of ['/usr/bin/osascript -e 1', '/usr/bin/open -h', '/bin/launchctl list']) expect(inSandbox(home, home, cmd).out, cmd).toContain('Operation not permitted');
+    for (const f of ['.zshrc', '.bash_profile', '.profile', 'Library/LaunchAgents/x.plist']) {
+      expect(inSandbox(home, home, `mkdir -p "$(dirname "${home}/${f}")"; echo x > "${home}/${f}"`).code, f).not.toBe(0);
+      expect(existsSync(path.join(home, f)), f).toBe(false);
+    }
+  });
+});
+
+describe('the fingerprint of the user’s own agy config', () => {
+  it('changes with settings, MCP servers or hooks, not with agy’s data or other apps’ files in ~/.gemini', () => {
+    const home = tmpDir('fl-agy-home-');
+    const g = path.join(home, '.gemini');
+    mkdirSync(path.join(g, 'antigravity-cli', 'log'), { recursive: true });
+    mkdirSync(path.join(g, 'config'), { recursive: true });
+    mkdirSync(path.join(g, 'antigravity-browser-profile'), { recursive: true });
+    writeFileSync(path.join(g, 'antigravity-cli', 'settings.json'), '{}');
+    const first = geminiFingerprint(home);
+    writeFileSync(path.join(g, 'antigravity-cli', 'log', 'a.log'), 'x');
+    writeFileSync(path.join(g, 'antigravity-browser-profile', 'Cookies'), 'x');
+    expect(geminiFingerprint(home)).toBe(first);
+    writeFileSync(path.join(g, 'config', 'hooks.json'), '{}');
+    expect(geminiFingerprint(home)).not.toBe(first);
+    const second = geminiFingerprint(home);
+    writeFileSync(path.join(g, 'antigravity-cli', 'settings.json'), '{"toolPermission":"always-proceed"}');
+    expect(geminiFingerprint(home)).not.toBe(second);
+  });
 });
 
 describe.skipIf(process.platform !== 'darwin')('the talk-only sandbox (deny by default)', () => {
@@ -373,8 +422,51 @@ describe.skipIf(process.platform !== 'darwin')('the agy ACP adapter (fake agy, i
     const project = await gitRepo();
     const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
     await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt(`probe:${path.join(project, 'README.md')}`) });
-    expect(JSON.parse(a.said())).toEqual({ readProject: 'EPERM', writeProject: 'EPERM', writeOwnFolder: 'ok', shell: 'EPERM' });
+    expect(JSON.parse(a.said())).toEqual({ readProject: 'EPERM', writeProject: 'EPERM', writeOwnFolder: 'ok', configOwnFolder: 'EPERM', configOwnFolderUnicode: 'EPERM', shell: 'EPERM' });
     expect(existsSync(path.join(project, 'README.md.x'))).toBe(false);
+    a.close();
+  });
+
+  it('a prompt FriedLiver marks read only runs talk only, whatever the session’s mode', async () => {
+    const a = adapter();
+    const project = await gitRepo();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: project, mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'full' });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt(`probe:${path.join(project, 'README.md')}`), _meta: { friedliver: { readOnly: true } } });
+    expect(JSON.parse(a.said())).toMatchObject({ readProject: 'EPERM', shell: 'EPERM' });
+    const [call] = a.calls();
+    expect(path.basename(call.cwd)).toMatch(/^friedliver-agy-talk-/);
+    expect(call.argv).not.toContain('--dangerously-skip-permissions');
+    a.close();
+  });
+
+  it('talk only: anything named like a config folder in its own folder is gone before each round', async () => {
+    const a = adapter();
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: await gitRepo(), mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('one') });
+    const scratch = a.calls()[0].cwd;
+    mkdirSync(path.join(scratch, '_agents'));
+    writeFileSync(path.join(scratch, '_agents', 'hooks.json'), '{}');
+    writeFileSync(path.join(scratch, 'notes.txt'), 'kept');
+    await a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('two') });
+    expect(a.calls()[1].cwd).toBe(scratch);
+    expect(existsSync(path.join(scratch, '_agents'))).toBe(false);
+    expect(existsSync(path.join(scratch, 'notes.txt'))).toBe(true);
+    a.close();
+  });
+
+  it('a change to the user’s own agy config during a turn ends the session', async () => {
+    const home = tmpDir('fl-agy-home-');
+    mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    const a = adapter({}, { home });
+    const { sessionId } = await a.agent.request(acp.methods.agent.session.new, { cwd: await gitRepo(), mcpServers: [] });
+    await a.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: 'mode', value: 'accept-edits' });
+    const turn = a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('pause') });
+    await waitFor(() => a.calls().length > 0);
+    writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), '{"toolPermission":"always-proceed"}');
+    await expect(turn).rejects.toMatchObject({ data: { details: expect.stringMatching(/agy config in ~\/\.gemini changed.*session has ended/) } });
+    await expect(a.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: prompt('next') })).rejects.toMatchObject({ data: { details: expect.stringMatching(/session has ended/) } });
+    expect(a.calls()).toHaveLength(1);
     a.close();
   });
 
@@ -558,6 +650,28 @@ describe('Antigravity in FriedLiver', () => {
     const status = await core.checkAccount('antigravity');
     expect(status).toMatchObject({ status: 'not-installed', installCommand: DEFAULT_AGENTS.antigravity.installCommand });
     expect(status.message).toContain('fl-agy-that-is-not-installed');
+  });
+
+  it('a chat in a discussion (or read only) keeps its level: changes are refused, and each prompt says read only', async () => {
+    const core = makeCore(await gitRepo());
+    const chat = await core.createChat('claude');
+    await core.send(chat.id, 'hello');
+    const inner = core as unknown as { guardDiscussion(id: string, on: boolean): Promise<void>; mustStayReadOnly(id: string): boolean };
+    const mode = () => core.chat(chat.id)?.session?.options.find((o) => o.category === 'mode')?.current;
+    await inner.guardDiscussion(chat.id, true);
+    const during = mode();
+    await core.setApproval(chat.id, 'edits');
+    await core.setOption(chat.id, 'mode', 'bypassPermissions');
+    await core.setPlan(chat.id, false);
+    expect(core.chat(chat.id)?.approval ?? 'ask').toBe('ask');
+    expect(mode()).toBe(during);
+    expect(core.chat(chat.id)!.items.at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('stays read only') });
+    expect(inner.mustStayReadOnly(chat.id)).toBe(true);
+    expect(READ_ONLY_PROMPT_META).toEqual({ friedliver: { readOnly: true } });
+    await inner.guardDiscussion(chat.id, false);
+    expect(inner.mustStayReadOnly(chat.id)).toBe(false);
+    await core.setApproval(chat.id, 'edits');
+    expect(core.chat(chat.id)?.approval).toBe('edits');
   });
 
   it('is offered for Inline Edit, which is read only (talk only for it)', () => {

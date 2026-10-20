@@ -87,6 +87,8 @@ if (argv[0] === '--version') {
         readProject: how(() => readFileSync(file, 'utf8')),
         writeProject: how(() => writeFileSync(`${file}.x`, 'x')),
         writeOwnFolder: how(() => writeFileSync('ok.txt', 'x')),
+        configOwnFolder: how(() => mkdirSync('.gemini')),
+        configOwnFolderUnicode: how(() => mkdirSync('.agentſ')),
         shell: (() => {
           const r = spawnSync('/bin/sh', ['-c', 'echo hi'], { encoding: 'utf8' });
           return r.error ? (r.error.code ?? 'error') : r.status === 0 && r.stdout.trim() === 'hi' ? 'ok' : `exit ${r.status}`;

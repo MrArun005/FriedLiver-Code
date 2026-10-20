@@ -87,6 +87,9 @@ import { RULES_CAP, type Rules } from './sharedRules';
 import { DISCUSS_READ_ONLY, Discussions, discussionAllows, discussionAllowsBridge } from './discuss';
 
 const READ_ONLY = 'This chat only proposes text: FriedLiver refuses file access, commands and tools in it.';
+/** Each prompt of a chat that must stay read only says so: an adapter that can hold itself to it (Antigravity's talk only) does, whatever its mode. */
+export const READ_ONLY_PROMPT_META = { friedliver: { readOnly: true } };
+const LEVEL_LOCKED = 'This chat stays read only while it is in a discussion (or is a read-only chat), so its level and mode can’t change until that ends.';
 
 /** Each vendor's key goes only to that vendor's agent process. Antigravity has none: agy signs in with Google itself. */
 export const KEY_ENV: Partial<Record<VendorAgentId, string>> = {
@@ -374,6 +377,8 @@ export class AgentCore {
         !this.toolsOffered(chatId) ? undefined : this.options.primer?.(chatId, text, Math.min(PRIMER_TOKENS, Math.floor((RULES_CAP - (this.rulesBytes.get(chatId) ?? 0)) / 4))),
       freshSessionFor: (chatId) => this.readOnlyChat(chatId),
       sessionMetaFor: (chatId, agentId) => (this.readOnlyChat(chatId) && agentId === 'claude' ? CLAUDE_READ_ONLY_META : undefined),
+      // Per turn, not only per mode: an adapter that can hold itself read only (Antigravity's talk only) does for this turn.
+      promptMetaFor: (chatId) => (this.mustStayReadOnly(chatId) ? READ_ONLY_PROMPT_META : undefined),
     });
     // The connections read the live state, not the one at construction.
     const live = () => this.state;
@@ -736,6 +741,7 @@ export class AgentCore {
     const chat = this.requireChat(chatId);
     const option = chat.session?.options.find((o) => o.id === optionId);
     if (!option || !offers(option, value)) return;
+    if ((option.category === 'mode' || planToggle(chat.session)?.option === option) && this.levelLocked(chatId)) return;
     if (option.category === 'mode' && typeof value === 'string') {
       const level = levelOfMode(chat.agent, option, value);
       if (level === 'full' && !(await this.confirmFull(chat))) return;
@@ -757,6 +763,7 @@ export class AgentCore {
   /** FriedLiver's approval level for the chat, and the agent's matching mode. */
   async setApproval(chatId: string, level: ApprovalLevel, via: Via = 'desktop'): Promise<void> {
     const chat = this.requireChat(chatId);
+    if (this.levelLocked(chatId)) return;
     const before = chat.approval ?? 'ask';
     if (via !== 'desktop') {
       // From a phone: tightening goes ahead; loosening waits for the Mac; nothing becomes a default for new chats.
@@ -777,6 +784,7 @@ export class AgentCore {
   /** Plan mode on or off: a Plan entry in the agent's modes, or Codex's collaboration mode. */
   async setPlan(chatId: string, on: boolean): Promise<void> {
     const chat = this.requireChat(chatId);
+    if (this.levelLocked(chatId)) return;
     const plan = planToggle(chat.session);
     if (!plan) return;
     const off = plan.option.category === 'mode' ? modeFor(chat.agent, plan.option, chat.approval ?? 'ask') : plan.off;
@@ -1591,6 +1599,18 @@ export class AgentCore {
   /** Whether the chat may only answer (inline edit); checked before any rule, level or policy. */
   private readOnlyChat(chatId: string | undefined): boolean {
     return !!chatId && this.chat(chatId)?.readOnly === true;
+  }
+
+  /** A read-only chat, or one in a discussion (counted, so it holds until the last one ends). */
+  private mustStayReadOnly(chatId: string): boolean {
+    return this.readOnlyChat(chatId) || this.discussing.has(chatId);
+  }
+
+  /** Refuses a level or mode change for a chat that must stay read only, and says why in it. */
+  private levelLocked(chatId: string): boolean {
+    if (!this.mustStayReadOnly(chatId)) return false;
+    this.items(chatId, [{ kind: 'notice', tone: 'info', text: LEVEL_LOCKED }]);
+    return true;
   }
 
   private async mcpServersFor(chatId: string, http: boolean): Promise<acp.McpServer[]> {

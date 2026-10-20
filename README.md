@@ -164,7 +164,9 @@ from its own index, and agy asks for more in a `need` block in its reply
 (`{"need":[{"read":"src/a.ts","lines":"1-120"},{"search":"jsonb"}]}`), which
 FriedLiver answers through the same read-only index tools, inside the project,
 never secrets or ignored files, at most 5 requests a round, 3 rounds and about
-24,000 characters a turn. agy also
+24,000 characters a turn. A prompt FriedLiver marks read only (a discussion,
+a read-only chat) always runs talk only, and such a chat's level can't be
+changed until that ends. agy also
 has no flag to ignore a repository's own agy config (`.agents/hooks.json`,
 MCP servers, settings), so every agy process runs in a macOS sandbox
 (`sandbox-exec`): it can't read or write any `.agents`, `.agent`, `_agents`,

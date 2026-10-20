@@ -8,7 +8,8 @@
 // become agy's own flags per turn (agyModeArgs). Manual, Plan, /discuss and read-only chats are
 // talk only: agy runs in an empty folder under a deny-by-default sandbox (talkProfile), and
 // FriedLiver reads the project for it (parseNeeds) through its own index.
-import { readdirSync, type Dirent } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync, readlinkSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 export interface AgyChoice {
@@ -99,10 +100,12 @@ export function workspaceConfig(cwd: string, root: string = cwd): string[] {
   const found: string[] = [];
   for (const dir of dirs) {
     for (const e of list(dir)) {
-      const name = e.name.toLowerCase();
-      if (!CONFIG_DIRS.has(name)) continue;
+      const name = e.name.normalize('NFKC').toLowerCase();
+      // A dot or underscore name with non-ASCII in it may be a config folder on a case-insensitive volume: refused.
+      if (!CONFIG_DIRS.has(name) && !(/^[._]/.test(name) && /[^\x20-\x7e]/.test(name))) continue;
       const full = path.join(dir, e.name);
       if (!e.isDirectory()) found.push(full);
+      else if (!CONFIG_DIRS.has(name)) found.push(full);
       else found.push(...unsafeIn(full, name === '.gemini' ? TEXT_ONLY.gemini : TEXT_ONLY.agents));
     }
   }
@@ -110,17 +113,18 @@ export function workspaceConfig(cwd: string, root: string = cwd): string[] {
 }
 
 /** What agy writes under ~/.gemini as it runs (its first run, 1.4.3): state, never config. Everything else there is read only to it. */
-const AGY_STATE = [
+/**
+ * Data only: never `updater` (it stages new agy binaries), `builtin` (agy's own skills), `mcp`,
+ * `plugin_data` or `config/projects`, which agy may load as code or config. agy 1.4.3 runs
+ * (version, models, a turn up to sign-in) with these alone.
+ */
+export const AGY_STATE = [
   'antigravity-cli/brain',
-  'antigravity-cli/builtin',
   'antigravity-cli/cache',
   'antigravity-cli/conversations',
   'antigravity-cli/crashes',
   'antigravity-cli/implicit',
   'antigravity-cli/log',
-  'antigravity-cli/mcp',
-  'antigravity-cli/plugin_data',
-  'antigravity-cli/updater',
   'antigravity-cli/tmp',
   'antigravity-cli/cli.log',
   'antigravity-cli/conversation_summaries.db',
@@ -130,7 +134,6 @@ const AGY_STATE = [
   'antigravity-cli/jetski_state.pbtxt',
   'antigravity-cli/last_check.timestamp',
   'config/.migrated',
-  'config/projects',
   'jetski/brain',
 ];
 
@@ -141,6 +144,34 @@ const sbString = (p: string): string => {
 };
 /** A folder name matched in any case, for a sandbox regex: ".agents" → "[.][Aa][Gg]…". */
 const anyCase = (name: string): string => [...name].map((c) => (/[a-z]/.test(c) ? `[${c.toUpperCase()}${c}]` : `[${c}]`)).join('');
+/** A string matched literally in a sandbox regex. */
+const reLiteral = (p: string): string => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * A config folder's name as one path component: the five names in any ASCII case, or any name
+ * starting with "." or "_" that has a byte outside printable ASCII. A case-insensitive volume
+ * folds Unicode case (".agentſ" is ".agents" there), so those are refused outright.
+ */
+const CONFIG_COMPONENT = `(${['.agents', '.agent', '_agents', '_agent', '.gemini'].map(anyCase).join('|')}|[._][^/]*[^/ -~][^/]*)`;
+const CONFIG_ANYWHERE = `(^|/)${CONFIG_COMPONENT}(/|$)`;
+
+/**
+ * The rules every agy profile ends with: no config folder anywhere (read or write), the user's own
+ * ~/.gemini readable, written only in agy's data folders, and never a config folder inside those.
+ */
+function configRules(home: string): string[] {
+  const gemini = path.join(home, '.gemini');
+  return [
+    // The last matching rule wins.
+    `(deny file-read* file-write* (regex #"${CONFIG_ANYWHERE}"))`,
+    `(allow file-read* (subpath ${sbString(gemini)}))`,
+    `(deny file-write* (subpath ${sbString(gemini)}))`,
+    `(allow file-write* ${AGY_STATE.map((p) => `(subpath ${sbString(path.join(gemini, p))})`).join(' ')})`,
+    `(deny file-write* (regex #"^${reLiteral(gemini)}/(.*/)?${CONFIG_COMPONENT}(/|$)"))`,
+  ];
+}
+
+/** Where a session could leave something that runs later outside it: login items, shell start-up files. */
+const PERSISTENCE = ['.zshrc', '.zshenv', '.zprofile', '.zlogin', '.bashrc', '.bash_profile', '.bash_login', '.profile', '.config/fish'];
 
 /**
  * The macOS sandbox (sandbox-exec) every agy process runs in. agy and everything it starts can't
@@ -150,16 +181,15 @@ const anyCase = (name: string): string => [...name].map((c) => (/[a-z]/.test(c) 
  * settings, plugins, skills, rules) for the next one. `home` must be a real path (no symlinks).
  */
 export function seatbeltProfile(home: string): string {
-  const gemini = path.join(home, '.gemini');
-  const configDir = `(^|/)(${['.agents', '.agent', '_agents', '_agent', '.gemini'].map(anyCase).join('|')})(/|$)`;
   return [
     '(version 1)',
     '(allow default)',
-    // The last matching rule wins.
-    `(deny file-read* file-write* (regex #"${configDir}"))`,
-    `(allow file-read* (subpath ${sbString(gemini)}))`,
-    `(deny file-write* (subpath ${sbString(gemini)}))`,
-    `(allow file-write* ${AGY_STATE.map((p) => `(subpath ${sbString(path.join(gemini, p))})`).join(' ')})`,
+    // Nothing that opens apps, scripts other apps or schedules itself to run later.
+    '(deny process-exec (literal "/usr/bin/osascript") (literal "/usr/bin/open") (literal "/bin/launchctl") (literal "/usr/bin/automator") (literal "/usr/bin/shortcuts"))',
+    '(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name "com.apple.coreservices.appleevents"))',
+    '(deny appleevent-send)',
+    `(deny file-write* (subpath ${sbString(path.join(home, 'Library', 'LaunchAgents'))}) (subpath "/Library/LaunchAgents") (subpath "/Library/LaunchDaemons") ${PERSISTENCE.map((f) => `(subpath ${sbString(path.join(home, f))})`).join(' ')})`,
+    ...configRules(home),
   ].join('\n');
 }
 
@@ -211,7 +241,6 @@ export interface TalkSandbox {
  */
 export function talkProfile(s: TalkSandbox): string {
   const sub = (paths: string[]) => paths.map((p) => `(subpath ${sbString(p)})`).join(' ');
-  const gemini = path.join(s.home, '.gemini');
   return [
     '(version 1)',
     '(deny default)',
@@ -225,8 +254,10 @@ export function talkProfile(s: TalkSandbox): string {
     '(allow network-outbound)',
     '(allow network-bind network-inbound (local ip "localhost:*"))',
     '(allow file-read-metadata)',
-    `(allow file-read* (literal "/") ${sub(['/usr/lib', '/usr/share', '/System', '/Library/Keychains', '/private/etc', '/private/var/db/timezone', '/dev'])} (literal "/usr/bin/security") (literal ${sbString(s.agy)}) ${sub([s.scratch, gemini, path.join(s.home, 'Library', 'Keychains'), ...(s.read ?? [])])})`,
-    `(allow file-write* (literal "/dev/null") (literal "/dev/tty") ${sub([s.scratch, ...AGY_STATE.map((p) => path.join(gemini, p)), ...(s.write ?? [])])})`,
+    `(allow file-read* (literal "/") ${sub(['/usr/lib', '/usr/share', '/System', '/Library/Keychains', '/private/etc', '/private/var/db/timezone', '/dev'])} (literal "/usr/bin/security") (literal ${sbString(s.agy)}) ${sub([s.scratch, path.join(s.home, 'Library', 'Keychains'), ...(s.read ?? [])])})`,
+    `(allow file-write* (literal "/dev/null") (literal "/dev/tty") ${sub([s.scratch, ...(s.write ?? [])])})`,
+    // Not even in its own folder can agy make a config folder for its next round.
+    ...configRules(s.home),
   ].join('\n');
 }
 
@@ -540,4 +571,44 @@ export function stopReasonOf(status: string | undefined): 'end_turn' | 'cancelle
   if (status === 'SUCCESS') return 'end_turn';
   if (status === 'CANCELED' || status === 'CANCELLED' || status === 'INTERRUPTED') return 'cancelled';
   return 'error';
+}
+
+/**
+ * A fingerprint of the user's own agy config: ~/.gemini/antigravity-cli and ~/.gemini/config
+ * (settings, MCP servers, hooks, plugins, skills, workflows) and ~/.gemini/GEMINI.md, but not
+ * agy's data folders (AGY_STATE) or its project list; by content (by size and time past 1 MB),
+ * links by target. Not the rest of ~/.gemini: Gemini CLI and the Antigravity apps write there all
+ * the time. The sandbox stops agy writing any of it; this tells when something did anyway.
+ */
+export function geminiFingerprint(home: string): string {
+  const gemini = path.join(home, '.gemini');
+  const skip = new Set([...AGY_STATE, 'config/projects'].map((p) => path.join(gemini, p)));
+  const hash = createHash('sha256');
+  let seen = 0;
+  const walk = (dir: string, only?: Set<string>): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (only && !only.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (skip.has(full) || ++seen > 5000) continue;
+      hash.update(`${full}\0`);
+      try {
+        if (e.isSymbolicLink()) hash.update(`link:${readlinkSync(full)}`);
+        else if (e.isDirectory()) walk(full);
+        else if (e.isFile()) {
+          const st = statSync(full);
+          hash.update(st.size > 1_000_000 ? `${st.size}:${st.mtimeMs}` : readFileSync(full));
+        }
+      } catch {
+        hash.update('unreadable');
+      }
+    }
+  };
+  walk(gemini, new Set(['antigravity-cli', 'config', 'GEMINI.md']));
+  return hash.digest('hex');
 }

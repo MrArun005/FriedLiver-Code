@@ -4,7 +4,7 @@
 // (dist/agy-acp.js) with the editor's own Node; FRIEDLIVER_AGY is the agy binary core.ts found.
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { realpathSync, rmSync } from 'node:fs';
+import { readdirSync, realpathSync, rmSync } from 'node:fs';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,7 @@ import {
   isTalkMode,
   needCall,
   workspaceConfig,
+  geminiFingerprint,
   needsSignIn,
   parseEvent,
   parseModels,
@@ -99,6 +100,11 @@ process.once('exit', () => {
   for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
   for (const child of mcpChildren) child.kill();
 });
+
+/** Removes anything in a talk-only folder named like a config folder (a dot or underscore name). */
+function emptyOfConfig(dir: string): void {
+  for (const name of readdirSync(dir)) if (/^[._]/.test(name)) rmSync(path.join(dir, name), { recursive: true, force: true });
+}
 
 /** A minimal MCP client over stdio (one JSON-RPC message per line): initialize once, then tools/call. */
 function startMcp(server: StdioServer) {
@@ -224,14 +230,14 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
   async function runAgy(
     s: Session,
     sessionId: string,
-    run: { cwd: string; profile: string; text: string; stream: boolean },
+    run: { cwd: string; profile: string; text: string; stream: boolean; mode: AgyMode },
     notify: (u: acp.SessionUpdate) => Promise<void>,
   ): Promise<{ stop: acp.StopReason; reply: string }> {
     const conversationId = s.conversations.get(run.cwd);
     const seen = (id: unknown) => {
       if (typeof id === 'string' && id) s.conversations.set(run.cwd, id);
     };
-    const child = spawnAgy(turnArgs({ mode: s.mode, model: s.model, effort: s.effort, conversationId }, opts.extraArgs), run.cwd, run.profile);
+    const child = spawnAgy(turnArgs({ mode: run.mode, model: s.model, effort: s.effort, conversationId }, opts.extraArgs), run.cwd, run.profile);
     // agy may exit before it reads stdin (a refused flag): that is its answer, not the adapter's crash.
     child.stdin?.on('error', () => {});
     const running = { child, cancelled: false };
@@ -322,7 +328,7 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
         `Antigravity won’t run in this folder: it has agy config (${named(config)}), and only text rules and workflows are allowed there, since agy has no way to ignore the rest (MCP servers, hooks, plugins, skills, settings). Remove it, or use another agent here.`,
       );
     }
-    const { stop } = await runAgy(s, sessionId, { cwd: s.cwd, profile: editProfile!, text, stream: true }, notify);
+    const { stop } = await runAgy(s, sessionId, { cwd: s.cwd, profile: editProfile!, text, stream: true, mode: s.mode }, notify);
     // The sandbox stops agy writing config; something else may have (another agent, a script).
     const left = workspaceConfig(s.cwd, s.root);
     if (left.length) {
@@ -348,7 +354,7 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
    * start nothing. FriedLiver gives it excerpts, then reads what it asks for (parseNeeds), within
    * TALK_LIMITS, and passes its last answer on.
    */
-  async function talkTurn(s: Session, sessionId: string, text: string, notify: (u: acp.SessionUpdate) => Promise<void>): Promise<acp.StopReason> {
+  async function talkTurn(s: Session, sessionId: string, text: string, notify: (u: acp.SessionUpdate) => Promise<void>, mode: 'read-only' | 'plan'): Promise<acp.StopReason> {
     if (!s.scratch) {
       s.scratch = real(await mkdtemp(path.join(os.tmpdir(), 'friedliver-agy-talk-')));
       scratchDirs.add(s.scratch);
@@ -362,9 +368,11 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
     };
     let excerpts = '';
     if (s.bridge) excerpts = take(await bridgeCall(s, 'index_search', { query: text.slice(0, TALK_LIMITS.query), limit: 5, budget: 1500 }).catch(() => ''), TALK_LIMITS.startChars);
-    let prompt = [talkPreamble(s.mode === 'plan'), ...(excerpts ? ['## Project excerpts (from FriedLiver’s index)', excerpts] : []), '## Message', text].join('\n\n');
+    let prompt = [talkPreamble(mode === 'plan'), ...(excerpts ? ['## Project excerpts (from FriedLiver’s index)', excerpts] : []), '## Message', text].join('\n\n');
     for (let round = 0; ; round++) {
-      const { stop, reply } = await runAgy(s, sessionId, { cwd: s.scratch, profile, text: prompt, stream: false }, notify);
+      // The sandbox keeps agy from making a config folder in its own folder; anything there that could be one goes.
+      emptyOfConfig(s.scratch);
+      const { stop, reply } = await runAgy(s, sessionId, { cwd: s.scratch, profile, text: prompt, stream: false, mode }, notify);
       if (stop === 'cancelled') return stop;
       const { text: said, needs, refused } = parseNeeds(reply);
       if ((!needs.length && !refused.length) || round >= TALK_LIMITS.rounds) {
@@ -396,9 +404,23 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
     }
   }
 
-  async function turn(s: Session, sessionId: string, text: string, notify: (u: acp.SessionUpdate) => Promise<void>): Promise<acp.StopReason> {
+  /**
+   * One turn. `readOnly` (FriedLiver's per-prompt `_meta`: a discussion, a read-only chat) makes it
+   * talk only whatever the mode says. The user's own agy config is fingerprinted around every turn.
+   */
+  async function turn(s: Session, sessionId: string, text: string, notify: (u: acp.SessionUpdate) => Promise<void>, readOnly: boolean): Promise<acp.StopReason> {
     if (s.ended) throw internal(s.ended);
-    return isTalkMode(s.mode) ? talkTurn(s, sessionId, text, notify) : editTurn(s, sessionId, text, notify);
+    const talk = readOnly ? (s.mode === 'plan' ? 'plan' : 'read-only') : isTalkMode(s.mode) ? s.mode : undefined;
+    const before = geminiFingerprint(home);
+    try {
+      return talk ? await talkTurn(s, sessionId, text, notify, talk) : await editTurn(s, sessionId, text, notify);
+    } finally {
+      if (!s.ended && geminiFingerprint(home) !== before) {
+        s.ended = 'Your agy config in ~/.gemini changed during the turn, so this session has ended. Check it, then start a new chat.';
+        // eslint-disable-next-line no-unsafe-finally -- the change outranks the turn's own result
+        throw internal(s.ended);
+      }
+    }
   }
 
   return acp
@@ -465,6 +487,7 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
         .filter(Boolean)
         .join('\n\n');
       const notify = (update: acp.SessionUpdate) => client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update });
-      return { stopReason: await turn(s, params.sessionId, text, notify) };
+      const readOnly = (params._meta as { friedliver?: { readOnly?: unknown } } | null | undefined)?.friedliver?.readOnly === true;
+      return { stopReason: await turn(s, params.sessionId, text, notify, readOnly) };
     });
 }
