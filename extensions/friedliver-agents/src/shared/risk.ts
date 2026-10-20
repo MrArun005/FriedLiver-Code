@@ -334,6 +334,7 @@ const SUBMIT = /\b(submit|send|delete|remove|confirm|sign[-_\s]?up|register|publ
 /** How careful to be with a browser action: `text` is the element (selector or its words) or what it types. */
 export function browserRisk(tool: string, text: string, origin?: string): Risk {
   const where = origin ? ` on ${origin.replace(/^https?:\/\//, '')}` : '';
+  if (tool === 'browser_download') return { tone: 'review', label: 'Saves a file', consequences: ['Saved in your downloads folder, never over another file; nothing is opened or run'] };
   if (tool === 'browser_open' || tool === 'browser_back' || tool === 'browser_reload') return { tone: 'review', label: tool === 'browser_open' ? 'Opens a page' : 'Navigates', consequences: [] };
   if (tool === 'browser_click' && BUY.test(text)) {
     return { tone: 'careful', label: 'Places an order or pays', consequences: [`Can place a real order or payment${where}`, 'Money spent or orders sent can’t be taken back from here'], lock: CAREFUL_LOCK };
