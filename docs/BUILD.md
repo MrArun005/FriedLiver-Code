@@ -56,10 +56,16 @@ release job gets a token that can write (`contents: write`).
      (https, only from this repo's release downloads and GitHub's asset hosts,
      every redirect checked), checks its size and its SHA-256 against
      `SHA256SUMS.txt` (missing or different: it refuses), then offers
-     **Restart to update**. A detached script in a private temp folder waits
-     for the app to exit, mounts the DMG, swaps the running `.app` (wherever it
-     is), and reopens it. If the `.app` or its folder isn't writable, the
-     verified DMG is opened instead.
+     **Restart to update**. A script in a private temp folder, started as its
+     own background app (`FriedLiver Update.app`, so quitting or force-quitting
+     FriedLiver can't stop it), waits for the app to exit, mounts the DMG
+     read-only at a mountpoint inside that folder (no second checksum pass,
+     one retry), swaps the running `.app` (wherever it is), and reopens it. It
+     always detaches the image and deletes its folder. On failure the current
+     app is untouched and the next launch says why, with **Download manually**
+     (the release page) and **Show log** (`$TMPDIR/friedliver-update.log`,
+     with the mount's exit codes). If the `.app` or its folder isn't
+     writable, the verified DMG is opened instead.
    - On Windows and Linux, Install opens the release page.
    - `friedliver.update.mode: "off"` (or `update.mode: "none"`) turns this off.
 
@@ -441,10 +447,11 @@ Packaged build, `bench/fixture`, 1440×900, under xvfb with software rendering
 
 ## Known gaps
 
-- **No extension signature checks.** Patch 0040 turns off
-  `extensions.verifySignature`, because the verifier (`@vscode/vsce-sign`) ships
-  only with Microsoft's builds. Extensions come over HTTPS from Open VSX, whose
-  list of malicious extensions still applies. See [SECURITY.md](../SECURITY.md).
+- **Open VSX key renewals need a FriedLiver update.** Patch 0040 checks
+  extension signatures with Open VSX's Ed25519 key pinned in the app
+  ([EXTENSION-SIGNATURES.md](EXTENSION-SIGNATURES.md)). When Open VSX renews it,
+  every extension asks before installing until a release pins the new key;
+  `build.yml`'s Linux install check fails first.
 - **No Apple- or Microsoft-issued signatures.** Windows SmartScreen and macOS
   Gatekeeper warn on first launch. macOS builds carry a self-signed
   certificate (stable privacy grants, see above); removing the warnings needs

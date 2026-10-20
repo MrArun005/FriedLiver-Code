@@ -771,6 +771,21 @@
           ],
           "description": "Arguments for the Gemini program."
         },
+        "friedliver.agents.antigravity.command": {
+          "scope": "machine",
+          "type": "string",
+          "default": "agy",
+          "description": "Google's Antigravity CLI (agy). It has no ACP mode, so FriedLiver runs it through its own adapter. Changing it restarts Antigravity. Read from user settings only, never from a workspace."
+        },
+        "friedliver.agents.antigravity.args": {
+          "scope": "machine",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra arguments for each agy call (e.g. --project). FriedLiver sets the mode, model, effort and permissions itself and drops flags that would change them."
+        },
         "friedliver.links.openIn": {
           "scope": "application",
           "type": "string",
@@ -904,17 +919,19 @@
             "claude",
             "codex",
             "gemini",
+            "antigravity",
             "demo"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
+            "Antigravity",
             "Demo"
           ],
           "default": "claude",
           "scope": "machine",
-          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @demo). Read from user settings only, so a repository can't choose where your code goes."
+          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini, @antigravity or @demo). Read from user settings only, so a repository can't choose where your code goes."
         },
         "friedliver.browser.externalClients": {
           "scope": "machine",
@@ -1035,12 +1052,14 @@
             "claude",
             "codex",
             "gemini",
+            "antigravity",
             "demo"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
+            "Antigravity",
             "Demo"
           ],
           "default": "claude",
@@ -1161,7 +1180,7 @@
     "@types/vscode": "~1.104.0",
     "@vscode/test-electron": "^3.1.0",
     "esbuild": "^0.28.2",
-    "playwright": "1.56.1",
+    "playwright": "1.64.0",
     "preact": "^11.0.1",
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",

@@ -9,7 +9,7 @@ import { stepFacts, withRawOutput, type StepFacts } from './steps';
 import { isSystemTool, SYSTEM_VERBS, type SystemTool } from './system';
 import type { DiscussionItem } from './discuss';
 
-export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'demo'] as const;
+export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'antigravity', 'demo'] as const;
 export type AgentKey = (typeof AGENT_KEYS)[number];
 
 /** Every agent has a face: a letter on a tint of its hue. */
@@ -17,6 +17,7 @@ export const AGENT_FACES: Record<AgentKey, { letter: string; name: string }> = {
   claude: { letter: 'C', name: 'Claude' },
   codex: { letter: 'X', name: 'Codex' },
   gemini: { letter: 'G', name: 'Gemini' },
+  antigravity: { letter: 'A', name: 'Antigravity' },
   demo: { letter: 'D', name: 'Demo' },
 };
 
@@ -823,6 +824,8 @@ export const MENTIONS: Record<string, AgentKey> = {
   openai: 'codex',
   gemini: 'gemini',
   google: 'gemini',
+  antigravity: 'antigravity',
+  agy: 'antigravity',
   demo: 'demo',
 };
 

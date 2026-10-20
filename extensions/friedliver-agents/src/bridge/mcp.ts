@@ -66,7 +66,7 @@ export const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        agent: { type: 'string', enum: [...AGENT_KEYS], description: 'Which agent: claude, codex (GPT), gemini, or demo (an offline test agent).' },
+        agent: { type: 'string', enum: [...AGENT_KEYS], description: 'Which agent: claude, codex (GPT), gemini, antigravity (Google models through the Antigravity CLI), or demo (an offline test agent).' },
         prompt: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.text, description: 'The question or request, written for the other agent.' },
         chat_id: { description: 'Ask this existing chat (it must be idle and use `agent`) instead of starting or reusing a consultation.', ...CHAT_ID },
       },
