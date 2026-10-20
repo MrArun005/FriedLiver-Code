@@ -1,8 +1,8 @@
 # Try it with the real agents
 
 A 10-minute check on your own machine, with your own Claude, Codex or Gemini
-accounts. Everything here has been tested with the offline Demo agent only, so
-this is the first run against the real ones. Note what happens at each step;
+accounts. Everything here was tested with a fake stand-in agent only, so this is
+the first run against the real ones. Note what happens at each step;
 anything marked "Report" is worth sending back, with a screenshot if you can.
 
 ## 1. Install (2 minutes)
@@ -19,25 +19,7 @@ anything marked "Report" is worth sending back, with a screenshot if you can.
 
 Report: anything other than the Agents panel on the right with "Start a chat".
 
-## 2. Warm up with the Demo agent (1 minute)
-
-The Demo agent is a fake local agent, hidden from the pickers until you turn
-on **Settings → `friedliver.showDemoAgent`** (Help → Welcome's "Start a Demo
-Chat" works without it).
-
-1. Click **Demo**. The chips under the message box fill in at once: **Ask**,
-   the model (**Smart**) and the effort (**Medium**).
-2. Type `tour` and press Enter. When "New file to review" appears, press
-   **Accept**. When it asks to run a command, press **Run**.
-3. Type `native-edit README.md` (or any file): the agent asks with the diff on
-   the card, and writes the file itself after **Yes**. "Changed 1 file" and
-   **Undo this turn** should follow. `plan` shows a plan to approve, `question`
-   a form, `/` the agent's commands.
-
-Report: if the diff didn't open, Accept or Run did nothing, or Undo didn't
-put the file back.
-
-## 3. Sign in to one real agent (3 minutes)
+## 2. Sign in to one real agent (3 minutes)
 
 Install the agent's command line tool once, in a terminal:
 
@@ -63,7 +45,7 @@ Report: the exact message if Check says "not installed" after installing, if
 sign-in doesn't finish, if the card shows the wrong account, or if it says to
 update right after installing.
 
-## 4. Use it (3 minutes)
+## 3. Use it (3 minutes)
 
 1. Start a chat with that agent. Before typing, look under the message box:
    the model and effort chips should list the agent's own choices (Claude's
@@ -91,7 +73,7 @@ card without its diff or command, chips that stay empty, a model or effort
 that didn't take effect, a mode badge that disagrees with what the agent did,
 Undo that missed a file, slow or frozen panels, error notices.
 
-## 5. Connect two agents (2 minutes, needs two agents signed in)
+## 4. Connect two agents (2 minutes, needs two agents signed in)
 
 1. In the same chat, type `@gemini is this change a good idea?` (or `@codex`,
    `@claude`). A second chat starts with that agent, and its answer comes back

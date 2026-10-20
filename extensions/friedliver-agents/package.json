@@ -804,12 +804,6 @@
           "default": "builtin",
           "markdownDescription": "Where web links you click open: in a chat, the Agent Manager and Images, and (through the editor's link openers) in Markdown previews, hovers, the editor and the terminal. Per-site choices you made in `#workbench.externalUriOpeners#` still win."
         },
-        "friedliver.showDemoAgent": {
-          "scope": "machine",
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show the Demo agent in the agent pickers, New Chat and the Agent Manager. Demo is a fake agent that runs locally inside FriedLiver, with no account and no network, for trying the chat, reviews and approvals; it isn't an AI model. Chats you already have with it still open. Read from your user settings only."
-        },
         "friedliver.maxRunningAgents": {
           "type": "integer",
           "default": 3,
@@ -919,19 +913,17 @@
             "claude",
             "codex",
             "gemini",
-            "antigravity",
-            "demo"
+            "antigravity"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
-            "Antigravity",
-            "Demo"
+            "Antigravity"
           ],
           "default": "claude",
           "scope": "machine",
-          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini, @antigravity or @demo). Read from user settings only, so a repository can't choose where your code goes."
+          "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @antigravity). Read from user settings only, so a repository can't choose where your code goes."
         },
         "friedliver.browser.externalClients": {
           "scope": "machine",
@@ -1040,15 +1032,13 @@
             "claude",
             "codex",
             "gemini",
-            "antigravity",
-            "demo"
+            "antigravity"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
-            "Antigravity",
-            "Demo"
+            "Antigravity"
           ],
           "default": "claude",
           "scope": "machine",
@@ -1095,18 +1085,6 @@
             "completionEvents": [
               "onCommand:workbench.action.files.openFolder",
               "onContext:workspaceFolderCount > 0"
-            ]
-          },
-          {
-            "id": "demoAgent",
-            "title": "Try it with the Demo agent (no account)",
-            "description": "The Demo agent is a fake local agent: no account, no network, not an AI. It shows how FriedLiver works. Type **tour** to see a plan, an edit you review as a diff, a command you approve and an image. Under the message box pick the model, the effort and how much it may do without asking (Shift+Tab switches). Accept is Ctrl/Cmd+Alt+Y, Reject is Ctrl/Cmd+Alt+N. It stays out of the agent pickers unless you turn on `friedliver.showDemoAgent`.\n[Start a Demo Chat](command:friedliver.newChat?%5B%22demo%22%5D)",
-            "media": {
-              "svg": "media/walkthrough/demo-agent.svg",
-              "altText": "A Demo agent chat with a plan and an edit waiting for review, with Accept and Reject buttons."
-            },
-            "completionEvents": [
-              "onCommand:friedliver.newChat"
             ]
           },
           {
