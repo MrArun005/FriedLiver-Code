@@ -21,6 +21,8 @@ const SELECTORS = [
 	[/body\.vscode-high-contrast\b/g, '.monaco-workbench.hc-black'],
 	[/body\.vscode-light\b/g, '.monaco-workbench.vs'],
 	[/body\.vscode-dark\b/g, '.monaco-workbench.vs-dark'],
+	[/body\[data-platform='windows'\]/g, '.monaco-workbench.windows'],
+	[/body\[data-platform='linux'\]/g, '.monaco-workbench.linux'],
 ];
 
 /** Splits CSS into top-level chunks: [prelude, body] for rules and at-rules, comments dropped. */

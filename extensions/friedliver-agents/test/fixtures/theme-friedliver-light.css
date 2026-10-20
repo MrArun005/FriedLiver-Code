@@ -56,10 +56,10 @@
   --vscode-activityBarBadge-foreground: #ffffff;
   --vscode-badge-background: #edebe8;
   --vscode-badge-foreground: #242220;
-  --vscode-button-background: #1e6ccf;
+  --vscode-button-background: #ba4f1f;
   --vscode-button-border: #00000000;
   --vscode-button-foreground: #ffffff;
-  --vscode-button-hoverBackground: #0c5fc1;
+  --vscode-button-hoverBackground: #a94008;
   --vscode-button-secondaryBackground: #edebe8;
   --vscode-button-secondaryForeground: #242220;
   --vscode-button-secondaryHoverBackground: #cdcac7;
@@ -284,9 +284,9 @@
   --vscode-activityWarningBadge-background: #8a5600;
   --vscode-activityErrorBadge-foreground: #ffffff;
   --vscode-activityErrorBadge-background: #c51d28;
-  --vscode-extensionButton-prominentBackground: #1e6ccf;
+  --vscode-extensionButton-prominentBackground: #ba4f1f;
   --vscode-extensionButton-prominentForeground: #ffffff;
-  --vscode-extensionButton-prominentHoverBackground: #1a5cb0;
+  --vscode-extensionButton-prominentHoverBackground: #9e431a;
   --vscode-quickInputList-focusBackground: #110f0d13;
   --vscode-quickInputList-focusForeground: #110f0d;
   --vscode-quickInputList-focusIconForeground: #242220;
@@ -793,7 +793,7 @@
   --vscode-chat-linesAddedForeground: #007835;
   --vscode-chat-linesRemovedForeground: #c51d28;
   --vscode-chat-checkpointSeparator: #e2dfdc;
-  --vscode-chat-sessionStateIndicator-needsInputBorder: #1e6ccf;
+  --vscode-chat-sessionStateIndicator-needsInputBorder: #ba4f1f;
   --vscode-chat-sessionStateIndicator-inProgressBorder: #734dbe;
   --vscode-chat-sessionStateIndicator-unvisitedBorder: #494745;
   --vscode-chat-inputWorkingBorderColor2: #734dbe99;

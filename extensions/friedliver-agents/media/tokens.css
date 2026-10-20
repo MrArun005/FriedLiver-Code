@@ -23,8 +23,9 @@
      the page). */
   --bg: var(--vscode-editor-background, #191714);
   --input-bg: var(--vscode-input-background, #201d1b);
-  --field-border: transparent;
-  --thumb: var(--bg);
+  /* A field's edge reads 3:1 on the page (WCAG 1.4.11). */
+  --field-border: color-mix(in srgb, var(--fg-2) 55%, transparent);
+  --thumb: #ffffff;
   --menu-bg: var(--vscode-menu-background, #252220);
   --dialog-bg: var(--vscode-editorWidget-background, #252220);
   --code-bg: var(--vscode-textCodeBlock-background, #100e0c);
@@ -74,21 +75,21 @@
   --link: var(--vscode-textLink-foreground, #67b0f9);
   --inline-code-fg: var(--vscode-textPreformat-foreground, #c7c3c0);
 
-  /* The one accent ("the beacon"): signal blue oklch(.54 .17 257) with white ink (5.1:1), the same in
-     dark and light. It marks the next key action on a surface and nothing else: the one primary button,
-     the composer's send when there is something to send. Needs-you, focus and links are the same hue,
-     lighter in dark themes (.74 .13 250) so they read 4.5:1 as text on the page. */
-  --accent-bg: var(--vscode-button-background, #1e6ccf);
+  /* The one accent ("the beacon"): ember, oklch(.56 .15 42) with white ink (5:1), the same in dark and
+     light, taken from the FriedLiver mark. It marks the next key action on a surface (the one primary,
+     the composer's send when there is something to send) and the "on" of a switch or checkbox. Nothing
+     else is ember: status, focus and links never are. */
+  --accent-bg: var(--vscode-button-background, #ba4f1f);
   --accent-fg: var(--vscode-button-foreground, #ffffff);
-  --accent-hover: var(--vscode-button-hoverBackground, #2773d7);
+  --accent-hover: var(--vscode-button-hoverBackground, #c05621);
   --accent-press: color-mix(in srgb, var(--accent-bg) 88%, var(--bg));
   --accent: var(--fl-accent, var(--accent-bg));
   --send-bg: var(--fl-accent, var(--accent-bg));
   --send-fg: var(--accent-fg);
   --focus-border: var(--vscode-focusBorder, #67b0f9);
-  /* Toggles, checkboxes and radios are neutral when on (the strong text colour), so the accent stays rare. */
-  --button-bg: var(--sel-fg);
-  --button-fg: var(--bg);
+  /* Switches, checkboxes and radios take the accent when on, with a white knob or check (every platform's convention). */
+  --button-bg: var(--accent-bg);
+  --button-fg: var(--accent-fg);
   --error: var(--vscode-errorForeground, #f86970);
   --warn: var(--vscode-editorWarning-foreground, #f1bf5b);
   --toggle-on: var(--button-bg);
@@ -106,9 +107,9 @@
   --mic-bg: #0078d4;
   --mic-hover: #026ec1;
   --mic-fg: #fff;
-  /* "Needs you", focus and links: the signal blue's light step, oklch(.74 .13 250) dark / (.53 .16 256)
-     light. Blue means "this is for you": the decision waiting, the ring on what you are on, the button
-     that answers it. Status never borrows it except needs-you. */
+  /* "Needs you", focus and links: the decision blue, oklch(.74 .13 250) dark / (.53 .16 256) light. Blue is
+     the system talking to you, in small marks only (a bullseye, a count, a ring on the focused card); it
+     never fills a button. */
   --decision: var(--vscode-friedliver-decision, var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue, #67b0f9)));
   --decision-fg: var(--vscode-friedliver-decisionForeground, var(--bg));
   --decision-soft: color-mix(in srgb, var(--decision) 12%, transparent);
@@ -154,6 +155,8 @@
   --t-sm: 12px;
   --t-md: 13px;
   --t-lg: 14px;
+  /* A view's title (a chat's head, a discussion's sides). */
+  --t-lead: 15px;
   --t-title: 16px;
   /* A conclusion's headline (/discuss §2.30) and a page title (settings, welcome sections). */
   --t-hero: 20px;
@@ -300,7 +303,8 @@ body.vscode-high-contrast-light {
   --option-ring: #0000001a;
   --decision-soft: color-mix(in srgb, var(--decision) 9%, transparent);
   --decision-line: color-mix(in srgb, var(--decision) 50%, transparent);
-  --field-border: color-mix(in srgb, var(--fg) 16%, transparent);
+  /* A field's edge reads 3:1 on the page (WCAG 1.4.11). */
+  --field-border: color-mix(in srgb, var(--fg-2) 72%, transparent);
   /* A white knob on the dark "on" track, ringed so it reads off a light page. */
   --thumb: #ffffff;
   --shadow-thumb: 0 0 0 1px #00000026, 0 1px 2px #00000029;
@@ -318,6 +322,17 @@ body.vscode-high-contrast-light {
   /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
   --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
   --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
+}
+/* Windows (and Linux): the platform layer. The host sets data-platform on the webview body; the workbench
+   copy maps it to .monaco-workbench.windows/.linux. Fluent's corner ramp (4 controls, 8 surfaces) and an
+   underline focus on fields. Keys render as one "Ctrl+Shift+A" cap (§2.25). */
+body[data-platform='windows'],
+body[data-platform='linux'] {
+  --r-ctl: var(--r-4);
+  --r-row: var(--r-4);
+  --r-box: var(--r-8);
+  --r-float: var(--r-8);
+  --r-dialog: var(--r-8);
 }
 /* High Contrast: every control and container shows the theme's contrast border; the active one its
    active border. No glass, no shadows, no tints standing in for edges, no motion beyond fades. */
