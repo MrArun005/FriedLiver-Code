@@ -5,8 +5,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AGENT_KEYS, type ChatView } from '../src/shared/model';
 import { TAB_MIN, markWindow, switcherGroups, tabFit, tabForKey, tabTip } from '../src/shared/view';
-import { FRIEDLIVER_MARK } from '../src/webview/ui/friedliverMark';
 import { MARKS, markFor } from '../src/webview/ui/marks';
+
+/** The agents a user can pick; Demo is test-only. */
+const VENDORS = AGENT_KEYS.filter((a) => a !== 'demo');
 
 const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
   id,
@@ -27,19 +29,19 @@ const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
 
 describe('a mark on every tab', () => {
   it('gives every agent kind its own mark, and anything else the generic one', () => {
-    const marks = AGENT_KEYS.map((a) => markFor(a));
-    expect(new Set(marks).size).toBe(AGENT_KEYS.length);
+    const marks = VENDORS.map((a) => markFor(a));
+    expect(new Set(marks).size).toBe(VENDORS.length);
     expect(marks).not.toContain(MARKS.agent);
     expect(markFor('cursor')).toBe(MARKS.agent);
     expect(markFor('')).toBe(MARKS.agent);
   });
 
-  it('draws Demo with the FriedLiver mark, which lives in one file', () => {
-    expect(markFor('demo')).toBe(FRIEDLIVER_MARK);
+  it('draws the test-only Demo agent with the generic mark', () => {
+    expect(markFor('demo')).toBe(MARKS.agent);
   });
 
   it('the editor tab of a chat panel shows the same mark (media/agent-<kind>.svg)', () => {
-    for (const a of AGENT_KEYS) {
+    for (const a of VENDORS) {
       const svg = readFileSync(path.join(__dirname, `../media/agent-${a}.svg`), 'utf8');
       const m = markFor(a);
       if (m.svg) expect(svg, a).toContain(m.svg);
