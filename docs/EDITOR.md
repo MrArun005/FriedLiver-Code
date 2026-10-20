@@ -23,7 +23,7 @@ the extension is installed in VS Code or Antigravity.
    agent gets the function around the cursor (from the language's outline),
    or the cursor's line if no function is found.
 2. Describe the change. The box's title shows which agent will do it. Start
-   with `@claude`, `@codex`, `@gemini` or `@demo` to pick another one, or use
+   with `@claude`, `@codex`, `@gemini` or `@antigravity` to pick another one, or use
    the button in the box. Otherwise you get the agent you last used for edits
    in this folder. Before you pick one, it's `friedliver.edit.defaultAgent`
    (Claude unless you change it).
@@ -72,18 +72,6 @@ The diff runs with external diff programs and textconv filters turned off
 repository's git config or `.gitattributes` can't make FriedLiver run a
 program.
 
-## Try it with the Demo agent
-
-The offline Demo agent understands editor requests:
-
-- **Edit with Agent** (`@demo uppercase`, `@demo sort`, `@demo comment it out`)
-  changes the selected lines. Any other instruction adds a note above the
-  lines. The edit opens as a diff. An instruction that ends with "?" or starts
-  with "explain" gets a reply and no edit, so you can see the chat open.
-- **Ask About Selection** and **Add Selection to Chat**: the Demo agent echoes
-  what it got, so you can see the code reference.
-- **Review My Changes** with Demo lists the changed files it was given.
-
 ## Settings
 
 | Setting | Scope | What it does |
@@ -106,7 +94,7 @@ you prefer.
 | `src/host/editFlow.ts` | Which chat an edit goes to, and what came of its turn |
 | `src/host/gitChanges.ts` | The working tree's changes and the review request |
 | `src/webview/refs.tsx` | Code reference chips |
-| `agent-core/demo/editorRequests.mjs` | The Demo agent's side |
+| `agent-core/demo/editorRequests.mjs` | The tests' fake agent's side |
 
 What changed in the shared contract (`src/shared/model.ts`, `messages.ts`)
 is additive. Older views and saved chats work as before:

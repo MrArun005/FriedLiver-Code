@@ -9,5 +9,7 @@ export default defineConfig({
     testTimeout: 30_000,
     globalSetup: ['../../test/tmpRun.ts'],
     setupFiles: ['test/tmpFile.ts'],
+    // The fake Demo agent the tests drive; packaged builds never set this (test/noDemo.test.ts).
+    env: { FRIEDLIVER_TEST_AGENTS: '1' },
   },
 });
