@@ -97,7 +97,7 @@ export async function ensureFile(base: string, rel: string): Promise<string> {
 }
 
 /** The file at the folder's root each agent reads by itself every session. */
-export const NATIVE_RULES: Record<string, string> = { claude: 'CLAUDE.md', codex: 'AGENTS.md', gemini: 'GEMINI.md' };
+export const NATIVE_RULES: Record<string, string> = { claude: 'CLAUDE.md', codex: 'AGENTS.md', gemini: 'GEMINI.md', antigravity: 'GEMINI.md' };
 
 /** `rules` without the paragraphs `native` already has (as importRules matched them), and without the import note for that file. */
 export function withoutNative(rules: string, native: string, name: string): string {
