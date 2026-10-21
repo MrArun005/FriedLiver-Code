@@ -7,9 +7,9 @@ effort, and how much it may do on its own: **Ask** (edits and commands wait for
 you), **Auto-accept edits**, or **Full auto**. What an agent asks to do shows
 with its diff, its command or its plan, and every turn can be undone.
 
-![An agent asks another agent, and waits for your Allow](docs/screenshots/app/03-agent-asks-agent.png)
+![FriedLiver with the Beacon design: code, chats as tabs, and the agents panel](docs/screenshots/beacon/workbench.png)
 
-![The Agent Manager's map: which chat asked which](docs/screenshots/app/06-manager-map.png)
+![A chat: steps, a diff and an approval that says why and how to undo](docs/screenshots/beacon/chat.png)
 
 What changes from stock VS Code:
 
@@ -36,12 +36,29 @@ What changes from stock VS Code:
   most others install as usual. Microsoft-only extensions (Pylance, C/C++, C#,
   Remote - SSH, Copilot) aren't there. Open replacements are listed in the
   benchmarks.
-- **Black Blue theme and Geist fonts** built in, plus Light Blue, Midnight Blue
-  and Graphite. Quiet chrome, loud decisions: regions separate by tone instead
-  of lines, overlays float on soft shadows, and only a decision gets the
-  accent color ([screenshots](docs/screenshots/workbench/)). A first-run
-  walkthrough (Help → Welcome) shows sign-in, the Agent Manager and
-  `@gemini`.
+- **Beacon design.** The whole app is restyled, VS Code's own parts included:
+  a title bar with one search box ("Go to file, run a command, ask an agent")
+  and a "N need you" pill, stroke icons, Geist fonts, and **FriedLiver Dark /
+  Light** as the default themes (Black Blue, Light Blue, Midnight Blue and
+  Graphite stay available). One ember accent marks the next key action; status
+  has a shape (◉ needs you, ◠ working, ✓ done, ⊗ failed). Every chat is its own
+  tab in the top row, each agent shows its real logo, and errors pop up as
+  toasts that close by themselves ([design system](docs/design/COMPONENTS.md)).
+- **`/discuss`.** `/discuss @opus @gpt-5.6-terra @agy Postgres or MySQL?` (agents
+  or models, any order) lets agents take turns read-only, answer each other,
+  and end with a conclusion card: what they agree on, where they still
+  disagree, and a next step to carry out with one click.
+- **A project index agents query instead of reading whole files** (outline,
+  search, read a symbol, what changed), kept current with a Merkle tree; on
+  macOS it reopens from the change journal in under a second
+  ([how](docs/PROJECT-INDEX.md)). In the token benchmark agents used about
+  89% fewer tokens ([numbers](docs/benchmarks.md)).
+- **Built-in browser** next to the code, which agents can drive (each action
+  asks unless the chat is in Full auto), with downloads: a progress ring, a
+  downloads list, and approval for anything an agent or a page script starts.
+- **Images.** Every image an agent reads or takes shows in the Images gallery;
+  "Done looking" clears them (with undo), starred ones stay, and a 1 GB /
+  7-day limit keeps the disk clean.
 - **No telemetry, no experiments, no update service.** Every 4 hours the Agents
   extension asks GitHub whether a newer FriedLiver release is out and offers to
   install it (checksum-verified; `friedliver.update.mode: off` turns that off). It has its own
@@ -51,7 +68,11 @@ What changes from stock VS Code:
   outside the workspace (symlinks included) are off limits to FriedLiver's
   file access, and a repository's settings can't change which program runs as
   an agent or let it run without asking. What that does and doesn't protect,
-  per agent: [SECURITY.md](SECURITY.md).
+  per agent: [SECURITY.md](SECURITY.md). Even in Full auto, FriedLiver still asks
+  before an agent goes from a web page to localhost or your local network,
+  starts a download, runs a file it just downloaded, or installs packages.
+  Extensions from Open VSX are checked against Open VSX's signing key; an
+  unsigned one asks before installing.
 
 This VS Code fork is the only FriedLiver editor. The earlier stand-alone
 Electron app ([FriedLiver](https://github.com/MrArun005/FriedLiver), 0.x) is
@@ -96,7 +117,7 @@ check from install to two agents talking to each other.
 |---|---|---|
 | Claude | `npm install -g @agentclientprotocol/claude-agent-acp` | Claude Code's own login in a terminal (subscription or Anthropic Console): approve on claude.ai; or an Anthropic API key |
 | Codex | `npm install -g @agentclientprotocol/codex-acp` | Your browser opens OpenAI's sign-in page (ChatGPT), or an OpenAI API key |
-| Gemini | `npm install -g @google/gemini-cli` | Your browser opens Google's sign-in page, or a Gemini API key, or Vertex AI |
+| Gemini | `npm install -g @google/gemini-cli` | A Gemini API key (Google AI Studio) or Vertex AI. For Google-account sign-in, use Antigravity |
 | Antigravity | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` (Google's installer, to `~/.local/bin/agy`; Windows: `irm https://antigravity.google/cli/install.ps1 \| iex`) | Run `agy` once in a terminal: it opens Google's sign-in page (Google AI Free, Pro or Ultra plan) |
 
    The older `@zed-industries/*` packages are deprecated and lack the effort
