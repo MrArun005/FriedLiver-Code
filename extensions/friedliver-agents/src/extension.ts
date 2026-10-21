@@ -33,6 +33,7 @@ import { RemoteControl } from './remote/host';
 import { testAgentsOn, userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
 import { actionsFor, showsChat, stateFor } from './host/surfaceState';
+import { ChatTabs, restoredChats, tabTitle } from './host/chatTabs';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
 import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
@@ -44,7 +45,7 @@ import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
 import { shownCommand } from './shared/steps';
 import { isImagePath } from './shared/stepImages';
-import { chatOfSession, clip, linkResumeChats, needsYou, panelTitle } from './shared/view';
+import { chatOfSession, clip, linkResumeChats, needsYou, panelTitle, statusOf } from './shared/view';
 import { agentName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
 import { codexModelVisibility } from './host/codexModels';
@@ -126,7 +127,11 @@ export class Controller {
   /** Open Decision Inbox ran while the Agent Manager was loading. */
   private inboxWanted = false;
   private agentsView?: vscode.WebviewView;
-  private chatPanel?: vscode.WebviewPanel;
+  /** Chats in the editor area: each its own editor tab. */
+  private readonly chatTabs = new ChatTabs<vscode.WebviewPanel>((chatId, column, preserveFocus) => {
+    const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', { viewColumn: column ?? vscode.ViewColumn.Active, preserveFocus }, { retainContextWhenHidden: false });
+    this.adoptPanel(panel, 'chat', chatId);
+  });
   private tasksPanel?: vscode.WebviewPanel;
   /** The Welcome page (COMPONENTS.md v2 §2.38) and the recent folders it was last sent, by index. */
   private welcomePanel?: vscode.WebviewPanel;
@@ -374,7 +379,7 @@ export class Controller {
       { dispose: () => this.scaler.dispose() },
       vscode.window.registerWebviewPanelSerializer('friedliver.tasks', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'tasks') }),
       vscode.window.registerWebviewPanelSerializer('friedliver.welcome', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'welcome') }),
-      vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel) => this.adoptPanel(panel, 'chat') }),
+      vscode.window.registerWebviewPanelSerializer('friedliver.chatPanel', { deserializeWebviewPanel: async (panel, state) => this.restoreChatTab(panel, state) }),
       vscode.workspace.onDidChangeConfiguration((e) => this.onConfig(e)),
       registerBeforeProvider(() => this.core),
     );
@@ -678,16 +683,33 @@ export class Controller {
     this.updateDecisions();
   }
 
-  private adoptPanel(panel: vscode.WebviewPanel, kind: Script): void {
+  /** A chat tab back after a reload: its chat again (a tab from before, with its own strip, becomes a tab per chat it had). */
+  private restoreChatTab(panel: vscode.WebviewPanel, state: unknown): void {
+    const [chatId, ...more] = restoredChats(state);
+    if (!chatId) {
+      panel.dispose();
+      return;
+    }
+    this.adoptPanel(panel, 'chat', chatId);
+    for (const id of more) this.chatTabs.open(id, panel.viewColumn, true);
+  }
+
+  private adoptPanel(panel: vscode.WebviewPanel, kind: Script, chatId?: string): void {
     const surface: Surface = {
       kind,
       webview: panel.webview,
-      selected: kind === 'chat' ? this.lastSelected : undefined,
+      selected: kind === 'chat' ? chatId : undefined,
+      ...(kind === 'chat' ? { single: true } : {}),
       ready: false,
       visible: () => panel.visible,
     };
-    if (kind === 'chat') this.chatPanel = panel;
-    else if (kind === 'welcome') this.welcomePanel = panel;
+    if (kind === 'chat') {
+      if (!chatId || !this.chatTabs.adopt(chatId, panel)) return;
+      // The chat in the tab you're on is the current one (the editor's Ask, @-mentions).
+      panel.onDidChangeViewState((e) => {
+        if (e.webviewPanel.active) this.lastSelected = chatId;
+      });
+    } else if (kind === 'welcome') this.welcomePanel = panel;
     else this.tasksPanel = panel;
     const icon = (name: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `${name}.svg`);
     panel.iconPath = kind === 'welcome' ? { dark: icon('agent-demo'), light: icon('agent-demo-light') } : icon('agents');
@@ -695,7 +717,9 @@ export class Controller {
     let shown = '';
     if (kind === 'chat')
       surface.retitle = (chat) => {
-        const { title, agent } = panelTitle(chat);
+        const { agent } = panelTitle(chat);
+        // The chat's status dot leads its tab's title (the editor's tab row has no other place for it).
+        const title = tabTitle(panelTitle(chat).title, chat && statusOf(chat));
         if (shown === `${title}\0${agent}`) return;
         shown = `${title}\0${agent}`;
         panel.title = title;
@@ -705,7 +729,7 @@ export class Controller {
     this.addSurface(surface, panel.title, panel);
     this.retitle();
     panel.onDidDispose(() => {
-      if (this.chatPanel === panel) this.chatPanel = undefined;
+      if (chatId) this.chatTabs.closed(chatId, panel);
       if (this.tasksPanel === panel) this.tasksPanel = undefined;
       if (this.welcomePanel === panel) this.welcomePanel = undefined;
     });
@@ -747,12 +771,16 @@ export class Controller {
     const reveal: HostMessage | undefined = revealItem ? { type: 'reveal', chatId, id: revealItem } : undefined;
     if (reveal) this.remember(reveal);
     for (const s of this.chatSurfaces()) {
-      s.selected = chatId;
-      post(s, { type: 'select', chatId });
+      // A chat's own tab keeps its chat.
+      if (s.single && s.selected !== chatId) continue;
+      if (!s.single) {
+        s.selected = chatId;
+        post(s, { type: 'select', chatId });
+      }
       if (reveal) post(s, reveal);
     }
     try {
-      if (this.chatPanel || !this.agentsView?.visible) this.revealChatPanel();
+      if (this.chatTabs.size || !this.agentsView?.visible) this.chatTabs.open(chatId);
     } catch (err) {
       this.error(err);
     }
@@ -800,6 +828,7 @@ export class Controller {
           await this.newChat(m.agent, surface.list ? undefined : surface);
           return;
         case 'select':
+          if (surface.single) return;
           surface.selected = m.chatId;
           this.lastSelected = m.chatId;
           this.retitle();
@@ -915,7 +944,7 @@ export class Controller {
         }
         case 'openChat':
           // From the side bar's list: into the chat tab, opening one when there is none.
-          if (surface.list && !this.chatPanel) await this.moveToCenter();
+          if (surface.list && !this.chatTabs.size) await this.moveToCenter(undefined, m.chatId);
           await this.showChat(m.chatId, m.item);
           return;
         case 'watchSubagent':
@@ -1031,7 +1060,10 @@ export class Controller {
           const chat = this.core.chat(m.chatId);
           if (!chat) return;
           const ok = await vscode.window.showWarningMessage(`Remove ${chatRef(chat)} (${agentName(chat.agent)})?`, { modal: true, detail: 'Its history goes. A worktree it had stays on disk.' }, 'Remove');
-          if (ok) await this.core.removeChat(m.chatId);
+          if (ok) {
+            await this.core.removeChat(m.chatId);
+            this.chatTabs.get(m.chatId)?.dispose();
+          }
           return;
         }
         case 'viewChanges':
@@ -1149,6 +1181,8 @@ export class Controller {
 
   /** Shows a chat on the surface that asked for it. */
   private selectOn(surface: Surface, chatId: string): void {
+    // A chat's own tab: the other chat opens in its own tab.
+    if (surface.single) return void this.showChat(chatId);
     surface.selected = chatId;
     this.lastSelected = chatId;
     post(surface, { type: 'select', chatId });
@@ -1213,19 +1247,11 @@ export class Controller {
     }
   }
 
-  async moveToCenter(column?: vscode.ViewColumn): Promise<void> {
-    this.revealChatPanel(column);
+  /** The chat (the current one, else the latest open one, else a new one) in its editor tab. */
+  async moveToCenter(column?: vscode.ViewColumn, chatId = this.lastSelected): Promise<void> {
+    const id = (chatId && this.core.chat(chatId) ? chatId : undefined) ?? this.core.snapshot.chats.find((c) => !c.archived)?.id ?? (await this.newChat());
+    if (id) this.chatTabs.open(id, column);
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
-  }
-
-  /** The chat tab, opened when there is none. */
-  private revealChatPanel(column?: vscode.ViewColumn): void {
-    if (this.chatPanel) {
-      this.chatPanel.reveal(column);
-    } else {
-      const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', column ?? vscode.ViewColumn.Active, { retainContextWhenHidden: false });
-      this.adoptPanel(panel, 'chat');
-    }
   }
 
   /**
@@ -1233,7 +1259,7 @@ export class Controller {
    * the chat moves into the first editor group, or the last code editor there comes back.
    */
   async toggleCodeAndChat(): Promise<void> {
-    const chatShown = this.chatPanel?.visible && this.chatPanel.viewColumn === vscode.ViewColumn.One;
+    const chatShown = this.chatTabs.all().some((p) => p.visible && p.viewColumn === vscode.ViewColumn.One);
     if (!chatShown) return this.moveToCenter(vscode.ViewColumn.One);
     if (this.lastLeftEditor && !this.lastLeftEditor.isClosed) {
       await vscode.window.showTextDocument(this.lastLeftEditor, vscode.ViewColumn.One);
@@ -1243,7 +1269,7 @@ export class Controller {
   }
 
   async moveToSide(): Promise<void> {
-    this.chatPanel?.dispose();
+    for (const p of this.chatTabs.all()) p.dispose();
     await vscode.commands.executeCommand('friedliver.agents.focus');
   }
 
