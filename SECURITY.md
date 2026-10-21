@@ -117,6 +117,27 @@ vendors' own permission settings as part of your setup.
   Full auto. FriedLiver still asks for commands in folders outside the
   workspace and for plans (and other mode switches) that reach it, but the
   agent's own full-access mode means the agent itself may not ask at all.
+- **Full auto's hard limits** (`friedliver.approvals.fullAutoGuards`, on by
+  default, user settings only): even on Full auto, "Allow for this chat" or a
+  remembered rule, FriedLiver asks, once only and saying why ("Full auto still
+  asks: …"), before (1) a browser action that takes a chat from a page on the
+  internet onto this computer or its network (localhost, `*.local`, loopback,
+  private and link-local IPv4/IPv6, judged by every address the name resolves
+  to, so a rebinding name counts as local); (2) every download an agent
+  starts; (3) a command that runs a file the chat downloaded or wrote in its
+  last 3 turns, installs or fetches and runs packages (`npx`, `pnpm dlx`,
+  `uvx`…), or pipes a download into anything; on Full auto also a line too
+  unclear to check (any quote, backslash, `$` or brace, an unquoted glob,
+  command substitution, a download whose file can't be told). A chat that only ever used local pages,
+  like your dev server, goes on as before; one that saw a remote page stays
+  marked for its life. Addresses are classified with ipaddr.js: anything but
+  global unicast (CGNAT, benchmarking, multicast, NAT64/6to4, ::/96…) is local.
+  Limits: (1) is checked when FriedLiver decides, not per navigation, and the
+  resolved IP isn't pinned, so a name that rebinds in between, a redirect, or
+  a link click that navigates there, isn't caught; (3) covers commands that reach FriedLiver (its
+  terminals and the permission requests agents send). In Full auto, Claude,
+  Codex, Gemini and Antigravity run in their own full-access modes and run
+  commands without asking FriedLiver, so (3) does not see those (FL-38).
 - FriedLiver answers for you only with an agent's one-time allow option whose
   name doesn't change the agent's mode or keep allowing ("bypass", "don't ask
   again", "always"…). Those options are never the highlighted button and say
@@ -600,3 +621,4 @@ for a typical single-user desktop.
 | FL-35 | Low | Remote | The phone could approve commands it showed clipped or with hidden characters. An OK given on the Mac after a revoke still applied. Pairing needed no OK on the Mac. Use over HTTP alone went unnoticed. | Fixed before merge. Approve such commands on the Mac. OKs check the device is still paired, and revoking refuses pending ones. Each pairing needs a modal OK, and the Mac is told on each phone's first use. |
 | FL-36 | Low | Claude Code config | `friedliver.browser.externalClients` was on by default, so FriedLiver wrote a `friedliver-browser` MCP server into `~/.claude.json` on every start without being asked, and that client was offered the `system_*` tools too. | Fixed. Off by default and opt-in (the setting, or **Connect Claude Code to the browser**, which turns it on); with it off FriedLiver only removes the entry it added, and never touches another program's entry by that name. The external client gets the `browser_*` tools only. |
 | FL-37 | High | Extensions | Open VSX signature checks (patch 0040, `docs/EXTENSION-SIGNATURES.md`). Open VSX signs the raw `.vsix` bytes with one Ed25519 key per registry; FriedLiver checks that signature itself with `node:crypto`. | Fixed. The open-vsx.org key (id `14ccb407-4e79-41ed-be5a-6d608325c45a`) is pinned in the app, never fetched; it was checked against the Wayback Machine's copy and against a real signature. A signature that doesn't match is refused with no override, and so is a missing or broken one when the gallery names the pinned key (no downgrade to a prompt). No signature, a key FriedLiver doesn't know, or a check that couldn't run asks "This extension isn't signed by Open VSX. Install anyway?"; Install Anyway is remembered per extension in `extensions.allowUnsigned`, application scope (user settings only, so a workspace can't add to it), and the package is still checked, so a mismatch is still refused. A marketplace whose manifest requires signatures is always enforced, whatever the setting or install options say. VSIX files installed from disk are unchanged. `build.yml` installs `redhat.vscode-yaml` into the Linux build and fails unless the check says Success, which also catches an Open VSX key renewal. Residual: an attacker who can rewrite the gallery's HTTPS answers (not just the download) can drop both the signature and the key entry and get the prompt; turning `extensions.verifySignature` off (application scope) turns checks off, as upstream. |
+| FL-38 | High | Full auto | Prompt-injection chain: an agent on Full auto reads a hostile page or file, drives FriedLiver's browser onto a local service (127.0.0.1, a rebinding name), downloads an artifact and runs it, all without asking. Full auto also auto-approved agent downloads. | Partly fixed. Full auto's hard limits (above), enforced by FriedLiver: remote-page-to-local browser pivots and every agent download ask once, with the reason, whatever the level; commands that run a fresh download or write, install packages or pipe a download into a shell ask whenever they reach FriedLiver. Open: per-navigation/redirect checks and IP pinning in the browser; and Full auto puts the agents in their own no-ask modes, so their native commands never reach FriedLiver; closing that means keeping agents in an asking mode under Full auto and letting FriedLiver answer. |

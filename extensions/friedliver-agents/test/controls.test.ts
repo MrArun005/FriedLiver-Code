@@ -262,15 +262,20 @@ describe('approval levels and the agent’s own modes', () => {
     expect(existsSync(path.join(dir, 'NOTES.md'))).toBe(false);
   });
 
-  it('Full auto runs edits and commands without asking, but not commands outside the workspace', async () => {
+  it('Full auto runs edits without asking; a command it cannot check (quotes) still asks, saying why', async () => {
     const dir = await gitRepo();
     const { core: c, seen } = core(dir);
     const chat = await c.createChat('demo', { approval: 'full' });
-    await c.send(chat.id, 'tour');
+    const turn = c.send(chat.id, 'tour');
+    // The tour's command is node -e '<script>': quoted, so Full auto's hard limits ask (fullAutoGuards.ts).
+    await waitFor(() => c.decisions()[0]?.kind === 'command');
+    expect(c.chat(chat.id)!.items.find((i) => i.kind === 'command')).toMatchObject({ state: 'awaiting', guard: expect.stringMatching(/^Full auto still asks: it has quotes/) });
+    c.decideCommand(c.decisions()[0].id, true);
+    await turn;
     expect(seen.reviews).toEqual([]);
-    expect(seen.commands).toEqual([]);
+    expect(seen.commands).toHaveLength(1);
     const command = c.chat(chat.id)!.items.find((i) => i.kind === 'command');
-    expect(command).toMatchObject({ state: 'exited', exitCode: 0, auto: 'Auto' });
+    expect(command).toMatchObject({ state: 'exited', exitCode: 0 });
     expect(c.chat(chat.id)!.items.some((i) => i.kind === 'review' && i.auto === 'Auto')).toBe(true);
   });
 });

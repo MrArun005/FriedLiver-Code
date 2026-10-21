@@ -281,6 +281,8 @@ export class Controller {
         done: (summary) => void vscode.window.setStatusBarMessage(`$(device-desktop) Agent used: ${plainText(summary).replace(/\$\(/g, '$ (')}`, 5000),
       },
       approvalDefault: () => this.approvalDefault(),
+      // User settings only: a repository must not lift Full auto's hard limits.
+      fullAutoGuards: () => userSetting(vscode.workspace.getConfiguration('friedliver.approvals').inspect<unknown>('fullAutoGuards')).value !== false,
       // Codex keeps which models the account may use; the other agents list only those already.
       modelVisibility: (agent) => (agent === 'codex' ? codexModelVisibility() : Promise.resolve(undefined)),
       // User settings only: a repository must not make requests allow themselves.

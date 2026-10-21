@@ -294,6 +294,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
     const page = { origin: 'https://www.irctc.co.in', password: false };
     h.browser = async (chatId, call, _s, expect) => (done.push({ tool: call.tool, chatId, expect }), 'ok');
     h.browserPage = async () => ({ ...page });
+    h.lookup = async () => ['93.184.216.34'];
     h.notify = (a) => void asks.push(a);
     h.permissions = store;
     return { h, done, asks, page, store, requests: new BridgeRequests(h), signal: new AbortController().signal };
@@ -303,6 +304,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
   it('remembers a website by its exact origin, for every chat, and rechecks the origin when acting', async () => {
     const { h, done, page, store, requests, signal } = setup();
     const open = requests.call('chat-1', { tool: 'browser_open', url: 'https://www.irctc.co.in/nget/train-search' }, signal);
+    await tick();
     const [item] = bridgeItems(h);
     expect(item).toMatchObject({ state: 'awaiting', always: 'https://www.irctc.co.in' });
     if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
@@ -328,6 +330,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
     const user = memoryStore();
     const first = setup(memoryPermissions({ user }));
     const open = first.requests.call('chat-1', { tool: 'browser_open', url: 'https://www.irctc.co.in' }, first.signal);
+    await tick();
     const [item] = bridgeItems(first.h);
     if (item.kind === 'bridge') first.requests.answer(item.requestId, 'allowAlways');
     await open;
@@ -364,6 +367,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
     const { h, requests, signal } = setup();
     h.permissions = undefined;
     const open = requests.call('chat-1', { tool: 'browser_open', url: 'https://a.example' }, signal);
+    await tick();
     const [item] = bridgeItems(h);
     expect(item).not.toHaveProperty('always');
     if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
@@ -433,5 +437,96 @@ describe('"Always allow", remembered for every chat and later session', () => {
     void requests.call(S1, { tool: 'browser_reload' }, signal).catch(() => {});
     await tick();
     expect(asks[0]).not.toHaveProperty('always');
+  });
+});
+
+describe("Full auto's hard limits in the browser", () => {
+  const dns: Record<string, string[]> = { 'evil.test': ['93.184.216.34'], 'rebind.evil.test': ['127.0.0.1'], 'docs.test': ['1.1.1.1'] };
+  function setup(guards = true) {
+    const h = host();
+    h.dispatch({ t: 'approval', chatId: 'chat-1', level: 'full' });
+    let page: string | undefined;
+    const done: string[] = [];
+    h.lookup = async (name) => dns[name] ?? Promise.reject(new Error('ENOTFOUND'));
+    h.fullAutoGuards = () => guards;
+    h.browserPage = async () => ({ origin: page, password: false });
+    h.browser = async (_c, call) => {
+      if (call.tool === 'browser_open') page = new URL(call.url).origin;
+      done.push('url' in call ? `${call.tool} ${call.url}` : call.tool);
+      return 'ok';
+    };
+    const requests = new BridgeRequests(h);
+    const items = () => h.state.chats[0].items.filter((i) => i.kind === 'bridge');
+    return { h, requests, items, done, signal: new AbortController().signal, goTo: (o: string) => (page = o) };
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it('asks, once only, when a remote page leads the chat to localhost', async () => {
+    const { requests, items, done, signal } = setup();
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/readme' }, signal);
+    await requests.call('chat-1', { tool: 'browser_snapshot' }, signal);
+    const probe = requests.call('chat-1', { tool: 'browser_open', url: 'http://127.0.0.1:9222/json' }, signal);
+    await flush();
+    const ask = items().at(-1)!;
+    expect(ask).toMatchObject({ state: 'awaiting', guard: expect.stringMatching(/^Full auto still asks: a page from outside this computer led here, and this reaches 127\.0\.0\.1:9222/) });
+    // "For this chat" can't stretch over it.
+    if (ask.kind === 'bridge') requests.answer(ask.requestId, 'allowChat');
+    expect(items().at(-1)).toMatchObject({ state: 'awaiting' });
+    if (ask.kind === 'bridge') requests.answer(ask.requestId, 'deny');
+    await expect(probe).rejects.toThrow(/did not allow/);
+    expect(done).toEqual(['browser_open https://evil.test/readme', 'browser_snapshot']);
+  });
+
+  it('checks what a name resolves to, so a rebinding name asks too', async () => {
+    const { requests, items, signal } = setup();
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/' }, signal);
+    void requests.call('chat-1', { tool: 'browser_open', url: 'http://rebind.evil.test:8080/' }, signal).catch(() => {});
+    await flush();
+    expect(items().at(-1)).toMatchObject({ state: 'awaiting', guard: expect.stringContaining('rebind.evil.test:8080') });
+  });
+
+  it('asks before acting on a local page the chat reached from a remote one', async () => {
+    const { requests, items, signal, goTo } = setup();
+    goTo('https://evil.test');
+    await requests.call('chat-1', { tool: 'browser_snapshot' }, signal);
+    goTo('http://localhost:3000');
+    void requests.call('chat-1', { tool: 'browser_click', text: 'Delete all' }, signal).catch(() => {});
+    await flush();
+    expect(items().at(-1)).toMatchObject({ tool: 'browser_click', state: 'awaiting', guard: expect.stringContaining('localhost:3000') });
+  });
+
+  it("goes on as before for the user's own dev server, and remote to remote", async () => {
+    const { requests, items, signal, goTo } = setup();
+    goTo('http://localhost:3000');
+    await requests.call('chat-1', { tool: 'browser_click', text: 'Save' }, signal);
+    await requests.call('chat-1', { tool: 'browser_open', url: 'http://localhost:3000/settings' }, signal);
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://docs.test/' }, signal);
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/' }, signal);
+    expect(items().every((i) => i.state === 'allowed')).toBe(true);
+  });
+
+  it('remembers the remote page past the turn, for the chat', async () => {
+    const { requests, items, signal, goTo } = setup();
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/' }, signal);
+    requests.settle('chat-1', false);
+    goTo('http://localhost:3000');
+    void requests.call('chat-1', { tool: 'browser_reload' }, signal).catch(() => {});
+    await flush();
+    expect(items().at(-1)).toMatchObject({ state: 'awaiting', guard: expect.stringContaining('localhost:3000') });
+  });
+
+  it('an open from a remote page the agent never opened itself asks too', async () => {
+    const { requests, items, signal, goTo } = setup();
+    goTo('https://evil.test');
+    void requests.call('chat-1', { tool: 'browser_open', url: 'http://[::ffff:7f00:1]:9222/' }, signal).catch(() => {});
+    await flush();
+    expect(items().at(-1)).toMatchObject({ state: 'awaiting', guard: expect.stringContaining('9222') });
+  });
+
+  it('a user who turned the limits off gets Full auto as before', async () => {
+    const { requests, items, signal } = setup(false);
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/' }, signal);
+    await requests.call('chat-1', { tool: 'browser_open', url: 'http://localhost:9222/' }, signal);
+    expect(items().every((i) => i.state === 'allowed')).toBe(true);
   });
 });

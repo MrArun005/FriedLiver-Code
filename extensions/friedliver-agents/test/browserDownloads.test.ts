@@ -183,7 +183,7 @@ const chat = (id: string, over: Partial<ChatView> = {}): ChatView => ({
   id, agent: 'demo', label: id, title: 'Task', cwd: '/w', createdAt: 0, busy: false, changedFiles: 0, items: [], depth: 0, files: [], lastActivity: 0, turns: 0, ...over,
 });
 
-function setup(approval?: 'ask' | 'edits' | 'full', downloads: DownloadInfo[] = [dl()]) {
+function setup(approval?: 'ask' | 'edits' | 'full', downloads: DownloadInfo[] = [dl()], guards = true) {
   let state: AppState = [chat('chat-1')].reduce((s, c) => reduce(s, { t: 'created', chat: c }), EMPTY_STATE);
   let n = 0;
   const answers: boolean[] = [];
@@ -206,10 +206,13 @@ function setup(approval?: 'ask' | 'edits' | 'full', downloads: DownloadInfo[] = 
       return 'ok';
     },
   };
+  const saved: string[] = [];
+  h.fullAutoGuards = () => guards;
+  h.downloaded = (_chatId, file) => void saved.push(file);
   if (approval) h.dispatch({ t: 'approval', chatId: 'chat-1', level: approval });
   const requests = new BridgeRequests(h);
   const items = () => h.state.chats[0].items.filter((i) => i.kind === 'bridge');
-  return { h, requests, items, answers, signal: new AbortController().signal };
+  return { h, requests, items, answers, saved, signal: new AbortController().signal };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -228,8 +231,26 @@ describe('download approvals in the chat', () => {
     expect(answers).toEqual([false]);
   });
 
-  it('goes ahead on Full auto, and is recorded in the chat', async () => {
-    const { requests, items, answers, signal } = setup('full');
+  it('asks even on Full auto, once only, saying why; "this chat" and a second try do not get around it', async () => {
+    const { requests, items, answers, saved, signal } = setup('full', [dl(), dl({ id: 'd2', filename: 'b.zip' })]);
+    const call = requests.call('chat-1', { tool: 'browser_click', text: 'Download' }, signal);
+    await flush();
+    const first = items().at(-1)!;
+    expect(first).toMatchObject({ tool: 'browser_download', state: 'awaiting', once: true, guard: 'Full auto still asks: an agent started this download' });
+    // "For this chat" allows this one only.
+    if (first.kind === 'bridge') requests.answer(first.requestId, 'allowChat');
+    await flush();
+    const second = items().at(-1)!;
+    expect(second).toMatchObject({ text: 'b.zip (2.0 MB) from github.com', state: 'awaiting' });
+    if (second.kind === 'bridge') requests.answer(second.requestId, 'deny');
+    await call;
+    expect(answers).toEqual([true, false]);
+    // The allowed file joins the chat's trail: a command that runs it asks.
+    expect(saved).toEqual(['tool.zip']);
+  });
+
+  it('goes ahead on Full auto only when the user turned its hard limits off', async () => {
+    const { requests, items, answers, signal } = setup('full', [dl()], false);
     await requests.call('chat-1', { tool: 'browser_click', text: 'Download' }, signal);
     expect(answers).toEqual([true]);
     expect(items().at(-1)).toMatchObject({ tool: 'browser_download', state: 'allowed' });
@@ -247,7 +268,7 @@ describe('download approvals in the chat', () => {
   });
 
   it('"Allow downloads for this chat" covers later downloads, not other browser actions', async () => {
-    const { requests, items, answers, signal } = setup('ask', [dl(), dl({ id: 'd2', filename: 'b.zip' })]);
+    const { requests, items, answers, signal } = setup('ask', [dl(), dl({ id: 'd2', filename: 'b.zip' })], false);
     const call = requests.call('chat-1', { tool: 'browser_reload' }, signal);
     const [reload] = items();
     if (reload.kind === 'bridge') requests.answer(reload.requestId, 'allow');
@@ -262,7 +283,7 @@ describe('download approvals in the chat', () => {
   });
 
   it('forgets "Allow downloads for this chat" when the chat is forgotten', async () => {
-    const { requests, items, answers, signal } = setup('ask');
+    const { requests, items, answers, signal } = setup('ask', [dl()], false);
     const first = requests.call('chat-1', { tool: 'browser_reload' }, signal);
     const reload = items().at(-1)!;
     if (reload.kind === 'bridge') requests.answer(reload.requestId, 'allow');

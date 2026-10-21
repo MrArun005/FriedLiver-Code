@@ -148,4 +148,6 @@ export interface PermissionDetail {
   always?: Grant[];
   /** A force push: the remote's commits it would drop. */
   dropped?: DroppedCommits;
+  /** Why it asks even on Full auto (fullAutoGuards.ts), shown on its card. */
+  guard?: string;
 }

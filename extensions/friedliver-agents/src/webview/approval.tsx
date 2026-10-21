@@ -442,8 +442,10 @@ function Preview({ a, item, chat, state, diff }: { a: Approval; item: Approvable
   const line = commandLine(item);
   const why = item.kind === 'permission' ? item.detail?.text : undefined;
   const dropped = item.kind === 'permission' ? item.detail?.dropped : item.kind === 'command' ? item.dropped : undefined;
+  const guard = item.kind === 'permission' ? item.detail?.guard : item.kind === 'command' || item.kind === 'bridge' ? item.guard : undefined;
   return (
     <div class="apv-bd">
+      {guard && <div class="apv-warn">{guard}</div>}
       {why && (
         <div class="apv-why">
           <b>Why:</b> {why.length > 300 ? `${why.slice(0, 299)}…` : why}
