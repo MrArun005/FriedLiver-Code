@@ -186,7 +186,7 @@ function SignIn({ card }: { card: AccountCard }) {
         <KeyRow key={k.id} card={card} k={k} />
       ))}
       {card.envKey && !card.keys.some((k) => k.active) && <p class="hint">{card.envKey} is set in the editor’s environment, so {card.name} gets it.</p>}
-      {card.cli && (
+      {card.cli?.signIn && (
         <div class="acct-cli">
           <span class="hint">Or its own CLI: </span>
           <Line agent={card.agent as VendorKey} what="signIn" line={card.cli.signIn} />
