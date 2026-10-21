@@ -99,6 +99,8 @@ export type WebviewMessage =
   | { type: 'star'; chatId: string; starred: boolean }
   /** Open the shared rules files (sharedRules.ts). */
   | { type: 'openRules' }
+  /** Show the FriedLiver Agents log, where every error notice is also written. */
+  | { type: 'showLog' }
   /** Ask for a new name; a name you give stays put. */
   | { type: 'renameChat'; chatId: string }
   /** Stop and forget a chat. */
@@ -475,6 +477,8 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
         : null;
     case 'openRules':
       return { type: 'openRules' };
+    case 'showLog':
+      return { type: 'showLog' };
     case 'openAccounts':
       if (m.agent === undefined) return { type: 'openAccounts' };
       return isAgentKey(m.agent) ? { type: 'openAccounts', agent: m.agent } : null;
