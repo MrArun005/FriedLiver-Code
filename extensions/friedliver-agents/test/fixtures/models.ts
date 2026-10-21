@@ -24,6 +24,5 @@ export const CATALOG: ModelCatalog = {
     { value: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
     { value: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
     { value: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
-    { value: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
   ],
 };
