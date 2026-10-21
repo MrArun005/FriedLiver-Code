@@ -114,6 +114,7 @@
       },
       "workbench.tree.renderIndentGuides": "always",
       "workbench.list.density": "comfortable",
+      "workbench.secondarySideBar.defaultVisibility": "visibleInWorkspace",
       "workbench.hover.delay": 500,
       "workbench.editor.tabSizing": "shrink",
       "workbench.editor.useModal": "off",
