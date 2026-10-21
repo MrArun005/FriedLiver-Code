@@ -1228,7 +1228,7 @@ export class Controller {
 
   async newChat(agent?: AgentKey, surface?: Surface): Promise<string | undefined> {
     const shown = shownAgents(testAgentsOn());
-    const ordered = shown.includes('antigravity') ? ['antigravity', ...shown.filter((a) => a !== 'antigravity')] : shown;
+    const ordered: AgentKey[] = shown.includes('antigravity') ? ['antigravity', ...shown.filter((a) => a !== 'antigravity')] : shown;
     const chosen =
       agent ??
       (
