@@ -53,8 +53,10 @@ What changes from stock VS Code:
   an agent or let it run without asking. What that does and doesn't protect,
   per agent: [SECURITY.md](SECURITY.md).
 
-The Electron app, a separate and lighter editor (about 370 MB against about
-840 MB here), lives in [FriedLiver](https://github.com/MrArun005/FriedLiver).
+This VS Code fork is the only FriedLiver editor. The earlier stand-alone
+Electron app ([FriedLiver](https://github.com/MrArun005/FriedLiver), 0.x) is
+retired: it gets no updates, and if it's installed, uninstall it so it isn't
+opened by mistake.
 
 ## Install
 
