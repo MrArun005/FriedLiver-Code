@@ -1551,7 +1551,13 @@ export class AgentCore {
   // ---- Internals ----
 
   private dispatch(action: Action): void {
+    const chatId = 'chatId' in action && typeof action.chatId === 'string' ? action.chatId : undefined;
+    const before = chatId && this.chat(chatId)?.items.at(-1);
     this.state = reduce(this.state, action);
+    // Error notices toast and go (shared/toasts.ts), so each is also kept in the log.
+    // ponytail: checks only the last item; a notice is always appended on its own.
+    const last = chatId && this.chat(chatId)?.items.at(-1);
+    if (last && last !== before && last.kind === 'notice' && last.tone === 'error') this.options.log?.(`Error in chat ${chatId}: ${last.text}${last.detail ? `\n${last.detail}` : ''}`);
     for (const listener of this.listeners) listener(action, this.state);
   }
 

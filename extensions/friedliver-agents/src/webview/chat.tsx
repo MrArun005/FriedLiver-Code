@@ -76,7 +76,8 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp } from './ui';
+import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
+import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, type NoticeItem } from '../shared/toasts';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -98,7 +99,9 @@ function App() {
   const [viewer, setViewer] = useState<{ path: string; from: HTMLElement } | null>(null);
   const [found, setFound] = useState<{ chatId: string; query: string; files: string[] } | null>(null);
   const shown = useRef<string | undefined>(undefined);
+  const resync = useRef(false);
   const { state, selected, setSelected } = useHost((m) => {
+    if (m.type === 'snapshot') resync.current = true;
     if (m.type === 'foundFiles') setFound({ chatId: m.chatId, query: m.query, files: m.files });
     if (m.type === 'attached') {
       const to = m.chatId ?? shown.current;
@@ -123,6 +126,7 @@ function App() {
   // The selected chat when it has a tab (archived ones too, opened from History); otherwise the last tab.
   const chat = state.chats.find((c) => c.id === selected) ?? state.chats.find((c) => c.id === tabs.at(-1));
   shown.current = chat?.id;
+  const toasts = useErrorToasts(chat, resync);
 
   const select = useCallback((chatId: string) => {
     setSelected(chatId);
@@ -203,7 +207,7 @@ function App() {
         <div class="chat-main">
         {chat ? (
           <>
-            <ChatHeader chat={chat} state={state} onSelect={select} />
+            <ChatHeader chat={chat} state={state} onSelect={select} onShowErrors={toasts.reopen} />
             <div class="chat-body" data-rail={rail ? '' : undefined}>
             <div class="chat-col">
             <Transcript
@@ -236,9 +240,51 @@ function App() {
         )}
         </div>
       </div>
+      {chat && toasts.shown.length > 0 && (
+        <ToastRegion>
+          {toasts.shown.map((t) => (
+            <Toast
+              key={itemKey(t)}
+              tone="error"
+              title={t.text}
+              text={t.detail && <NoticeDetail item={t} />}
+              actions={[...(t.actions ?? []).map((a) => ({ label: a.label, run: () => send({ type: 'notice', chatId: chat.id, action: a }) })), { label: 'Show log', run: () => send({ type: 'showLog' }) }]}
+              seconds={TOAST_SECONDS}
+              onClose={() => toasts.dismiss(t)}
+            />
+          ))}
+        </ToastRegion>
+      )}
       </OpenImage.Provider>
     </LiveState.Provider>
   );
+}
+
+/**
+ * The open chat's error notices as toasts (shared/toasts.ts): each one that arrives while the chat is
+ * open, once. Ones already there on opening (or re-sent in a snapshot) don't pop up; "N errors" reopens them.
+ */
+function useErrorToasts(chat: ChatView | undefined, resync: { current: boolean }) {
+  const [shown, setShown] = useState<NoticeItem[]>([]);
+  const known = useRef<{ chatId?: string; keys: Set<number> }>({ keys: new Set() });
+  const errors = useMemo(() => (chat ? chat.items.filter(isToastNotice) : []), [chat?.items]);
+  useEffect(() => {
+    if (known.current.chatId !== chat?.id || resync.current) {
+      if (known.current.chatId !== chat?.id) setShown([]);
+      known.current = { chatId: chat?.id, keys: new Set(errors.map(itemKey)) };
+      resync.current = false;
+      return;
+    }
+    const fresh = errors.filter((e) => !known.current.keys.has(itemKey(e)));
+    for (const e of fresh) known.current.keys.add(itemKey(e));
+    if (fresh.length) setShown((s) => addToasts(s, fresh));
+  }, [chat?.id, errors]);
+  return {
+    shown,
+    count: errors.length,
+    reopen: () => setShown(errors.slice(-MAX_TOASTS)),
+    dismiss: (t: NoticeItem) => setShown((s) => s.filter((x) => x !== t)),
+  };
 }
 
 /** Recent chats as tabs, and every open chat one click away in "All chats", for fifteen agents and more. */
@@ -467,7 +513,8 @@ function AllChats({ state, active, onPick, newAgent, tabs }: { state: AppState; 
 const IS_MAC = /Mac/.test(navigator.platform);
 
 /** The open chat: who and what, its connections, and the actions that join it to other agents. */
-function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState; onSelect: Select }) {
+function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; state: AppState; onSelect: Select; onShowErrors(): void }) {
+  const errors = useMemo(() => chat.items.filter(isToastNotice).length, [chat.items]);
   const status = statusOf(chat);
   const discussing = discussingLabel(chat.items);
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
@@ -545,6 +592,7 @@ function ChatHeader({ chat, state, onSelect }: { chat: ChatView; state: AppState
                 <HandoffTargets chat={chat} close={close} title="Hand off to" />
                 <PipeTargets chat={chat} close={close} />
                 <div class="fl-menu__sep" role="separator" />
+                {errors > 0 && <MenuItem icon="alert" label={`${errors} error${errors === 1 ? '' : 's'}`} onSelect={() => (close(), onShowErrors())} />}
                 <MenuItem label="Rules…" onSelect={() => (close(), send({ type: 'openRules' }))} />
                 <MenuItem icon="history" label="Rewind…" disabled={chat.busy} onSelect={() => {
                     close();
@@ -724,7 +772,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     stick.current = true;
     setLimit(WINDOW);
   }, [chat.id]);
-  const { items, approvals } = useMemo(() => foldApprovals(withoutDiscussionTurns(chat.items)), [chat.items]);
+  const { items, approvals } = useMemo(() => foldApprovals(withoutDiscussionTurns(chat.items).filter((i) => !isToastNotice(i))), [chat.items]);
   // The marked decision card moves on when it is answered: its hint and outline follow.
   useEffect(() => syncDecisionTarget(chat), [chat.items]);
   const groups = useMemo(() => {
@@ -1049,13 +1097,7 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
             ))}
           >
             <div>{item.text}</div>
-            {item.detail &&
-              (item.detailKind === 'code' ? (
-                <code class="notice-detail">{item.detail}</code>
-              ) : (
-                // Prose (an agent's words, a hint) in the body font; `backticks` are its code spans.
-                <p class="notice-detail">{item.detail.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</p>
-              ))}
+            {item.detail && <NoticeDetail item={item} />}
           </Banner>
         </div>
       );
@@ -1091,6 +1133,12 @@ function ItemView({ item, chat, state, conflicts, onSelect, canUndo, live, msgKe
     case 'discussion':
       return <DiscussionCard item={item} chat={chat} />;
   }
+}
+
+function NoticeDetail({ item }: { item: NoticeItem }) {
+  if (item.detailKind === 'code') return <code class="notice-detail">{item.detail}</code>;
+  // Prose (an agent's words, a hint) in the body font; `backticks` are its code spans.
+  return <p class="notice-detail">{item.detail?.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</p>;
 }
 
 const LINK_HEAD: Record<LinkItem['role'], (label: string) => string> = {
