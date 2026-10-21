@@ -684,7 +684,7 @@ describe('Antigravity in FriedLiver', () => {
 
   it('the Install and sign-in lines are FriedLiver’s own, and only a pipe into bash or iex passes', () => {
     expect(installCommandFor('antigravity')).toBe(process.platform === 'win32' ? 'irm https://antigravity.google/cli/install.ps1 | iex' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash');
-    expect(cliLineFor(CLI_ACCOUNTS.antigravity.signIn.command)).toBe('agy');
+    expect(cliLineFor(CLI_ACCOUNTS.antigravity.signIn!.command)).toBe('agy');
     for (const bad of ['curl x | sh', 'curl x | bash; rm -rf ~', 'curl x | bash | bash', 'a && b', 'curl x |bash']) expect(cliLineFor(bad)).toBeNull();
     expect(KEY_SETUPS.antigravity).toEqual([]);
   });
