@@ -7,6 +7,7 @@ import { Icon, type IconName } from './icon';
 import { keyText } from './keys';
 import { Button, IconButton } from './controls';
 import { Countdown, type Tone } from './display';
+import { dismissTimer } from '../../shared/toasts';
 
 /** Space between a tooltip and its target, and the viewport's edge (§2.14). */
 const TIP_GAP = 8;
@@ -69,12 +70,13 @@ export function Tooltip({ text, kbd, delay, side, children }: { text: string; kb
 
 const TOAST_ICON: Partial<Record<Tone, IconName>> = { info: 'info', success: 'check', done: 'check', warn: 'warn', error: 'alert', failed: 'alert' };
 
-/** A toast: what happened, an optional action, a ×; with `seconds` it counts down (paused on hover). */
+/** A toast: what happened, optional actions, a ×; with `seconds` it counts down (paused while hovered or focused). */
 export function Toast({
   tone,
   title,
   text,
   action,
+  actions,
   seconds,
   onClose,
 }: {
@@ -82,29 +84,45 @@ export function Toast({
   title: ComponentChildren;
   text?: ComponentChildren;
   action?: { label: string; run(): void };
+  actions?: { label: string; run(): void }[];
   seconds?: number;
   onClose(): void;
 }) {
-  const [paused, setPaused] = useState(false);
-  const left = useRef(seconds ?? 0);
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const paused = hover || focus;
+  const close = useRef(onClose);
+  close.current = onClose;
+  const timer = useRef<ReturnType<typeof dismissTimer>>(undefined);
   useEffect(() => {
-    if (!seconds || paused) return;
-    const started = Date.now();
-    const t = setTimeout(onClose, left.current * 1000);
-    return () => (clearTimeout(t), (left.current -= (Date.now() - started) / 1000));
-  }, [seconds, paused]);
+    if (!seconds) return;
+    timer.current = dismissTimer(seconds, () => close.current());
+    return () => timer.current?.clear();
+  }, [seconds]);
+  useEffect(() => (paused ? timer.current?.pause() : timer.current?.resume()), [paused]);
   const icon = tone && TOAST_ICON[tone];
+  const buttons = [...(action ? [action] : []), ...(actions ?? [])];
   return (
-    <div class="fl-toast" data-tone={tone} role={tone === 'error' || tone === 'failed' ? 'alert' : 'status'} onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}>
+    <div
+      class="fl-toast"
+      data-tone={tone}
+      role={tone === 'error' || tone === 'failed' ? 'alert' : 'status'}
+      onPointerEnter={() => setHover(true)}
+      onPointerLeave={() => setHover(false)}
+      onFocusIn={() => setFocus(true)}
+      onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setFocus(false)}
+    >
       {icon && <Icon name={icon} />}
       <div class="fl-toast__body">
         <div class="fl-toast__title">{title}</div>
         {text && <div class="fl-toast__text">{text}</div>}
-        {action && (
+        {buttons.length > 0 && (
           <div class="fl-toast__actions">
-            <Button size="sm" onClick={() => (action.run(), onClose())}>
-              {action.label}
-            </Button>
+            {buttons.map((a) => (
+              <Button key={a.label} size="sm" onClick={() => (a.run(), onClose())}>
+                {a.label}
+              </Button>
+            ))}
           </div>
         )}
       </div>
