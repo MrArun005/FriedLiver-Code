@@ -2551,8 +2551,9 @@ body[data-platform='windows'] .fl-dialog__foot {
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
+/* No line over the selected tab (owner, 2026-10-21). */
 .fl-tab[aria-selected='true']::after {
-  content: '';
+  content: none;
   position: absolute;
   top: 0;
   left: var(--sp-2);
