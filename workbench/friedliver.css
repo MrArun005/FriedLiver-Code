@@ -554,8 +554,8 @@
 
 /* ---- Editor tabs §6.4: pills 24 (Modern UI's pill height), r-ctl. No line above the active tab, in any theme (owner, 2026-10-21). */
 
-.monaco-workbench .part.editor .tabs-container > .tab > .tab-fill::before,
-.monaco-workbench .part.editor .tabs-container > .tab .tab-border-top-container {
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.editor .tabs-container > .tab > .tab-fill::before,
+.monaco-workbench:not(.hc-black):not(.hc-light) .part.editor .tabs-container > .tab .tab-border-top-container {
 	display: none !important;
 }
 
