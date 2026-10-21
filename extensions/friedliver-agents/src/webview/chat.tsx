@@ -86,6 +86,8 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAC = document.body.dataset.platform === 'mac';
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
+/** A chat's own editor tab (chats in the editor area): this chat only, no strip; the editor's tab row is the strip. */
+const SINGLE = document.body.dataset.chat || undefined;
 
 type Select = (chatId: string) => void;
 
@@ -120,15 +122,21 @@ function App() {
   const tabs = (saved ?? (state.chats.length ? recentChats(state.chats, selected, 6).map((c) => c.id) : [])).filter((id) => state.chats.some((c) => c.id === id));
   // Opening a chat (a new one, or from the list, a notification, a card, the Agent Manager) adds its tab at the end.
   useEffect(() => {
+    if (SINGLE) return;
     if (selected && state.chats.some((c) => c.id === selected) && !tabs.includes(selected)) setTabs(openTab(tabs, selected));
     else if (saved === null && tabs.length) setTabs(tabs);
   }, [selected, state.chats.length]);
   // The selected chat when it has a tab (archived ones too, opened from History); otherwise the last tab.
-  const chat = state.chats.find((c) => c.id === selected) ?? state.chats.find((c) => c.id === tabs.at(-1));
+  const chat = SINGLE ? state.chats.find((c) => c.id === SINGLE) : (state.chats.find((c) => c.id === selected) ?? state.chats.find((c) => c.id === tabs.at(-1)));
   shown.current = chat?.id;
   const toasts = useErrorToasts(chat, resync);
 
   const select = useCallback((chatId: string) => {
+    // In its own tab, another chat opens in that chat's tab.
+    if (SINGLE) {
+      if (chatId !== SINGLE) send({ type: 'openChat', chatId });
+      return;
+    }
     setSelected(chatId);
     send({ type: 'select', chatId });
   }, []);
@@ -149,6 +157,8 @@ function App() {
   useEffect(() => {
     // Cmd/Ctrl+W closes the open chat's tab; Ctrl+Tab, Ctrl+Shift+Tab and Cmd/Ctrl+1..9 switch tabs.
     // Caught before the webview forwards them, so the editor's own tabs stay.
+    // In its own tab the editor's keys do it: Cmd/Ctrl+W, Ctrl+Tab and the rest go to the editor tabs.
+    if (SINGLE) return;
     const onKey = (e: KeyboardEvent) => {
       if (switchTab.current(e)) {
         e.preventDefault();
@@ -203,7 +213,7 @@ function App() {
       )}
       <div class="chat-app">
         <TextSize />
-        <Switcher state={state} active={chat?.id} onSelect={select} tabs={tabs} onClose={close} />
+        {!SINGLE && <Switcher state={state} active={chat?.id} onSelect={select} tabs={tabs} onClose={close} />}
         <div class="chat-main">
         {chat ? (
           <>

@@ -102,6 +102,15 @@ try {
 } catch {
   // A stub without state: start fresh.
 }
+// A chat's own editor tab keeps which chat it is: the host's serializer reads it back on reload.
+if (document.body?.dataset.chat && viewState.chat !== document.body.dataset.chat) {
+  viewState = { ...viewState, chat: document.body.dataset.chat };
+  try {
+    vscode.setState(viewState);
+  } catch {
+    // A stub without state.
+  }
+}
 
 /** Like useState, kept by the webview across reloads (the view, the sort order). */
 export function usePersisted<T>(key: string, initial: T): [T, (value: T) => void] {
