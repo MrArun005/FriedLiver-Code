@@ -208,7 +208,7 @@ As v1 §1.10: content 1 · sticky 2/3 · composer footer 6 · menus 10 · compos
 
 | Token | Value | Use |
 |---|---|---|
-| `--spring-snap` | `linear()` sample of a spring, stiffness 800, damping 57 (ζ 1.0, settles ≈ 300ms) | spatial: menus, palette, popovers open (scale .98 → 1, 6px rise); the tab top line slides |
+| `--spring-snap` | `linear()` sample of a spring, stiffness 800, damping 57 (ζ 1.0, settles ≈ 300ms) | spatial: menus, palette, popovers open (scale .98 → 1, 6px rise) |
 | `--spring-pop` | stiffness 560, damping 38 (ζ 0.8, 1.5% overshoot) | toasts arriving, a switch's knob, a selected segment moving, a card arriving on the board, a count bump |
 | `--dur-spring` / `--dur-pop` | 240 / 340ms | the durations the springs run for |
 | `--dur-fast` / `--dur` / `--dur-slow` | 120 / 180 / 260ms | fades (effects) and closing (`--ease-out`) |
@@ -227,7 +227,7 @@ As v1 §1.10: content 1 · sticky 2/3 · composer footer 6 · menus 10 · compos
 |---|---|
 | keyboard focus (`:focus-visible`) | 2px `--focus` (neutral) ring, 2px offset (`--focus-w`, `--focus-off`); fields: `--focus` border + 3px halo at 24% |
 | selection (rows, nav, radio rows) | `--sel-bg` fill + the selection mark (§2.37) |
-| active tab | the raised fill + a 2px `--sel-fg` line on the top edge, inset 8 |
+| active tab | the raised fill only; no line above it, in any theme (owner, 2026-10-21) |
 | palette item | fill only (sel-fg 13%) |
 | the card the keys act on (board) | a 7% `--sel-fg` tonal fill + a 1px `--fg-2` edge |
 | High Contrast | selection = 1px solid `contrastBorder`; focus = 2px `contrastActiveBorder` (orange): never alike |
@@ -572,10 +572,10 @@ Target: shell tone; head 32 ("Explorer" 13/600 `--sel-fg`, + and ⋯); trees: ro
 - P (new **0150-row-density.patch**): setting `workbench.list.density: comfortable | compact`; `explorerViewer.ts` `ExplorerDelegate.ITEM_HEIGHT`, the SCM, Outline and Search delegates read it (24 / 22).
 
 ### 6.4 Editor tabs
-Target: strip 32 on the page tone; tabs 26, `--r-ctl`, gap 2; active = the raised fill + the 2px top line; inactive `--fg-2`; × on hover and active; preview italic; no connected shoulders.
+Target: strip 32 on the page tone; tabs 26, `--r-ctl`, gap 2; active = the raised fill, no top line (any theme); inactive `--fg-2`; × on hover and active; preview italic; no connected shoulders.
 - D: `workbench.experimental.modernUIEditorTabStyle: "pill"`, `workbench.editor.tabSizing: shrink`.
-- T: `editorGroupHeader.tabsBackground` page, `tab.activeBackground` raised, `tab.inactiveBackground` page, `tab.border` none, `tab.activeBorderTop` sel-fg.
-- C: `.tabs-container > .tab` height 26, radius `--fl-r-ctl`; `.tab.active::after` = the top line.
+- T: `editorGroupHeader.tabsBackground` page, `tab.activeBackground` raised, `tab.inactiveBackground` page, `tab.border` none, `tab.activeBorderTop` transparent.
+- C: `.tabs-container > .tab` height 26, radius `--fl-r-ctl`; the stylesheet hides the tab's top border (`.tab-border-top-container`) in every theme but High Contrast.
 
 ### 6.5 Breadcrumbs
 A 22 row; 12px `--fg-2`, last segment `--fg`; 12 chevrons at 70%; segments are quiet sm buttons (`--r-ctl`). T `breadcrumb.*`; C `.monaco-breadcrumbs .monaco-breadcrumb-item`.
@@ -600,7 +600,7 @@ Target: 26 tall, shell, no border; items sm 22, `--r-ctl`, 11px `--fg-2` tabular
 - B2: the agents item is contributed by the Agents extension (`createStatusBarItem`, priority high, end side).
 
 ### 6.9 Command palette / quick input
-Target: §2.13 palette variant.
+Target: §2.13 palette variant. A picker's title (e.g. "New chat with…") starts at the same left edge as the input and the rows, never centred.
 - T: `quickInput.background` float, `quickInputList.focusBackground` sel-fg 13%, `pickerGroup.foreground` fg-2, `pickerGroup.border` hairline.
 - C: `.quick-input-widget` (radius `--fl-r-dialog`, glass + rim + `--fl-elev-4`, width 640), `.quick-input-filter .monaco-inputbox` (52, 16px), `.quick-input-list .quick-input-list-entry` (the grid), `.quick-input-list-separator` (group labels).
 - P (new **0160-palette-v2.patch**): `src/vs/platform/quickinput/browser/quickInputList.ts` item height 22 → 40 (two-line 44); `quickInputController.ts` `layout()` top = the title-bar height + 4; a scope-chips row (`.quick-input-scopes`) whose chips set the value prefix; an agents quick-access provider on `~` (in core, or contributed by the Agents extension through a small proposed API). `>`, `@`, `#`, `:` stay upstream's.
@@ -662,7 +662,7 @@ Workbench: Geist + Geist Mono are bundled (0100). v2 changes the Windows UI stac
 | The accent | ember `oklch(.56 .15 42)`, white ink 5:1, both themes | The blind panel rejected blue + orange side by side (round 1) and stock blue as the accent (rounds 2–3); ember comes from the mark, so the brand owns it |
 | Needs-you | blue, marks only | Owner rule (2026-10-18); restricted to marks so it never competes with the accent |
 | Focus | neutral ring | An accent or blue ring on an off switch read as an error (rounds 5–6) |
-| Selection | fill + pill (lists), fill + top line (tabs), fill only (palette) | An inset bar on rounded rows read as "(" (round 7) |
+| Selection | fill + pill (lists), fill only (tabs, palette) | An inset bar on rounded rows read as "(" (round 7) |
 | Status | shapes | WCAG 1.4.1; CVD simulations |
 | Panels | attached, tone-separated, full width | Figma UI3's reversal; the owner's full-width rule |
 | Composer | visuals restyled, layout frozen | The owner's "complete change" order |
@@ -671,4 +671,4 @@ Workbench: Geist + Geist Mono are bundled (0100). v2 changes the Windows UI stac
 | Working (owner, 2026-10-20) | a warm neutral animated arc (`--status-working` = `--fg-2`); green only for done/success | Removes a fourth hue (taste critic) |
 | First run (owner, 2026-10-20) | "Ask before edits" stays the first-run default | Newcomer critic |
 | Codex mark (owner, 2026-10-20) | a closed figure-eight loop (§2.22b), vendor-neutral | `{ }` read as a JSON file |
-| Active tab | Modern UI pill tabs (`modernUIEditorTabStyle: pill`) with the 2px top line on the active pill's fill; height 24 (Modern UI's pill height; the strip's 32 is unchanged) | Spec §6.4 with upstream's pill geometry |
+| Active tab | Modern UI pill tabs (`modernUIEditorTabStyle: pill`) with the raised fill on the active pill and no top line (owner, 2026-10-21: no line above the active tab in any theme); height 24 (Modern UI's pill height; the strip's 32 is unchanged) | Spec §6.4 with upstream's pill geometry |

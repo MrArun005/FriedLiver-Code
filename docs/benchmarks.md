@@ -5,7 +5,7 @@ rendering). The FriedLiver app's numbers, and the RAM tool and test project used
 here (`scripts/ram-benchmark.ts`, `bench/fixture`), are in the
 [FriedLiver repo](https://github.com/MrArun005/FriedLiver/blob/main/docs/benchmarks.md).
 
-## The fork against VS Code and the FriedLiver app
+## The fork against VS Code and the FriedLiver app (the retired 0.x Electron app)
 
 The same container. Each app opens `bench/fixture` with `src/format.ts` in the
 editor, so the language features run. Then memory is sampled for 30 s.
@@ -59,6 +59,9 @@ check.
 | | GitHub Copilot | FriedLiver Agents (Claude, Codex, Gemini) |
 
 ## 15 agents at once
+
+The Demo agent used below is no longer in the product: it starts only with
+`FRIEDLIVER_TEST_AGENTS=1`, which `scripts/stress-demo.mjs` sets.
 
 What 15 agents streaming together cost, and what FriedLiver costs at rest.
 Measured with `scripts/stress-demo.mjs` on the packaged Linux build (VS Code

@@ -13,7 +13,7 @@
    is fixed on the branch, before merging, not during a release.
 2. **Actions → Release → Run workflow** on `main`
    ([`release.yml`](../.github/workflows/release.yml)). It refuses unless CI passed
-   on main's head, picks the next version (`v1.142.0-7` → `v1.142.0-8`; a new
+   on main's head, picks the next version (`v1.142.0-14` → `v1.142.0-15`; a new
    upstream version starts at `-1`), writes the notes from the titles of the pull
    requests merged since the last tag (grouped by `feat`/`fix`/`perf`/… prefix),
    builds every OS with [`build.yml`](../.github/workflows/build.yml), publishes the

@@ -1,7 +1,7 @@
 # FriedLiver fork: memory plan
 
 Why: Antigravity, itself a VS Code fork, ate the user's RAM. Measured here:
-VS Code at 761 MB against 314 MB for the FriedLiver Electron app. This plan
+VS Code at 761 MB against 314 MB for the FriedLiver Electron app (0.x, since retired). This plan
 lists what a Code - OSS fork can cut. Items 3, 6, 7 and 10–12 were measured
 with `scripts/stress-demo.mjs` (idle and 15 agents); their outcome is in the
 last column and the numbers in [benchmarks.md](benchmarks.md#cutting-memory-at-the-app-level).

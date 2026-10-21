@@ -48,7 +48,7 @@ start again after a restart until you run the command.
   allow or deny commands, edits and agent requests; switch a chat's approval
   level back to Manual.
 - **It needs your OK on the Mac** for anything that keeps allowing:
-  - **Auto** and **Edits** (auto-accept edits);
+  - **Auto** and **Edits** (Edit automatically on the Mac);
   - every **Always allow**;
   - an agent's own "don't ask again" / "for this session" answers;
   - "For this chat" on an agent request.

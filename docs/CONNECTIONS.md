@@ -19,7 +19,7 @@ The host side lives in `extensions/friedliver-agents/src/host/`
 | **@gemini …** | The same as Ask. A message that starts with `@claude`, `@codex`, `@gpt`, `@gemini` or `@antigravity` (or `@agy`) goes to that agent instead of this chat's. A mention later in the text is just text. | One turn in the consulted chat. |
 | **Pipe to** | From now on, each reply that finishes in this chat is sent to the other chat as a message. If the other chat is busy, the newest reply waits until it is idle. | One turn in the other chat per reply. |
 | **Forward** | Sends this chat's last reply to another chat once, e.g. a consultant's answer back to the main chat. | One turn in the other chat. |
-| **/discuss @… question** | The chat's agent and the ones you mention take turns on the question (read-only), then the chat's agent sums it up. Mentions go anywhere in the text, in any order: an agent (`@gemini`), a model one of them reported (`@opus`, `@gpt-5.6-terra`; a family name is its newest model), or both (`@claude/opus`, `@codex:gpt-5.6-luna`). The same agent can join twice on different models (`@opus @sonnet`), each in its own chat. The chat's own agent always takes part: naming it on its own model, or on none, adds nobody. An `@` in code, an email or a URL is no mention. A mention that fits several models, or none, gets a chip and a picker, and nothing is sent until it is settled. | One turn per participant per round, and the summing up. |
+| **/discuss @… question** | The chat's agent and the ones you mention take turns on the question (read-only), then the chat's agent sums it up. Mentions go anywhere in the text, in any order: an agent (`@gemini`), a model one of them reported (`@opus`, `@gpt-5.6-terra`; a family name is its newest model), or both (`@claude/opus`, `@codex:gpt-5.6-luna`). The same agent can join twice on different models (`@opus @sonnet`), each in its own chat. The chat's own agent always takes part: naming it on its own model, or on none, adds nobody. An `@` in code, an email or a URL is no mention. A mention that fits several models, or none, gets a chip and a picker, and nothing is sent until it is settled. The card has four layouts (`friedliver.discuss.layout`: `board+meter`, the default, `board`, `meter` or `timeline`); once finished, every layout shows the same conclusion. | One turn per participant per round, and the summing up. |
 | **Run on several agents** | One chat per agent you pick, all given the same message at once, shown side by side on the board. With "Own worktree" each gets its own git worktree and branch, so their edits never mix. | One turn each. |
 
 Every message that crosses shows in both chats, with the other chat's name.
@@ -108,7 +108,7 @@ question, a review, a command, a tool request) is closed and marked "Stopped
 when the window closed". A restored chat continues in its old agent session
 when the agent can reload it, and otherwise starts a new session and says so;
 either way its model, effort and approval level are applied again (Full auto
-comes back as Ask). Messages that were queued aren't saved.
+comes back as Manual). Messages that were queued aren't saved.
 Turning the setting off deletes the saved chats.
 
 ## The browser
@@ -135,6 +135,15 @@ opens by itself: only that command, or an agent's `browser_open` you allow.
   adds permissive CORS headers, and answers preflights with 204, for
   responses from `localhost`, `127.0.0.1` and `[::1]` in this browser only,
   through CDP's Fetch domain on pages FriedLiver is attached to.
+- **Downloads** (patch 0300): the browser saves downloads, with a progress
+  ring and a downloads list. A download an agent's action starts, or one from
+  a page an agent acted on since you last did, waits before any byte is
+  written until you allow it in that agent's chat; so does one a page starts
+  without a click, and one over 500 MB. Only http, https and a page's own blob
+  URLs download; file names are cleaned and never overwrite a file. When it
+  finishes, the agent is told the path, size and SHA-256. Without the patch
+  (the extension in stock VS Code) FriedLiver neither holds nor reports
+  downloads.
 
 ### Browser tools
 
@@ -155,7 +164,8 @@ this chat" on a browser request allows later browser actions in that chat,
 not agent-to-agent requests (and the other way round).
 
 Claude, Codex and Gemini get these tools with the rest of the `friedliver`
-server.
+server. Antigravity doesn't: FriedLiver's adapter for it uses the server only
+to read the project index on its behalf.
 
 ### Claude Code (extension or CLI) outside FriedLiver chats
 

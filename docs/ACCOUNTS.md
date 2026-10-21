@@ -8,6 +8,9 @@ the page on the agent's card).
 
 ![Agents & Accounts, dark](screenshots/agents/accounts-black-blue.png)
 
+(Screenshot from before the Beacon redesign; the cards are the same, the theme
+is now FriedLiver Dark.)
+
 ## What a card shows
 
 - **Status**: Not checked, Not installed, Needs sign-in, Signed in or Problem,
@@ -36,13 +39,18 @@ needs sign-in. What was learned is kept in the editor's global storage
 
 ## Per agent
 
-| | Claude | Codex | Gemini | Antigravity |
+Antigravity is listed first. It runs on macOS only for now, and because agy
+can't stop to ask, its Manual, Plan and /discuss chats are talk only
+(FriedLiver reads the project for it); Edit automatically and Auto run it in
+the project.
+
+| | Antigravity | Claude | Codex | Gemini |
 |---|---|---|---|---|
-| Browser / terminal sign-in (from the agent) | Claude Subscription, Anthropic Console (terminal) | ChatGPT (browser) | Log in with Google (browser) | none: agy has no ACP mode, so its own CLI line signs in |
-| Keys FriedLiver keeps | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY`, then ACP `api-key` | Gemini API key (`GEMINI_API_KEY`, then ACP `gemini-api-key`); Vertex AI (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`, or `GOOGLE_API_KEY`, with `GOOGLE_GENAI_USE_VERTEXAI=true`, then ACP `vertex-ai`) | none (agy's API-key mode lives in its own `~/.gemini/antigravity-cli/settings.json`, which FriedLiver never edits) |
-| Own CLI sign-in / sign-out | `claude auth login` / `claude auth logout` | `codex login` / `codex logout` | API key or Vertex AI in Agents & Accounts (Google sign-in: use Antigravity) / `gemini`, then `/signout` | `agy`, then Google OAuth / `agy`, then `/logout` |
-| Sign-out from the page | ACP `logout` | ACP `logout` | the CLI line | the CLI line |
-| Account reported | plan, email, organization or key source | ChatGPT plan and email, or API key | not reported; the card says which method is in use | not reported; the version is agy's (`agy --version`), the models are what `agy models` lists |
+| Browser / terminal sign-in (from the agent) | none: agy has no ACP mode, so its own CLI line signs in | Claude Subscription, Anthropic Console (terminal) | ChatGPT (browser) | none: FriedLiver doesn't offer Google sign-in for Gemini; use an API key or Vertex AI, or Antigravity for a Google account |
+| Keys FriedLiver keeps | none (agy's API-key mode lives in its own `~/.gemini/antigravity-cli/settings.json`, which FriedLiver never edits) | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY`, then ACP `api-key` | Gemini API key (`GEMINI_API_KEY`, then ACP `gemini-api-key`); Vertex AI (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`, or `GOOGLE_API_KEY`, with `GOOGLE_GENAI_USE_VERTEXAI=true`, then ACP `vertex-ai`) |
+| Own CLI sign-in / sign-out | `agy`, then Google OAuth / `agy`, then `/logout` | `claude auth login` / `claude auth logout` | `codex login` / `codex logout` | none (API key or Vertex AI only) / `gemini`, then `/signout` |
+| Sign-out from the page | the CLI line | ACP `logout` | ACP `logout` | the CLI line |
+| Account reported | not reported; the version is agy's (`agy --version`), the models are what `agy models` lists | plan, email, organization or key source | ChatGPT plan and email, or API key | not reported; the card says which method is in use |
 
 One key setup is kept per agent: saving the Gemini API key replaces Vertex AI
 settings and the other way round. After a key is saved, FriedLiver restarts the

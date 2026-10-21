@@ -6,11 +6,14 @@ from that tag.
 ## What ships
 
 `extensions/friedliver-theme` is a built-in extension with no code. It
-contributes four color themes and a set of `configurationDefaults`.
+contributes six color themes, the FriedLiver Icons product icon theme (stroke
+icons), the FriedLiver Files file icon theme and a set of `configurationDefaults`.
 
 | Theme | uiTheme | File |
 |---|---|---|
-| FriedLiver Black Blue (default) | vs-dark | `themes/friedliver-black-blue-color-theme.json` |
+| FriedLiver Dark (default, Beacon) | vs-dark | `themes/friedliver-dark-color-theme.json` |
+| FriedLiver Light (default light, Beacon) | vs | `themes/friedliver-light-color-theme.json` |
+| FriedLiver Black Blue | vs-dark | `themes/friedliver-black-blue-color-theme.json` |
 | FriedLiver Light Blue | vs | `themes/friedliver-light-blue-color-theme.json` |
 | FriedLiver Midnight Blue | vs-dark | `themes/friedliver-midnight-blue-color-theme.json` |
 | FriedLiver Graphite | vs-dark | `themes/friedliver-graphite-color-theme.json` |
@@ -39,10 +42,14 @@ color registry. The keys were checked against every `registerColor(...)` in
 | `raised` | selected and focused rows, the selected activity item and pane tab (`modernActivityBarItem.*`, `modernTab.*`), secondary buttons, quiet badges, status bar remote/debug/error/warning items. Hover is `raised` at 60% |
 | `line` / `line-strong` | seams inside one tone only: split editors, stacked views, menu separators, overlay outlines. Borders between surfaces of different tones are transparent: side bar, activity bar, panel, tab strip, title bar, status bar, sticky scroll headers, and Modern UI's card frames (`surface.border`, `modernPanel.border`, `modernActivityBar.border`, `editor.border`) |
 | `accent` | only: primary button, prominent extension button, activity badge, chat "needs input" indicator |
-| `accent-line` | focus rings (`focusBorder`, list focus outline, input focus). Alpha `a6` in dark themes and `cc` in Light Blue, so a ring is at least 3:1 against every surface |
+| `accent-line` | focus rings (`focusBorder`, list focus outline, input focus). Set per theme in `palette.json`; the theme test keeps a ring at least 3:1 against every surface |
 | `info` | an agent working: progress bar, chat in-progress border, queued tests, running notebook cells |
 | `warn` | git modified (decorations, gutter, overview ruler, minimap) and terminal yellow. Exception: warning diagnostics also use it, because VS Code needs a hue for warnings that is distinct from errors, and the palette has no other |
 | `ok` / `bad` | git added and deleted, diff inserted and removed, test pass and fail, errors |
+
+FriedLiver Dark and FriedLiver Light also pin about 80 keys each in
+`palette.json` (`overrides`): the floating surfaces, links in the decision
+blue, and the agent hues. The older four themes use the mapping above as is.
 
 Other decisions:
 - The cursor is `text`, not `accent`. Selection, word highlight and bracket
@@ -93,9 +100,11 @@ settings override all of them.
 
 | Setting | Value | Scope (source) | Why |
 |---|---|---|---|
-| `workbench.colorTheme` | `FriedLiver Black Blue` | window (`services/themes/common/themeConfiguration.ts:35`) | design |
-| `workbench.preferredDarkColorTheme` | `FriedLiver Black Blue` | window (`:45`) | design |
-| `workbench.preferredLightColorTheme` | `FriedLiver Light Blue` | window (`:55`) | design |
+| `workbench.colorTheme` | `FriedLiver Dark` | window (`services/themes/common/themeConfiguration.ts:35`) | design |
+| `workbench.preferredDarkColorTheme` | `FriedLiver Dark` | window (`:45`) | design |
+| `workbench.preferredLightColorTheme` | `FriedLiver Light` | window (`:55`) | design |
+| `workbench.productIconTheme` | `friedliver-icons` | window | stroke icons (Beacon) |
+| `workbench.iconTheme` | `friedliver-files` | window | file icons to match |
 | `editor.fontFamily` | `'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace` | language-overridable (`editor/common/config/editorOptions.ts:6416`) | fonts |
 | `editor.fontSize` | `13` | language-overridable | fonts |
 | `editor.lineHeight` | `1.55` (values under 8 are multipliers, `editorOptions.ts:3390`) | language-overridable | fonts |
@@ -112,7 +121,7 @@ settings override all of them.
 | `editor.cursorSmoothCaretAnimation` | `on` | language-overridable (`editorOptions.ts:6258`) | the caret glides to its new position; a CSS transition, no extra rendering |
 | `editor.smoothScrolling` | `true` | language-overridable (`editorOptions.ts:6780`) | animated scrolling; only runs while scrolling |
 | `editor.stickyScroll.enabled` | `true` | language-overridable (`editorOptions.ts:3204`) | keeps the enclosing scopes in view; already the upstream default, pinned |
-| `editor.padding.top` | `8` | language-overridable (`editorOptions.ts:3665`) | the first line doesn't touch the tab strip |
+| `editor.padding.top` | `8` | language-overridable (`editorOptions.ts:3665`) | the first line doesn't touch the tabs |
 | `window.commandCenter` | `true` | window (`browser/workbench.contribution.ts:917`) | the pill search field in the title bar; already the upstream default, pinned |
 | `workbench.tree.indent` | `12` | window (`platform/list/browser/listService.ts:1417`) | nesting is easier to follow than with 8px |
 | `workbench.list.smoothScrolling` | `true` | window (`listService.ts:1430`) | lists and trees scroll like the editor |
@@ -126,6 +135,22 @@ settings override all of them.
 | `typescript.tsserver.useSyntaxServer` | `never` | window (`extensions/typescript-language-features/package.json:2523`) | one tsserver per window instead of two, est. −40–80 MB and one Node process with TS/JS open (CORE-PERF C5). **Trade-off:** on large projects, syntax features (outline, folding, breadcrumbs, document highlights) wait for the semantic server's project load instead of answering at once. The key must be the `typescript.*` one: the extension reads `js/ts.tsserver.useSyntaxServer` first but only when a user or workspace set it (`src/utils/configuration.ts:23-37` ignores defaults there), then falls back to `typescript.*`, which sees this default. Either key in user settings wins |
 | `workbench.startupEditor` | `none` | resource (`contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts:317`) | no Welcome editor in a window with nothing to restore: est. −5–15 MB renderer and the time to restore it (CORE-PERF C8). Walkthroughs stay under Help |
 | `extensions.experimental.deferredStartupFinishedActivation` | `true` | window (`contrib/extensions/browser/extensions.contribution.ts:312`) | `onStartupFinished` extensions activate in 50 ms slices (`api/common/extHostExtensionService.ts:622-645`) instead of all in one extension-host task: fewer long tasks and less input lag in the first seconds. Each such extension may activate a few hundred ms later (CORE-PERF C7) |
+| `workbench.tree.renderIndentGuides` | `always` | window | nesting is visible without hovering |
+| `workbench.list.density` | `comfortable` | window | design |
+| `workbench.secondarySideBar.defaultVisibility` | `visibleInWorkspace` | window | the Agents panel opens with a project |
+| `workbench.hover.delay` | `500` | window | fewer accidental hovers |
+| `workbench.editor.tabSizing` | `shrink` | window | more tabs fit; every chat is its own editor tab |
+| `workbench.experimental.modernUIEditorTabStyle` | `pill` | window | Beacon pill tabs, no line above the active tab |
+| `workbench.editor.useModal` | `off` | window | settings and other editors open as tabs, not a modal |
+| `workbench.settings.editor` / `workbench.settings.useSplitJSON` | `ui` / `false` | window | the settings UI, not split JSON |
+| `editor.inlineSuggest.showToolbar` | `never` | language-overridable | quieter |
+| `scm.diffDecorationsGutterPattern` | added solid, modified striped (`added: false, modified: true`) | resource | design |
+| `diffEditor.renderSideBySideInlineBreakpoint` | `900` | window | side by side down to 900px wide |
+| `diffEditor.experimental.showMoves` | `true` | window | moved code shows as a move, not a delete plus an add |
+
+The icon-theme rows and the rows from `workbench.tree.renderIndentGuides` down
+were added after the 1.142 check; their Scope column is not re-checked against
+the source.
 
 Why `editor.cursorBlinking` stays `smooth` and not upstream's `blink`
 (CORE-PERF C6 tried `blink` and measured it worse). `blink` toggles the caret
@@ -215,60 +240,12 @@ What the fork keeps or changes from upstream, for the threat model in
 | Link protection (`linkProtectionTrustedDomains`) | `https://open-vsx.org` | product.json; other links ask before they open |
 | FriedLiver tools endpoint for agents that take MCP over HTTP | 127.0.0.1 only, random port, open from the first such session until the window closes; each request needs its chat's token (`Authorization: Bearer`), and another Host or Origin is refused | Agents extension, `src/bridge/http.ts`; SECURITY.md, "The HTTP endpoint" |
 
-## Geist fonts: patch pending
+## Geist fonts
 
-Status: **not written.** `/home/user/build/vscode` did not exist during this
-run (`ls: cannot access '/home/user/build': No such file or directory`).
-Until the patch lands, the `'Geist Mono'` entry in `editor.fontFamily` falls
-through to JetBrains Mono, Cascadia Code, Menlo or Consolas, and the UI keeps
-upstream's system font.
-
-Plan for `patches/0100-bundle-geist-fonts.patch`, against 1.142.0. It
-must be made with `git diff --binary` because it adds woff2 files, and it
-applies with `git apply`.
-
-1. **Add the font files** (OFL-1.1) from `@fontsource-variable/geist@5.3.0`
-   and `@fontsource-variable/geist-mono@5.3.0` (`files/`) to a new directory
-   `src/vs/workbench/browser/media/fonts/`:
-   - `geist-latin-wght-normal.woff2` (29,400 B)
-   - `geist-latin-ext-wght-normal.woff2` (16,512 B)
-   - `geist-mono-latin-wght-normal.woff2` (23,128 B)
-   - `geist-mono-latin-ext-wght-normal.woff2` (14,696 B)
-   - `OFL.txt` (the packages' `LICENSE`)
-
-   The total is about 84 KB. Cyrillic and Vietnamese subsets can be added the
-   same way. Also add them to `cglicenses.json` and `ThirdPartyNotices.txt` if
-   the build's license check requires it.
-2. **`src/vs/workbench/browser/media/style.css`** (loaded by
-   `workbench.desktop.main`):
-   - Add four `@font-face` rules: `font-family: 'Geist'` or `'Geist Mono'`,
-     `font-weight: 100 900`, `font-display: swap`,
-     `src: url('./fonts/<file>.woff2') format('woff2-variations')`. Copy the
-     `unicode-range` values from the packages' `index.css`. Latin is
-     `U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD`.
-     Latin-ext is
-     `U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF`.
-   - Prepend `"Geist", ` to each `font-family` on lines 12–29: the
-     `.monaco-workbench.mac`, `.windows` and `.linux` rules and their
-     `:lang(...)` variants. The system and CJK fonts stay as fallbacks.
-   - The CSP in `src/vs/code/electron-browser/workbench/workbench.html:41-45`
-     already allows `font-src 'self'`, so it needs no change.
-3. **`build/next/index.ts:517-522`**: add `'.woff2': 'file'` to the esbuild
-   `loader` map. Production bundles CSS for `vs/workbench/workbench.desktop.main`
-   (`build/next/index.ts:184`), and esbuild rejects an unknown asset
-   extension. Dev and transpile builds copy every non-TS file under `src/`
-   (`build/next/index.ts:270-292`), so they need nothing.
-4. **Editor re-measure.** The editor measures `editor.fontFamily` once and
-   caches the result (`src/vs/editor/browser/config/fontMeasurements.ts`). A
-   web font that finishes loading after that leaves fallback metrics until
-   the next display change. The only upstream hook is
-   `src/vs/workbench/contrib/codeEditor/electron-browser/displayChangeRemeasureFonts.ts:25`.
-   Add to the same contribution:
-   `mainWindow.document.fonts.addEventListener('loadingdone', () => FontMeasurements.clearAllFontInfos())`.
-   An alternative is to preload the two mono files with `<link rel="preload">`
-   in `workbench.html`.
-
-That touches three upstream files (`style.css`, `build/next/index.ts`,
-`displayChangeRemeasureFonts.ts`) and adds one directory. The terminal
-(xterm) uses the same document, so it gets Geist Mono from the same
-`@font-face` rules.
+Patch `0100-bundle-geist-fonts` ships Geist and Geist Mono (OFL-1.1, variable
+woff2, Latin and Latin-ext) in `src/vs/workbench/browser/media/fonts/`. It adds
+the `@font-face` rules and puts Geist first in the workbench font stacks in
+`style.css`, makes Geist Mono the first editor font on every platform
+(`fontInfo.ts`), teaches the build's esbuild loader `.woff2`
+(`build/next/index.ts`), and re-measures editor fonts once the web fonts finish
+loading (`displayChangeRemeasureFonts.ts`). The system fonts stay as fallbacks.
