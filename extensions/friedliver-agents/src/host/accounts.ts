@@ -351,7 +351,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
 
   /** The line FriedLiver would type for an agent: its install command or its own CLI's sign-in or sign-out. */
   cliLine(agent: VendorKey, what: CliWhat): string | null {
-    return what === 'install' ? installCommandFor(agent) : cliLineFor(CLI_ACCOUNTS[agent][what].command);
+    return what === 'install' ? installCommandFor(agent) : (CLI_ACCOUNTS[agent][what] ? cliLineFor(CLI_ACCOUNTS[agent][what]!.command) : null);
   }
 
   /**
@@ -369,7 +369,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     });
     terminal.show();
     terminal.sendText(line, true);
-    const then = what === 'install' ? undefined : CLI_ACCOUNTS[agent][what].then;
+    const then = what === 'install' ? undefined : CLI_ACCOUNTS[agent][what]?.then;
     if (then) void vscode.window.showInformationMessage(`${name}: ${then}`);
     const done = vscode.window.onDidCloseTerminal(async (t) => {
       if (t !== terminal) return;
