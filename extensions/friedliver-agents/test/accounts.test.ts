@@ -140,9 +140,10 @@ describe('sign-in methods per agent', () => {
 
   it("each vendor's own CLI lines are plain enough to type into a terminal", () => {
     for (const cli of Object.values(CLI_ACCOUNTS)) {
-      expect(cliLineFor(cli.signIn.command)).toBe(cli.signIn.command);
+      if (cli.signIn) expect(cliLineFor(cli.signIn.command)).toBe(cli.signIn.command);
       expect(cliLineFor(cli.signOut.command)).toBe(cli.signOut.command);
     }
+    expect(CLI_ACCOUNTS.gemini.signIn).toBeUndefined(); // Google login is Antigravity's
     expect(cliLineFor('codex logout; rm -rf ~')).toBeNull();
     expect(cliLineFor('codex logout\n')).toBeNull();
   });
