@@ -28,8 +28,9 @@ Installers (none notarized; macOS signed with FriedLiver's own certificate when 
 | macOS | `FriedLiver-darwin-<arch>-<version>.dmg` | `codesign` (the self-signed certificate, or ad-hoc without it), then `hdiutil` |
 | Linux | `friedliver_<version>_amd64.deb` | `gulp vscode-linux-<arch>-prepare-deb` and `-build-deb` |
 
-CI (`.github/workflows/build.yml`) builds all three with the portable apps on
-every push to `main`. For a pushed tag `vX.Y.Z` or `vX.Y.Z-N` (the upstream
+`.github/workflows/build.yml` builds all three with the portable apps when the
+Release workflow calls it, on a manual run (**Actions → Build FriedLiver**), or
+for a pushed tag; never on a branch push. For a pushed tag `vX.Y.Z` or `vX.Y.Z-N` (the upstream
 version, then FriedLiver's own build number) it also publishes a GitHub
 release with every installer, the portable apps and `SHA256SUMS.txt`. Only that
 release job gets a token that can write (`contents: write`).
@@ -107,7 +108,7 @@ and forwards levels at most 30 times a second, to the dictating chat only.
   extension's `bin/` (gitignored, shipped by `.vscodeignore`), with its
   `Info.plist` embedded, ad-hoc signed. `build.yml` runs it on macOS before
   `prepare.mjs`, which copies it into the app; `ci.yml` type-checks it on
-  every push (`build.sh --check`). For a local macOS build, run it before
+  every push to `main` (`build.sh --check`). For a local macOS build, run it before
   `prepare.mjs`. Needs Xcode or the Command Line Tools.
 - `build.mjs` (macOS installer step) adds `NSMicrophoneUsageDescription`
   and `NSSpeechRecognitionUsageDescription` to the app's `Info.plist` and

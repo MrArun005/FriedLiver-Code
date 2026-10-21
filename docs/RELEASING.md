@@ -2,11 +2,14 @@
 
 "Merge" means two clicks, no re-integration:
 
-1. **Merge the green pull requests** into `main` (merge commit). They are already
-   up to date with `main`: after every push to `main`,
-   [`update-prs.yml`](../.github/workflows/update-prs.yml) merges `main` into each
-   open pull request that is behind (a merge, never a rebase), runs CI on it, and
-   comments on any that conflict, with the commands to fix it. A conflicting branch
+1. **Merge the green pull requests** into `main` (merge commit). To bring them
+   up to date first, run **Actions → Update pull requests** by hand
+   ([`update-prs.yml`](../.github/workflows/update-prs.yml), manual only): it merges
+   `main` into each open pull request that is behind (a merge, never a rebase),
+   runs CI on it, and comments on any that conflict, with the commands to fix it.
+   CI on a pull request is Linux only (lint, typecheck, tests, extensions); the
+   macOS and Windows tests run on the push to `main`, and step 2 needs that run
+   green. A conflicting branch
    is fixed on the branch, before merging, not during a release.
 2. **Actions → Release → Run workflow** on `main`
    ([`release.yml`](../.github/workflows/release.yml)). It refuses unless CI passed
