@@ -20,4 +20,11 @@ export const CATALOG: ModelCatalog = {
     { value: 'gemini-3.1-flash', name: 'Gemini 3.1 Flash' },
     { value: 'argon', name: 'Argon' },
   ],
+  antigravity: [
+    { value: 'Gemini 3.8 Flash (High)', name: 'Gemini 3.8 Flash (High)' },
+    { value: 'Gemini 3.8 Flash (Medium)', name: 'Gemini 3.8 Flash (Medium)' },
+    { value: 'Gemini 3.8 Flash (Low)', name: 'Gemini 3.8 Flash (Low)' },
+    { value: 'Gemini 3.1 Pro (High)', name: 'Gemini 3.1 Pro (High)' },
+    { value: 'Gemini 3.1 Pro (Low)', name: 'Gemini 3.1 Pro (Low)' },
+  ],
 };

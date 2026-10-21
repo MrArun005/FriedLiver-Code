@@ -458,6 +458,18 @@ const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 const MAX_MODELS = 100;
 
 /**
+ * Default Gemini models matching Google Antigravity UI.
+ * When `agy models` is offline, empty, or before sign-in, these are offered.
+ */
+export const AGY_DEFAULT_MODELS: AgyChoice[] = [
+  { value: 'Gemini 3.8 Flash (High)', name: 'Gemini 3.8 Flash (High)', description: 'Fast, high reasoning (default in Antigravity)' },
+  { value: 'Gemini 3.8 Flash (Medium)', name: 'Gemini 3.8 Flash (Medium)', description: 'Balanced speed and reasoning' },
+  { value: 'Gemini 3.8 Flash (Low)', name: 'Gemini 3.8 Flash (Low)', description: 'Fastest response time' },
+  { value: 'Gemini 3.1 Pro (High)', name: 'Gemini 3.1 Pro (High)', description: 'Deep reasoning, complex coding' },
+  { value: 'Gemini 3.1 Pro (Low)', name: 'Gemini 3.1 Pro (Low)', description: 'Pro capability with lower reasoning latency' },
+];
+
+/**
  * `agy models` as choices. Its output isn't documented, so this is forgiving: one model per
  * line; a header ("Fetching…", "Available models:") skipped; bullets and a current marker
  * ("*", "✓", "(current)", "(default)") stripped; "slug   Label" (two or more spaces) read
@@ -481,7 +493,7 @@ export function parseModels(stdout: string): { choices: AgyChoice[]; current?: s
     if (marked && !current) current = choice.value;
     if (choices.length >= MAX_MODELS) break;
   }
-  return { choices, current };
+  return { choices: choices.length ? choices : AGY_DEFAULT_MODELS, current };
 }
 
 /** The model in agy's own settings (~/.gemini/antigravity-cli/settings.json `model`), when it is one of the choices. Read only. */

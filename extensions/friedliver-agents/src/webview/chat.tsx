@@ -380,27 +380,30 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
         )}
       </Popover>
       <Popover label="New chat with" title="New chat" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted" trigger={<Icon name="plus" />}>
-        {(close) => (
-          <>
-            <div class="fl-menu__title" aria-hidden="true">New chat with</div>
-            {agents.map((agent) => (
-              <button
-                key={agent}
-                role="menuitem"
-                onClick={() => {
-                  close(false);
-                  send({ type: 'newChat', agent });
-                }}
-              >
-                <AgentMark agent={agent} />
-                <span class="grow">{AGENT_FACES[agent].name}</span>
-                <SignInMark agent={agent} />
-              </button>
-            ))}
-            <div class="fl-menu__sep" role="separator" />
-            <MenuItem icon="key" label="Agents &amp; Accounts…" onSelect={() => (close(false), send({ type: 'openAccounts' }))} />
-          </>
-        )}
+        {(close) => {
+          const menuAgents = agents.includes('antigravity') ? ['antigravity' as const, ...agents.filter((a) => a !== 'antigravity')] : agents;
+          return (
+            <>
+              <div class="fl-menu__title" aria-hidden="true">New chat with</div>
+              {menuAgents.map((agent) => (
+                <button
+                  key={agent}
+                  role="menuitem"
+                  onClick={() => {
+                    close(false);
+                    send({ type: 'newChat', agent });
+                  }}
+                >
+                  <AgentMark agent={agent} />
+                  <span class="grow">{AGENT_FACES[agent].name}</span>
+                  <SignInMark agent={agent} />
+                </button>
+              ))}
+              <div class="fl-menu__sep" role="separator" />
+              <MenuItem icon="key" label="Agents &amp; Accounts…" onSelect={() => (close(false), send({ type: 'openAccounts' }))} />
+            </>
+          );
+        }}
       </Popover>
       <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" class="manager-btn" onClick={() => send({ type: 'openTasks' })} />
     </div>

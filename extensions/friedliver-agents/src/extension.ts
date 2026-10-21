@@ -1227,11 +1227,13 @@ export class Controller {
   // ---- Commands ----
 
   async newChat(agent?: AgentKey, surface?: Surface): Promise<string | undefined> {
+    const shown = shownAgents(testAgentsOn());
+    const ordered = shown.includes('antigravity') ? ['antigravity', ...shown.filter((a) => a !== 'antigravity')] : shown;
     const chosen =
       agent ??
       (
         await vscode.window.showQuickPick(
-          shownAgents(testAgentsOn()).map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
+          ordered.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
           { title: 'New chat with…' },
         )
       )?.agent;

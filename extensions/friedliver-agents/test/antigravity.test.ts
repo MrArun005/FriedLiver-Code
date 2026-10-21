@@ -7,7 +7,7 @@ import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
 import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGY_MODES, TALK_LIMITS, extraArgs, geminiFingerprint, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
+import { AGY_DEFAULT_MODELS, AGY_MODES, TALK_LIMITS, extraArgs, geminiFingerprint, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
 import { PLATFORM_REFUSAL, agyAgent, type AgyAdapterOptions } from '@friedliver/main/agents/agyAcp';
 import { findProgram } from '@friedliver/main/agents/processes';
 import { DEFAULT_AGENTS } from '@friedliver/main/agents/registry';
@@ -84,6 +84,11 @@ describe('agy models', () => {
 
   it('names tool kinds from agy’s tool names', () => {
     expect(['view_file', 'grep_search', 'write_to_file', 'replace_file_content', 'run_command', 'read_url_content'].map(toolKind)).toEqual(['read', 'search', 'edit', 'edit', 'execute', 'fetch']);
+  });
+
+  it('falls back to AGY_DEFAULT_MODELS when output has no models', () => {
+    expect(parseModels('').choices).toEqual(AGY_DEFAULT_MODELS);
+    expect(parseModels('Fetching available models...\n').choices).toEqual(AGY_DEFAULT_MODELS);
   });
 });
 

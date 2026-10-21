@@ -22,7 +22,7 @@ function Welcome() {
   const now = useNow(30_000);
   const roster = useRoster();
   const [text, setText] = useState('');
-  const agent: AgentKey = preselectAgents(roster, ['claude'])[0] ?? 'claude';
+  const agent: AgentKey = preselectAgents(roster, ['antigravity', 'claude'])[0] ?? 'antigravity';
   const chats = openChats(state.chats);
   const sum = welcomeSummary(chats, now);
   const firstRun = !recent.length && !state.chats.length;

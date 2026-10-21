@@ -43,6 +43,12 @@ const MODES = {
     choice('agent-full-access', 'Full access', 'Unrestricted access to the internet and any file on your computer'),
   ],
   gemini: [choice('default', 'Default', 'Prompts for approval'), choice('autoEdit', 'Auto Edit', 'Auto-approves edit tools'), choice('yolo', 'YOLO', 'Auto-approves all tools'), choice('plan', 'Plan', 'Read-only mode')],
+  antigravity: [
+    choice('read-only', 'Read only', 'Talk only: no files, commands or tools of its own; FriedLiver reads the project for it'),
+    choice('plan', 'Plan', 'Talk only, planning: FriedLiver reads the project for it; nothing changes'),
+    choice('accept-edits', 'Accept edits', 'Edits files without asking; commands are refused unless allowed in agy’s own settings'),
+    choice('full', 'Full access', 'Auto-approves all tool requests: edits and commands'),
+  ],
 };
 const COMMANDS = {
   claude: [
@@ -59,19 +65,29 @@ const COMMANDS = {
     { name: 'memory', description: 'Manage memory' },
     { name: 'init', description: 'Analyze the project and create a GEMINI.md' },
   ],
+  antigravity: [],
 };
 function session(agentKey, mode, { model = 'default', effort, used, fast } = {}) {
   const options = [select('mode', 'Mode', 'mode', mode, MODES[agentKey])];
   if (agentKey === 'gemini') {
     options[0].via = 'mode';
     options.push({ ...select('model', 'Model', 'model', model, [choice('auto', 'Auto'), choice('pro', 'Pro'), choice('flash', 'Flash')]), via: 'model' });
+  } else if (agentKey === 'antigravity') {
+    options.push(select('model', 'Model', 'model', model === 'default' ? 'Gemini 3.8 Flash (High)' : model, [
+      choice('Gemini 3.8 Flash (High)', 'Gemini 3.8 Flash (High)', 'Fast, high reasoning (default in Antigravity)'),
+      choice('Gemini 3.8 Flash (Medium)', 'Gemini 3.8 Flash (Medium)', 'Balanced speed and reasoning'),
+      choice('Gemini 3.8 Flash (Low)', 'Gemini 3.8 Flash (Low)', 'Fastest response time'),
+      choice('Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (High)', 'Deep reasoning, complex coding'),
+      choice('Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (Low)', 'Pro capability with lower reasoning latency'),
+    ]));
+    options.push(select('effort', 'Effort', 'thought_level', effort ?? 'high', efforts(['low', 'medium', 'high'])));
   } else {
     options.push(select('model', 'Model', 'model', model, [choice('default', 'Default', 'Recommended', 'Recommended'), choice('large', 'Large', 'Most capable', 'All models'), choice('small', 'Small', 'Fastest', 'All models')]));
     options.push(select(agentKey === 'codex' ? 'reasoning_effort' : 'effort', agentKey === 'codex' ? 'Reasoning effort' : 'Effort', 'thought_level', effort ?? 'high', efforts(['low', 'medium', 'high', 'xhigh', 'max'])));
     options.push({ id: agentKey === 'codex' ? 'fast-mode' : 'fast', name: 'Fast mode', description: 'Faster responses on supported models', category: 'model_config', type: 'boolean', current: !!fast, choices: [], via: 'option' });
   }
   if (agentKey === 'codex') options.push(select('collaboration_mode', 'Collaboration mode', 'collaboration_mode', 'default', [choice('default', 'Default'), choice('plan', 'Plan', 'Plan before making changes')]));
-  return { options, commands: COMMANDS[agentKey], live: true, ...(used ? { usage: { used, size: 200_000, cost: { amount: used / 140_000, currency: 'USD' } } } : {}) };
+  return { options, commands: COMMANDS[agentKey] ?? [], live: true, ...(used ? { usage: { used, size: 200_000, cost: { amount: used / 140_000, currency: 'USD' } } } : {}) };
 }
 
 export function fixture(now = Date.now()) {

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import {
   AGY_DEFAULT,
+  AGY_DEFAULT_MODELS,
   AGY_EFFORTS,
   AGY_MODES,
   TALK_LIMITS,
@@ -205,7 +206,8 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
     const { code, out, err } = await call(['models'], cwd);
     if (needsSignIn(`${out}\n${err}`)) throw acp.RequestError.authRequired(undefined, 'Antigravity needs a sign-in: run `agy` in a terminal.');
     if (code !== 0) throw new acp.RequestError(-32603, 'Internal error', { details: (err || out).trim().slice(0, 2000) || `agy models exited with ${code}` });
-    return parseModels(out).choices;
+    const parsed = parseModels(out).choices;
+    return parsed.length ? parsed : AGY_DEFAULT_MODELS;
   }
 
   function configOptions(s: Session): acp.SessionConfigOption[] {
@@ -448,7 +450,9 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
       const server = params.mcpServers.find((m): m is acp.McpServerStdio => m.name === 'friedliver' && 'command' in m && typeof m.command === 'string');
       const bridge = server ? { command: server.command, args: server.args ?? [], env: Object.fromEntries((server.env ?? []).map((v) => [v.name, v.value])) } : undefined;
       // Talk only until FriedLiver sets the chat's level: the safe start.
-      const s: Session = { cwd, root, mode: 'read-only', model: settingsModel(settings, models) ?? AGY_DEFAULT, effort: AGY_DEFAULT, models, conversations: new Map(), bridge };
+      // Default to Antigravity UI's default model (Gemini 3.8 Flash (High)) if no settings model.
+      const defaultModel = settingsModel(settings, models) ?? models.find((m) => m.value.includes('3.8 Flash (High)'))?.value ?? AGY_DEFAULT;
+      const s: Session = { cwd, root, mode: 'read-only', model: defaultModel, effort: AGY_DEFAULT, models, conversations: new Map(), bridge };
       sessions.set(sessionId, s);
       return { sessionId, configOptions: configOptions(s) };
     })
