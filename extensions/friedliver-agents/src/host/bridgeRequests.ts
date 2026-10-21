@@ -99,7 +99,7 @@ export class BridgeRequests {
    * external MCP session `<callerId> browser <origin>`, so a new session or another site asks again.
    */
   private readonly allowedChats = new Set<string>();
-  /** Chats whose browser showed a page from outside this computer and its network this turn. */
+  /** Chats whose browser showed a page from outside this computer and its network, kept for the chat's life. */
   private readonly remote = new Set<string>();
   /** For each chat, the chats it is waiting on through ask_agent. */
   private readonly waits = new Map<string, Set<string>>();
@@ -187,9 +187,8 @@ export class BridgeRequests {
   private async browser(caller: ChatView, call: BrowserCall, signal: AbortSignal): Promise<string> {
     if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
     if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
-    // Awaited only when the chat already saw a remote page, or there is a page to act on or read (an open
-    // needs none: a page the agent never looked at can't have steered it).
-    const guard = this.guardsOn() && (this.remote.has(caller.id) || (this.host.browserPage && call.tool !== 'browser_open')) ? await this.localPivot(caller.id, call) : this.noteRemote(caller.id, call);
+    // Awaited only when the chat already saw a remote page or there is a page to look at.
+    const guard = this.guardsOn() && (this.remote.has(caller.id) || this.host.browserPage) ? await this.localPivot(caller.id, call) : this.noteRemote(caller.id, call);
     if (!browserNeedsApproval(call.tool, undefined)) return this.host.browser(caller.id, call, signal);
     const askDownload = (d: DownloadInfo) => this.download(caller, d, signal);
     const text =
@@ -448,7 +447,6 @@ export class BridgeRequests {
    * the user. When stopped, the consultations it waits on stop too.
    */
   settle(chatId: string, stopped: boolean): void {
-    this.remote.delete(chatId);
     for (const p of [...this.pending.values()]) if (p.chatId === chatId) p.resolve('denied');
     if (!stopped) return;
     for (const target of this.waits.get(chatId) ?? []) void this.host.cancel(target);
@@ -461,6 +459,7 @@ export class BridgeRequests {
 
   forget(chatId: string): void {
     this.settle(chatId, true);
+    this.remote.delete(chatId);
     // Every grant the chat holds: browser, memory, download, system … (keys are "<chatId> <what>").
     this.allowedChats.delete(chatId);
     for (const key of [...this.allowedChats]) if (key.startsWith(`${chatId} `)) this.allowedChats.delete(key);

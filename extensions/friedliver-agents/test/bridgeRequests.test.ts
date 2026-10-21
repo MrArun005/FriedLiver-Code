@@ -294,6 +294,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
     const page = { origin: 'https://www.irctc.co.in', password: false };
     h.browser = async (chatId, call, _s, expect) => (done.push({ tool: call.tool, chatId, expect }), 'ok');
     h.browserPage = async () => ({ ...page });
+    h.lookup = async () => ['93.184.216.34'];
     h.notify = (a) => void asks.push(a);
     h.permissions = store;
     return { h, done, asks, page, store, requests: new BridgeRequests(h), signal: new AbortController().signal };
@@ -303,6 +304,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
   it('remembers a website by its exact origin, for every chat, and rechecks the origin when acting', async () => {
     const { h, done, page, store, requests, signal } = setup();
     const open = requests.call('chat-1', { tool: 'browser_open', url: 'https://www.irctc.co.in/nget/train-search' }, signal);
+    await tick();
     const [item] = bridgeItems(h);
     expect(item).toMatchObject({ state: 'awaiting', always: 'https://www.irctc.co.in' });
     if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
@@ -328,6 +330,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
     const user = memoryStore();
     const first = setup(memoryPermissions({ user }));
     const open = first.requests.call('chat-1', { tool: 'browser_open', url: 'https://www.irctc.co.in' }, first.signal);
+    await tick();
     const [item] = bridgeItems(first.h);
     if (item.kind === 'bridge') first.requests.answer(item.requestId, 'allowAlways');
     await open;
@@ -364,6 +367,7 @@ describe('"Always allow", remembered for every chat and later session', () => {
     const { h, requests, signal } = setup();
     h.permissions = undefined;
     const open = requests.call('chat-1', { tool: 'browser_open', url: 'https://a.example' }, signal);
+    await tick();
     const [item] = bridgeItems(h);
     expect(item).not.toHaveProperty('always');
     if (item.kind === 'bridge') requests.answer(item.requestId, 'allowAlways');
@@ -491,17 +495,32 @@ describe("Full auto's hard limits in the browser", () => {
     expect(items().at(-1)).toMatchObject({ tool: 'browser_click', state: 'awaiting', guard: expect.stringContaining('localhost:3000') });
   });
 
-  it("goes on as before for the user's own dev server, remote to remote, and after the turn", async () => {
+  it("goes on as before for the user's own dev server, and remote to remote", async () => {
     const { requests, items, signal, goTo } = setup();
     goTo('http://localhost:3000');
     await requests.call('chat-1', { tool: 'browser_click', text: 'Save' }, signal);
     await requests.call('chat-1', { tool: 'browser_open', url: 'http://localhost:3000/settings' }, signal);
     await requests.call('chat-1', { tool: 'browser_open', url: 'https://docs.test/' }, signal);
     await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/' }, signal);
+    expect(items().every((i) => i.state === 'allowed')).toBe(true);
+  });
+
+  it('remembers the remote page past the turn, for the chat', async () => {
+    const { requests, items, signal, goTo } = setup();
+    await requests.call('chat-1', { tool: 'browser_open', url: 'https://evil.test/' }, signal);
     requests.settle('chat-1', false);
     goTo('http://localhost:3000');
-    await requests.call('chat-1', { tool: 'browser_reload' }, signal);
-    expect(items().every((i) => i.state === 'allowed')).toBe(true);
+    void requests.call('chat-1', { tool: 'browser_reload' }, signal).catch(() => {});
+    await flush();
+    expect(items().at(-1)).toMatchObject({ state: 'awaiting', guard: expect.stringContaining('localhost:3000') });
+  });
+
+  it('an open from a remote page the agent never opened itself asks too', async () => {
+    const { requests, items, signal, goTo } = setup();
+    goTo('https://evil.test');
+    void requests.call('chat-1', { tool: 'browser_open', url: 'http://[::ffff:7f00:1]:9222/' }, signal).catch(() => {});
+    await flush();
+    expect(items().at(-1)).toMatchObject({ state: 'awaiting', guard: expect.stringContaining('9222') });
   });
 
   it('a user who turned the limits off gets Full auto as before', async () => {

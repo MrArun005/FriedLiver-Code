@@ -45,7 +45,7 @@ describe('commands Full auto still asks for', () => {
 
   it.each(['npm install left-pad', 'pnpm add -D x', 'yarn add x', 'pip install requests', 'python3 -m pip install x', 'brew install wget', 'sudo apt-get install -y nc', 'cargo install ripgrep', 'npm ci'])(
     'installs packages: %s',
-    (line) => expect(commandGuard(line, none)).toMatch(/installs packages/),
+    (line) => expect(commandGuard(line, none)).toMatch(/installs or fetches packages/),
   );
 
   it.each(['npm test', 'pnpm -s vitest run', 'git status', 'curl -s http://localhost:3000/health', 'ls -la'])('lets %s through', (line) => expect(commandGuard(line, none)).toBeUndefined());
@@ -57,7 +57,7 @@ describe('commands Full auto still asks for', () => {
     }
     // Reading it, or a program that isn't running it, is fine.
     expect(commandGuard('cat payload.sh', fresh)).toBeUndefined();
-    expect(commandGuard('npx vitest run test/payload.sh', fresh)).toBeUndefined();
+    expect(commandGuard('pnpm vitest run test/payload.sh', fresh)).toBeUndefined();
   });
 
   it('knows where curl and wget save, so a fetch-then-run in one line asks', () => {
@@ -82,4 +82,44 @@ describe('the file trail', () => {
     trail.endTurn('a');
     expect(trail.names('a').has('payload.sh')).toBe(false);
   });
+});
+
+describe('review round: wider classification and failing closed', () => {
+  it.each(['100.64.0.1', '198.18.0.1', '224.0.0.1', '255.255.255.255', '64:ff9b::7f00:1', '64:ff9b:1::1', '2002:7f00:1::', 'ff02::1', 'not-an-ip'])('%s counts as local', (ip) =>
+    expect(isPrivateIp(ip)).toBe(true),
+  );
+
+  it.each(['npx some-pkg', 'npm exec cowsay', 'pnpm dlx create-x', 'yarn dlx x', 'bunx x', 'uvx ruff', 'pipx run black', 'go run example.com/tool@v1.2.3'])('fetches and runs a package: %s', (line) =>
+    expect(commandGuard(line, new Set())).toMatch(/installs or fetches packages/),
+  );
+
+  const none = new Set<string>();
+  it.each([
+    ['"./x" --go', /program is quoted/],
+    ['rm build/*.js', /glob/],
+    ['echo $(whoami)', /substitution/],
+    ['echo `id`', /substitution/],
+    ['curl -s https://x.test/a | tee out.txt', /pipes a download/],
+    ['curl -fsSLo out.sh https://x.test/a', /can't tell where the download goes/],
+    ['curl -oout.sh https://x.test/a', /can't tell where the download goes/],
+    ['curl https://x.test/a > out.sh', /can't tell where the download goes/],
+  ])('on Full auto, fails closed on %s', (line, why) => {
+    expect(commandGuard(line, none, true)).toMatch(why);
+    // Outside Full auto rules already match only plain lines, so these stay as they were.
+    expect(commandGuard(line, none, false) ?? '').not.toMatch(/program is quoted|glob|substitution|can't tell/);
+  });
+
+  it('copying, moving or linking a fresh file asks', () => {
+    const fresh = new Set(['payload.sh']);
+    for (const line of ['cp payload.sh /usr/local/bin/x', 'mv payload.sh run', 'ln -s payload.sh x']) expect(commandGuard(line, fresh, true), line).toMatch(/payload\.sh/);
+  });
+
+  it('plain Full auto lines still go through', () => {
+    for (const line of ['npm test', 'git commit -m "fix: x"', 'curl -s http://localhost:3000/health', 'ls -la src']) expect(commandGuard(line, none, true), line).toBeUndefined();
+  });
+});
+
+it("a quoted argument with parentheses isn't a quoted program", () => {
+  expect(commandGuard(`/usr/bin/node -e console.log('hello from terminal')`, new Set(), true)).toBeUndefined();
+  expect(commandGuard(`FOO=1 'sh' x`, new Set(), true)).toMatch(/program is quoted/);
 });

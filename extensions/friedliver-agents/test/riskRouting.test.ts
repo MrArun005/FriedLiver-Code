@@ -315,7 +315,7 @@ describe("Full auto's hard limits on commands", () => {
     const chat = await core.createChat('demo', { approval: 'edits' });
     let turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'npm install left-pad' })}`);
     await waitFor(() => core.decisions().length === 1);
-    expect(perm(core, chat.id)).toMatchObject({ detail: { guard: 'Full auto still asks: the command installs packages' } });
+    expect(perm(core, chat.id)).toMatchObject({ detail: { guard: 'Full auto still asks: the command installs or fetches packages' } });
     expect(perm(core, chat.id)?.auto).toBeUndefined();
     core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
     await turn;
