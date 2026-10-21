@@ -44,8 +44,8 @@ What changes from stock VS Code:
   has a shape (◉ needs you, ◠ working, ✓ done, ⊗ failed). Every chat is its own
   tab in the top row, each agent shows its real logo, and errors pop up as
   toasts that close by themselves ([design system](docs/design/COMPONENTS.md)).
-- **`/discuss`.** `/discuss @opus @gpt-5.6-terra @agy Postgres or MySQL?` (agents
-  or models, any order) lets agents take turns read-only, answer each other,
+- **`/discuss`.** `/discuss @claude @codex @agy Postgres or MySQL?` (agents,
+  or a model by name, in any order) lets agents take turns read-only, answer each other,
   and end with a conclusion card: what they agree on, where they still
   disagree, and a next step to carry out with one click.
 - **A project index agents query instead of reading whole files** (outline,
