@@ -552,33 +552,11 @@
 	pointer-events: none;
 }
 
-/* ---- Editor tabs §6.4: pills 24 (Modern UI's pill height), r-ctl; the active one raised with a
-   2px sel-fg line along its top edge, inset 8, that slides between tabs. */
+/* ---- Editor tabs §6.4: pills 24 (Modern UI's pill height), r-ctl. No line above the active tab, in any theme (owner, 2026-10-21). */
 
-.monaco-workbench.modern-ui-tabs:not(.modern-ui-connected-editor-tabs):not(.hc-black):not(.hc-light) .part.editor .tabs-container > .tab.active:not(.multi-selected) > .tab-fill::before {
-	top: 0;
-	right: var(--fl-sp-2);
-	left: var(--fl-sp-2);
-	height: var(--fl-focus-w);
-	border-radius: 0 0 var(--fl-r-pill) var(--fl-r-pill);
-	background-color: var(--vscode-tab-activeBorderTop);
-	transform-origin: center;
-}
-
-.monaco-workbench.monaco-enable-motion.modern-ui-tabs:not(.monaco-reduce-motion):not(.modern-ui-connected-editor-tabs):not(.hc-black):not(.hc-light) .part.editor .tabs-container > .tab.active:not(.multi-selected) > .tab-fill::before {
-	animation: fl-tab-line var(--fl-dur-spring) var(--fl-spring-snap) both;
-}
-
-@keyframes fl-tab-line {
-	from {
-		opacity: 0;
-		transform: scaleX(0.4);
-	}
-
-	to {
-		opacity: 1;
-		transform: none;
-	}
+.monaco-workbench .part.editor .tabs-container > .tab > .tab-fill::before,
+.monaco-workbench .part.editor .tabs-container > .tab .tab-border-top-container {
+	display: none !important;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
