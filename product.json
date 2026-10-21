@@ -45,7 +45,7 @@
   "enableTelemetry": false,
   "agentsTelemetryAppName": null,
   "voiceWsUrl": null,
-  "defaultChatAgent": "antigravity",
+  "defaultChatAgent": null,
   "builtInExtensionsEnabledWithAutoUpdates": [],
   "sessionsWindowAllowedExtensions": [],
   "trustedExtensionAuthAccess": {

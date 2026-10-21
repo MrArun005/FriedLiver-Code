@@ -7,7 +7,7 @@ import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
 import { build } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGY_DEFAULT_MODELS, AGY_MODES, TALK_LIMITS, extraArgs, geminiFingerprint, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
+import { AGY_MODES, TALK_LIMITS, extraArgs, geminiFingerprint, needCall, parseModels, parseNeeds, seatbeltProfile, settingsModel, talkProfile, toolKind, turnArgs, workspaceConfig } from '@friedliver/main/agents/agy';
 import { PLATFORM_REFUSAL, agyAgent, type AgyAdapterOptions } from '@friedliver/main/agents/agyAcp';
 import { findProgram } from '@friedliver/main/agents/processes';
 import { DEFAULT_AGENTS } from '@friedliver/main/agents/registry';
@@ -86,9 +86,10 @@ describe('agy models', () => {
     expect(['view_file', 'grep_search', 'write_to_file', 'replace_file_content', 'run_command', 'read_url_content'].map(toolKind)).toEqual(['read', 'search', 'edit', 'edit', 'execute', 'fetch']);
   });
 
-  it('falls back to AGY_DEFAULT_MODELS when output has no models', () => {
-    expect(parseModels('').choices).toEqual(AGY_DEFAULT_MODELS);
-    expect(parseModels('Fetching available models...\n').choices).toEqual(AGY_DEFAULT_MODELS);
+  it('reads agy 1.4 model lines (id, tab, display name) and nothing when there are none', () => {
+    const out = 'Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\n';
+    expect(parseModels(out).choices.map((c) => c.value)).toEqual(['gemini-3.8-flash-high', 'claude-opus-4-6-thinking']);
+    expect(parseModels('Fetching available models...\n').choices).toEqual([]);
   });
 });
 

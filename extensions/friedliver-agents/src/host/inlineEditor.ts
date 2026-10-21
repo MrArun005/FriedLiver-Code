@@ -60,7 +60,7 @@ export class InlineEditor implements vscode.Disposable {
 
   private agent(): AgentKey {
     const v = userSetting(vscode.workspace.getConfiguration('friedliver').inspect<string>('inlineEdit.agent')).value;
-    return isAgentKey(v) && (v !== 'demo' || testAgentsOn()) ? v : 'antigravity';
+    return isAgentKey(v) && (v !== 'demo' || testAgentsOn()) ? v : 'claude';
   }
 
   async start(): Promise<void> {

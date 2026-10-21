@@ -944,7 +944,7 @@
             "Gemini",
             "Antigravity"
           ],
-          "default": "antigravity",
+          "default": "claude",
           "scope": "machine",
           "description": "The agent Edit with Agent uses in a folder until you pick another there (start the request with @claude, @codex, @gemini or @antigravity). Read from user settings only, so a repository can't choose where your code goes."
         },
@@ -1075,7 +1075,7 @@
             "Gemini",
             "Antigravity"
           ],
-          "default": "antigravity",
+          "default": "claude",
           "scope": "machine",
           "description": "The agent Inline Edit (Ctrl/Cmd+I) asks. It only proposes text; FriedLiver changes the file when you accept. Rebind the shortcut in Keyboard Shortcuts under FriedLiver: Inline Edit."
         },

@@ -467,7 +467,7 @@ export class EditorAgent implements vscode.Disposable {
     const remembered = this.context.workspaceState.get<unknown>(LAST_AGENT);
     if (usable(remembered)) return remembered;
     const { value } = userSetting(vscode.workspace.getConfiguration('friedliver.edit').inspect<unknown>('defaultAgent'));
-    return usable(value) ? value : 'antigravity';
+    return usable(value) ? value : 'claude';
   }
 
   private async pickAgent(title: string, current?: AgentKey): Promise<AgentKey | undefined> {

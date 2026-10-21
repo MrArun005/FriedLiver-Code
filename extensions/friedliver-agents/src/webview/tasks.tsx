@@ -486,7 +486,7 @@ function Manager() {
 function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefaults>> }) {
   const roster = useRoster();
   const shown = roster.agents;
-  const [saved, setSaved] = usePersisted<AgentKey[]>('agents', ['antigravity']);
+  const [saved, setSaved] = usePersisted<AgentKey[]>('agents', ['claude']);
   // Until you pick, the choice leaves out agents the Accounts page found not installed (and hidden ones);
   // an agent you pick yourself stays picked whatever its status.
   const [touched, setTouched] = useState(false);
