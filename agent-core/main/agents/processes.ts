@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 /** A Windows system program by absolute path, so a same-named file in the current folder is never run instead. */
@@ -76,8 +77,11 @@ export function findProgram(command: string, env: NodeJS.ProcessEnv = process.en
     }
   };
   if (command.includes('/')) return runnable(command) ? command : null;
-  for (const dir of (env.PATH ?? '').split(':')) {
-    if (dir && path.isAbsolute(dir) && runnable(path.join(dir, command))) return path.join(dir, command);
+  const dirs = (env.PATH ?? '').split(':').filter(Boolean);
+  const userLocalBin = path.join(os.homedir(), '.local', 'bin');
+  if (!dirs.includes(userLocalBin)) dirs.push(userLocalBin);
+  for (const dir of dirs) {
+    if (path.isAbsolute(dir) && runnable(path.join(dir, command))) return path.join(dir, command);
   }
   return null;
 }

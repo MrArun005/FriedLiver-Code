@@ -314,9 +314,10 @@ export function installedOrUnknown(roster: AgentRoster, agent: AgentKey): boolea
 export function preselectAgents(roster: AgentRoster, saved: readonly AgentKey[]): AgentKey[] {
   const kept = saved.filter((a) => roster.agents.includes(a) && installedOrUnknown(roster, a));
   if (kept.length) return kept;
+  const priorityOrder: AgentKey[] = ['antigravity', ...roster.agents.filter((a) => a !== 'antigravity')];
   const first =
-    roster.agents.find((a) => a !== 'demo' && roster.signIn[a] === 'signed-in') ??
-    roster.agents.find((a) => a !== 'demo' && installedOrUnknown(roster, a)) ??
+    priorityOrder.find((a) => roster.agents.includes(a) && a !== 'demo' && roster.signIn[a] === 'signed-in') ??
+    priorityOrder.find((a) => roster.agents.includes(a) && a !== 'demo' && installedOrUnknown(roster, a)) ??
     (roster.agents.includes('demo') ? 'demo' : roster.agents[0]);
   return first ? [first] : [];
 }

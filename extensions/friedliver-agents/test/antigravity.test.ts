@@ -85,6 +85,12 @@ describe('agy models', () => {
   it('names tool kinds from agy’s tool names', () => {
     expect(['view_file', 'grep_search', 'write_to_file', 'replace_file_content', 'run_command', 'read_url_content'].map(toolKind)).toEqual(['read', 'search', 'edit', 'edit', 'execute', 'fetch']);
   });
+
+  it('reads agy 1.4 model lines (id, tab, display name) and nothing when there are none', () => {
+    const out = 'Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\n';
+    expect(parseModels(out).choices.map((c) => c.value)).toEqual(['gemini-3.8-flash-high', 'claude-opus-4-6-thinking']);
+    expect(parseModels('Fetching available models...\n').choices).toEqual([]);
+  });
 });
 
 describe('FriedLiver levels on agy’s modes', () => {

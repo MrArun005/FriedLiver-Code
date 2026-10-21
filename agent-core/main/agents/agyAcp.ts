@@ -448,7 +448,9 @@ export function agyAgent(opts: AgyAdapterOptions): acp.AgentApp {
       const server = params.mcpServers.find((m): m is acp.McpServerStdio => m.name === 'friedliver' && 'command' in m && typeof m.command === 'string');
       const bridge = server ? { command: server.command, args: server.args ?? [], env: Object.fromEntries((server.env ?? []).map((v) => [v.name, v.value])) } : undefined;
       // Talk only until FriedLiver sets the chat's level: the safe start.
-      const s: Session = { cwd, root, mode: 'read-only', model: settingsModel(settings, models) ?? AGY_DEFAULT, effort: AGY_DEFAULT, models, conversations: new Map(), bridge };
+      // Antigravity's own default (Gemini 3.8 Flash, High) when agy's settings name no model.
+      const defaultModel = settingsModel(settings, models) ?? models.find((m) => m.value === 'gemini-3.8-flash-high')?.value ?? AGY_DEFAULT;
+      const s: Session = { cwd, root, mode: 'read-only', model: defaultModel, effort: AGY_DEFAULT, models, conversations: new Map(), bridge };
       sessions.set(sessionId, s);
       return { sessionId, configOptions: configOptions(s) };
     })
