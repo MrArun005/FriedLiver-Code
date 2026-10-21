@@ -893,6 +893,12 @@
           "scope": "machine",
           "markdownDescription": "Routine requests (reads, `git status`, the project's tests, lint and build) allow themselves once after this many seconds, with a visible countdown you can stop (Esc). 0 turns it off. Review and careful requests always wait for you. Read from user settings only."
         },
+        "friedliver.approvals.fullAutoGuards": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Full auto's hard limits. On: even on Full auto (or an \"Always allow\" rule) FriedLiver asks before a browser action that takes a chat from a page on the internet onto this computer or its network (localhost, private and link-local addresses, judged by what the name resolves to), before every download an agent starts, before a command that runs a file the chat downloaded or wrote in its last 3 turns, before package installs, and before piping a download into a shell. Read from your user settings only: a workspace can't turn it off."
+        },
         "friedliver.notify.decisions": {
           "type": "boolean",
           "default": true,

@@ -3,6 +3,7 @@ import { chatRef } from '../shared/names';
 import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
 import { describeForApproval, LARGE_DOWNLOAD_BYTES, type DownloadInfo } from './browserDownloads';
+import { isLocalName, isLocalTarget, STILL_ASKS, type Lookup } from './fullAutoGuards';
 import { AGENT_FACES, BRIDGE_TIMEOUT_MS, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { siteOrigin, type Grant, type ToolGrant } from '../shared/permissions';
 import { browserRisk } from '../shared/risk';
@@ -47,6 +48,12 @@ export interface ToolHost {
   remember?(fact: string): Promise<string>;
   /** Whether read_chat skips the user's OK between chats a hand-off or consultation linked. Default no. */
   autoAllowLinkedReads?(): boolean;
+  /** Full auto's hard limits (fullAutoGuards.ts): on unless the user's own settings turn them off. */
+  fullAutoGuards?(): boolean;
+  /** DNS for those limits; the system's by default. */
+  lookup?: Lookup;
+  /** A download the user allowed, saved to `file`: a command that runs it asks (FileTrail). */
+  downloaded?(chatId: string, file: string): void;
   /** Whether browser actions by the external client (EXTERNAL_CLIENT) skip the user's OK. Default no. */
   externalAutoApprove?(): boolean;
   /** The open page's origin, and whether `selector` there is a password field (unknown counts as one). */
@@ -92,6 +99,8 @@ export class BridgeRequests {
    * external MCP session `<callerId> browser <origin>`, so a new session or another site asks again.
    */
   private readonly allowedChats = new Set<string>();
+  /** Chats whose browser showed a page from outside this computer and its network this turn. */
+  private readonly remote = new Set<string>();
   /** For each chat, the chats it is waiting on through ask_agent. */
   private readonly waits = new Map<string, Set<string>>();
 
@@ -178,13 +187,17 @@ export class BridgeRequests {
   private async browser(caller: ChatView, call: BrowserCall, signal: AbortSignal): Promise<string> {
     if (!this.host.browser) throw new Error("FriedLiver's built-in browser isn't available in this editor.");
     if (call.tool === 'browser_open') call = { ...call, url: checkBrowserUrl(call.url) };
+    // Awaited only when the chat already saw a remote page, or there is a page to act on or read (an open
+    // needs none: a page the agent never looked at can't have steered it).
+    const guard = this.guardsOn() && (this.remote.has(caller.id) || (this.host.browserPage && call.tool !== 'browser_open')) ? await this.localPivot(caller.id, call) : this.noteRemote(caller.id, call);
     if (!browserNeedsApproval(call.tool, undefined)) return this.host.browser(caller.id, call, signal);
     const askDownload = (d: DownloadInfo) => this.download(caller, d, signal);
     const text =
       call.tool === 'browser_open' ? call.url : call.tool === 'browser_click' ? (call.selector ?? `"${call.text}"`) : call.tool === 'browser_type' ? `${call.selector} ← ${call.text}` : '';
     // A purchase or a form submit asks every time: only Full auto lets it through, never "this chat" or a remembered site.
-    const careful = browserRisk(call.tool, call.tool === 'browser_click' ? `${call.selector ?? ''} ${call.text ?? ''}` : text).tone === 'careful';
-    const allowed = !browserNeedsApproval(call.tool, caller.approval) || (!careful && this.allowedChats.has(`${caller.id} browser`));
+    // So does a remote page steering it onto this computer or its network: not even Full auto.
+    const careful = !!guard || browserRisk(call.tool, call.tool === 'browser_click' ? `${call.selector ?? ''} ${call.text ?? ''}` : text).tone === 'careful';
+    const allowed = !guard && !browserNeedsApproval(call.tool, caller.approval) || (!careful && this.allowedChats.has(`${caller.id} browser`));
     // The site it acts on: what "Always allow" remembers, and what browser.ts checks again just before acting.
     const origin = allowed || !this.host.permissions ? undefined : call.tool === 'browser_open' ? siteOrigin(call.url) : siteOrigin((await this.host.browserPage?.().catch(() => undefined))?.origin ?? '');
     const remembered = origin && !careful ? this.host.permissions?.site(origin) : undefined;
@@ -198,6 +211,7 @@ export class BridgeRequests {
       text,
       state: 'awaiting',
       ...(remembered ? { auto: `Always allowed: ${origin}` } : {}),
+      ...(guard ? { guard } : {}),
     };
     // Careful: no grant to remember, but the origin still rides along for the card and browser.ts's recheck.
     settled(await this.approve(caller, careful ? { ...item, ...(origin ? { always: origin } : {}) } : item, auto, signal, origin && !careful ? { kind: 'site', origin } : undefined, careful));
@@ -208,14 +222,49 @@ export class BridgeRequests {
   }
 
   /**
-   * A download the page started during this chat's browser action. Like the action it waits for the
-   * user unless the chat is on Full auto or they allowed downloads for this chat; over 500 MB it asks
-   * every time, once only. Nothing is saved until the answer.
+   * Whether this browser call takes the chat from a page outside this computer onto it or its
+   * network (localhost, private and link-local addresses, by what the name resolves to): why, or
+   * undefined. A chat that stayed on local pages, like the user's own dev server, goes on as before.
+   * ponytail: checked when asked, not when the browser connects; a name that rebinds between the
+   * two, or a link click that navigates there, gets through. Pinning in browser.ts would close it.
+   */
+  private async localPivot(chatId: string, call: BrowserCall): Promise<string | undefined> {
+    const page = (await this.host.browserPage?.().catch(() => undefined))?.origin;
+    if (page && page !== 'null' && isLocalName(page) !== true) this.remote.add(chatId);
+    if (!this.remote.has(chatId)) return this.noteRemote(chatId, call);
+    this.noteRemote(chatId, call);
+    // Where it acts: a URL to open, by what it resolves to now; or the page already loaded, by its name.
+    const target = call.tool === 'browser_open' ? call.url : browserNeedsApproval(call.tool, undefined) ? page : undefined;
+    if (!target || !(call.tool === 'browser_open' ? await isLocalTarget(target, this.host.lookup) : isLocalName(target) === true)) return undefined;
+    let host = target;
+    try {
+      host = new URL(target).host;
+    } catch {
+      // keep it whole
+    }
+    return `${STILL_ASKS}: a page from outside this computer led here, and this reaches ${clean(host, 80)}, on this computer or its network`;
+  }
+
+  /** A page the chat opens counts as remote by its name: a name that turns out local only makes it ask more. */
+  private noteRemote(chatId: string, call: BrowserCall): undefined {
+    if (call.tool === 'browser_open' && isLocalName(call.url) !== true) this.remote.add(chatId);
+    return undefined;
+  }
+
+  private guardsOn(): boolean {
+    return this.host.fullAutoGuards?.() !== false;
+  }
+
+  /**
+   * A download the page started during this chat's browser action. It waits for the user, once only,
+   * whatever the chat's level (Full auto included) unless the user turned Full auto's hard limits off;
+   * then Full auto and "this chat" cover it below 500 MB. Nothing is saved until the answer.
    */
   private async download(caller: ChatView, d: DownloadInfo, signal: AbortSignal): Promise<boolean> {
+    const guard = this.guardsOn();
     const large = d.totalBytes > LARGE_DOWNLOAD_BYTES;
     const key = `${caller.id} download`;
-    const auto = !large && (!browserNeedsApproval('browser_click', this.chat(caller.id)?.approval ?? caller.approval) || this.allowedChats.has(key));
+    const auto = !guard && !large && (!browserNeedsApproval('browser_click', this.chat(caller.id)?.approval ?? caller.approval) || this.allowedChats.has(key));
     if (!auto) this.room(caller.id);
     const origin = siteOrigin(d.url);
     const item: BridgeItem = {
@@ -226,10 +275,13 @@ export class BridgeRequests {
       text: clean(describeForApproval(d), 160),
       state: 'awaiting',
       ...(origin ? { always: origin } : {}),
-      ...(large ? { once: true as const } : {}),
+      ...(large || guard ? { once: true as const } : {}),
+      ...(guard ? { guard: `${STILL_ASKS}: an agent started this download` } : {}),
     };
     const answer = await this.approve(caller, item, auto, signal, undefined, false, key);
-    return answer === 'allowed' && this.host.policy() !== 'off' && !!this.chat(caller.id);
+    const ok = answer === 'allowed' && this.host.policy() !== 'off' && !!this.chat(caller.id);
+    if (ok) this.host.downloaded?.(caller.id, d.path || d.filename);
+    return ok;
   }
 
   /** A download a Claude Code browser action started: its own popup, "this session" covers later ones under 500 MB. */
@@ -396,6 +448,7 @@ export class BridgeRequests {
    * the user. When stopped, the consultations it waits on stop too.
    */
   settle(chatId: string, stopped: boolean): void {
+    this.remote.delete(chatId);
     for (const p of [...this.pending.values()]) if (p.chatId === chatId) p.resolve('denied');
     if (!stopped) return;
     for (const target of this.waits.get(chatId) ?? []) void this.host.cancel(target);

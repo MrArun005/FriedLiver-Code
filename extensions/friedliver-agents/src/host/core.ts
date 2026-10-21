@@ -12,6 +12,7 @@ import { findProgram } from '@friedliver/main/agents/processes';
 import { allowedSignInUrl, signInMethods } from '@friedliver/main/agents/signIn';
 import { visibleText, type TerminalListener } from '@friedliver/main/agents/terminals';
 import { TurnLog } from '@friedliver/main/agents/turnLog';
+import { commandGuard, downloadTargets, FileTrail } from './fullAutoGuards';
 import * as git from '@friedliver/main/workspace/git';
 import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
 import { OMIT_ENV, omittedTools } from '../bridge/mcp';
@@ -202,6 +203,8 @@ export interface CoreOptions {
   agentToAgent?(): AgentToAgent;
   /** The level new chats start at, from the user's own settings (never a workspace's). Ask when not given. */
   approvalDefault?(): Exclude<ApprovalLevel, 'full'>;
+  /** Full auto's hard limits (fullAutoGuards.ts); on unless the user's own settings say false. */
+  fullAutoGuards?(): boolean;
   /** Which models the agent's own records let this account use (Codex's models cache), to keep pickers to them. */
   modelVisibility?(agent: AgentKey): Promise<ModelVisibility | undefined>;
   /** Each agent's last known options and the user's last choices, kept in the user's own storage. */
@@ -275,6 +278,8 @@ export class AgentCore {
   private readonly listeners = new Set<(action: Action, state: AppState) => void>();
   private readonly hub: AgentHub;
   private readonly turns = new TurnLog();
+  /** Files each chat downloaded or wrote lately: running one asks even on Full auto. */
+  private readonly trail = new FileTrail();
   /** `careful`: once only, so the agent's own "don't ask again" is refused for it too. */
   private readonly permissions = new Map<string, Pending<acp.RequestPermissionResponse> & { options: acp.PermissionOption[]; careful?: boolean }>();
   /** Routine requests counting down to allow themselves, by request or command id. */
@@ -446,6 +451,8 @@ export class AgentCore {
       cancel: (chatId) => this.cancel(chatId),
       browser: options.browser,
       externalAutoApprove: options.externalAutoApprove,
+      fullAutoGuards: options.fullAutoGuards,
+      downloaded: (chatId, file) => this.trail.add(chatId, file),
       autoAllowLinkedReads: options.autoAllowLinkedReads,
       browserPage: options.browserPage,
       index: options.index,
@@ -1112,6 +1119,7 @@ export class AgentCore {
     this.preambles.delete(chatId);
     this.lastPrompt.delete(chatId);
     this.turns.forget(chatId);
+    this.trail.forget(chatId);
     void this.checkpoints.forget(chatId);
     for (const q of this.queues.get(chatId) ?? []) q.done();
     for (const map of [this.queues, this.chosen, this.openTools, this.approvedWrites, this.turnDecision, this.reported]) map.delete(chatId);
@@ -1745,6 +1753,8 @@ export class AgentCore {
     }
     // The chat stays busy until the turn's changes are known, so a new turn can't start in between.
     const files = await this.turnFiles(chatId, turnId);
+    for (const f of files) this.trail.add(chatId, f);
+    this.trail.endTurn(chatId);
     this.options.indexTurnEnded?.(chatId);
     for (const map of [this.turnDecision, this.approvedWrites, this.reported]) map.delete(chatId);
     this.dispatch({ t: 'busy', chatId, busy: false, at: Date.now() });
@@ -1823,6 +1833,7 @@ export class AgentCore {
    * request saw, read while the agent waited for the answer.
    */
   private noteFile(chatId: string, file: string, before?: string | null): void {
+    if (typeof file === 'string') this.trail.add(chatId, file);
     const resolved = typeof file === 'string' && path.isAbsolute(file) ? insideRoots(file, this.roots()) : null;
     const turn = this.reported.get(chatId);
     if (!resolved || !turn) return;
@@ -1908,7 +1919,8 @@ export class AgentCore {
     files: { paths: string[]; access?: Access; complete: boolean },
     careful = false,
   ): { option: acp.PermissionOption; reason: string } | undefined {
-    if (!chat || kind === 'switch_mode' || detail.plan) return undefined;
+    // Full auto's hard limits: no level, rule or "Accept all" answers these.
+    if (!chat || kind === 'switch_mode' || detail.plan || detail.guard) return undefined;
     const once = options.find((o) => o.kind === 'allow_once' && !ESCALATING.test(o.name));
     const no = options.find((o) => o.kind === 'reject_once');
     const edit = kind === 'edit' || kind === 'delete' || kind === 'move' || !!detail.files?.length;
@@ -2109,6 +2121,8 @@ export class AgentCore {
     if (signal.aborted) return { outcome: { outcome: 'cancelled' } };
     const always = kind === 'switch_mode' ? [] : this.alwaysFor(files, detail);
     if (always.length) detail.always = always;
+    const guard = detail.command ? this.commandGuard(chatId, detail.command.line) : undefined;
+    if (guard) detail.guard = guard;
     for (const p of proposals) this.noteFile(chatId, p.path, p.before);
     const title = tool.title?.trim() || fallbackTitle(kind, detail);
     const options = req.options;
@@ -2122,7 +2136,7 @@ export class AgentCore {
       ...(Object.keys(detail).length ? { detail } : {}),
     };
     const risk = approvalOf(item as Approvable, chat ?? { agent: 'demo', label: '', cwd: '' }).risk;
-    const careful = risk.tone === 'careful';
+    const careful = risk.tone === 'careful' || !!guard;
     const auto = this.autoAnswer(chat, kind, detail, options, files, careful);
     if (auto) {
       this.items(chatId, [{ ...item, answer: auto.option.name, auto: auto.reason }]);
@@ -2158,7 +2172,7 @@ export class AgentCore {
         ? inside(detail.command.cwd ?? chat?.cwd)
         : files.complete && files.paths.length > 0 && [...files.paths, ...(detail.locations ?? [])].every(inside);
       // Only the exact command list ever counts down; nothing the classifier says does.
-      const routine = inWorkspace && !!detail.command && autoRoutineCommand(detail.command.line);
+      const routine = !guard && inWorkspace && !!detail.command && autoRoutineCommand(detail.command.line);
       const autoAt =
         allow && !detail.plan && kind !== 'switch_mode'
           ? this.autoRoutine(requestId, routine, () => {
@@ -2300,6 +2314,7 @@ export class AgentCore {
     const chat = chatId ? this.chat(chatId) : undefined;
     if (chatId && chat) {
       this.reported.get(chatId)?.add(file);
+      this.trail.add(chatId, file);
       const approved = this.approvedWrites.get(chatId)?.get(file) === req.content;
       const all = this.turnDecision.get(chatId);
       const level = chat.approval ?? 'ask';
@@ -2355,6 +2370,16 @@ export class AgentCore {
     this.options.ui.fileChanged?.(file);
   }
 
+  /**
+   * Why `line` asks even on Full auto or an "Always allow" rule (fullAutoGuards.ts), or undefined.
+   * What a curl or wget in it saves joins the chat's trail first, so fetch-then-run in one line asks.
+   */
+  private commandGuard(chatId: string | undefined, line: string): string | undefined {
+    if (!chatId || this.options.fullAutoGuards?.() === false) return undefined;
+    for (const f of downloadTargets(line)) this.trail.add(chatId, f);
+    return commandGuard(line, this.trail.names(chatId));
+  }
+
   /** Nothing an agent asks to run starts before the user approves it. */
   private commandHooks(agentId: AgentKey): TerminalListener {
     const known = new Map<string, { commandId: string; startedAt?: number }>();
@@ -2368,22 +2393,23 @@ export class AgentCore {
         // Full auto and "Always allow" rules run it at once, but never in a folder outside the workspace.
         const chat = chatId ? this.chat(chatId) : undefined;
         const risk = commandRisk(info.commandLine);
-        // A careful command asks every time: no remembered rule runs it.
-        const rule = outside || risk.tone === 'careful' ? undefined : matchesRule(info.commandLine, this.options.permissions?.commands() ?? []);
-        const auto = outside || !chat ? undefined : chat.approval === 'full' ? APPROVAL_NAMES.full : rule ? `Always allowed: ${describeRule(rule)}` : undefined;
+        const guard = this.commandGuard(chatId, info.commandLine);
+        // A careful command asks every time: no remembered rule runs it; nor does Full auto run a guarded one.
+        const rule = outside || guard || risk.tone === 'careful' ? undefined : matchesRule(info.commandLine, this.options.permissions?.commands() ?? []);
+        const auto = outside || !chat || guard ? undefined : chat.approval === 'full' ? APPROVAL_NAMES.full : rule ? `Always allowed: ${describeRule(rule)}` : undefined;
         if (chatId && auto) {
           this.items(chatId, [{ kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'running', output: '', auto }]);
           return true;
         }
         const dropped = await this.droppedBy(info.commandLine, info.cwd);
         let autoFired = false;
-        const autoAt = outside || !chatId ? undefined : this.autoRoutine(commandId, autoRoutineCommand(info.commandLine), () => ((autoFired = true), this.decideCommand(commandId, true)));
+        const autoAt = outside || !chatId || guard ? undefined : this.autoRoutine(commandId, autoRoutineCommand(info.commandLine), () => ((autoFired = true), this.decideCommand(commandId, true)));
         if (chatId)
           this.items(chatId, [
-            { kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'awaiting', output: '', ...(dropped ? { dropped } : {}), ...(autoAt ? { autoAt } : {}) },
+            { kind: 'command', commandId, commandLine: info.commandLine, cwd: info.cwd, outside, state: 'awaiting', output: '', ...(dropped ? { dropped } : {}), ...(autoAt ? { autoAt } : {}), ...(guard ? { guard } : {}) },
           ]);
         const agentLabel = (chatId && this.chat(chatId)?.label) || this.label(agentId);
-        this.options.ui.askCommand?.({ chatId, commandId, agentLabel, commandLine: info.commandLine, ...(risk.tone === 'careful' ? { careful: true } : {}) });
+        this.options.ui.askCommand?.({ chatId, commandId, agentLabel, commandLine: info.commandLine, ...(risk.tone === 'careful' || guard ? { careful: true } : {}) });
         return new Promise<boolean>((resolve) => {
           this.commands.set(commandId, {
             chatId,

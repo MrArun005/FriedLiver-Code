@@ -304,3 +304,42 @@ describe('routine countdown', () => {
     await turn;
   });
 });
+
+describe("Full auto's hard limits on commands", () => {
+  it('no remembered rule runs a package install or a file the chat just wrote; each card says why', async () => {
+    const dir = await gitRepo();
+    const permissions = memoryPermissions();
+    expect(permissions.add({ kind: 'prefix', command: 'npm install' })).toBe(true);
+    expect(permissions.add({ kind: 'exact', command: 'sh payload.sh' })).toBe(true);
+    const core = makeCore(dir, { permissions });
+    const chat = await core.createChat('demo', { approval: 'edits' });
+    let turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'npm install left-pad' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)).toMatchObject({ detail: { guard: 'Full auto still asks: the command installs packages' } });
+    expect(perm(core, chat.id)?.auto).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+
+    // Before the chat writes payload.sh, the rule runs it; after, it asks.
+    await core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'sh payload.sh' })}`);
+    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({ auto: 'Always allowed: sh payload.sh' });
+    await core.send(chat.id, 'native-edit payload.sh');
+    turn = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'sh payload.sh' })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({
+      detail: { guard: 'Full auto still asks: the command runs payload.sh, a file this chat just downloaded or wrote' },
+    });
+    core.answerPermission(core.decisions()[0].id, 'reject');
+    await turn;
+  });
+
+  it('a user who turned the limits off gets the rule as before', async () => {
+    const dir = await gitRepo();
+    const permissions = memoryPermissions();
+    permissions.add({ kind: 'prefix', command: 'npm install' });
+    const core = makeCore(dir, { permissions, fullAutoGuards: () => false });
+    const chat = await core.createChat('demo');
+    await core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'npm install left-pad' })}`);
+    expect(perm(core, chat.id)).toMatchObject({ auto: 'Always allowed: npm install …' });
+  });
+});

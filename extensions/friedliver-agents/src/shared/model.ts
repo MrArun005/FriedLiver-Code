@@ -76,6 +76,8 @@ export interface CommandItem {
   durationMs?: number;
   /** Ran without asking, and why: "Full auto", or the "Always allow" rule that covers it. */
   auto?: string;
+  /** Why it asks even on Full auto (fullAutoGuards.ts), shown on its card. */
+  guard?: string;
   /** When it arrived (the host's clock); waiting items get it, for the Decision Inbox's ages. */
   at?: number;
   /** A force push: the remote's commits it would drop. */
@@ -147,6 +149,8 @@ export interface BridgeItem {
   always?: string;
   /** Why it went ahead without asking: a remembered rule. */
   auto?: string;
+  /** Why it asks even on Full auto (fullAutoGuards.ts), shown on its card. */
+  guard?: string;
   at?: number;
   /** Still waiting when the window closed: the agent that asked is gone, so nobody decided it (shown as EXPIRED, never as your answer). */
   expired?: true;
