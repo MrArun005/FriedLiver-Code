@@ -220,7 +220,8 @@ export interface CliLine {
 }
 
 export interface CliAccount {
-  signIn: CliLine;
+  /** Absent when FriedLiver doesn't offer the CLI's own sign-in (Gemini: Google login lives in Antigravity). */
+  signIn?: CliLine;
   signOut: CliLine;
   note: string;
 }
@@ -238,7 +239,6 @@ export const CLI_ACCOUNTS: Record<VendorKey, CliAccount> = {
     note: 'The Codex CLI (npm install -g @openai/codex). codex-acp uses the same login, in ~/.codex.',
   },
   gemini: {
-    signIn: { command: 'gemini', then: 'Choose Login with Google, or type /auth to pick another way.' },
     signOut: { command: 'gemini', then: 'Type /signout, which clears its cached credentials.' },
     note: 'The Gemini CLI itself: the same program FriedLiver runs in ACP mode.',
   },

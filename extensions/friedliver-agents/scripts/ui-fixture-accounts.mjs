@@ -13,7 +13,6 @@ const CLI = {
   claude: { signIn: { command: 'claude auth login' }, signOut: { command: 'claude auth logout' }, note: 'Claude Code’s CLI. FriedLiver’s Claude adapter uses the same login.' },
   codex: { signIn: { command: 'codex login' }, signOut: { command: 'codex logout' }, note: 'The Codex CLI (npm install -g @openai/codex). codex-acp uses the same login, in ~/.codex.' },
   gemini: {
-    signIn: { command: 'gemini', then: 'Choose Login with Google, or type /auth to pick another way.' },
     signOut: { command: 'gemini', then: 'Type /signout, which clears its cached credentials.' },
     note: 'The Gemini CLI itself: the same program FriedLiver runs in ACP mode.',
   },
