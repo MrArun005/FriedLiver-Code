@@ -1017,6 +1017,9 @@ export class Controller {
         case 'openRules':
           void this.openRules();
           return;
+        case 'showLog':
+          this.log.show(true);
+          return;
         case 'renameChat': {
           const chat = this.core.chat(m.chatId);
           if (!chat) return;
