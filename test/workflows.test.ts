@@ -84,9 +84,32 @@ describe('GitHub workflows', () => {
     const release = build.slice(build.indexOf('\n  release:'));
     expect(release).toMatch(/permissions:\n\s+contents: write/);
     expect(release).toContain("if: inputs.version || github.ref_type == 'tag'");
-    expect(build).toMatch(/tags: \['v\*'\]/);
-    expect(build).toMatch(/branches: \[main\]/);
     expect(build).toMatch(/^ {2}workflow_call:$/m);
+  });
+
+  /** The `on:` block of a workflow. */
+  const triggers = (f: string) => /^on:\n((?: .*\n|\n)*?)(?=^\S)/m.exec(read(f))![1];
+
+  it('builds only from a release, a manual run or a v* tag, never a branch push', () => {
+    const on = triggers('build.yml');
+    expect(on).toMatch(/^ {2}push:\n {4}tags: \['v\*'\]\n {2}workflow_dispatch:\n {2}workflow_call:\n/);
+    expect(on).not.toMatch(/branches|pull_request/);
+  });
+
+  it('runs CI once per change: pull requests on Linux only, main pushes on every OS', () => {
+    const ci = read('ci.yml');
+    expect(triggers('ci.yml')).toMatch(/^ {2}push:\n {4}branches: \[main\]\n {2}pull_request:\n/);
+    expect(ci).toContain(`os: \${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') }}`);
+    expect(ci).toMatch(/^concurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: true$/m);
+  });
+
+  it('starts the slow or fan-out workflows only by hand (index bench: also on index changes)', () => {
+    for (const f of ['update-prs.yml', 'workbench-shots.yml']) {
+      expect(triggers(f), f).not.toMatch(/^ {2}(push|pull_request|schedule):/m);
+    }
+    const bench = triggers('index-bench.yml');
+    expect(bench).toMatch(/^ {2}push:\n {4}paths:\n/m);
+    expect(bench).not.toMatch(/pull_request|branches/);
   });
 
   it('installs an Open VSX extension into the Linux build and requires a successful signature check', () => {

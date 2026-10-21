@@ -4,8 +4,7 @@ name: Workbench shots
 # release, a release tag, or a trusted Build FriedLiver run), screenshot every workbench surface
 # in FriedLiver Dark and Light and the owner's Dark 2026 at 1440x900 and 1280x800, run the design
 # gates on the live DOM, record three short motion clips, check the approved chat composer against
-# its computed-style baseline (macOS), and upload everything. Pushes to ui/* that touch the harness
-# run it against the latest release.
+# its computed-style baseline (macOS), and upload everything. Manual runs only.
 on:
   workflow_dispatch:
     inputs:
@@ -36,13 +35,6 @@ on:
         description: 'Window sizes, comma separated (1440x900,1280x800); empty = both'
         required: false
         default: ''
-  push:
-    branches: ['ui/**']
-    paths:
-      - '.github/workflows/workbench-shots.yml'
-      - 'scripts/workbench-shots.mjs'
-      - 'scripts/fetch-build.mjs'
-      - 'test/workbench-harness/**'
 
 # Read-only; actions: read lets fetch-build.mjs read a run's artifacts.
 permissions:

@@ -1,10 +1,12 @@
 name: CI
 
-# Quick checks on every push and pull request: lint and the theme tests on each
-# OS, then the agents extension's tests and both extensions as VSIX files for
-# stock VS Code and editors built on it.
+# Lint and the theme tests, then the agents extension's tests and both extensions
+# as VSIX files for stock VS Code and editors built on it. A pull request runs the
+# fast set (Linux only); a push to main and a manual run add macOS and Windows, and
+# release.yml requires that full run green on main's head.
 on:
   push:
+    branches: [main]
   pull_request:
   # update-prs.yml starts it on a pull request branch it merged main into: its push
   # (made with the workflow token) starts no workflow by itself.
@@ -14,12 +16,17 @@ on:
 permissions:
   contents: read
 
+# A new push cancels the older run on the same branch or pull request.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       # Actions are pinned to commits (Dependabot keeps them current); nothing here pushes, so no credentials stay on disk.

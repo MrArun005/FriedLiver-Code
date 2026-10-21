@@ -2,21 +2,15 @@ name: Build FriedLiver
 
 # Fetch the pinned upstream, apply FriedLiver's branding and patches, add the
 # built-in extensions, build the minified app and its installer for each OS and
-# upload them. About an hour per OS, so docs-only changes don't start it.
-# A pushed tag vX.Y.Z or vX.Y.Z-N (the upstream version, then FriedLiver's own
-# build number) builds the same way and then publishes a GitHub release.
+# upload them. About an hour per OS, so it never runs on a branch push: only from
+# a release (workflow_call), a manual run or a pushed tag. A pushed tag vX.Y.Z or
+# vX.Y.Z-N (the upstream version, then FriedLiver's own build number) builds the
+# same way and then publishes a GitHub release.
 # The Release workflow (release.yml) calls this one with a version, a main commit
 # and notes: it builds that commit and publishes the release, creating the tag.
 on:
   push:
-    branches: [main]
-    # Path filters don't apply to tag pushes: a release tag always builds.
     tags: ['v*']
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'test/**'
-      - '.github/workflows/ci.yml'
   workflow_dispatch:
   workflow_call:
     inputs:

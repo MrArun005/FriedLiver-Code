@@ -1,6 +1,6 @@
 name: Update pull requests
 
-# Keeps finished branches mergeable: after every push to main, each open pull
+# Keeps finished branches mergeable: run by hand before merging, each open pull
 # request into main that is behind it gets main merged in (a merge commit, never a
 # rebase, so nothing is force-pushed), then CI runs on it. A branch that conflicts
 # gets one comment (kept up to date, removed once it merges cleanly) saying how to
@@ -9,9 +9,8 @@ name: Update pull requests
 # Limit: the workflow token may not write .github/workflows/, so when main's new
 # commits change a workflow the merge is refused and the comment says to merge
 # locally (git merge origin/main && git push).
+# Manual only: on every push to main it would start CI on every open pull request.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
