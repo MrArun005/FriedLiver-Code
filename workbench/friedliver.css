@@ -732,6 +732,12 @@
 	padding: var(--fl-sp-3) var(--fl-sp-3) var(--fl-sp-2);
 }
 
+/* Titles ("New chat with…") line up with the input and the rows, not centred (owner, 2026-10-21). */
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-titlebar .quick-input-title {
+	text-align: start;
+	padding-inline-start: var(--fl-sp-3);
+}
+
 .monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-filter .monaco-inputbox {
 	--vscode-input-background: transparent;
 	--vscode-input-border: transparent;
