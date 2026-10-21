@@ -127,11 +127,11 @@ vendors' own permission settings as part of your setup.
   starts; (3) a command that runs a file the chat downloaded or wrote in its
   last 3 turns, installs or fetches and runs packages (`npx`, `pnpm dlx`,
   `uvx`…), or pipes a download into anything; on Full auto also a line too
-  unclear to check (quoted program, unquoted glob, command substitution, a
-  download whose file can't be told). A chat that only ever used local pages,
+  unclear to check (any quote, backslash, `$` or brace, an unquoted glob,
+  command substitution, a download whose file can't be told). A chat that only ever used local pages,
   like your dev server, goes on as before; one that saw a remote page stays
   marked for its life. Addresses are classified with ipaddr.js: anything but
-  global unicast (CGNAT, benchmarking, multicast, NAT64/6to4…) is local.
+  global unicast (CGNAT, benchmarking, multicast, NAT64/6to4, ::/96…) is local.
   Limits: (1) is checked when FriedLiver decides, not per navigation, and the
   resolved IP isn't pinned, so a name that rebinds in between, a redirect, or
   a link click that navigates there, isn't caught; (3) covers commands that reach FriedLiver (its

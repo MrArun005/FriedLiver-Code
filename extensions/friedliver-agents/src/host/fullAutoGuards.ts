@@ -16,6 +16,8 @@ export type Lookup = (host: string) => Promise<string[]>;
 const systemLookup: Lookup = async (host) => (await lookup(host, { all: true, verbatim: true })).map((a) => a.address);
 
 const NAT64_LOCAL = ipaddr.parseCIDR('64:ff9b:1::/48');
+/** IPv4-compatible IPv6 (::a.b.c.d), deprecated and never global. */
+const V4_COMPATIBLE = ipaddr.parseCIDR('::/96');
 
 /**
  * Anything but plain global unicast, by ipaddr.js's range table: loopback, unspecified, private,
@@ -27,7 +29,7 @@ export function isPrivateIp(raw: string): boolean {
   if (!isIP(text)) return true;
   let addr = ipaddr.parse(text);
   if (addr instanceof ipaddr.IPv6 && addr.isIPv4MappedAddress()) addr = addr.toIPv4Address();
-  if (addr instanceof ipaddr.IPv6 && addr.match(NAT64_LOCAL)) return true;
+  if (addr instanceof ipaddr.IPv6 && (addr.match(NAT64_LOCAL) || addr.match(V4_COMPATIBLE))) return true;
   return addr.range() !== 'unicast';
 }
 
@@ -129,7 +131,7 @@ export function downloadTargets(line: string): string[] {
 }
 
 const INSTALL =
-  /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|ci)|(?:pip3?|pipx|poetry|uv(?:\s+pip)?|-m\s+pip)\s+(?:install|add)|(?:gem|cargo|go|brew|port|apt|apt-get|yum|dnf|apk|zypper|choco|winget|scoop)\s+(?:install|reinstall)|uv\s+tool\s+install|pacman\s+-S|npx|bunx|uvx|npm\s+exec|(?:pnpm|yarn)\s+dlx|pipx\s+run|go\s+run\s+\S+@\S+)\b/i;
+  /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|ci)|(?:pip3?|pipx|poetry|uv(?:\s+pip)?|-m\s+pip)\s+(?:install|add)|(?:gem|cargo|go|brew|port|apt|apt-get|yum|dnf|apk|zypper|choco|winget|scoop)\s+(?:install|reinstall)|uv\s+tool\s+install|pacman\s+-S|npx|bunx|uvx|(?:npm|bun)\s+x|npm\s+exec|(?:pnpm|yarn)\s+dlx|pipx\s+run|go\s+run\s+\S+@\S+)\b/i;
 const FETCHER = String.raw`(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)`;
 const SHELLS = String.raw`(?:(?:\S*\/)?(?:ba|z|da|k|fi|c|tc)?sh|python[23]?|node|perl|ruby|php|iex|invoke-expression|pwsh|powershell|osascript|source)`;
 const PIPE_FROM_FETCHER = new RegExp(String.raw`\b${FETCHER}\b[^;&|]*\|(?!\|)`, 'i');
@@ -142,14 +144,15 @@ const PIPE_TO_SHELL = new RegExp(
 const unquoted = (line: string) => line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
 
 /**
- * On Full auto, lines this doesn't parse reliably ask instead of being guessed at: a quoted
- * program, an unquoted glob, command substitution, a download piped anywhere, or a download
- * whose file can't be told (bundled or attached -o/-O, a redirect).
+ * On Full auto, lines this doesn't parse reliably ask instead of being guessed at: command
+ * substitution, a quoted program, any quote, backslash, $ or brace, an unquoted glob, a download
+ * piped anywhere, or a download whose file can't be told (bundled or attached -o/-O, a redirect).
  */
 function unclear(line: string): string | undefined {
   if (/\$\(|`|<\(|>\(/.test(line)) return 'it uses command substitution';
   const bare = unquoted(line);
   if (/(?:^|[;&|\n]\s*)(?:\w+=\S*\s+)*(?:''|\\)/.test(bare)) return 'its program is quoted';
+  if (/['"\\${}]/.test(line)) return 'it has quotes, backslashes, $ or braces';
   if (/[*?[]/.test(bare)) return 'it uses a glob';
   if (PIPE_FROM_FETCHER.test(line)) return 'it pipes a download into another program';
   for (const part of bare.split(/[;&|\n]/)) {

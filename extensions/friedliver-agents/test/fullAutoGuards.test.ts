@@ -115,11 +115,15 @@ describe('review round: wider classification and failing closed', () => {
   });
 
   it('plain Full auto lines still go through', () => {
-    for (const line of ['npm test', 'git commit -m "fix: x"', 'curl -s http://localhost:3000/health', 'ls -la src']) expect(commandGuard(line, none, true), line).toBeUndefined();
+    for (const line of ['npm test', 'git commit -m fix', 'curl -s http://localhost:3000/health', 'ls -la src']) expect(commandGuard(line, none, true), line).toBeUndefined();
   });
+
+  it.each(['git commit -m "fix: x"', "echo 'a'", 'cat a\\ b', 'echo $HOME', 'echo {a,b}', 'node -e console.log(1)}'])('on Full auto, any quote, backslash, $ or brace asks: %s', (line) =>
+    expect(commandGuard(line, none, true)).toMatch(/Full auto still asks/),
+  );
+
+  it.each(['npm x cowsay', 'bun x cowsay'])('%s fetches and runs a package', (line) => expect(commandGuard(line, none)).toMatch(/installs or fetches packages/));
+
+  it.each(['::7f00:1', '::a00:1', '::808:808'])('%s (IPv4-compatible ::/96) counts as local', (ip) => expect(isPrivateIp(ip)).toBe(true));
 });
 
-it("a quoted argument with parentheses isn't a quoted program", () => {
-  expect(commandGuard(`/usr/bin/node -e console.log('hello from terminal')`, new Set(), true)).toBeUndefined();
-  expect(commandGuard(`FOO=1 'sh' x`, new Set(), true)).toMatch(/program is quoted/);
-});
