@@ -1,0 +1,95 @@
+# Spike W1 (Antigravity on Windows): can agy run in an AppContainer + Job object?
+# Manual only. Four checks; each prints RESULT lines, and nothing here fails the run.
+name: spike-agy-appcontainer
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DIR: ${{ github.workspace }}\spike\agy-appcontainer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build helper + probe (MSVC)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VS=%%i
+          call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
+          cd /d "%DIR%"
+          cl /nologo /W4 /O2 sandbox.c /Fe:sandbox.exe userenv.lib advapi32.lib || exit /b 1
+          cl /nologo /W4 /O2 probe.c /Fe:probe.exe ws2_32.lib advapi32.lib || exit /b 1
+      - name: Setup
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\scratch" | Out-Null
+          'secret' | Set-Content "$env:USERPROFILE\fl-probe-secret.txt"
+          'granted' | Set-Content "$env:RUNNER_TEMP\scratch\granted.txt"
+          whoami /groups | Select-String -Pattern 'Mandatory Label|Administrators'
+          "# W1 results" >> $env:GITHUB_STEP_SUMMARY
+      - name: 0. token (is the child really in an AppContainer?)
+        continue-on-error: true
+        run: |
+          $sb = "$env:DIR\sandbox.exe"; $p = "$env:DIR\probe.exe"
+          $o = & $p token; $i = & $sb --rx $env:DIR -- $p token
+          "0 outside: $o`n0 inside: $i" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+      - name: 1. user-profile file unreadable inside
+        continue-on-error: true
+        run: |
+          $sb = "$env:DIR\sandbox.exe"; $p = "$env:DIR\probe.exe"; $s = "$env:RUNNER_TEMP\scratch"
+          $r = @(
+            "1 outside profile: " + (& $p read "$env:USERPROFILE\fl-probe-secret.txt")
+            "1 inside profile (want DENIED): " + (& $sb --rx $env:DIR --rw $s -- $p read "$env:USERPROFILE\fl-probe-secret.txt")
+            "1 inside granted (want OK): " + (& $sb --rx $env:DIR --rw $s -- $p read "$s\granted.txt")
+            "1 inside ~/.ssh-like dir file (want DENIED): " + (& $sb --rx $env:DIR -- $p read "$env:USERPROFILE\NTUSER.DAT")
+          )
+          $r -join "`n" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+      - name: 2. Credential Manager readable inside
+        continue-on-error: true
+        run: |
+          $sb = "$env:DIR\sandbox.exe"; $p = "$env:DIR\probe.exe"
+          $r = @(
+            "2 outside write: " + (& $p credwrite 'friedliver-spike:probe' 's3cret')
+            "2 outside read: " + (& $p credread 'friedliver-spike:probe')
+            "2 inside read, no caps: " + (& $sb --rx $env:DIR -- $p credread 'friedliver-spike:probe')
+            "2 inside read, internetClient: " + (& $sb --cap client --rx $env:DIR -- $p credread 'friedliver-spike:probe')
+            "2 inside write: " + (& $sb --cap client --rx $env:DIR -- $p credwrite 'friedliver-spike:inside' 'x')
+            "2 outside read of inside write: " + (& $p credread 'friedliver-spike:inside')
+          )
+          $r -join "`n" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+      - name: 3. two in-container processes over localhost
+        continue-on-error: true
+        run: |
+          $sb = "$env:DIR\sandbox.exe"; $p = "$env:DIR\probe.exe"
+          $r = @(
+            "3 outside: " + (& $p loopback)
+            "3 inside, internetClient: " + (& $sb --cap client --rx $env:DIR --timeout 30 -- $p loopback)
+            "3 inside, client+server: " + (& $sb --cap client --cap server --rx $env:DIR --timeout 30 -- $p loopback)
+            "3 inside, client+server+private: " + (& $sb --cap client --cap server --cap private --rx $env:DIR --timeout 30 -- $p loopback)
+          )
+          $r -join "`n" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+      - name: 4. agy.exe starts inside (official install.ps1)
+        continue-on-error: true
+        run: |
+          irm https://antigravity.google/cli/install.ps1 | iex
+          $agy = "$env:LOCALAPPDATA\agy\bin\agy.exe"
+          $sb = "$env:DIR\sandbox.exe"; $s = "$env:RUNNER_TEMP\scratch"
+          New-Item -ItemType Directory -Force "$env:USERPROFILE\.gemini" | Out-Null
+          $turn = '{"event":"user","message":{"content":"say hi"}}'
+          $targs = @('--output-format','stream-json','--input-format','stream-json','--disable-slash-commands','--mode','plan','--sandbox')
+          function cut($x) { (($x | Out-String) -replace "`r",'').Trim() -split "`n" | Select-Object -First 8 | ForEach-Object { $_.Substring(0, [Math]::Min(300, $_.Length)) } }
+          $out = @("4 installed: $(Test-Path $agy)")
+          $out += "4 outside --version: " + (cut (& $agy --version 2>&1))
+          $env:TEMP = $s; $env:TMP = $s
+          $grants = @('--cap','client','--rx',(Split-Path $agy),'--rw',"$env:USERPROFILE\.gemini",'--rw',$s,'--timeout','60')
+          $out += "4 inside --version: " + (cut (& $sb @grants -- $agy --version 2>&1))
+          Push-Location $s
+          $out += "4 outside turn (unsigned-in):`n" + ((cut ($turn | & $agy @targs 2>&1)) -join "`n")
+          $out += "4 inside turn (unsigned-in):`n" + ((cut ($turn | & $sb @grants -- $agy @targs 2>&1)) -join "`n")
+          $out += "4 inside turn, client+server+private:`n" + ((cut ($turn | & $sb --cap server --cap private @grants -- $agy @targs 2>&1)) -join "`n")
+          Pop-Location
+          $out -join "`n" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
