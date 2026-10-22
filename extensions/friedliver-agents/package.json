@@ -826,6 +826,23 @@
           ],
           "description": "Arguments for the Copilot program (e.g. --effort=high, which Copilot fixes for the whole server)."
         },
+        "friedliver.agents.opencode.command": {
+          "scope": "machine",
+          "type": "string",
+          "default": "opencode",
+          "description": "Program that runs OpenCode over ACP. Changing it restarts OpenCode. Read from user settings only, never from a workspace."
+        },
+        "friedliver.agents.opencode.args": {
+          "scope": "machine",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "acp"
+          ],
+          "description": "Arguments for the OpenCode program."
+        },
         "friedliver.agents.custom": {
           "scope": "machine",
           "type": "array",
@@ -1016,14 +1033,16 @@
             "codex",
             "gemini",
             "antigravity",
-            "copilot"
+            "copilot",
+            "opencode"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
             "Antigravity",
-            "Copilot"
+            "Copilot",
+            "OpenCode"
           ],
           "default": "claude",
           "scope": "machine",
@@ -1149,14 +1168,16 @@
             "codex",
             "gemini",
             "antigravity",
-            "copilot"
+            "copilot",
+            "opencode"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
             "Antigravity",
-            "Copilot"
+            "Copilot",
+            "OpenCode"
           ],
           "default": "claude",
           "scope": "machine",

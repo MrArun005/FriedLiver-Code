@@ -209,7 +209,7 @@ export function chatList(state: Pick<AppState, 'chats' | 'links'>, callerId: str
 
 /** list_agents: the agents FriedLiver can start. */
 export function agentList(): string {
-  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', antigravity: 'Google models through the Antigravity CLI', copilot: 'GitHub Copilot CLI', demo: 'offline test agent; it echoes what it is told' };
+  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', antigravity: 'Google models through the Antigravity CLI', copilot: 'GitHub Copilot CLI', opencode: 'OpenCode, with OpenCode Zen and other providers', demo: 'offline test agent; it echoes what it is told' };
   const keys = allAgentKeys().filter((k) => k !== 'demo' || testAgentsOn());
   return [
     ...keys.map((k) => `${k} · ${agentFace(k).name}${about[k] ? ` (${about[k]})` : ''}`),

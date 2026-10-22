@@ -1,4 +1,4 @@
-export const AGENT_IDS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'demo'] as const;
+export const AGENT_IDS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode', 'demo'] as const;
 export type BuiltinAgentId = (typeof AGENT_IDS)[number];
 /** An agent the user added in their own settings (`friedliver.agents.custom`), by its id there. */
 export type CustomAgentId = `custom:${string}`;
@@ -23,6 +23,16 @@ export interface AgentSpec {
    */
   minVersion?: string;
 }
+
+/** OpenCode's permission rules (last match wins): ask for everything but reading and searching; .env stays unread. */
+export const OPENCODE_PERMISSIONS = {
+  '*': 'ask',
+  read: { '*': 'allow', '*.env': 'deny', '*.env.*': 'deny', '*.env.example': 'allow' },
+  glob: 'allow',
+  grep: 'allow',
+  lsp: 'allow',
+  question: 'allow',
+};
 
 // Agents are started directly, never through `npx`: npx keeps an extra Node
 // process alive for the whole session, which costs ~50 MB per agent. The
@@ -73,7 +83,20 @@ export const DEFAULT_AGENTS: Record<VendorAgentId, AgentSpec> = {
     command: 'copilot',
     args: ['--acp'],
     installCommand: process.platform === 'win32' ? 'winget install GitHub.Copilot' : 'npm install -g @github/copilot',
-    loginHint: 'Run `copilot` in a terminal and type /login, or set GH_TOKEN to a fine-grained token with the Copilot Requests permission.',
+    loginHint: 'Run `copilot login` in a terminal, or set GH_TOKEN to a fine-grained token with the Copilot Requests permission.',
+  },
+  // OpenCode's own ACP mode (`opencode acp`): https://opencode.ai/docs/acp/. Its permissions default to
+  // "allow" (https://opencode.ai/docs/permissions/), so FriedLiver starts it with every action but reads and
+  // searches set to "ask": each edit, command and fetch then comes to FriedLiver's approvals like any agent's.
+  // Inline config (OPENCODE_CONFIG_CONTENT) outranks the global and project opencode.json, so a repo can't undo it.
+  opencode: {
+    id: 'opencode',
+    label: 'OpenCode',
+    command: 'opencode',
+    args: ['acp'],
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: OPENCODE_PERMISSIONS }) },
+    installCommand: process.platform === 'win32' ? 'npm install -g opencode-ai' : 'curl -fsSL https://opencode.ai/install | bash',
+    loginHint: 'OpenCode Zen’s free models need no sign-in. For other providers run `opencode auth login` in a terminal, or set the provider’s API key.',
   },
 };
 

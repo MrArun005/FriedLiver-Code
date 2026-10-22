@@ -211,13 +211,13 @@ describe('models per agent', () => {
 
 describe('Demo visibility', () => {
   it('hides Demo from pickers unless turned on', () => {
-    expect(shownAgents(false)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot']);
-    expect(shownAgents(true)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'demo']);
+    expect(shownAgents(false)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode']);
+    expect(shownAgents(true)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode', 'demo']);
   });
 
   it('gives pickers the shown agents and their last known sign-in', () => {
     const records: Partial<Record<AgentKey, AccountRecord>> = { gemini: record({ status: 'needs-sign-in' }), demo: record({ status: 'signed-in' }) };
-    expect(rosterOf(false, records)).toEqual({ agents: ['claude', 'codex', 'gemini', 'antigravity', 'copilot'], signIn: { gemini: 'needs-sign-in' } });
+    expect(rosterOf(false, records)).toEqual({ agents: ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode'], signIn: { gemini: 'needs-sign-in' } });
     expect(rosterOf(true, records).signIn).toEqual({ gemini: 'needs-sign-in', demo: 'signed-in' });
   });
 

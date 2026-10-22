@@ -15,8 +15,8 @@ const { markFor } = await import(pathToFileURL(out).href);
 // The agents' v2 hues (package.json friedliver.agent* defaults; tokens.css --hue-*): an editor tab icon is a
 // file, so it can't read the theme; the tab gets { dark, light } (extension.ts). Neutral agents use --fg-2.
 const HUE = {
-  dark: { claude: '#ebaf86', codex: '#8bd9c9', gemini: '#a9b6f5', antigravity: '#aca8a5', copilot: '#aca8a5', demo: '#aca8a5', custom: '#aca8a5' },
-  light: { claude: '#984b16', codex: '#037465', gemini: '#4e59b1', antigravity: '#5e5c59', copilot: '#5e5c59', demo: '#5e5c59', custom: '#5e5c59' },
+  dark: { claude: '#ebaf86', codex: '#8bd9c9', gemini: '#a9b6f5', antigravity: '#aca8a5', copilot: '#aca8a5', opencode: '#aca8a5', demo: '#aca8a5', custom: '#aca8a5' },
+  light: { claude: '#984b16', codex: '#037465', gemini: '#4e59b1', antigravity: '#5e5c59', copilot: '#5e5c59', opencode: '#5e5c59', demo: '#5e5c59', custom: '#5e5c59' },
 };
 // Logos keep their vendors' colours (ui/logos.ts; --logo-* in tokens.css); OpenAI's is monochrome.
 const LOGO = {

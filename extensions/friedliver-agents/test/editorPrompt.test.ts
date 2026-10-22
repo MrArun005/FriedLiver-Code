@@ -156,7 +156,7 @@ describe('code references', () => {
 describe('the Edit with Agent hint', () => {
   it('names each agent as its mention everywhere else does (@codex, not @gpt), and each one parses', () => {
     const mentions = EDIT_AGENT_HINT.match(/@\w+/g)!;
-    expect(mentions).toEqual(['@claude', '@codex', '@gemini', '@antigravity', '@copilot']);
+    expect(mentions).toEqual(['@claude', '@codex', '@gemini', '@antigravity', '@copilot', '@opencode']);
     for (const m of mentions) expect(parseEditInput(`${m} tidy`).agent).toBe(m.slice(1));
   });
 });

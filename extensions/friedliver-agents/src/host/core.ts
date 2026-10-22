@@ -103,8 +103,9 @@ export const KEY_ENV: Partial<Record<VendorAgentId, string>> = {
   codex: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
   copilot: 'GH_TOKEN',
+  opencode: 'OPENCODE_API_KEY',
 };
-export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'copilot'];
+export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode'];
 
 const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 /** Files larger than this aren't read to show a permission request's whole diff. */
@@ -776,6 +777,8 @@ export class AgentCore {
     const chat = this.requireChat(chatId);
     const option = chat.session?.options.find((o) => o.id === optionId);
     if (!option || !offers(option, value)) return;
+    // An agent's own "approve everything" switch (Copilot's allow_all) would bypass FriedLiver's approvals.
+    if (option.category === 'permissions') return;
     if ((option.category === 'mode' || planToggle(chat.session)?.option === option) && this.levelLocked(chatId)) return;
     if (option.category === 'mode' && typeof value === 'string') {
       const level = levelOfMode(chat.agent, option, value);

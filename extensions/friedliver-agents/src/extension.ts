@@ -1864,7 +1864,7 @@ export class Controller {
         args: Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : [],
       };
     };
-    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity'), copilot: one('copilot') };
+    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity'), copilot: one('copilot'), opencode: one('opencode') };
   }
 
   /**

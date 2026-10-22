@@ -169,6 +169,16 @@ export const KEY_SETUPS: Record<VendorKey, KeySetup[]> = {
       acpMethods: [],
     },
   ],
+  // OpenCode Zen's key (https://opencode.ai/docs/zen/); the free Zen models need none.
+  opencode: [
+    {
+      id: 'apiKey',
+      name: 'OpenCode Zen API key',
+      description: 'A key from opencode.ai/auth, for OpenCode Zen’s paid models. Its free models work without one.',
+      fields: [{ env: 'OPENCODE_API_KEY', label: 'API key', secret: true }],
+      acpMethods: [],
+    },
+  ],
 };
 
 export function keySetup(agent: AgentKey, id: unknown): KeySetup | undefined {
@@ -262,9 +272,14 @@ export const CLI_ACCOUNTS: Record<VendorKey, CliAccount> = {
     note: 'Google’s Antigravity CLI. It has no ACP mode, so FriedLiver runs it through its own adapter with the same login. It can’t stop to ask, so Manual, Plan and /discuss are talk only (FriedLiver reads the project for it, in a deny-by-default sandbox); Edit automatically and Auto run it in the project. macOS only for now.',
   },
   copilot: {
-    signIn: { command: 'copilot', then: 'Type /login and finish on github.com, then type /exit.' },
+    signIn: { command: 'copilot login', then: 'Finish on github.com.' },
     signOut: { command: 'copilot', then: 'Type /logout.' },
     note: 'GitHub Copilot CLI: the same program FriedLiver runs in ACP mode (copilot --acp). Copilot Free includes it with a monthly allowance.',
+  },
+  opencode: {
+    signIn: { command: 'opencode auth login', then: 'Pick a provider and paste its key, or sign in.' },
+    signOut: { command: 'opencode auth logout' },
+    note: 'OpenCode itself (opencode acp). OpenCode Zen’s free models work without signing in; other providers need their key here or in your environment.',
   },
 };
 

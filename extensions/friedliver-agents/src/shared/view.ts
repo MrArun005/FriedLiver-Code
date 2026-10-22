@@ -303,6 +303,7 @@ const AGENT_WORDS: Record<BuiltinAgentKey, string> = {
   gemini: 'gemini google',
   antigravity: 'antigravity agy google',
   copilot: 'copilot github',
+  opencode: 'opencode zen',
   demo: 'demo',
 };
 
@@ -825,6 +826,7 @@ export const MENTION_OPTIONS: MentionOption[] = [
   { agent: 'gemini', name: 'Gemini', insert: 'gemini', words: ['gemini', 'google'] },
   { agent: 'antigravity', name: 'Antigravity', insert: 'antigravity', words: ['antigravity', 'agy'] },
   { agent: 'copilot', name: 'Copilot', insert: 'copilot', words: ['copilot', 'github'] },
+  { agent: 'opencode', name: 'OpenCode', insert: 'opencode', words: ['opencode'] },
   { agent: 'demo', name: 'Demo', insert: 'demo', words: ['demo'] },
 ];
 

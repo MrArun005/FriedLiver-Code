@@ -3,7 +3,7 @@
 // the 16 grid with the icon set's 1.5px stroke. FriedLiver's own mark (Demo) is the outline mark.
 import type { BuiltinAgentKey } from '../../shared/model';
 import { FRIEDLIVER_MARK } from './friedliverMark';
-import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, COPILOT_LOGO, GEMINI_LOGO, OPENAI_LOGO } from './logos';
+import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, COPILOT_LOGO, GEMINI_LOGO, OPENAI_LOGO, OPENCODE_LOGO } from './logos';
 
 /**
  * A drawing in `viewBox` (16 × 16 unless given). Line marks: `d` stroked, `fill` filled at 16%. Logos: `logo`
@@ -23,6 +23,7 @@ export const MARKS: Record<BuiltinAgentKey | 'agent', Mark> = {
   gemini: { d: GEMINI_LOGO, viewBox: '0 0 24 24', logo: { color: 'var(--logo-gemini)' } },
   antigravity: { d: '', viewBox: ANTIGRAVITY_LOGO.viewBox, svg: ANTIGRAVITY_LOGO.svg },
   copilot: { d: COPILOT_LOGO, viewBox: '0 0 24 24', logo: { color: 'var(--logo-github)' } },
+  opencode: { d: '', viewBox: OPENCODE_LOGO.viewBox, svg: OPENCODE_LOGO.svg },
   demo: FRIEDLIVER_MARK,
   // Any other agent: a small robot face.
   agent: { d: 'M2.5 5h11v8h-11zM8 2.25V5M6 8.5v1M10 8.5v1' },

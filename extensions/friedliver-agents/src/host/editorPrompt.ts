@@ -39,7 +39,7 @@ export type SpanKind = 'selection' | 'function' | 'line' | 'problem';
  * another agent).
  */
 /** The Edit with Agent box's hint: the agents by the names the rest of FriedLiver mentions them with. */
-export const EDIT_AGENT_HINT = 'Start with @claude, @codex, @gemini, @antigravity or @copilot to pick another agent.';
+export const EDIT_AGENT_HINT = 'Start with @claude, @codex, @gemini, @antigravity, @copilot or @opencode to pick another agent.';
 
 export function parseEditInput(text: string): { agent?: AgentKey; instruction: string } {
   let rest = text.trim();

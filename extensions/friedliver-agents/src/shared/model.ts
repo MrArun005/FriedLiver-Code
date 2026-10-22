@@ -9,7 +9,7 @@ import { stepFacts, withRawOutput, type StepFacts } from './steps';
 import { isSystemTool, SYSTEM_VERBS, type SystemTool } from './system';
 import type { DiscussionItem } from './discuss';
 
-export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'demo'] as const;
+export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode', 'demo'] as const;
 export type BuiltinAgentKey = (typeof AGENT_KEYS)[number];
 /** An agent from the user's own `friedliver.agents.custom` setting: `custom:<its id>`. */
 export type CustomAgentKey = `custom:${string}`;
@@ -22,6 +22,7 @@ export const AGENT_FACES: Record<BuiltinAgentKey, { letter: string; name: string
   gemini: { letter: 'G', name: 'Gemini' },
   antigravity: { letter: 'A', name: 'Antigravity' },
   copilot: { letter: 'P', name: 'Copilot' },
+  opencode: { letter: 'O', name: 'OpenCode' },
   demo: { letter: 'D', name: 'Demo' },
 };
 
@@ -889,6 +890,7 @@ export const MENTIONS: Record<string, AgentKey> = {
   agy: 'antigravity',
   copilot: 'copilot',
   github: 'copilot',
+  opencode: 'opencode',
   demo: 'demo',
 };
 
