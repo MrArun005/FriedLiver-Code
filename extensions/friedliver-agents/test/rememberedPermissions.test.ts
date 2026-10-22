@@ -15,7 +15,7 @@ afterEach(disposeCores);
 type Permission = Extract<Item, { kind: 'permission' }>;
 
 function fakeHome() {
-  const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'fl-home-')));
+  const home = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'fl-home-')));
   for (const d of ['Desktop/trip', '.ssh']) mkdirSync(path.join(home, d), { recursive: true });
   writeFileSync(path.join(home, 'Desktop/trip/plan.txt'), 'Delhi to Agra\n');
   return home;
@@ -42,7 +42,7 @@ async function ask(c: AgentCore, chatId: string, text: string) {
 
 describe('remembered folders', () => {
   it('answer the next edit in that folder for the agent, in another chat and agent, and after a restart', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     mkdirSync(path.join(dir, 'src'));
     const { c, permissions, stores, home } = setup(dir);
     const chat = await c.createChat('demo');
@@ -70,7 +70,7 @@ describe('remembered folders', () => {
   });
 
   it('read separately from write, outside the workspace too (~/Desktop)', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, home } = setup(dir);
     const chat = await c.createChat('demo');
     const plan = path.join(home, 'Desktop/trip/plan.txt');
@@ -92,7 +92,7 @@ describe('remembered folders', () => {
   });
 
   it('remember only what the card offered, and never a sensitive place', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, permissions, home } = setup(dir);
     const chat = await c.createChat('demo');
     const { card, turn } = await ask(c, chat.id, 'native-edit README.md');
@@ -118,7 +118,7 @@ describe('remembered folders', () => {
 
 describe('config that runs code or steers agents', () => {
   it('a write to .vscode/settings.json or CLAUDE.md under an always-allowed folder still asks, and offers Allow once only', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, permissions } = setup(dir);
     permissions.add({ kind: 'folder', folder: dir, access: 'write' });
     const chat = await c.createChat('demo');
@@ -145,8 +145,8 @@ describe('every target a request names is checked', () => {
   }
 
   it('a move whose new_path is outside the rule asks; inside, it is answered', async () => {
-    const dir = realpathSync(await gitRepo());
-    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
+    const dir = realpathSync.native(await gitRepo());
+    const outside = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
     const { c, permissions } = setup(dir);
     permissions.add({ kind: 'folder', folder: dir, access: 'write' });
     const chat = await c.createChat('demo');
@@ -160,7 +160,7 @@ describe('every target a request names is checked', () => {
   });
 
   it('a relative path is resolved against the chat’s folder and checked', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, permissions } = setup(dir);
     permissions.add({ kind: 'folder', folder: dir, access: 'write' });
     const chat = await c.createChat('demo');
@@ -170,7 +170,7 @@ describe('every target a request names is checked', () => {
   });
 
   it('fails closed: a target that is not a path, or file arguments on a kind it doesn’t know', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, permissions } = setup(dir);
     permissions.add({ kind: 'folder', folder: dir, access: 'write' });
     const chat = await c.createChat('demo');
@@ -202,7 +202,7 @@ describe('remembered websites', () => {
 
 describe('what stays as it was', () => {
   it('a read-only chat is refused before any rule, and remembers nothing', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, permissions } = setup(dir);
     permissions.add({ kind: 'folder', folder: dir, access: 'write' });
     const chat = await c.createChat('demo', { readOnly: true });
@@ -214,7 +214,7 @@ describe('what stays as it was', () => {
 
 describe('writes that come as a review', () => {
   it('a remembered folder accepts an agent write that asked nothing first (Gemini-style), recorded for undo', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const shown: string[] = [];
     const permissions = memoryPermissions();
     const c = makeCore(dir, { permissions, ui: { showReview: (r) => shown.push(r.path), closeReview: () => {}, askCommand: () => {} } });
@@ -236,7 +236,7 @@ describe('writes that come as a review', () => {
 
 describe('no folder open', () => {
   it('agents (and their sign-in checks) start in FriedLiver’s own empty folder, not home, so their start-up scan never reaches Desktop or Documents', () => {
-    const empty = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'fl-no-folder-')));
+    const empty = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'fl-no-folder-')));
     const cwd = (c: AgentCore) => (c as unknown as { hub: { options: { cwd: string } } }).hub.options.cwd;
     expect(cwd(makeCore('', { folders: () => [], noFolderCwd: empty }))).toBe(empty);
     expect(cwd(makeCore('/w', { noFolderCwd: empty }))).toBe('/w');

@@ -29,7 +29,7 @@ const FILE_LINKS = canSymlink('file');
 
 /** <tmp>/ws (the workspace) and <tmp>/outside, with secret.txt in outside. */
 function layout() {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-paths-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-paths-')));
   const ws = path.join(base, 'ws');
   const outside = path.join(base, 'outside');
   fs.mkdirSync(path.join(ws, 'src'), { recursive: true });
@@ -119,8 +119,8 @@ describe('.git folders', () => {
 
 describe('workspacePath: where a request really points, for the countdown', () => {
   it('resolves relative paths against the chat folder, follows links, and fails closed', () => {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-ws-')));
-    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-ws-')));
+    const outside = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
     fs.mkdirSync(path.join(root, 'src'));
     fs.symlinkSync(outside, path.join(root, 'escape'));
     expect(workspacePath('src', root, [root])).toBe(path.join(root, 'src'));

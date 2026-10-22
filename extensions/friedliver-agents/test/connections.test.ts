@@ -272,6 +272,21 @@ describe('chat housekeeping', () => {
   });
 });
 
+describe('Windows paths', () => {
+  // The drive letter's case differs between git (C:\) and VS Code or an agent (c:\): still one changed file.
+  it.runIf(process.platform === 'win32')('records a file the agent names with another drive-letter case once', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, {
+      ui: { showReview: (r) => setTimeout(() => core.decideReview(r.reviewId, true), 5), closeReview: () => {}, askPermission: (a) => setTimeout(() => core.answerPermission(a.requestId, 'allow'), 5) },
+    });
+    const a = await core.createChat('demo');
+    const file = path.join(dir, 'src', 'new.txt');
+    const other = (file[0] === file[0].toUpperCase() ? file[0].toLowerCase() : file[0].toUpperCase()) + file.slice(1);
+    await core.send(a.id, `edit ${other}`);
+    expect(core.chat(a.id)!.files).toEqual(['src/new.txt']);
+  });
+});
+
 describe('connected chats on the board', () => {
   it('reads a consulted chat as done, and a waiting tool request as needing you', () => {
     const base: ChatView = { id: 'chat-2', agent: 'gemini', label: 'Gemini', title: 'Q', cwd: '/w', createdAt: 0, busy: false, changedFiles: 0, items: [], depth: 1, files: [], lastActivity: 0, turns: 1 };

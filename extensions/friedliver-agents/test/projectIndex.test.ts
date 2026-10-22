@@ -142,11 +142,10 @@ describe('what is never indexed', () => {
 
   it('fails closed when git check-ignore errors inside a repo', async () => {
     const root = await project({ 'ok.ts': 'fine' }, true);
-    const fake = path.join(root, '..', `fake-git-${path.basename(root)}`);
-    await writeFile(fake, '#!/bin/sh\nif [ "$1" = rev-parse ]; then echo true; exit 0; fi\nexit 128\n', { mode: 0o755 });
-    dirs.push(fake);
+    // A corrupt index: rev-parse still says "in a work tree", check-ignore dies with 128. Real git, so on every OS.
+    await writeFile(path.join(root, '.git', 'index'), 'not an index');
     const logged: string[] = [];
-    const ix = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1e8, git: fake, log: (m) => logged.push(m) });
+    const ix = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1e8, log: (m) => logged.push(m) });
     await writeFile(path.join(root, 'new.ts'), 'leakword');
     await ix.updateMany(['new.ts']);
     expect(ix.has('new.ts')).toBe(false);

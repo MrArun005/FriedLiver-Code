@@ -32,7 +32,7 @@ let clock: number;
 const DAY = 86_400_000;
 
 beforeEach(() => {
-  base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-store-')));
+  base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-store-')));
   store = path.join(base, 'storage', 'images');
   temp = path.join(base, 'agent-temp');
   user = path.join(base, 'workspace');

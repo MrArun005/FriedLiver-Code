@@ -1803,7 +1803,11 @@ export class AgentCore {
       if (now === this.turns.before(chatId, f)) this.turns.drop(chatId, f);
       else changed.push(f);
     }
-    return [...new Set([...snap, ...changed])];
+    // One entry per file: on Windows the same file comes as git's C:\ and VS Code's or the agent's c:\ (case-insensitive).
+    const key = (f: string) => (this.platform === 'win32' ? path.resolve(f).toLowerCase() : f);
+    const files = new Map<string, string>();
+    for (const f of [...snap, ...changed]) if (!files.has(key(f))) files.set(key(f), f);
+    return [...files.values()];
   }
 
   /** Keeps open tool calls whole (a permission request may name only the id), and notes files edit tools touch. */

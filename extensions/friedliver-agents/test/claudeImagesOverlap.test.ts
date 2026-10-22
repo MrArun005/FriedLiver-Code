@@ -7,6 +7,9 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { encodeCwd, listClaudeImages } from '../src/host/claudeSessions';
 
+/** A POSIX fixture path as the code resolves it: itself on macOS/Linux, on the current drive on Windows. */
+const R = (p: string) => path.resolve(p);
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs/promises')>();
   const slow = <T>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), 30));
@@ -36,6 +39,6 @@ describe('images of a growing transcript', () => {
     fs.appendFileSync(file, `{"type":"x","pad":"${'y'.repeat(100_000)}"}\n`);
     await Promise.all([read(), read()]);
     fs.appendFileSync(file, readOf('r2', 'two.png'));
-    expect((await read())[0].images.map((i) => i.path)).toEqual(['/work/race/one.png', '/work/race/two.png']);
+    expect((await read())[0].images.map((i) => i.path)).toEqual([R('/work/race/one.png'), R('/work/race/two.png')]);
   });
 });
