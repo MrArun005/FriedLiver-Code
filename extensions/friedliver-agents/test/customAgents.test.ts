@@ -120,6 +120,22 @@ describe('OpenCode preset', () => {
     expect(config.permission.read['*.env']).toBe('deny');
   });
 
+  // A repo's opencode.json or .opencode/agents could set `build`'s own permissions to allow (verified with
+  // OpenCode 1.19.4's `opencode debug agent build`): FriedLiver turns project config off and pins every built-in agent.
+  it('ignores the project’s own OpenCode config and pins each built-in agent’s permissions', () => {
+    const env = DEFAULT_AGENTS.opencode.env!;
+    expect(env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    for (const agent of ['build', 'plan', 'general', 'explore']) expect(config.agent[agent].permission, agent).toEqual(OPENCODE_PERMISSIONS);
+    // Named, not only under "*": a same-named rule in the user's own config can't come after it and win.
+    for (const p of ['edit', 'shell', 'webfetch', 'websearch', 'task', 'skill', 'external_directory', 'doom_loop']) expect(OPENCODE_PERMISSIONS[p as keyof typeof OPENCODE_PERMISSIONS], p).toBe('ask');
+  });
+
+  it('never searches file contents without asking (grep can’t be kept out of .env by path)', () => {
+    expect(OPENCODE_PERMISSIONS.grep).toBe('ask');
+    expect(OPENCODE_PERMISSIONS.glob).toBe('allow');
+  });
+
   it('signs in with `opencode auth login` or a Zen key; free Zen models need neither', () => {
     expect(CLI_ACCOUNTS.opencode.signIn?.command).toBe('opencode auth login');
     expect(KEY_SETUPS.opencode.map((s) => s.fields.map((f) => f.env))).toEqual([['OPENCODE_API_KEY']]);

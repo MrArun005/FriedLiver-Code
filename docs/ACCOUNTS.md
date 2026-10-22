@@ -64,10 +64,17 @@ hand asks like Full auto, and its `allow_all` option is never offered.
 OpenCode is `opencode acp` ([docs](https://opencode.ai/docs/acp/)). Install:
 `curl -fsSL https://opencode.ai/install | bash` (macOS, Linux), `npm install -g
 opencode-ai` (Windows; also Scoop or Chocolatey). OpenCode's permissions
-default to "allow", so FriedLiver starts it with an inline config
-(`OPENCODE_CONFIG_CONTENT`, which outranks a project's `opencode.json`) that
-asks for everything but reading and searching; every edit, command and fetch
-then reaches FriedLiver's approvals. OpenCode Zen's free models (listed as
+default to "allow", and a repository's own `opencode.json` or `.opencode/agents`
+can set an agent's permissions to allow. So FriedLiver starts it with
+`OPENCODE_DISABLE_PROJECT_CONFIG=1` (no project config, `.opencode` agents,
+plugins or `AGENTS.md`; FriedLiver's shared rules still reach it) and an inline
+config (`OPENCODE_CONFIG_CONTENT`) that pins every built-in agent (build, plan,
+general, explore) to ask for everything but reading files and listing names;
+`.env` files stay unread and content search (grep) asks. Every edit, command,
+search and fetch then reaches FriedLiver's approvals. Checked with OpenCode
+1.19.4's `opencode debug agent build` in a repository whose config allowed
+everything. Your own global OpenCode config can still add agents of its own;
+FriedLiver keeps chats on `build` and `plan`. OpenCode Zen's free models (listed as
 "… Free" in the model picker, plus Big Pickle) work without signing in.
 
 First real run (2026-10-22, ACP initialize + session/new, not signed in):
