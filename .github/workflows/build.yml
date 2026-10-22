@@ -61,6 +61,24 @@ jobs:
       - name: Free disk space (the upstream checkout and build need about 10 GB)
         if: runner.os == 'Linux'
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      # Upstream's deb packaging fetches dpkg-shlibdeps.pl from raw.githubusercontent.com with a bare curl, and
+      # CI runners get 429s for it. A curl earlier on PATH retries those fetches (curl honours the 429's
+      # Retry-After); any call without a raw.githubusercontent.com URL goes to the real curl unchanged.
+      # No token: nothing later in this job should be able to read one.
+      - name: Retry raw.githubusercontent.com fetches
+        if: runner.os == 'Linux'
+        run: |
+          shim="$RUNNER_TEMP/curl-shim"
+          mkdir -p "$shim"
+          cat > "$shim/curl" <<'EOF'
+          #!/bin/sh
+          for a in "$@"; do case "$a" in https://raw.githubusercontent.com/*)
+            exec /usr/bin/curl --fail --silent --show-error --retry 8 --retry-delay 30 --retry-all-errors "$@" ;;
+          esac; done
+          exec /usr/bin/curl "$@"
+          EOF
+          chmod +x "$shim/curl"
+          echo "$shim" >> "$GITHUB_PATH"
       # Long paths: upstream's node_modules nest deeply. No CRLF conversion: the patches are LF.
       - name: Git settings for Windows
         if: runner.os == 'Windows'
