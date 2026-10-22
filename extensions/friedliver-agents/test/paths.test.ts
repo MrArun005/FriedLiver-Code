@@ -47,6 +47,15 @@ describe('workspace containment with real symlinks', () => {
     expect(insideRoots(path.join(ws, 'not', 'yet', 'there.txt'), [ws])).toBe(path.join(ws, 'not', 'yet', 'there.txt'));
   });
 
+  it.skipIf(!DIR_LINKS)('a workspace opened through another name (a link; a Windows 8.3 name) holds paths under its real name', () => {
+    const { base, ws, outside } = layout();
+    const alias = path.join(base, 'alias');
+    link(ws, alias, 'dir');
+    expect(insideRoots(path.join(ws, 'src', 'a.ts'), [alias])).toBe(path.join(ws, 'src', 'a.ts'));
+    expect(insideRoots(path.join(outside, 'secret.txt'), [alias])).toBeNull();
+    expect(insideRoots(path.join(ws, '..', 'outside', 'secret.txt'), [alias])).toBeNull();
+  });
+
   it.skipIf(!DIR_LINKS)('refuses a folder link that leads out of the workspace (a repo with keys -> ~/.ssh)', () => {
     const { ws, outside } = layout();
     link(outside, path.join(ws, 'keys'), 'dir');

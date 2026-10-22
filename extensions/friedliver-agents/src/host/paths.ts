@@ -20,7 +20,10 @@ import path from 'node:path';
 export function insideRoots(file: unknown, roots: readonly string[], p: path.PlatformPath = path): string | null {
   if (typeof file !== 'string' || !file || file.includes('\0') || roots.length === 0) return null;
   const resolved = p.resolve(roots[0], file);
-  if (!roots.some((root) => contains(p, p.resolve(root), resolved))) return null;
+  // A root as given or as it really is: a folder opened as C:\Users\RUNNER~1\… (Windows 8.3) or through a link
+  // still holds the paths git and agents report under its real name. The real-path check below still decides.
+  const under = (root: string) => [p.resolve(root), ...(p === path ? [realPath(path.resolve(root))] : [])].some((r) => r !== null && contains(p, r, resolved));
+  if (!roots.some(under)) return null;
   if (p !== path) return resolved;
   const real = realPath(resolved);
   if (real === null) return null;

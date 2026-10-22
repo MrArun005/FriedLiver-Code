@@ -177,7 +177,8 @@ describe('pipes and forwards', () => {
     expect(core.chat(a.id)!.items.some((i) => i.kind === 'notice' && i.text.startsWith('Paused the pipe'))).toBe(true);
     expect(core.pipe(a.id, b.id).id).toBe(link.id);
     expect(core.snapshot.links[0].active).toBe(true);
-  });
+    // 42 turns, each with a git checkpoint: about 28 s on a Windows runner, where every git start is slow.
+  }, 90_000);
 
   it("forwards a chat's last reply into another chat", async () => {
     const dir = await gitRepo();
