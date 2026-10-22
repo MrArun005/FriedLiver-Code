@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import type * as acp from '@agentclientprotocol/sdk';
+import { agentShell, shellLaunch, type AgentShell } from './agentShell';
 import { killProcessTree, launchFor, quoteWindowsArg } from './processes';
 
 const DEFAULT_OUTPUT_LIMIT = 1_000_000;
@@ -171,6 +172,8 @@ export class TerminalManager {
   constructor(
     private readonly defaultCwd: string,
     private readonly listener?: TerminalListener,
+    /** Where bare command lines run (agentShell); tests pass their own. */
+    private readonly shell: AgentShell = agentShell(),
   ) {}
 
   async create(req: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
@@ -204,10 +207,15 @@ export class TerminalManager {
     // arguments starts directly, so nothing re-splits them (see launchFor).
     const detached = process.platform !== 'win32';
     let child: ChildProcess;
-    if (!launch) {
+    const shell = this.shell;
+    if (launch) {
+      child = spawn(launch.file, launch.args, { cwd, env, detached, windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+    } else if (shell.kind === 'sh') {
       child = spawn(shellLine, { cwd, env, shell: true, detached, windowsHide: true });
     } else {
-      child = spawn(launch.file, launch.args, { cwd, env, detached, windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+      // Windows: Git Bash or PowerShell by absolute path, never cmd.exe (agentShell.ts).
+      const run = shellLaunch(shell, shellLine);
+      child = spawn(run.file, run.args, { cwd, env: { ...env, ...run.env }, detached, windowsHide: true });
     }
 
     this.listener?.onStart(info);

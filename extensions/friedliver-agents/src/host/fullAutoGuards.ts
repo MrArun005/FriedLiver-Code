@@ -148,8 +148,10 @@ const unquoted = (line: string) => line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "'
  * substitution, a quoted program, any quote, backslash, $ or brace, an unquoted glob, a download
  * piped anywhere, or a download whose file can't be told (bundled or attached -o/-O, a redirect).
  */
-function unclear(line: string): string | undefined {
+function unclear(line: string, powershell: boolean): string | undefined {
   if (/\$\(|`|<\(|>\(/.test(line)) return 'it uses command substitution';
+  // In PowerShell any parenthesis runs what is inside it first: `iex (iwr URL).Content`.
+  if (powershell && /\(/.test(line)) return 'it uses command substitution';
   const bare = unquoted(line);
   if (/(?:^|[;&|\n]\s*)(?:\w+=\S*\s+)*(?:''|\\)/.test(bare)) return 'its program is quoted';
   if (/['"\\${}]/.test(line)) return 'it has quotes, backslashes, $ or braces';
@@ -167,11 +169,12 @@ function unclear(line: string): string | undefined {
  * Why Full auto must still ask before running `line`, or undefined: it pipes a download into a
  * shell, installs or fetches packages, or runs, copies or moves a file named in `fresh` (this chat's
  * recent downloads and writes); on `fullAuto`, also a line too unclear to check (unclear()).
+ * `powershell`: agent command lines run in PowerShell here (agentShell), which reads more as code.
  */
-export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto = false): string | undefined {
+export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto = false, powershell = false): string | undefined {
   if (PIPE_TO_SHELL.test(line)) return `${STILL_ASKS}: the command pipes a download into a shell`;
   if (INSTALL.test(line)) return `${STILL_ASKS}: the command installs or fetches packages`;
-  const why = fullAuto ? unclear(line) : undefined;
+  const why = fullAuto ? unclear(line, powershell) : undefined;
   if (why) return `${STILL_ASKS}: ${why}, so FriedLiver can't check what the command runs`;
   if (!fresh.size) return undefined;
   for (const words of simpleCommands(line)) {
