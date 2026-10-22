@@ -158,12 +158,16 @@ describe('full-auto guards and the chosen shell', () => {
     for (const line of ['ls; Get-Item Env:NODE_OPTIONS', 'read BASH_ENV', 'export -n PERL5OPT', 'printenv RUBYOPT', 'set -a; LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'git -c core.x GIT_SSH_COMMAND', 'unset ENV', '$env:pythonstartup']) {
       expect(commandGuard(line, new Set(), true), line).toMatch(/startup/);
     }
+    // ... and in every mode, for the whole loader list.
+    for (const name of ['BASH_ENV', 'ENV', 'NODE_OPTIONS', 'PYTHONSTARTUP', 'PROMPT_COMMAND', 'PERL5OPT', 'PERL5LIB', 'RUBYOPT', 'RUBYLIB', 'PYTHONPATH', 'NODE_PATH', 'JAVA_TOOL_OPTIONS', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'GIT_SSH_COMMAND']) {
+      expect(commandGuard(`echo x; read ${name}`, new Set(), false), name).toMatch(/startup/);
+    }
     expect(commandGuard('env FOO=1 make', new Set(), true)).toBeUndefined();
     expect(commandGuard('NODE_OPTIONSX=1 make', new Set(), true)).toBeUndefined();
-    expect(commandGuard('LD_PRELOAD=./evil.so ls', new Set(['evil.so']))).toMatch(/evil\.so/);
+    expect(commandGuard('X=./evil.so ls', new Set(['evil.so']))).toMatch(/evil\.so/);
     expect(commandGuard("$env:X = 'C:\\t\\evil.dll'; ls", new Set(['evil.dll']))).toMatch(/evil\.dll/);
     expect(commandGuard('X=fine ls', new Set(['evil.so']))).toBeUndefined();
-    for (const line of ['NODE_PATH=/a:/tmp/evil.so make', 'X="a b,c;./evil.so" ls', 'OPTS=--require=evil.so ls', 'P5=-Mevil.so perl', "X='C:\\a\\evil.so' ls"]) {
+    for (const line of ['CLASSPATH=/a:/tmp/evil.so make', 'X="a b,c;./evil.so" ls', 'OPTS=--require=evil.so ls', 'P5=-Mevil.so perl', "X='C:\\a\\evil.so' ls"]) {
       expect(commandGuard(line, new Set(['evil.so'])), line).toMatch(/evil\.so/);
     }
   });

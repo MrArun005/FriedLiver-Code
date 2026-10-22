@@ -147,10 +147,9 @@ const PIPE_TO_SHELL = new RegExp(
  */
 const PS_FETCH_OR_RUN = /(?:^|[^\w-])(?:iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|curl|wget|certutil|bitsadmin|start-process|saps|msiexec|rundll32|mshta|regsvr32|cscript|wscript|iex|invoke-expression|ii|invoke-item|icm|invoke-command|sajb|start-job|start-threadjob|installutil|msbuild)(?:\.exe)?(?![\w-])|(?:^|[;&|\n({]\s*)start(?:\.exe)?(?![\w-])/i;
 
-/** Variables that make a shell or runtime load code: set in a line, they can turn any later program into anything. */
-const STARTUP_VAR = /(?:^|[^\w$])(?:\$env:)?(BASH_ENV|ENV|NODE_OPTIONS|PYTHONSTARTUP|PROMPT_COMMAND)\s*=/i;
-/** On Full auto, any mention of these at all asks (read, export -n, Env:, -v ...). Bare ENV only in capitals, so `env` the program passes. */
-const STARTUP_NAME = /(?<!\w)(?:BASH_ENV|NODE_OPTIONS|PYTHONSTARTUP|PROMPT_COMMAND|PERL5OPT|RUBYOPT|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND)(?!\w)/i;
+/** Variables that make a shell or runtime load code: named anywhere in a line, in any mode, it asks. */
+// Any form counts: NAME=, export, read, -v, $env:, Env:. Bare ENV only in capitals, so `env` the program passes.
+const STARTUP_NAME = /(?<!\w)(?:BASH_ENV|NODE_OPTIONS|NODE_PATH|PYTHONSTARTUP|PYTHONPATH|PROMPT_COMMAND|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND)(?!\w)/i;
 const STARTUP_ENV = /(?<!\w)ENV(?![\w:])/;
 /** `NAME=value` and `$env:NAME = 'value'` assignments: the whole value, quoted or not. */
 const ASSIGNED = /(?:\$env:)?\b[A-Za-z_]\w*\s*=\s*('[^']*'|"[^"]*"|[^\s;&|]+)/g;
@@ -197,9 +196,7 @@ function unclear(line: string, powershell: boolean): string | undefined {
 export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto = false, powershell = false): string | undefined {
   if (PIPE_TO_SHELL.test(line)) return `${STILL_ASKS}: the command pipes a download into a shell`;
   if (INSTALL.test(line)) return `${STILL_ASKS}: the command installs or fetches packages`;
-  const startup = STARTUP_VAR.exec(line);
-  if (startup) return `${STILL_ASKS}: the command sets ${startup[1]}, a startup variable that makes programs load other code`;
-  const named = fullAuto ? (STARTUP_NAME.exec(line) ?? STARTUP_ENV.exec(line)) : null;
+  const named = STARTUP_NAME.exec(line) ?? STARTUP_ENV.exec(line);
   if (named) return `${STILL_ASKS}: the command names ${named[0]}, a startup variable that makes programs load other code`;
   if (powershell && PS_FETCH_OR_RUN.test(line)) return `${STILL_ASKS}: the command downloads or starts other code in PowerShell`;
   for (const [, value] of line.matchAll(ASSIGNED)) {
