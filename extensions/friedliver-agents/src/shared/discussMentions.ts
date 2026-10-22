@@ -2,7 +2,7 @@
 // (@claude/opus, @codex:gpt-5.6-luna), anywhere in the question and in any order. Models resolve
 // against the models each agent reported (ids and display names); the composer's suggestions come
 // from the same list. No I/O, so the webview, the host and the tests share it.
-import { AGENT_FACES, MENTIONS, type AgentKey } from './model';
+import { agentFace, mentioned, mentionWords, type AgentKey } from './model';
 import { baseModel, byCategory, type ChatSession, type OptionChoice, type SessionOption } from './session';
 
 /** Each agent's models as its sessions reported them. */
@@ -138,10 +138,10 @@ function distance(a: string, b: string): number {
  * else a prefix ("opus" → the newest Opus that agent offers). More than one agent fitting is ambiguous.
  */
 export function resolveMention(word: string, catalog: ModelCatalog): Resolution {
-  const agent = MENTIONS[word.toLowerCase()];
+  const agent = mentioned(word);
   if (agent) return { ok: { agent } };
-  const pair = /^([a-z]+)[/:](.+)$/i.exec(word);
-  const scoped = pair ? MENTIONS[pair[1].toLowerCase()] : undefined;
+  const pair = /^([a-z][a-z0-9]*)[/:](.+)$/i.exec(word);
+  const scoped = pair ? mentioned(pair[1]) : undefined;
   const query = scoped ? pair![2] : word;
   const pool = (scoped ? [[scoped, catalog[scoped] ?? []]] : Object.entries(catalog)) as [AgentKey, OptionChoice[]][];
   const exact = pool.map(([a, cs]) => [a, fits(query, cs).exact] as const).filter(([, cs]) => cs.length);
@@ -158,7 +158,7 @@ export function resolveMention(word: string, catalog: ModelCatalog): Resolution 
     const d = Math.min(...all.flatMap((x) => [x, ...[...x.matchAll(/-(?=[a-z])/g)].map((m) => x.slice(m.index + 1))].map((p) => Math.min(distance(q, p), distance(q, p.slice(0, q.length))))));
     near.push({ who, d, whole: Math.min(...all.map((x) => distance(q, x))) });
   };
-  if (!scoped) for (const [w, a] of Object.entries(MENTIONS)) score({ agent: a }, [w]);
+  if (!scoped) for (const [w, a] of mentionWords()) score({ agent: a }, [w]);
   for (const [a, cs] of pool) for (const c of cs) score({ agent: a, model: c.value }, [c.value, c.name]);
   const max = Math.max(2, Math.floor(q.length / 3));
   const seen = new Set<string>();
@@ -190,14 +190,14 @@ export function insertFor(who: Who, catalog: ModelCatalog): string {
 
 /** A model's display name without its agent's name in front ("Gemini 3.1 Pro" → "3.1 Pro" under Gemini). */
 export function modelLabel(agent: AgentKey, name: string): string {
-  const brand = AGENT_FACES[agent]?.name ?? '';
+  const brand = agentFace(agent)?.name ?? '';
   const rest = brand && name.toLowerCase().startsWith(`${brand.toLowerCase()} `) ? name.slice(brand.length).trim() : name;
   return rest || name;
 }
 
 /** "Claude · Opus 4.5", or "Claude" for an agent on its default model. */
 export function whoLabel(who: Who, catalog: ModelCatalog): string {
-  const agent = AGENT_FACES[who.agent]?.name ?? who.agent;
+  const agent = agentFace(who.agent)?.name ?? who.agent;
   if (!who.model) return agent;
   const name = catalog[who.agent]?.find((c) => c.value === who.model)?.name ?? who.model;
   return `${agent} · ${modelLabel(who.agent, name)}`;
@@ -258,12 +258,12 @@ export function discussMentionAt(text: string, caret: number): (Mention & { quer
  */
 export function mentionSuggestions(query: string, catalog: ModelCatalog, agents: readonly AgentKey[], max = 40): Choice[] {
   const q = query.toLowerCase();
-  const pair = /^([a-z]+)[/:](.*)$/.exec(q);
-  const scoped = pair ? MENTIONS[pair[1]] : undefined;
+  const pair = /^([a-z][a-z0-9]*)[/:](.*)$/.exec(q);
+  const scoped = pair ? mentioned(pair[1]) : undefined;
   const out: Choice[] = [];
   for (const agent of agents) {
     if (pair && scoped !== agent) continue;
-    const words = Object.entries(MENTIONS)
+    const words = mentionWords()
       .filter(([, a]) => a === agent)
       .map(([w]) => w);
     const named = !pair && words.some((w) => w.startsWith(q));

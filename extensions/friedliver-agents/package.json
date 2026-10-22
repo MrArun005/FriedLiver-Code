@@ -809,6 +809,79 @@
           "default": [],
           "description": "Extra arguments for each agy call (e.g. --project). FriedLiver sets the mode, model, effort and permissions itself and drops flags that would change them."
         },
+        "friedliver.agents.copilot.command": {
+          "scope": "machine",
+          "type": "string",
+          "default": "copilot",
+          "description": "Program that runs GitHub Copilot CLI over ACP. Changing it restarts Copilot. Read from user settings only, never from a workspace."
+        },
+        "friedliver.agents.copilot.args": {
+          "scope": "machine",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "--acp"
+          ],
+          "description": "Arguments for the Copilot program (e.g. --effort=high, which Copilot fixes for the whole server)."
+        },
+        "friedliver.agents.custom": {
+          "scope": "machine",
+          "type": "array",
+          "default": [],
+          "maxItems": 16,
+          "markdownDescription": "More agents: any program that speaks ACP on stdin/stdout. Each shows up like the built-in ones (pickers, `@id`, Agents & Accounts, models, approvals, `/discuss`). Read from user settings only, never from a workspace. Put API keys in your shell environment rather than here.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "command"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]{1,23}$",
+                "description": "What @ mentions it: lower-case letters and digits, not a built-in agent's name."
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 40,
+                "description": "The name shown for it. Default: the id."
+              },
+              "command": {
+                "type": "string",
+                "description": "The program that speaks ACP, e.g. opencode."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Its arguments, e.g. [\"acp\"]."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra environment variables for it."
+              },
+              "install": {
+                "type": "string",
+                "maxLength": 300,
+                "description": "The command that installs it, shown on its Accounts card."
+              },
+              "signIn": {
+                "type": "string",
+                "maxLength": 300,
+                "description": "How to sign in, shown on its Accounts card."
+              }
+            }
+          }
+        },
         "friedliver.links.openIn": {
           "scope": "application",
           "type": "string",
@@ -942,13 +1015,15 @@
             "claude",
             "codex",
             "gemini",
-            "antigravity"
+            "antigravity",
+            "copilot"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
-            "Antigravity"
+            "Antigravity",
+            "Copilot"
           ],
           "default": "claude",
           "scope": "machine",
@@ -1073,13 +1148,15 @@
             "claude",
             "codex",
             "gemini",
-            "antigravity"
+            "antigravity",
+            "copilot"
           ],
           "enumItemLabels": [
             "Claude",
             "Codex",
             "Gemini",
-            "Antigravity"
+            "Antigravity",
+            "Copilot"
           ],
           "default": "claude",
           "scope": "machine",

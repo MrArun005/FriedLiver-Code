@@ -1,7 +1,10 @@
-export const AGENT_IDS = ['claude', 'codex', 'gemini', 'antigravity', 'demo'] as const;
-export type AgentId = (typeof AGENT_IDS)[number];
+export const AGENT_IDS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'demo'] as const;
+export type BuiltinAgentId = (typeof AGENT_IDS)[number];
+/** An agent the user added in their own settings (`friedliver.agents.custom`), by its id there. */
+export type CustomAgentId = `custom:${string}`;
+export type AgentId = BuiltinAgentId | CustomAgentId;
 /** Agents from an AI company, signed in through that company's own CLI. */
-export type VendorAgentId = Exclude<AgentId, 'demo'>;
+export type VendorAgentId = Exclude<BuiltinAgentId, 'demo'>;
 
 export interface AgentSpec {
   id: AgentId;
@@ -62,9 +65,19 @@ export const DEFAULT_AGENTS: Record<VendorAgentId, AgentSpec> = {
     installCommand: process.platform === 'win32' ? 'irm https://antigravity.google/cli/install.ps1 | iex' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     loginHint: 'Run `agy` in a terminal: it opens Google sign-in in the browser.',
   },
+  // GitHub Copilot CLI's own ACP server (`copilot --acp`, stdio; public preview):
+  // https://docs.github.com/en/copilot/reference/acp-server. Sign-in is the CLI's own /login, not over ACP.
+  copilot: {
+    id: 'copilot',
+    label: 'Copilot',
+    command: 'copilot',
+    args: ['--acp'],
+    installCommand: process.platform === 'win32' ? 'winget install GitHub.Copilot' : 'npm install -g @github/copilot',
+    loginHint: 'Run `copilot` in a terminal and type /login, or set GH_TOKEN to a fine-grained token with the Copilot Requests permission.',
+  },
 };
 
-export function isAgentId(value: unknown): value is AgentId {
+export function isAgentId(value: unknown): value is BuiltinAgentId {
   return typeof value === 'string' && (AGENT_IDS as readonly string[]).includes(value);
 }
 

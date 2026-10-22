@@ -3,12 +3,12 @@
 // a numbered label like "Claude 9", not even in a tooltip; where chats must be
 // told apart a tooltip reads "<topic> · Claude". Pure, so the status bar, the
 // notifications and the tests agree.
-import { AGENT_FACES, type AgentKey } from './model';
+import { agentFace, type AgentKey } from './model';
 
 type Named = { agent: AgentKey; title: string };
 
 /** The plain agent name. */
-export const agentName = (agent: AgentKey): string => AGENT_FACES[agent].name;
+export const agentName = (agent: AgentKey): string => agentFace(agent).name;
 
 /** The chat's topic, or the agent's name while it has none. */
 export function chatName(chat: Named): string {

@@ -8,7 +8,7 @@ import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type List
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
 import type { HostMessage, WebviewMessage } from '../shared/messages';
 import { discussLayouts, type DiscussLayout } from '../shared/discussView';
-import { AGENT_FACES, AGENT_KEYS, EMPTY_STATE, reduce, type AgentKey, type AppState } from '../shared/model';
+import { agentFace, AGENT_KEYS, EMPTY_STATE, reduce, setCustomAgents, type AgentKey, type AppState } from '../shared/model';
 import { inFolder, runnableCode, stepSummary, type StepCommand } from '../shared/steps';
 import { TAB_MIN, markWindow, settleOrder, tabFit, type Settled, type TabFit } from '../shared/view';
 import type { AgentDefaults } from '../shared/session';
@@ -46,6 +46,7 @@ let roster: AgentRoster = { agents: AGENT_KEYS.filter((a) => a !== 'demo'), sign
 const rosterWatchers = new Set<() => void>();
 
 function setRoster(next: AgentRoster): void {
+  setCustomAgents(next.custom ?? []);
   roster = next;
   for (const wake of rosterWatchers) wake();
 }
@@ -92,7 +93,7 @@ export function useDiscussLayout(): DiscussLayout {
 export function SignInMark({ agent }: { agent: AgentKey }) {
   const state = useRoster().signIn[agent];
   if (!state || agent === 'demo') return null;
-  const label = `${AGENT_FACES[agent].name}: ${SIGN_IN_TEXT[state]}`;
+  const label = `${agentFace(agent).name}: ${SIGN_IN_TEXT[state]}`;
   return <span class="signin-mark" data-state={state} role="img" aria-label={label} title={label} />;
 }
 

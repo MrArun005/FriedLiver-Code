@@ -1,7 +1,7 @@
 import { Fragment, render } from 'preact';
 import { useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  AGENT_FACES,
+  agentFace,
   age,
   decisions,
   fileConflicts,
@@ -538,7 +538,7 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         <div class="agent-pick" role="group" aria-label="Agents">
           {shown.map((a) => (
             <button key={a} type="button" class="agent-option" aria-pressed={agents.includes(a)} onClick={() => toggle(a)}>
-              <Glyph agent={a} size="sm" /> {AGENT_FACES[a].name}
+              <Glyph agent={a} size="sm" /> {agentFace(a).name}
               <SignInMark agent={a} />
             </button>
           ))}

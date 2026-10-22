@@ -15,11 +15,15 @@ const { markFor } = await import(pathToFileURL(out).href);
 // The agents' v2 hues (package.json friedliver.agent* defaults; tokens.css --hue-*): an editor tab icon is a
 // file, so it can't read the theme; the tab gets { dark, light } (extension.ts). Neutral agents use --fg-2.
 const HUE = {
-  dark: { claude: '#ebaf86', codex: '#8bd9c9', gemini: '#a9b6f5', antigravity: '#aca8a5', demo: '#aca8a5' },
-  light: { claude: '#984b16', codex: '#037465', gemini: '#4e59b1', antigravity: '#5e5c59', demo: '#5e5c59' },
+  dark: { claude: '#ebaf86', codex: '#8bd9c9', gemini: '#a9b6f5', antigravity: '#aca8a5', copilot: '#aca8a5', demo: '#aca8a5', custom: '#aca8a5' },
+  light: { claude: '#984b16', codex: '#037465', gemini: '#4e59b1', antigravity: '#5e5c59', copilot: '#5e5c59', demo: '#5e5c59', custom: '#5e5c59' },
 };
 // Logos keep their vendors' colours (ui/logos.ts; --logo-* in tokens.css); OpenAI's is monochrome.
-const LOGO = { dark: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#e9e5e2', 'var(--logo-gemini)': '#8e75b2' }, light: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#242220', 'var(--logo-gemini)': '#8e75b2' } };
+const LOGO = {
+  dark: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#e9e5e2', 'var(--logo-gemini)': '#8e75b2', 'var(--logo-github)': '#e9e5e2' },
+  light: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#242220', 'var(--logo-gemini)': '#8e75b2', 'var(--logo-github)': '#242220' },
+};
+// `custom`: every agent from friedliver.agents.custom gets the neutral glyph (markFor of an unknown agent).
 for (const [kind, hues] of Object.entries(HUE))
   for (const [agent, colour] of Object.entries(hues)) {
     const m = markFor(agent);

@@ -54,7 +54,7 @@ async function api<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pro
 
 // ---- Small pieces ----
 
-const AGENT_NAMES: Record<AgentKey, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', antigravity: 'Antigravity', demo: 'Demo' };
+const AGENT_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', antigravity: 'Antigravity', copilot: 'Copilot', demo: 'Demo' };
 const LEVELS: { level: ApprovalLevel; name: string }[] = [
   { level: 'ask', name: 'Manual' },
   { level: 'edits', name: 'Edits' },
@@ -648,7 +648,7 @@ function RequestPanel({ req, done }: { req: Req; done(): void }) {
         ) : null}
         {req.extra.length ? (
           <div class="sheet__extra">
-            <p class="meta">Other answers from {AGENT_NAMES[req.agent]}</p>
+            <p class="meta">Other answers from {AGENT_NAMES[req.agent] ?? req.agent.replace(/^custom:/, '')}</p>
             {req.extra.map((x) => (
               <Button key={x.label} variant="quiet" size="sm" onClick={() => (x.run(), done())}>
                 {x.label}

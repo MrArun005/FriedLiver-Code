@@ -44,13 +44,38 @@ can't stop to ask, its Manual, Plan and /discuss chats are talk only
 (FriedLiver reads the project for it); Edit automatically and Auto run it in
 the project.
 
-| | Antigravity | Claude | Codex | Gemini |
-|---|---|---|---|---|
-| Browser / terminal sign-in (from the agent) | none: agy has no ACP mode, so its own CLI line signs in | Claude Subscription, Anthropic Console (terminal) | ChatGPT (browser) | none: FriedLiver doesn't offer Google sign-in for Gemini; use an API key or Vertex AI, or Antigravity for a Google account |
-| Keys FriedLiver keeps | none (agy's API-key mode lives in its own `~/.gemini/antigravity-cli/settings.json`, which FriedLiver never edits) | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY`, then ACP `api-key` | Gemini API key (`GEMINI_API_KEY`, then ACP `gemini-api-key`); Vertex AI (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`, or `GOOGLE_API_KEY`, with `GOOGLE_GENAI_USE_VERTEXAI=true`, then ACP `vertex-ai`) |
-| Own CLI sign-in / sign-out | `agy`, then Google OAuth / `agy`, then `/logout` | `claude auth login` / `claude auth logout` | `codex login` / `codex logout` | none (API key or Vertex AI only) / `gemini`, then `/signout` |
-| Sign-out from the page | the CLI line | ACP `logout` | ACP `logout` | the CLI line |
-| Account reported | not reported; the version is agy's (`agy --version`), the models are what `agy models` lists | plan, email, organization or key source | ChatGPT plan and email, or API key | not reported; the card says which method is in use |
+| | Antigravity | Claude | Codex | Gemini | Copilot |
+|---|---|---|---|---|---|
+| Browser / terminal sign-in (from the agent) | none: agy has no ACP mode, so its own CLI line signs in | Claude Subscription, Anthropic Console (terminal) | ChatGPT (browser) | none: FriedLiver doesn't offer Google sign-in for Gemini; use an API key or Vertex AI, or Antigravity for a Google account | none: Copilot's `/login` isn't offered over ACP, so its own CLI line signs in |
+| Keys FriedLiver keeps | none (agy's API-key mode lives in its own `~/.gemini/antigravity-cli/settings.json`, which FriedLiver never edits) | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY`, then ACP `api-key` | Gemini API key (`GEMINI_API_KEY`, then ACP `gemini-api-key`); Vertex AI (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`, or `GOOGLE_API_KEY`, with `GOOGLE_GENAI_USE_VERTEXAI=true`, then ACP `vertex-ai`) | GitHub token (`GH_TOKEN`: a fine-grained token with the Copilot Requests permission) |
+| Own CLI sign-in / sign-out | `agy`, then Google OAuth / `agy`, then `/logout` | `claude auth login` / `claude auth logout` | `codex login` / `codex logout` | none (API key or Vertex AI only) / `gemini`, then `/signout` | `copilot`, then `/login` / `copilot`, then `/logout` |
+| Sign-out from the page | the CLI line | ACP `logout` | ACP `logout` | the CLI line | the CLI line |
+| Account reported | not reported; the version is agy's (`agy --version`), the models are what `agy models` lists | plan, email, organization or key source | ChatGPT plan and email, or API key | not reported; the card says which method is in use | whatever its ACP server reports |
+
+Copilot is GitHub Copilot CLI's own ACP server (`copilot --acp`, in public
+preview: [docs](https://docs.github.com/en/copilot/reference/acp-server)).
+Install: `npm install -g @github/copilot` (macOS, Linux), `winget install
+GitHub.Copilot` (Windows). Copilot Free includes the CLI. Its reasoning effort
+is fixed when the server starts (`--effort=…` in `friedliver.agents.copilot.args`).
+
+## Custom agents
+
+Any other program that speaks ACP on stdin/stdout can be added in your user
+settings (never a workspace's; machine scope):
+
+```json
+"friedliver.agents.custom": [
+  { "id": "opencode", "name": "OpenCode", "command": "opencode", "args": ["acp"],
+    "install": "npm install -g opencode-ai", "signIn": "Run opencode and type /connect." }
+]
+```
+
+Each one appears like the built-in agents: pickers, `@<id>`, its card here
+(install line and sign-in hint, if given; the sign-in methods and models it
+reports), approvals, Full auto guards and `/discuss`. It gets a neutral mark and
+no keys kept by FriedLiver (`env` is passed as written, so keep secrets in your
+shell environment). An id can't be a built-in agent's name or alias. Removing
+one keeps its chats; they can't start until it's back.
 
 One key setup is kept per agent: saving the Gemini API key replaces Vertex AI
 settings and the other way round. After a key is saved, FriedLiver restarts the

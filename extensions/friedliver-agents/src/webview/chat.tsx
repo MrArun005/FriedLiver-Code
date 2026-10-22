@@ -8,7 +8,7 @@ import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
 import { MicVisualizer } from './micVisualizer';
 import {
-  AGENT_FACES,
+  agentFace,
   EXPIRED,
   bridgeTitle,
   fileConflicts,
@@ -395,7 +395,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                   }}
                 >
                   <AgentMark agent={agent} />
-                  <span class="grow">{AGENT_FACES[agent].name}</span>
+                  <span class="grow">{agentFace(agent).name}</span>
                   <SignInMark agent={agent} />
                 </button>
               ))}
@@ -682,7 +682,7 @@ function AskingBar({ chat }: { chat: ChatView }) {
     <div class="banner asking-bar" role="status">
       <Dot state="needs-you" still />
       <span class="banner-text">
-        {AGENT_FACES[chat.agent].name} is asking · {n} question{n === 1 ? '' : 's'}
+        {agentFace(chat.agent).name} is asking · {n} question{n === 1 ? '' : 's'}
       </span>
       <Button size="sm" onClick={show}>
         Show
@@ -705,7 +705,7 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
           <button key={agent} class="pick-agent" onClick={() => send({ type: 'newChat', agent })}>
             <Glyph agent={agent} size="lg" />
             <span>
-              {AGENT_FACES[agent].name} <SignInMark agent={agent} />
+              {agentFace(agent).name} <SignInMark agent={agent} />
             </span>
           </button>
         ))}
@@ -1663,7 +1663,7 @@ function Composer({
                       i > 0 && <div class="cc-divider" role="presentation" />
                     ) : (
                       <div class="cc-menu-sub" aria-hidden="true">
-                        <Glyph agent={o.agent!} size="sm" /> {AGENT_FACES[o.agent!].name}
+                        <Glyph agent={o.agent!} size="sm" /> {agentFace(o.agent!).name}
                       </div>
                     ))}
                   <div
@@ -1839,7 +1839,7 @@ function Composer({
             <ComposerPills chat={chat} linked={linked} samples={samples} open={setMenu} />
             {asking && (
               <span class="composer-hint composer-agent">
-                <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
+                <Glyph agent={asking} size="sm" /> {agentFace(asking).name} · reply comes back here
               </span>
             )}
             {hint && <span class="composer-hint">{hint}</span>}
@@ -1850,8 +1850,8 @@ function Composer({
               onClick={stopping ? () => send({ type: 'stop', chatId: chat.id }) : submit}
               disabled={!stopping && !canSend}
               data-stop={stopping ? '' : undefined}
-              aria-label={stopping ? 'Stop' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${agentName(chat.agent)} finishes this turn` : 'Send (Enter)'}
+              aria-label={stopping ? 'Stop' : asking ? `Ask ${agentFace(asking).name}` : queueing ? 'Queue' : 'Send'}
+              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${agentFace(asking).name}` : queueing ? `Sends when ${agentName(chat.agent)} finishes this turn` : 'Send (Enter)'}
             >
               <Icon name={stopping ? 'stop' : asking ? 'ask' : queueing ? 'queue' : 'up'} size={stopping ? 16 : 20} />
             </button>

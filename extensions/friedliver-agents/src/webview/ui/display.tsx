@@ -1,7 +1,7 @@
 // The design system's display components (COMPONENTS.md §2.3–2.4, §2.14, §2.16–2.26).
 import type { ButtonHTMLAttributes, ComponentChildren } from 'preact';
 import { Icon, type IconName } from './icon';
-import { AGENT_FACES, type AgentKey } from '../../shared/model';
+import { agentFace, type AgentKey } from '../../shared/model';
 import { messageTime, messageTimeTitle, type MessageStamp } from '../../shared/view';
 import { IconButton, cx } from './controls';
 import { markFor } from './marks';
@@ -136,7 +136,7 @@ export const Kbd = ({ children, inline }: { children: ComponentChildren; inline?
  * phone's tiny rows). `working` adds the breathing ring. `size` 'marker' is the /discuss meter's (§2.30, 28).
  */
 export function Avatar({ agent, size, mark = true, working }: { agent: AgentKey; size?: 'xs' | 'sm' | 'md' | 'lg' | 'marker'; mark?: boolean; working?: boolean }) {
-  const face = AGENT_FACES[agent];
+  const face = agentFace(agent);
   const name = working ? `${face.name}, working` : face.name;
   return (
     <span class={cx('fl-avatar', size && size !== 'md' && `fl-avatar--${size}`, mark && 'fl-avatar--mark')} data-agent={agent} data-working={working ? '' : undefined} title={name} aria-label={name} role="img">
@@ -174,7 +174,7 @@ export function MarkSvg({ agent, box }: { agent: string; box?: { x: number; y: n
 
 /** An agent's mark (§2.22b): a 16px monochrome drawing in the text colour; its hue where the tab is selected or hovered. */
 export function AgentMark({ agent }: { agent: string }) {
-  const name = AGENT_FACES[agent as AgentKey]?.name ?? 'Agent';
+  const name = agentFace(agent as AgentKey)?.name ?? 'Agent';
   return (
     <span class="fl-mark" data-agent={agent} role="img" aria-label={name} title={name}>
       <MarkSvg agent={agent} />

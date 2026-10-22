@@ -4,7 +4,7 @@ import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
 import { describeForApproval, LARGE_DOWNLOAD_BYTES, type DownloadInfo } from './browserDownloads';
 import { isLocalName, isLocalTarget, STILL_ASKS, type Lookup } from './fullAutoGuards';
-import { AGENT_FACES, BRIDGE_TIMEOUT_MS, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
+import { agentFace, BRIDGE_TIMEOUT_MS, BROWSER_VERBS, bridgeTitle, MAX_LINK_DEPTH, type Action, type AgentKey, type AppState, type BridgeItem, type ChatView } from '../shared/model';
 import { siteOrigin, type Grant, type ToolGrant } from '../shared/permissions';
 import { browserRisk } from '../shared/risk';
 import { alwaysAllowable, describeTarget, SYSTEM_LIMITS, SYSTEM_VERBS, type SystemTool } from '../shared/system';
@@ -329,7 +329,7 @@ export class BridgeRequests {
 
   /** A system_* call from a chat (`caller`) or an external session; every attempt goes in the audit log. */
   private async system(id: string, caller: ChatView | undefined, call: SystemCall, signal: AbortSignal): Promise<string> {
-    const agent = caller ? AGENT_FACES[caller.agent].name : EXTERNAL_AGENT;
+    const agent = caller ? agentFace(caller.agent).name : EXTERNAL_AGENT;
     const log = (result: string) => this.host.system?.audit(auditLine({ at: Date.now(), agent, chat: caller?.id ?? id, call, result }));
     try {
       const { text, summary } = await this.systemCall(id, caller, call, signal);
@@ -556,7 +556,7 @@ export class BridgeRequests {
       const timer = setTimeout(() => done('timeout'), APPROVAL_TIMEOUT_MS);
       timer.unref?.();
       const allowKey = systemKey ?? ('browser' in item.target ? `${caller.id} browser` : 'memory' in item.target ? `${caller.id} memory` : caller.id);
-      const always = grant && !item.once ? { grant, agent: AGENT_FACES[caller.agent].name } : undefined;
+      const always = grant && !item.once ? { grant, agent: agentFace(caller.agent).name } : undefined;
       this.pending.set(requestId, { chatId: caller.id, allowKey, always, careful, once: !!item.once, resolve: done });
       this.host.dispatch({ t: 'items', chatId: caller.id, items: [item], at: Date.now() });
       if (signal.aborted) return done('denied');

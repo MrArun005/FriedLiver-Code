@@ -2,7 +2,7 @@
 // a selection, or code the user points at. Plain text, no VS Code, so the
 // shapes are easy to test. The editor glue is in editor.ts.
 import path from 'node:path';
-import { MENTIONS, type AgentKey, type CodeRef } from '../shared/model';
+import { mentioned, type AgentKey, type CodeRef } from '../shared/model';
 
 /** Lines before and after the selection that go with an edit request. */
 export const AROUND_LINES = 5;
@@ -39,14 +39,14 @@ export type SpanKind = 'selection' | 'function' | 'line' | 'problem';
  * another agent).
  */
 /** The Edit with Agent box's hint: the agents by the names the rest of FriedLiver mentions them with. */
-export const EDIT_AGENT_HINT = 'Start with @claude, @codex, @gemini or @antigravity to pick another agent.';
+export const EDIT_AGENT_HINT = 'Start with @claude, @codex, @gemini, @antigravity or @copilot to pick another agent.';
 
 export function parseEditInput(text: string): { agent?: AgentKey; instruction: string } {
   let rest = text.trim();
   let agent: AgentKey | undefined;
   for (;;) {
-    const m = rest.match(/^@([a-z]+)(?![\w-])[\s,:]*/i);
-    const named = m ? MENTIONS[m[1].toLowerCase()] : undefined;
+    const m = rest.match(/^@([a-z][a-z0-9]*)(?![\w-])[\s,:]*/i);
+    const named = m ? mentioned(m[1]) : undefined;
     if (!m || !named) break;
     agent = named;
     rest = rest.slice(m[0].length);

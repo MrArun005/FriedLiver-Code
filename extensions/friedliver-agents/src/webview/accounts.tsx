@@ -3,7 +3,7 @@
 // The page shows what the host sends and asks it to act; it never sees a key.
 import { Fragment, render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { SIGN_IN_TEXT, type AccountCard, type AccountsView, type CliLine, type CliWhat, type DefaultKey, type KeyView, type MethodView, type VendorKey } from '../shared/accounts';
+import { SIGN_IN_TEXT, type AccountCard, type AccountsView, type CliLine, type CliWhat, type DefaultKey, type KeyView, type LineKey, type MethodView, type VendorKey } from '../shared/accounts';
 import { age } from '../shared/model';
 import type { SessionOption } from '../shared/session';
 import { NEVER_ALWAYS, SYSTEM_TOOLS, SYSTEM_WORDS, unsupportedOn, type SystemSettingsView } from '../shared/system';
@@ -148,7 +148,7 @@ function Card({ card, focused }: { card: AccountCard; focused: boolean }) {
       {r?.update && <div class="acct-note warn">{r.update}</div>}
       {vendor && card.installCommand && (r?.status === 'not-installed' || !r) && (
         <Block title={r?.status === 'not-installed' ? 'Install' : 'Not installed yet?'}>
-          <Line agent={card.agent as VendorKey} what="install" line={{ command: card.installCommand }} />
+          <Line agent={card.agent as LineKey} what="install" line={{ command: card.installCommand }} />
         </Block>
       )}
       {vendor && r?.status !== 'not-installed' && <SignIn card={card} />}
@@ -186,6 +186,7 @@ function SignIn({ card }: { card: AccountCard }) {
         <KeyRow key={k.id} card={card} k={k} />
       ))}
       {card.envKey && !card.keys.some((k) => k.active) && <p class="hint">{card.envKey} is set in the editor’s environment, so {card.name} gets it.</p>}
+      {card.hint && <p class="hint">{card.hint}</p>}
       {card.cli?.signIn && (
         <div class="acct-cli">
           <span class="hint">Or its own CLI: </span>
@@ -250,7 +251,7 @@ function SignOut({ card }: { card: AccountCard }) {
 }
 
 /** One of FriedLiver's own lines for a terminal, with Copy and Run. */
-function Line({ agent, what, line }: { agent: VendorKey; what: CliWhat; line: CliLine }) {
+function Line({ agent, what, line }: { agent: LineKey; what: CliWhat; line: CliLine }) {
   return (
     <span class="acct-line">
       <code>{line.command}</code>

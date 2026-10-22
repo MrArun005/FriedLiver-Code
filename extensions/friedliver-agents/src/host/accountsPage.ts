@@ -12,8 +12,9 @@ import {
   type AccountsMessage,
   type AccountsView,
   type KeyView,
+  type VendorKey,
 } from '../shared/accounts';
-import { AGENT_FACES, type AgentKey } from '../shared/model';
+import { agentFace, customAgent, type AgentKey } from '../shared/model';
 import { SYSTEM_WORDS, unsupportedOn, type SystemSettingsView, type SystemTool } from '../shared/system';
 import type { Accounts } from './accounts';
 import { messageOf, type AgentCore } from './core';
@@ -98,7 +99,7 @@ export class AccountsPage implements vscode.Disposable {
       const envKey = isVendor(agent) && !keys.some((k) => k.active) ? KEY_SETUPS[agent].flatMap((s) => s.fields).find((f) => f.secret && process.env[f.env])?.env : undefined;
       const card: AccountCard = {
         agent,
-        name: AGENT_FACES[agent].name,
+        name: agentFace(agent).name,
         ...(record ? { record } : {}),
         ...(this.accounts.isChecking(agent) ? { checking: true } : {}),
         ...(this.accounts.busyText(agent) ? { busy: this.accounts.busyText(agent) } : {}),
@@ -107,6 +108,7 @@ export class AccountsPage implements vscode.Disposable {
         keys,
         ...(envKey ? { envKey } : {}),
         ...(isVendor(agent) ? { cli: CLI_ACCOUNTS[agent] } : {}),
+        ...(customAgent(agent)?.signIn ? { hint: customAgent(agent)!.signIn } : {}),
         ...modelChoices(defaults[agent]),
       };
       const active = activeMethod(card);
@@ -148,7 +150,7 @@ export class AccountsPage implements vscode.Disposable {
     this.log(`Mac & Windows control: ${SYSTEM_WORDS[key]} turned ${value ? 'on' : 'off'}.`);
   }
 
-  private keyViews(agent: Exclude<AgentKey, 'demo'>): KeyView[] {
+  private keyViews(agent: VendorKey): KeyView[] {
     const saved = this.accounts.savedSetup(agent);
     return KEY_SETUPS[agent].map((setup) => {
       const mine = saved?.setup === setup.id ? saved : undefined;
@@ -198,7 +200,7 @@ export class AccountsPage implements vscode.Disposable {
         await this.accounts.setKey(m.agent, m.setup);
         return;
       case 'clearKey': {
-        const name = AGENT_FACES[m.agent].name;
+        const name = agentFace(m.agent).name;
         const ok = await vscode.window.showWarningMessage(`Remove the key FriedLiver keeps for ${name}?`, { modal: true, detail: `${name}'s own CLI login, if any, stays.` }, 'Remove');
         if (ok === 'Remove') await this.accounts.clearKey(m.agent);
         return;

@@ -9,20 +9,77 @@ import { stepFacts, withRawOutput, type StepFacts } from './steps';
 import { isSystemTool, SYSTEM_VERBS, type SystemTool } from './system';
 import type { DiscussionItem } from './discuss';
 
-export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'antigravity', 'demo'] as const;
-export type AgentKey = (typeof AGENT_KEYS)[number];
+export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'demo'] as const;
+export type BuiltinAgentKey = (typeof AGENT_KEYS)[number];
+/** An agent from the user's own `friedliver.agents.custom` setting: `custom:<its id>`. */
+export type CustomAgentKey = `custom:${string}`;
+export type AgentKey = BuiltinAgentKey | CustomAgentKey;
 
 /** Every agent has a face: a letter on a tint of its hue. */
-export const AGENT_FACES: Record<AgentKey, { letter: string; name: string }> = {
+export const AGENT_FACES: Record<BuiltinAgentKey, { letter: string; name: string }> = {
   claude: { letter: 'C', name: 'Claude' },
   codex: { letter: 'X', name: 'Codex' },
   gemini: { letter: 'G', name: 'Gemini' },
   antigravity: { letter: 'A', name: 'Antigravity' },
+  copilot: { letter: 'P', name: 'Copilot' },
   demo: { letter: 'D', name: 'Demo' },
 };
 
-export function isAgentKey(value: unknown): value is AgentKey {
+/**
+ * An agent the user added in their user settings (never a workspace's). The host reads the setting;
+ * webviews get this list (no command, no env) with the roster. Install and sign-in are the user's own hints.
+ */
+export interface CustomAgent {
+  key: CustomAgentKey;
+  /** What @ mentions it: the id in the setting. */
+  id: string;
+  name: string;
+  install?: string;
+  signIn?: string;
+}
+
+/** A custom agent's id: lower-case letters and digits, so "@id" mentions it like a built-in one. */
+export const CUSTOM_AGENT_ID = /^[a-z][a-z0-9]{1,23}$/;
+
+// ponytail: one module-level list per JS context (the host, each webview); set from settings or the roster.
+let custom: readonly CustomAgent[] = [];
+export function setCustomAgents(list: readonly CustomAgent[]): void {
+  custom = list;
+}
+export function customAgents(): readonly CustomAgent[] {
+  return custom;
+}
+export function customAgent(key: AgentKey): CustomAgent | undefined {
+  return custom.find((c) => c.key === key);
+}
+
+export function isBuiltinAgent(value: unknown): value is BuiltinAgentKey {
   return typeof value === 'string' && (AGENT_KEYS as readonly string[]).includes(value);
+}
+
+/** A built-in agent, or a custom one the user's settings name right now. */
+export function isAgentKey(value: unknown): value is AgentKey {
+  return isBuiltinAgent(value) || custom.some((c) => c.key === value);
+}
+
+/**
+ * An agent key as saved state may hold it: also a custom agent no longer in the settings, so its
+ * chats aren't lost (they can't start until it is back). Never for what a webview or agent asks.
+ */
+export function isStoredAgentKey(value: unknown): value is AgentKey {
+  return isBuiltinAgent(value) || (typeof value === 'string' && value.startsWith('custom:') && CUSTOM_AGENT_ID.test(value.slice('custom:'.length)));
+}
+
+/** Built-in agents, then the user's custom ones. */
+export function allAgentKeys(): AgentKey[] {
+  return [...AGENT_KEYS, ...custom.map((c) => c.key)];
+}
+
+/** The agent's face; a custom one no longer in the settings keeps its id as its name. */
+export function agentFace(agent: AgentKey): { letter: string; name: string } {
+  if (isBuiltinAgent(agent)) return AGENT_FACES[agent];
+  const name = customAgent(agent)?.name ?? agent.slice('custom:'.length);
+  return { letter: (name[0] ?? '?').toUpperCase(), name };
 }
 
 export interface ImageItem {
@@ -789,7 +846,7 @@ export function bridgeTitle(state: Pick<AppState, 'chats'>, chat: ChatView, item
     return `${wants} ${verb}${what && (item.tool === 'system_open' || item.tool === 'system_focus' || item.tool === 'system_shortcut') ? ` ${what.length > 60 ? `${what.slice(0, 59)}…` : what}` : ''}`;
   }
   const other = 'chatId' in item.target ? state.chats.find((c) => c.id === (item.target as { chatId: string }).chatId) : undefined;
-  const target = 'agent' in item.target ? AGENT_FACES[item.target.agent].name : other ? topic(other.title) : 'another chat';
+  const target = 'agent' in item.target ? agentFace(item.target.agent).name : other ? topic(other.title) : 'another chat';
   const verb = item.tool === 'ask_agent' ? 'ask' : item.tool === 'send_to_chat' ? 'message' : 'read';
   return `${wants} ${verb} ${target}`;
 }
@@ -830,13 +887,26 @@ export const MENTIONS: Record<string, AgentKey> = {
   google: 'gemini',
   antigravity: 'antigravity',
   agy: 'antigravity',
+  copilot: 'copilot',
+  github: 'copilot',
   demo: 'demo',
 };
 
+/** The agent "@name" reaches: a built-in one's name or alias, or a custom agent's id. */
+export function mentioned(name: string): AgentKey | undefined {
+  const n = name.toLowerCase();
+  return Object.hasOwn(MENTIONS, n) ? MENTIONS[n] : custom.find((c) => c.id === n)?.key;
+}
+
+/** Every word that @-mentions an agent, with the agent: built-in names and aliases, then custom ids. */
+export function mentionWords(): [string, AgentKey][] {
+  return [...Object.entries(MENTIONS), ...custom.map((c): [string, AgentKey] => [c.id, c.key])];
+}
+
 /** "@gemini review this" → ask Gemini "review this". Only a mention at the very start counts. */
 export function parseMention(text: string): { agent: AgentKey; text: string } | null {
-  const m = text.match(/^\s*@([a-z]+)\b[\s,:]*([\s\S]*)$/i);
-  const agent = m && MENTIONS[m[1].toLowerCase()];
+  const m = text.match(/^\s*@([a-z][a-z0-9]*)\b[\s,:]*([\s\S]*)$/i);
+  const agent = m && mentioned(m[1]);
   return agent && m[2].trim() ? { agent, text: m[2].trim() } : null;
 }
 
@@ -919,7 +989,7 @@ export function stateLine(chat: ChatView): StateLine {
     }
     if (waiting.kind === 'question') return { text: `Asks you: ${waiting.title.slice(8)}`, decision: waiting };
   }
-  if (!chat.busy && chat.session?.starting) return { text: `Starting ${AGENT_FACES[chat.agent].name}…` };
+  if (!chat.busy && chat.session?.starting) return { text: `Starting ${agentFace(chat.agent).name}…` };
   const status = chatStatus(chat);
   if (status === 'working') {
     const plan = chat.items.findLast((i) => i.kind === 'plan');

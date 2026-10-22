@@ -8,6 +8,7 @@ import { AgentStartError, agentErrorMessage } from '@friedliver/main/agents/agen
 import { readIfExists, readTextFile, writeTextFile } from '@friedliver/main/agents/fileAccess';
 import { AgentHub, AuthRequiredError, NoSessionError, type SessionStart } from '@friedliver/main/agents/hub';
 import { DEFAULT_AGENTS, demoAgentSpec, type AgentSpec, type VendorAgentId } from '@friedliver/main/agents/registry';
+import type { CustomAgentConfig } from './customAgents';
 import { findProgram } from '@friedliver/main/agents/processes';
 import { allowedSignInUrl, signInMethods } from '@friedliver/main/agents/signIn';
 import { visibleText, type TerminalListener } from '@friedliver/main/agents/terminals';
@@ -49,7 +50,9 @@ import { approvalOf, type Approvable } from '../shared/approval';
 import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
 import { chatRef } from '../shared/names';
 import {
-  AGENT_FACES,
+  agentFace,
+  allAgentKeys,
+  isBuiltinAgent,
   EMPTY_STATE,
   MAX_COMMAND_OUTPUT,
   decisions,
@@ -99,8 +102,9 @@ export const KEY_ENV: Partial<Record<VendorAgentId, string>> = {
   claude: 'ANTHROPIC_API_KEY',
   codex: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
+  copilot: 'GH_TOKEN',
 };
-export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini', 'antigravity'];
+export const VENDOR_AGENTS: VendorAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'copilot'];
 
 const SIGN_IN_TIMEOUT_MS = 5 * 60 * 1000;
 /** Files larger than this aren't read to show a permission request's whole diff. */
@@ -172,6 +176,8 @@ export interface CoreOptions {
   apiKey(id: VendorAgentId): string | undefined;
   /** Other credentials FriedLiver keeps for the agent (Gemini's Vertex AI settings), as its environment. */
   credentialEnv?(id: VendorAgentId): Record<string, string>;
+  /** A custom agent from the user's own settings (friedliver.agents.custom), with how to start it. */
+  customAgent?(key: AgentKey): CustomAgentConfig | undefined;
   /** What a session, a failure or the agent itself just said about its sign-in (accounts.ts caches it). */
   accountSeen?(agent: AgentKey, patch: Partial<AccountRecord>): void;
   limits(): { maxRunning: number; idleStopMinutes: number };
@@ -500,13 +506,18 @@ export class AgentCore {
       if (!testAgentsOn()) throw new Error('The Demo agent was removed.');
       return { ...demoAgentSpec(this.options.demoAgentScript), label: 'Demo' };
     }
+    if (!isBuiltinAgent(id)) {
+      const c = this.options.customAgent?.(id);
+      if (!c) throw new Error(`${agentFace(id).name} is no longer in friedliver.agents.custom, so it can't start.`);
+      return { id, label: c.name, command: c.command, args: c.args, env: c.env, installCommand: c.install ?? '', loginHint: c.signIn ?? '' };
+    }
     const base = DEFAULT_AGENTS[id];
     const { command, args } = this.options.agentCommand(id);
     const key = this.options.apiKey(id);
     const keyEnv = KEY_ENV[id];
     const spec: AgentSpec = {
       ...base,
-      label: AGENT_FACES[id].name,
+      label: agentFace(id).name,
       command: command.trim() || base.command,
       args,
       env: { ...base.env, ...(key && keyEnv ? { [keyEnv]: key } : {}), ...this.options.credentialEnv?.(id) },
@@ -551,7 +562,7 @@ export class AgentCore {
     if (options.messageFollows) this.turnComing.add(chat.id);
     // Counted still (saved state keeps it), never shown: a chat is named by its topic (names.ts).
     this.chatCount[agent] = (this.chatCount[agent] ?? 0) + 1;
-    const name = AGENT_FACES[agent].name;
+    const name = agentFace(agent).name;
     const view: ChatView = {
       id: chat.id,
       agent,
@@ -749,7 +760,7 @@ export class AgentCore {
   /** Each agent's last known options and the user's last choices, for new chats and new tasks. */
   agentDefaults(): Partial<Record<AgentKey, AgentDefaults>> {
     const out: Partial<Record<AgentKey, AgentDefaults>> = {};
-    for (const agent of Object.keys(AGENT_FACES) as AgentKey[]) {
+    for (const agent of allAgentKeys()) {
       const d = this.options.defaults?.get(agent);
       if (d) out[agent] = d;
     }
@@ -1715,7 +1726,7 @@ export class AgentCore {
   }
 
   private label(agent: AgentKey): string {
-    return AGENT_FACES[agent].name;
+    return agentFace(agent).name;
   }
 
   private async runPrompt(chatId: string, blocks: acp.ContentBlock[]): Promise<TurnResult> {
@@ -2268,7 +2279,7 @@ export class AgentCore {
     } else if (!found.offered.some((g) => sameGrant(g, grant)) || (via !== 'desktop' && !(await fromPhone()))) {
       return;
     }
-    if (!remembered.add(grant, AGENT_FACES[found.chat.agent].name)) return;
+    if (!remembered.add(grant, agentFace(found.chat.agent).name)) return;
     if ('commandId' in target) {
       this.decideCommand(target.commandId, true);
       return;

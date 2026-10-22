@@ -5,7 +5,7 @@
 // as anywhere else.
 import path from 'node:path';
 import * as vscode from 'vscode';
-import { AGENT_FACES, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef } from '../shared/model';
+import { agentFace, AGENT_KEYS, isAgentKey, type Action, type AgentKey, type ChatView, type CodeRef } from '../shared/model';
 import { agentName, chatName, chatRef } from '../shared/names';
 import type { AgentCore, PendingReview, SendOptions } from './core';
 
@@ -174,7 +174,7 @@ export class EditorAgent implements vscode.Disposable {
     let chosen = agent;
     let switching = false;
     const refresh = () => {
-      box.title = `Edit with ${AGENT_FACES[parseEditInput(box.value).agent ?? chosen].name} · ${where}`;
+      box.title = `Edit with ${agentFace(parseEditInput(box.value).agent ?? chosen).name} · ${where}`;
     };
     box.placeholder = 'Describe the change';
     box.prompt = EDIT_AGENT_HINT;
@@ -221,7 +221,7 @@ export class EditorAgent implements vscode.Disposable {
   }
 
   private begin(chat: ChatView, agent: AgentKey, target: Target, range: vscode.Range): Session {
-    const name = AGENT_FACES[agent].name;
+    const name = agentFace(agent).name;
     const file = path.basename(target.file);
     const status = vscode.window.createStatusBarItem(`friedliver.edit.${chat.id}`, vscode.StatusBarAlignment.Left, 0);
     status.name = 'FriedLiver edit';
@@ -473,7 +473,7 @@ export class EditorAgent implements vscode.Disposable {
   private async pickAgent(title: string, current?: AgentKey): Promise<AgentKey | undefined> {
     const order = [...(this.host.shownAgents?.() ?? AGENT_KEYS)].sort((a, b) => Number(b === current) - Number(a === current));
     const items = order.map((a) => ({
-      label: AGENT_FACES[a].name,
+      label: agentFace(a).name,
       description: [a === 'codex' ? 'GPT' : '', a === current ? 'last used' : '', a === 'demo' ? 'fake local agent, no account' : ''].filter(Boolean).join(' · ') || undefined,
       agent: a,
     }));
@@ -498,7 +498,7 @@ export class EditorAgent implements vscode.Disposable {
     const items: Pick[] = [
       ...open.map((c) => ({ label: chatName(c), description: [agentName(c.agent), c.busy ? 'working' : ''].filter(Boolean).join(' · '), chat: c })),
       { label: 'New chat', kind: vscode.QuickPickItemKind.Separator },
-      ...(this.host.shownAgents?.() ?? AGENT_KEYS).map((a) => ({ label: `$(add) New Chat with ${AGENT_FACES[a].name}`, description: a === 'demo' ? 'fake local agent, no account' : undefined, agent: a })),
+      ...(this.host.shownAgents?.() ?? AGENT_KEYS).map((a) => ({ label: `$(add) New Chat with ${agentFace(a).name}`, description: a === 'demo' ? 'fake local agent, no account' : undefined, agent: a })),
     ];
     const picked = await vscode.window.showQuickPick(items, { title, matchOnDescription: true });
     if (picked?.chat) {

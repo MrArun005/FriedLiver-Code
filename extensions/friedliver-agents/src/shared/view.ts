@@ -1,7 +1,10 @@
 // Pure helpers for the agent views: search, sorting, badges, the agent map's
 // layout and the @-mention picker. No DOM here, so all of it is unit tested.
 import {
-  AGENT_KEYS,
+  agentFace,
+  allAgentKeys,
+  customAgents,
+  isBuiltinAgent,
   age,
   bridgeTitle,
   chatStatus,
@@ -10,6 +13,7 @@ import {
   formatDuration,
   stateLine,
   type AgentKey,
+  type BuiltinAgentKey,
   type AppState,
   type BoardColumn,
   type BridgeItem,
@@ -22,7 +26,7 @@ import {
   type LinkKind,
   type StateLine,
   MAX_ITEMS,
-  MENTIONS,
+  mentioned,
 } from './model';
 import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
@@ -293,11 +297,12 @@ export function openChats(chats: ChatView[]): ChatView[] {
 // ---- Search and sorting ----
 
 /** Words people use for an agent besides its name. */
-const AGENT_WORDS: Record<AgentKey, string> = {
+const AGENT_WORDS: Record<BuiltinAgentKey, string> = {
   claude: 'claude',
   codex: 'codex gpt chatgpt openai',
   gemini: 'gemini google',
   antigravity: 'antigravity agy google',
+  copilot: 'copilot github',
   demo: 'demo',
 };
 
@@ -305,7 +310,7 @@ const AGENT_WORDS: Record<AgentKey, string> = {
 export function matchesQuery(chat: ChatView, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [chat.title, chat.label, AGENT_WORDS[chat.agent], chat.branch ?? ''].join(' ').toLowerCase();
+  const hay = [chat.title, chat.label, (isBuiltinAgent(chat.agent) ? AGENT_WORDS[chat.agent] : `${agentFace(chat.agent).name} ${chat.agent.slice('custom:'.length)}`), chat.branch ?? ''].join(' ').toLowerCase();
   return words.every((w) => hay.includes(w));
 }
 
@@ -321,7 +326,11 @@ export interface Sort {
 
 /** STATUS_ORDER: waiting on you, working, failed, not started, done. */
 const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, working: 1, error: 2, idle: 3, done: 4 };
-const AGENT_RANK = Object.fromEntries(AGENT_KEYS.map((a, i) => [a, i])) as Record<AgentKey, number>;
+/** Built-in agents in their order, then custom ones; one no longer in the settings last. */
+const agentRank = (agent: AgentKey): number => {
+  const i = allAgentKeys().indexOf(agent);
+  return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+};
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
 /** The direction a header click starts with: the useful end first. */
@@ -337,7 +346,7 @@ export function defaultDir(key: SortKey): Sort['dir'] {
 export function sortChats(chats: ChatView[], sort: Sort): ChatView[] {
   const by: Record<SortKey, (a: ChatView, b: ChatView) => number> = {
     status: (a, b) => STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)],
-    agent: (a, b) => AGENT_RANK[a.agent] - AGENT_RANK[b.agent] || collator.compare(a.label, b.label),
+    agent: (a, b) => agentRank(a.agent) - agentRank(b.agent) || collator.compare(a.label, b.label),
     task: (a, b) => collator.compare(a.title, b.title),
     activity: (a, b) => b.lastActivity - a.lastActivity,
     files: (a, b) => a.files.length - b.files.length,
@@ -571,7 +580,7 @@ export function cardModel(state: Pick<AppState, 'chats' | 'links'>, chat: ChatVi
 export function groupMembers(chats: ChatView[], group: string): ChatView[] {
   return chats
     .filter((c) => c.group === group && !c.archived)
-    .sort((a, b) => a.createdAt - b.createdAt || AGENT_RANK[a.agent] - AGENT_RANK[b.agent] || collator.compare(a.label, b.label));
+    .sort((a, b) => a.createdAt - b.createdAt || agentRank(a.agent) - agentRank(b.agent) || collator.compare(a.label, b.label));
 }
 
 export interface FanoutGroup {
@@ -815,15 +824,21 @@ export const MENTION_OPTIONS: MentionOption[] = [
   { agent: 'codex', name: 'Codex', insert: 'codex', words: ['gpt', 'codex', 'chatgpt', 'openai'] },
   { agent: 'gemini', name: 'Gemini', insert: 'gemini', words: ['gemini', 'google'] },
   { agent: 'antigravity', name: 'Antigravity', insert: 'antigravity', words: ['antigravity', 'agy'] },
+  { agent: 'copilot', name: 'Copilot', insert: 'copilot', words: ['copilot', 'github'] },
   { agent: 'demo', name: 'Demo', insert: 'demo', words: ['demo'] },
 ];
+
+/** The built-in options, then one per custom agent (its id is the only word that picks it). */
+function allMentionOptions(): MentionOption[] {
+  return [...MENTION_OPTIONS, ...customAgents().map((c) => ({ agent: c.key, name: c.name, insert: c.id, words: [c.id] }))];
+}
 
 /**
  * The word typed after an @ at the very start of the message, while the caret
  * is in it; null when the picker should stay shut.
  */
 export function mentionQuery(text: string, caret: number): string | null {
-  const m = text.match(/^(\s*)@([a-z]*)/i);
+  const m = text.match(/^(\s*)@([a-z0-9]*)/i);
   if (!m) return null;
   const start = m[1].length + 1;
   return caret >= start && caret <= m[0].length ? m[2].toLowerCase() : null;
@@ -832,12 +847,12 @@ export function mentionQuery(text: string, caret: number): string | null {
 /** `shown`: the agents pickers offer (Demo only when turned on); typing @demo still works without the picker. */
 export function mentionOptions(query: string, shown?: readonly AgentKey[]): MentionOption[] {
   const q = query.toLowerCase();
-  return MENTION_OPTIONS.filter((o) => (!shown || shown.includes(o.agent)) && (o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q)));
+  return allMentionOptions().filter((o) => (!shown || shown.includes(o.agent)) && (o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q)));
 }
 
 /** Replaces the leading @word with the option's, followed by one space. */
 export function applyMention(text: string, option: MentionOption): { text: string; caret: number } {
-  const rest = text.replace(/^\s*@[a-z]*[\s,:]*/i, '');
+  const rest = text.replace(/^\s*@[a-z0-9]*[\s,:]*/i, '');
   const head = `@${option.insert} `;
   return { text: head + rest, caret: head.length };
 }
@@ -868,13 +883,13 @@ export const commandLabel = (c: SlashCommand): string => `/${c.name}${c.hint ? `
  * it isn't one (the agent gets it as typed). `catalog`: the models /discuss mentions resolve against.
  */
 export function slashAction(text: string, chat: ChatView, chats: ChatView[], agentCommands: SlashCommand[], catalog: ModelCatalog = {}): WebviewMessage | 'incomplete' | null {
-  const m = /^\/([a-z]+)(?:\s+([a-z]+))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
+  const m = /^\/([a-z]+)(?:\s+([a-z][a-z0-9]*))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
   if (!m || !FRIEDLIVER_COMMANDS.some((c) => c.name === m[1]) || agentCommands.some((c) => c.name === m[1])) return null;
   if (m[1] === 'discuss') {
     const d = parseDiscuss(text, { agent: chat.agent, model: currentModel(chat.session) }, catalog);
     return d && d !== 'incomplete' && !d.problems.length ? { type: 'discuss', chatId: chat.id, participants: d.participants, text: d.question } : 'incomplete';
   }
-  const agent: AgentKey | undefined = m[2] ? MENTIONS[m[2].toLowerCase()] : undefined;
+  const agent: AgentKey | undefined = m[2] ? mentioned(m[2]) : undefined;
   const rest = m[3].trim();
   switch (m[1]) {
     case 'handoff':
@@ -896,10 +911,10 @@ export function slashAction(text: string, chat: ChatView, chats: ChatView[], age
 
 /** The agent a leading @word names, even before the question is typed. */
 export function mentionedAgent(text: string): AgentKey | null {
-  const m = text.match(/^\s*@([a-z]+)(?![a-z])/i);
+  const m = text.match(/^\s*@([a-z][a-z0-9]*)(?![a-z0-9])/i);
   if (!m) return null;
   const word = m[1].toLowerCase();
-  return MENTION_OPTIONS.find((o) => o.words.includes(word))?.agent ?? null;
+  return allMentionOptions().find((o) => o.words.includes(word))?.agent ?? null;
 }
 
 // ---- The agent map ----
@@ -1121,7 +1136,7 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
   const nodes: MapNode[] = [];
   const subs: MapSub[] = [];
   let y = M.pad + M.youH + 18;
-  for (const agent of AGENT_KEYS) {
+  for (const agent of new Set([...allAgentKeys(), ...chats.map((c) => c.agent)])) {
     const inLane = chats.filter((c) => c.agent === agent).sort(order);
     if (!inLane.length) continue;
     const top = y;

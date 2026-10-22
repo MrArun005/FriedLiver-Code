@@ -5,7 +5,7 @@ import { render } from 'preact';
 import { useState } from 'preact/hooks';
 import type { RecentFolder } from '../shared/messages';
 import type { AgentKey, ChatView } from '../shared/model';
-import { AGENT_FACES } from '../shared/model';
+import { agentFace } from '../shared/model';
 import { preselectAgents } from '../shared/accounts';
 import { ago, cardLine, needsYou, openChats, planProgress, statusOf } from '../shared/view';
 import { welcomeSummary } from '../shared/welcome';
@@ -52,7 +52,7 @@ function Welcome() {
       </header>
 
       <div class="wl-ask-row">
-        <AskBox value={text} onInput={setText} onSubmit={start} label="Describe a task" placeholder={`What do you want to build or change? ${AGENT_FACES[agent].name} will start on it.`}>
+        <AskBox value={text} onInput={setText} onSubmit={start} label="Describe a task" placeholder={`What do you want to build or change? ${agentFace(agent).name} will start on it.`}>
           <Button variant="primary" kbd="⏎" disabled={!text.trim()} onClick={start}>
             Start
           </Button>
@@ -98,11 +98,11 @@ function Welcome() {
                   const waiting = mine.filter(needsYou).length;
                   const words = [working && `${working} working`, waiting && `${waiting} need${waiting === 1 ? 's' : ''} you`].filter(Boolean).join(', ') || 'idle';
                   return (
-                    <Row key={a} class="wl-agent" label={`${AGENT_FACES[a].name}: ${words}`} onPress={() => send({ type: 'openAccounts', agent: a })}>
+                    <Row key={a} class="wl-agent" label={`${agentFace(a).name}: ${words}`} onPress={() => send({ type: 'openAccounts', agent: a })}>
                       <span class="wl-who">
                         <Avatar agent={a} working={working > 0} />
                         <span class="wl-two">
-                          <b>{AGENT_FACES[a].name}</b>
+                          <b>{agentFace(a).name}</b>
                           <span>{words}</span>
                         </span>
                       </span>
@@ -171,7 +171,7 @@ function Welcome() {
                   <Row key={c.id} class="wl-row" label={c.title} onPress={() => open(c)} meta={new Date(c.lastActivity).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}>
                     <span class="wl-who">
                       <Dot state="done" still />
-                      <span class="wl-name">{c.title}</span> <span class="wl-sub">{AGENT_FACES[c.agent].name}</span>
+                      <span class="wl-name">{c.title}</span> <span class="wl-sub">{agentFace(c.agent).name}</span>
                     </span>
                   </Row>
                 ))}

@@ -17,6 +17,7 @@ import { ProjectIndexHost } from './host/projectIndexHost';
 import type { AgentToAgent, BridgeAnswer } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
+import { parseCustomAgents, publicCustomAgents, type CustomAgentConfig } from './host/customAgents';
 import { OTHER_AGENTS } from './host/otherAgents';
 import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
@@ -39,7 +40,7 @@ import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Sur
 import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
 import { discussLayoutOf, type DiscussLayout } from './shared/discussView';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
-import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
+import { agentFace, isAgentKey, isBuiltinAgent, setCustomAgents, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
 import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
@@ -159,6 +160,7 @@ export class Controller {
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
+  private customConfig = this.readCustomAgents();
   /** Remembered "Always allow" answers: the user's own storage (global for websites and agent tools, this workspace's for folders and commands). */
   readonly permissions: Permissions;
   private permissionsPanel?: { panel: vscode.WebviewPanel; ready: boolean };
@@ -303,6 +305,7 @@ export class Controller {
         },
       },
       agentCommand: (id) => this.agentConfig[id],
+      customAgent: (key) => this.customConfig.find((c) => c.key === key),
       apiKey: (id) => this.accounts.apiKey(id),
       credentialEnv: (id) => this.accounts.credentialEnv(id),
       accountSeen: (agent, patch) => this.accounts.note(agent, patch),
@@ -726,7 +729,9 @@ export class Controller {
         shown = `${title}\0${agent}`;
         panel.title = title;
         // The agent's mark in its v2 hue: the dark theme's hue, and a deeper one on light themes (scripts/agent-icons.mjs).
-        panel.iconPath = agent ? { dark: icon(`agent-${agent}`), light: icon(`agent-${agent}-light`) } : icon('agents');
+        // A custom agent's tab shows the neutral glyph (media/agent-custom.svg).
+        const file = agent && (isBuiltinAgent(agent) ? agent : 'custom');
+        panel.iconPath = file ? { dark: icon(`agent-${file}`), light: icon(`agent-${file}-light`) } : icon('agents');
       };
     this.addSurface(surface, panel.title, panel);
     this.retitle();
@@ -1175,7 +1180,7 @@ export class Controller {
     const roots = this.core.roots();
     const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
     // An agent's terminal is its own tab, "<Agent> · <command>", with the agent's mark (COMPONENTS.md v2 §6.7).
-    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${chat.agent}${kind}.svg`);
+    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${isBuiltinAgent(chat.agent) ? chat.agent : 'custom'}${kind}.svg`);
     const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)} · ${clip(command, 40)}`, cwd: folder, iconPath: { light: mark('-light'), dark: mark('') } });
     terminal.show();
     terminal.sendText(command, true);
@@ -1235,7 +1240,7 @@ export class Controller {
       agent ??
       (
         await vscode.window.showQuickPick(
-          ordered.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
+          ordered.map((a) => ({ label: agentFace(a).name, description: this.pickHint(a), agent: a })),
           { title: 'New chat with…' },
         )
       )?.agent;
@@ -1347,7 +1352,7 @@ export class Controller {
     const agent = await this.pickAgent('Ask which agent?', source.agent);
     if (!agent) return;
     const text = await vscode.window.showInputBox({
-      title: `Ask ${AGENT_FACES[agent].name}`,
+      title: `Ask ${agentFace(agent).name}`,
       prompt: `The answer comes back into ${chatRef(source)}.`,
       validateInput: (v) => (v.trim() ? undefined : 'Type a question.'),
     });
@@ -1363,7 +1368,7 @@ export class Controller {
     const vendors = roster.agents.filter((a) => a !== 'demo' && installedOrUnknown(roster, a));
     const preselected = vendors.length ? vendors : preselectAgents(roster, []);
     const picked = await vscode.window.showQuickPick(
-      roster.agents.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: preselected.includes(a) })),
+      roster.agents.map((a) => ({ label: agentFace(a).name, description: this.pickHint(a), agent: a, picked: preselected.includes(a) })),
       { title: 'Run a task on which agents?', canPickMany: true },
     );
     if (!picked?.length) return;
@@ -1449,7 +1454,7 @@ export class Controller {
     const order = [...shown.filter((a) => a !== current && a !== 'demo'), ...shown.filter((a) => a === current || a === 'demo')];
     return (
       await vscode.window.showQuickPick(
-        order.map((a) => ({ label: AGENT_FACES[a].name, description: a === current ? 'same agent' : a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
+        order.map((a) => ({ label: agentFace(a).name, description: a === current ? 'same agent' : a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
         { title },
       )
     )?.agent;
@@ -1680,7 +1685,7 @@ export class Controller {
   /** A new task's level: Full auto is confirmed once for all its chats, here. Null: the user said no; undefined: the default. */
   private async taskApproval(level: ApprovalLevel | undefined, agents: AgentKey[]): Promise<ApprovalLevel | null | undefined> {
     if (level !== 'full') return level;
-    const who = agents.map((a) => AGENT_FACES[a].name).join(', ');
+    const who = agents.map((a) => agentFace(a).name).join(', ');
     return (await this.confirmFullAuto({ label: agents.length > 1 ? `these ${agents.length} agents (${who})` : who, agent: who })) ? 'full' : null;
   }
 
@@ -1820,7 +1825,7 @@ export class Controller {
   private async offerSignInUrl(agent: AgentKey, url: string): Promise<void> {
     if (this.asked.has(url)) return;
     this.asked.add(url);
-    const open = await vscode.window.showInformationMessage(`${AGENT_FACES[agent].name} printed a sign-in link.`, 'Open sign-in page');
+    const open = await vscode.window.showInformationMessage(`${agentFace(agent).name} printed a sign-in link.`, 'Open sign-in page');
     // Sign-in pages talk back to the agent on this machine: the system browser, never FriedLiver's.
     if (open) await openInSystemBrowser(url);
   }
@@ -1859,7 +1864,20 @@ export class Controller {
         args: Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : [],
       };
     };
-    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity') };
+    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity'), copilot: one('copilot') };
+  }
+
+  /**
+   * friedliver.agents.custom, from the user's own settings only: a repository must never add an agent
+   * or choose its program. Webviews and the shared model get the list without commands or env.
+   */
+  private readCustomAgents(): CustomAgentConfig[] {
+    const { value, ignored } = userSetting(vscode.workspace.getConfiguration('friedliver.agents').inspect<unknown>('custom'));
+    if (ignored) this.log.warn('Ignored friedliver.agents.custom from the workspace settings; only your user settings add agents.');
+    const { agents, problems } = parseCustomAgents(value);
+    for (const p of problems) this.log.warn(p);
+    setCustomAgents(publicCustomAgents(agents));
+    return agents;
   }
 
   /** From the user's own settings only: a repository must never make its agents run without asking. */
@@ -2071,7 +2089,16 @@ export class Controller {
     const before = this.agentConfig;
     this.agentConfig = this.readAgentConfig();
     // A running agent keeps the command it started with; stop it so the next message starts the new one.
-    const restart = VENDOR_AGENTS.filter((id) => JSON.stringify(before[id]) !== JSON.stringify(this.agentConfig[id]));
+    const restart: AgentKey[] = VENDOR_AGENTS.filter((id) => JSON.stringify(before[id]) !== JSON.stringify(this.agentConfig[id]));
+    if (e.affectsConfiguration('friedliver.agents.custom')) {
+      const customBefore = this.customConfig;
+      this.customConfig = this.readCustomAgents();
+      // A custom agent that changed or went away stops; the next message starts the new one (or says it's gone).
+      restart.push(...customBefore.filter((c) => JSON.stringify(c) !== JSON.stringify(this.customConfig.find((n) => n.key === c.key))).map((c) => c.key));
+      this.postRoster();
+      this.accounts.refresh();
+      this.accountsPage.refresh();
+    }
     void this.core.reconfigure(restart);
   }
 
