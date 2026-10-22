@@ -3,6 +3,9 @@
 name: spike-agy-appcontainer
 on:
   workflow_dispatch:
+  # workflow_dispatch needs the file on main, which this spike must not touch: so push, this branch only.
+  push:
+    branches: [spike/agy-appcontainer]
 permissions:
   contents: read
 jobs:
