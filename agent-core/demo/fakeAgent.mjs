@@ -1180,7 +1180,8 @@ acp
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     const { sessionId } = params;
-    const texts = params.prompt.filter((b) => b.type === 'text').map((b) => b.text);
+    // The Windows shell note (agentShell.ts shellNote) is for real agents; the echo ignores it, so tests read the same on every OS.
+    const texts = params.prompt.filter((b) => b.type === 'text' && !b.text.startsWith('This computer runs Windows.')).map((b) => b.text);
     const text = texts.join(' ');
     // What to do comes from the last text block; earlier ones are context.
     const command = texts.at(-1) ?? '';
