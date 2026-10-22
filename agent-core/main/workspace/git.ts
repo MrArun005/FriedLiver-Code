@@ -325,7 +325,9 @@ export const READ_ONLY_CONFIG = [
 ];
 export const READ_ONLY_ENV: Record<string, string> = {
   GIT_CONFIG_NOSYSTEM: '1',
-  GIT_CONFIG_GLOBAL: os.devNull,
+  // '/dev/null' everywhere, as git documents: Git for Windows reads it as NUL (or finds no such file), while
+  // os.devNull's \\.\nul makes its config access check fail, and every read-only call with it.
+  GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_PAGER: 'cat',
   PAGER: 'cat',
   GIT_TERMINAL_PROMPT: '0',

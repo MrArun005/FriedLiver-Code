@@ -2,8 +2,8 @@ name: CI
 
 # Lint and the theme tests, then the agents extension's tests and both extensions
 # as VSIX files for stock VS Code and editors built on it. A pull request runs the
-# fast set (Linux only); a push to main and a manual run add macOS and Windows, and
-# release.yml requires that full run green on main's head.
+# fast set (Linux only); a push to main and a manual run add macOS and Windows (the agents
+# extension's tests on Windows too), and release.yml requires that full run green on main's head.
 on:
   push:
     branches: [main]
@@ -92,3 +92,31 @@ jobs:
           name: friedliver-vscode-extensions
           path: vsix/*.vsix
           if-no-files-found: error
+
+  # The agents extension's tests on Windows too (launchFor, terminals, guards, paths, index, images, updates):
+  # on a push to main and a manual run; pull requests stay Linux-only. Packaging stays in the job above.
+  extensions-windows:
+    # Not after `test`: a flake there would skip it, and these results stand on their own.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    defaults:
+      run:
+        # Git Bash, so a failing command fails the step (pwsh checks only the last one's exit code).
+        shell: bash
+    steps:
+      # The repository's bytes as on macOS and Linux: fixtures and snapshots are LF.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Agents extension tests
+        working-directory: extensions/friedliver-agents
+        run: |
+          npm ci
+          npm run typecheck
+          npm test

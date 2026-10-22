@@ -32,7 +32,7 @@ let clock: number;
 const DAY = 86_400_000;
 
 beforeEach(() => {
-  base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-store-')));
+  base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-store-')));
   store = path.join(base, 'storage', 'images');
   temp = path.join(base, 'agent-temp');
   user = path.join(base, 'workspace');
@@ -125,8 +125,9 @@ describe('removeTemp: deletes only inside the allowlist', () => {
   });
 });
 
-describe('trusted roots: a root another user could control is dropped', () => {
-  const uid = process.getuid!();
+// POSIX only: ownership by uid and group/world-writable bits don't exist on Windows (no process.getuid).
+describe.skipIf(process.platform === 'win32')('trusted roots: a root another user could control is dropped', () => {
+  const uid = process.getuid?.() ?? -1;
 
   it('accepts a folder of this user that only it can write to', async () => {
     expect(await trustedRoot(temp, uid)).toBe(temp);

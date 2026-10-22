@@ -74,10 +74,17 @@ const isFile = (file: string) => {
   }
 };
 
+/** The small environment runFixed gives a program. Windows programs need SystemRoot (and WINDIR) to start reliably. */
+export function fixedEnv(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (platform !== 'win32') return { PATH: '/usr/bin:/bin', HOME: os.homedir() };
+  const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.WINDIR ?? 'C:\\Windows';
+  return { SystemRoot: root, WINDIR: root, PATH: `${root}\\System32`, USERPROFILE: os.homedir() };
+}
+
 /** Runs a program by absolute path with a small environment, a timeout and bounded output. */
 export const runFixed: Run = (binary, args) =>
   new Promise((resolve, reject) => {
-    execFile(binary, args, { timeout: 15_000, maxBuffer: 1024 * 1024, env: { PATH: '/usr/bin:/bin', HOME: os.homedir() }, windowsHide: true }, (err, stdout) =>
+    execFile(binary, args, { timeout: 15_000, maxBuffer: 1024 * 1024, env: fixedEnv(), windowsHide: true }, (err, stdout) =>
       err ? reject(err) : resolve(String(stdout)),
     );
   });

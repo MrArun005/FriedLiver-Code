@@ -12,15 +12,23 @@ import path from 'node:path';
  * is checked too, with every symlink resolved: the file's own when it exists,
  * otherwise its nearest existing folder's, following dangling links to where
  * a write would land. The returned path is the one asked for (not the real
- * one), so it matches open editors and the review; callers check again right
- * before they write, in case a link appeared since.
+ * one), so it matches open editors and the review, except that a path named
+ * under a root's real name comes back under the root as given; callers check
+ * again right before they write, in case a link appeared since.
  *
  * `p` other than the native `path` checks names only (tests of Windows rules on Linux).
  */
 export function insideRoots(file: unknown, roots: readonly string[], p: path.PlatformPath = path): string | null {
   if (typeof file !== 'string' || !file || file.includes('\0') || roots.length === 0) return null;
-  const resolved = p.resolve(roots[0], file);
-  if (!roots.some((root) => contains(p, p.resolve(root), resolved))) return null;
+  let resolved = p.resolve(roots[0], file);
+  if (!roots.some((root) => contains(p, p.resolve(root), resolved))) {
+    // Under a root's real name: given back in the root's own spelling (spelledUnder), so every later check by
+    // name (inGitFolder, per-root rules) sees one form. The real-path check below still decides.
+    if (p !== path) return null;
+    const spelled = spelledUnder(resolved, roots);
+    if (spelled === resolved) return null;
+    resolved = spelled;
+  }
   if (p !== path) return resolved;
   const real = realPath(resolved);
   if (real === null) return null;
@@ -33,15 +41,33 @@ export function insideRoots(file: unknown, roots: readonly string[], p: path.Pla
 }
 
 /**
+ * `file` (absolute) in the spelling of the root it lies under. A root opened by another name (an 8.3 name like
+ * C:\Users\RUNNER~1\… on Windows, or a link) holds paths git and agents report under its real one: those are
+ * rewritten under the root as given. Unchanged when under a root by name already, or under none.
+ */
+export function spelledUnder(file: string, roots: readonly string[]): string {
+  if (roots.some((r) => contains(path, path.resolve(r), file))) return file;
+  const alias = roots.map((r) => [path.resolve(r), realPath(path.resolve(r))] as const).find(([, real]) => real !== null && contains(path, real, file));
+  return alias ? path.join(alias[0], path.relative(alias[1]!, file)) : file;
+}
+
+/**
  * Whether `file` (already inside `roots`) is in a repository's `.git` folder, or is a
  * worktree's `.git` file. Agents may read there but not write: git config and hooks
  * run programs, and nothing there shows up in a diff or a commit.
  */
 export function inGitFolder(file: string, roots: readonly string[], p: path.PlatformPath = path): boolean {
-  return roots.some((root) => {
-    const base = p.resolve(root);
-    return contains(p, base, file) && p.relative(base, file).split(/[\\/]/).some((part) => part.toLowerCase() === '.git');
-  });
+  const named = (f: string, rs: readonly string[]) =>
+    rs.some((root) => {
+      const base = p.resolve(root);
+      return contains(p, base, f) && p.relative(base, f).split(/[\\/]/).some((part) => part.toLowerCase() === '.git');
+    });
+  if (named(file, roots)) return true;
+  if (p !== path) return false;
+  // Also where it really is, against the roots as they really are: a link into .git, or a root opened by
+  // another name. Fails closed: a path that can't be resolved counts as in .git.
+  const real = realPath(file);
+  return real === null || named(real, roots.map((r) => realPath(path.resolve(r)) ?? path.resolve(r)));
 }
 
 function contains(p: path.PlatformPath, root: string, file: string): boolean {

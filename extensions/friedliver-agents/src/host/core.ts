@@ -77,12 +77,12 @@ import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
-import { inGitFolder, insideRoots, realPath, workspacePath } from './paths';
+import { inGitFolder, insideRoots, realPath, spelledUnder, workspacePath } from './paths';
 import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
 import { loginExtras } from './signin';
-import { mergeOffered, type AccountRecord } from '../shared/accounts';
+import { mergeOffered, unavailableOn, type AccountRecord } from '../shared/accounts';
 import { relativeFile, rewoundHistory } from './transcript';
 import { testAgentsOn } from './settings';
 import { RULES_CAP, type Rules } from './sharedRules';
@@ -161,6 +161,8 @@ export interface CoreUi {
 
 export interface CoreOptions {
   folders(): string[];
+  /** This system (process.platform unless a test says): agents it can't run are refused by name. */
+  platform?: NodeJS.Platform;
   clientVersion: string;
   demoAgentScript: string;
   /**
@@ -331,6 +333,10 @@ export class AgentCore {
   private bridgeStarting?: Promise<void>;
   private outputTimer?: ReturnType<typeof setTimeout>;
   private nextId = 1;
+
+  private get platform(): NodeJS.Platform {
+    return this.options.platform ?? process.platform;
+  }
 
   constructor(private readonly options: CoreOptions) {
     const limits = options.limits();
@@ -532,6 +538,8 @@ export class AgentCore {
   }
 
   async createChat(agent: AgentKey, options: NewChat = {}): Promise<ChatView> {
+    const unavailable = unavailableOn(agent, this.platform);
+    if (unavailable) throw new Error(unavailable);
     const folder = this.options.folders()[0];
     if (!folder) throw new Error('Open a folder first. Agents work inside the folder you open.');
     const shared = options.shareWorktreeOf ? this.chat(options.shareWorktreeOf) : undefined;
@@ -995,6 +1003,8 @@ export class AgentCore {
 
   /** Asks another agent from this chat. Resolves with the answer, which also shows in this chat. */
   async consult(chatId: string, agent: AgentKey, text: string, by: 'user' | 'agent' = 'user', images: Attachment[] = [], fresh = false): Promise<string> {
+    const unavailable = unavailableOn(agent, this.platform);
+    if (unavailable) throw new Error(unavailable);
     const srcs = images.map((img) => imageDataUri(img.mimeType, img.data));
     const bad = images.find((_, n) => !srcs[n]);
     if (bad) throw new Error(`${bad.name || 'An attachment'} is not an image FriedLiver can send.`);
@@ -1323,17 +1333,19 @@ export class AgentCore {
       },
       remove: (f) => rm(this.checkWrite(f), { force: true }),
     });
-    const handled = new Set([...snap.restored, ...snap.kept]);
+    // One spelling for both lists (spelledUnder): a root opened by another name is named by its real path in git.
+    const spell = (f: string) => spelledUnder(f, this.roots());
+    const handled = new Set([...snap.restored, ...snap.kept].map(spell));
     const logged =
       this.turns.current(chatId) === turnId
         ? await this.turns.undo(
             chatId,
             turnId,
             { write: (f, c) => writeTextFile(this.checkWrite(f), c), remove: (f) => rm(this.checkWrite(f), { force: true }) },
-            (f) => handled.has(f),
+            (f) => handled.has(spell(f)),
           )
         : [];
-    const files = [...snap.restored, ...logged];
+    const files = [...new Set([...snap.restored, ...logged].map(spell))];
     this.dispatch({ t: 'undone', chatId, turnId });
     if (snap.kept.length) {
       const names = snap.kept.map((f) => path.basename(f)).join(', ');
@@ -1793,7 +1805,13 @@ export class AgentCore {
       if (now === this.turns.before(chatId, f)) this.turns.drop(chatId, f);
       else changed.push(f);
     }
-    return [...new Set([...snap, ...changed])];
+    // One entry per file. On Windows the same file comes in several spellings: git's C:\ and long names, the
+    // workspace's or agent's c:\ and 8.3 names (RUNNER~1). Keyed by the real path, case-insensitively; the
+    // agent's spelling first, as it matches the chat's folder.
+    const key = (f: string) => (this.platform === 'win32' ? (realPath(f) ?? path.resolve(f)).toLowerCase() : f);
+    const files = new Map<string, string>();
+    for (const f of [...changed, ...snap].map((f) => spelledUnder(f, this.roots()))) if (!files.has(key(f))) files.set(key(f), f);
+    return [...files.values()];
   }
 
   /** Keeps open tool calls whole (a permission request may name only the id), and notes files edit tools touch. */

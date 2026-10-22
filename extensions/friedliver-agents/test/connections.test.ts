@@ -177,7 +177,8 @@ describe('pipes and forwards', () => {
     expect(core.chat(a.id)!.items.some((i) => i.kind === 'notice' && i.text.startsWith('Paused the pipe'))).toBe(true);
     expect(core.pipe(a.id, b.id).id).toBe(link.id);
     expect(core.snapshot.links[0].active).toBe(true);
-  });
+    // 42 turns, each with a git checkpoint: about 28 s on a Windows runner, where every git start is slow.
+  }, 90_000);
 
   it("forwards a chat's last reply into another chat", async () => {
     const dir = await gitRepo();
@@ -269,6 +270,21 @@ describe('chat housekeeping', () => {
     await core.removeChat(a.id);
     expect(core.chat(a.id)).toBeUndefined();
     expect(core.snapshot.links).toEqual([]);
+  });
+});
+
+describe('Windows paths', () => {
+  // The drive letter's case differs between git (C:\) and VS Code or an agent (c:\): still one changed file.
+  it.runIf(process.platform === 'win32')('records a file the agent names with another drive-letter case once', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, {
+      ui: { showReview: (r) => setTimeout(() => core.decideReview(r.reviewId, true), 5), closeReview: () => {}, askPermission: (a) => setTimeout(() => core.answerPermission(a.requestId, 'allow'), 5) },
+    });
+    const a = await core.createChat('demo');
+    const file = path.join(dir, 'src', 'new.txt');
+    const other = (file[0] === file[0].toUpperCase() ? file[0].toLowerCase() : file[0].toUpperCase()) + file.slice(1);
+    await core.send(a.id, `edit ${other}`);
+    expect(core.chat(a.id)!.files).toEqual(['src/new.txt']);
   });
 });
 

@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { EXTERNAL_TOOLS, handle, TOOLS } from '../src/bridge/mcp';
 import { parseCall, type SystemCall } from '../src/bridge/protocol';
 import { auditLine, capBytes, JXA, MAC_BIN, NOT_SUPPORTED, PS, powershell, RateLimit, SystemControl, winPowerShell, type Exec, type ExecResult } from '../src/host/system';
@@ -482,6 +482,16 @@ describe('settings (friedliver.system.*)', () => {
 /** CI's Windows runner (ci.yml sets FRIEDLIVER_SYSTEM_SMOKE): the real PowerShell, with harmless inputs. */
 describe.runIf(process.platform === 'win32' && !!process.env.FRIEDLIVER_SYSTEM_SMOKE)('the real PowerShell templates (Windows CI smoke)', () => {
   const real = () => new SystemControl({ home: os.homedir(), shotsBase: os.tmpdir() });
+
+  // A fresh runner's first PowerShell 5.1 starts can take longer than a call's 15 s limit (assemblies loading,
+  // Defender scanning them): warm it once, with room, so the tests time the templates and not that.
+  beforeAll(() => {
+    try {
+      execFileSync(winPowerShell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'Get-Process -Id $PID | Out-Null; Get-Clipboard | Out-Null'], { timeout: 120_000, windowsHide: true, stdio: 'ignore' });
+    } catch {
+      // The tests below say what went wrong.
+    }
+  }, 130_000);
 
   it('every template parses', async () => {
     const parse = String.raw`$errs = @()

@@ -283,9 +283,18 @@ export function validDefault(d: AgentDefaults | undefined, key: DefaultKey, valu
 
 // ---- Which agents the pickers show, and their sign-in marks ----
 
-/** The agents pickers and menus offer; the fake Demo agent only in tests (FRIEDLIVER_TEST_AGENTS=1). */
-export function shownAgents(showDemo: boolean): AgentKey[] {
-  return AGENT_KEYS.filter((a) => showDemo || a !== 'demo');
+/**
+ * Why `agent` can't run on this platform, or undefined when it can. Antigravity runs only inside macOS's sandbox
+ * (agyAcp.ts PLATFORM_REFUSAL), so elsewhere it is hidden from pickers and refused by name until a sandbox exists.
+ */
+export function unavailableOn(agent: AgentKey, platform: string): string | undefined {
+  if (agent !== 'antigravity' || platform === 'darwin') return undefined;
+  return `Antigravity isn’t available on ${platform === 'win32' ? 'Windows' : 'Linux'} yet: FriedLiver runs it only inside macOS’s sandbox for now.`;
+}
+
+/** The agents pickers and menus offer: not the ones this platform can't run; the fake Demo agent only in tests (FRIEDLIVER_TEST_AGENTS=1). */
+export function shownAgents(showDemo: boolean, platform: string = process.platform): AgentKey[] {
+  return AGENT_KEYS.filter((a) => (showDemo || a !== 'demo') && !unavailableOn(a, platform));
 }
 
 export interface AgentRoster {
@@ -294,8 +303,8 @@ export interface AgentRoster {
   signIn: Partial<Record<AgentKey, SignInState>>;
 }
 
-export function rosterOf(showDemo: boolean, records: Partial<Record<AgentKey, AccountRecord>>): AgentRoster {
-  const agents = shownAgents(showDemo);
+export function rosterOf(showDemo: boolean, records: Partial<Record<AgentKey, AccountRecord>>, platform: string = process.platform): AgentRoster {
+  const agents = shownAgents(showDemo, platform);
   const signIn: AgentRoster['signIn'] = {};
   for (const a of agents) if (records[a]) signIn[a] = records[a]!.status;
   return { agents, signIn };
@@ -352,6 +361,8 @@ export interface AccountCard {
   model?: SessionOption;
   effort?: SessionOption;
   chosen: Record<string, string | boolean>;
+  /** Set when this platform can't run the agent ("macOS only for now"): the card shows only that. */
+  unavailable?: string;
 }
 
 export interface AccountsView {
