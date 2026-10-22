@@ -56,8 +56,10 @@ Other decisions:
   match use `text-2` at low alpha, so nothing blue appears unless something
   needs a decision. Find matches use the syntax `type` hue.
 - Tone, not lines. Upstream's Modern UI (`workbench.experimental.modernUI`,
-  on by default in 1.142) draws the side bars and panel as floating cards.
-  Its shell and the cards are all `panel`, with transparent frames, so the
+  on by default in 1.142) draws the side bars and panel as floating cards;
+  FriedLiver turns it off, so the editor and Agents panel stay attached
+  (a hairline left and top, only the top-left corner rounded). The shell
+  and the parts are all `panel`, with transparent frames, so the
   chrome reads as one quiet surface and the editor is a `ground` well inside
   it. The resting sash grips are hidden (`modernSash.gripForeground` is
   transparent): a splitter shows only on hover, as a `muted` bar
@@ -141,6 +143,7 @@ settings override all of them.
 | `workbench.hover.delay` | `500` | window | fewer accidental hovers |
 | `workbench.editor.tabSizing` | `shrink` | window | more tabs fit; every chat is its own editor tab |
 | `workbench.experimental.modernUIEditorTabStyle` | `pill` | window | Beacon pill tabs, no line above the active tab |
+| `workbench.experimental.modernUI` | `false` | window | attached editor and Agents panel, not floating cards (§0 principle 7); glass stays on (patch 0110) |
 | `workbench.editor.useModal` | `off` | window | settings and other editors open as tabs, not a modal |
 | `workbench.settings.editor` / `workbench.settings.useSplitJSON` | `ui` / `false` | window | the settings UI, not split JSON |
 | `editor.inlineSuggest.showToolbar` | `never` | language-overridable | quieter |

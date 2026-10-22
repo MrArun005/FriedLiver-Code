@@ -9,8 +9,9 @@
  *    styles. Radii go through upstream's --vscode-cornerRadius-* sizes, re-pointed at the radius
  *    families (§1.4); the Windows/Linux layer (§1.14) changes the families, so these follow.
  *  - High contrast is untouched: every rule is scoped to .monaco-workbench:not(.hc-black):not(.hc-light).
- *  - Builds on upstream's Modern UI (on by default; floating panels, pill tabs) and must not tie
- *    with it on specificity: the bundle may order its modules before or after this sheet.
+ *  - FriedLiver turns upstream's Modern UI off by default (attached parts, not floating cards), but
+ *    a user may turn it back on: rules must work both ways and not tie with it on specificity (the
+ *    bundle may order its modules before or after this sheet).
  *  - No :has(), no class-substring selectors (contrib/modernUI/CSS_PERFORMANCE.md), and no
  *    transitions on virtualized rows. Hover is instant on and trails off (§1.11).
  *  - Motion follows §1.11 and stops under workbench.reduceMotion (.monaco-reduce-motion) and
@@ -27,6 +28,18 @@
 	--vscode-cornerRadius-xLarge: var(--fl-r-dialog);
 	--vscode-shadow-lg: var(--fl-rim), var(--fl-elev-3);
 	--vscode-shadow-xl: var(--fl-rim), var(--fl-elev-4);
+}
+
+/* ---- Attached editor and Agents panel (§0 principle 7): no gap, a hairline left and top, only the
+   top-left corner rounded. Not with Modern UI's floating cards, whose margins its layout code owns.
+   !important: the auxiliary bar paints its left border inline (auxiliaryBarPart.updateStyles). */
+
+.monaco-workbench:not(.floating-panels):not(.hc-black):not(.hc-light) .part.editor,
+.monaco-workbench:not(.floating-panels):not(.hc-black):not(.hc-light) .part.auxiliarybar {
+	margin: 0;
+	border-top: var(--fl-line) solid var(--fl-hairline) !important;
+	border-left: var(--fl-line) solid var(--fl-hairline) !important;
+	border-radius: var(--fl-r-box) 0 0 0;
 }
 
 /* ---- Glass (§1.9): blur 24, saturate 160%, on every floating surface ------------------------ */
@@ -799,7 +812,10 @@
 	border-radius: var(--fl-r-8);
 }
 
+/* The entry fills the 40px row (upstream sizes it to its 22px content), so the label and the
+   rows below centre in the row instead of sitting at its top (test/workbench-css.test.ts). */
 .monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-widget .quick-input-list .quick-input-list-entry {
+	height: 100%;
 	align-items: center;
 	padding: 0 var(--fl-sp-2) 0 var(--fl-sp-3);
 	font-size: var(--fl-t-lg);

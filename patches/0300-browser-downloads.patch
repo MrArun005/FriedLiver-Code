@@ -1516,10 +1516,10 @@ index 096492d9..24321e91 100644
  
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
 new file mode 100644
-index 00000000..1511172b
+index 00000000..89b5e1b0
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
-@@ -0,0 +1,328 @@
+@@ -0,0 +1,351 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): browser downloads, COMPONENTS.md §2.39.
 + *  Only design-system tokens (--fl-*, generated from tokens.css into the workbench) and theme
@@ -1614,13 +1614,36 @@ index 00000000..1511172b
 +	padding: var(--fl-sp-1) 0;
 +	border: var(--fl-line) solid var(--fl-dialog-border);
 +	border-radius: var(--fl-r-float);
-+	background: var(--fl-glass-bg);
-+	backdrop-filter: var(--fl-glass-blur);
++	/* Solid menu tone until the glass below can blur: an 84% pane with no working blur lets the page behind show through. */
++	background: var(--fl-menu-bg);
 +	box-shadow: var(--fl-rim), var(--fl-elev-3);
 +	color: var(--fl-fg);
 +	font-size: var(--fl-t-100);
 +	margin-top: var(--fl-sp-1);
 +	animation: fl-dl-rise var(--fl-dur) var(--fl-ease-out);
++}
++
++/* Glass §1.9 (menu tone at --glass-alpha + blur 24 + rim), only where the workbench turns glass on
++   (.modern-ui-frosted-glass: GPU compositing, no reduced transparency, not high contrast). The blur
++   sits on its own layer, as upstream's frosted glass does, so the popover's children stay put. */
++@media (prefers-reduced-transparency: no-preference) and (forced-colors: none) {
++	.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .fl-downloads {
++		position: relative;
++		isolation: isolate;
++		background: transparent;
++	}
++
++	.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .fl-downloads::before {
++		content: '';
++		position: absolute;
++		inset: 0;
++		z-index: -1;
++		border-radius: inherit;
++		background: var(--fl-glass-bg);
++		backdrop-filter: var(--fl-glass-blur);
++		box-shadow: var(--fl-rim);
++		pointer-events: none;
++	}
 +}
 +
 +.monaco-workbench .fl-downloads__head {
