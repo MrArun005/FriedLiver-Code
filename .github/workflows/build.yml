@@ -62,23 +62,20 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       # Upstream's deb packaging fetches dpkg-shlibdeps.pl from raw.githubusercontent.com with a bare curl, and
-      # CI runners get 429s for it. A curl earlier on PATH retries those fetches and signs them with this job's
-      # read-only token; any call without a raw.githubusercontent.com URL goes to the real curl unchanged.
-      - name: Retry and sign raw.githubusercontent.com fetches
+      # CI runners get 429s for it. A curl earlier on PATH retries those fetches (curl honours the 429's
+      # Retry-After); any call without a raw.githubusercontent.com URL goes to the real curl unchanged.
+      # No token: nothing later in this job should be able to read one.
+      - name: Retry raw.githubusercontent.com fetches
         if: runner.os == 'Linux'
-        env:
-          RAW_TOKEN: ${{ github.token }}
         run: |
           shim="$RUNNER_TEMP/curl-shim"
           mkdir -p "$shim"
-          (umask 077; printf '%s' "$RAW_TOKEN" > "$shim/.token")
           cat > "$shim/curl" <<'EOF'
           #!/bin/sh
-          raw=
-          for a in "$@"; do case "$a" in https://raw.githubusercontent.com/*) raw=1 ;; esac; done
-          [ -z "$raw" ] && exec /usr/bin/curl "$@"
-          exec /usr/bin/curl --fail --silent --show-error --retry 6 --retry-delay 20 --retry-all-errors \
-            -H "Authorization: Bearer $(cat "$(dirname "$0")/.token")" "$@"
+          for a in "$@"; do case "$a" in https://raw.githubusercontent.com/*)
+            exec /usr/bin/curl --fail --silent --show-error --retry 8 --retry-delay 30 --retry-all-errors "$@" ;;
+          esac; done
+          exec /usr/bin/curl "$@"
           EOF
           chmod +x "$shim/curl"
           echo "$shim" >> "$GITHUB_PATH"
