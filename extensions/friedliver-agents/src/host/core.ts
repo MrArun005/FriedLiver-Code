@@ -1803,10 +1803,12 @@ export class AgentCore {
       if (now === this.turns.before(chatId, f)) this.turns.drop(chatId, f);
       else changed.push(f);
     }
-    // One entry per file: on Windows the same file comes as git's C:\ and VS Code's or the agent's c:\ (case-insensitive).
-    const key = (f: string) => (this.platform === 'win32' ? path.resolve(f).toLowerCase() : f);
+    // One entry per file. On Windows the same file comes in several spellings: git's C:\ and long names, the
+    // workspace's or agent's c:\ and 8.3 names (RUNNER~1). Keyed by the real path, case-insensitively; the
+    // agent's spelling first, as it matches the chat's folder.
+    const key = (f: string) => (this.platform === 'win32' ? (realPath(f) ?? path.resolve(f)).toLowerCase() : f);
     const files = new Map<string, string>();
-    for (const f of [...snap, ...changed]) if (!files.has(key(f))) files.set(key(f), f);
+    for (const f of [...changed, ...snap]) if (!files.has(key(f))) files.set(key(f), f);
     return [...files.values()];
   }
 

@@ -149,7 +149,7 @@ describe('images in Claude Code sessions', () => {
     );
     expect(scan.images).toEqual([
       { path: R('/work/app/docs/login-page.png'), title: 'Login page', source: 'read', at: Date.parse(t(1)) },
-      { path: '/store/shots-x/screenshot-1.png', title: 'Screenshot of https://example.com/ (“Example”)', source: 'screenshot', at: Date.parse(t(3)) },
+      { path: R('/store/shots-x/screenshot-1.png'), title: 'Screenshot of https://example.com/ (“Example”)', source: 'screenshot', at: Date.parse(t(3)) },
       { path: R('/work/app/.playwright-mcp/page-1.png'), title: 'Screenshot of full page', source: 'screenshot', at: Date.parse(t(5)) },
       { path: R('/work/app/shots/hero.png'), title: 'Hero', source: 'screenshot', at: Date.parse(t(7)) },
     ]);
