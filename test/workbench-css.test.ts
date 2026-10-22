@@ -105,6 +105,8 @@ describe('workbench/friedliver.css', () => {
     const grid = ruleFor('.setting-item-bool) .setting-item-contents'); // the :is() list, split at its commas
     // A fixed control track: minmax(220, 320) grew to 320 before 1fr got anything, squeezing the words to ~130px.
     expect(grid['grid-template-columns']).toBe('minmax(0, 1fr) clamp(calc(5.5 * var(--fl-h-xl)), 30%, calc(8 * var(--fl-h-xl)))');
+    // Switch rows: the control track is just the switch, so the words don't wrap beside an empty 220px column.
+    expect(ruleFor('.settings-tree-container .setting-item-bool .setting-item-contents')).toMatchObject({ 'grid-template-columns': 'minmax(0, 1fr) auto' });
     expect(ruleFor('.setting-item-bool .setting-item-value-description')).toMatchObject({ display: 'contents' });
     expect(ruleFor('.setting-item-bool .setting-item-value-description > .setting-item-bool-control')).toMatchObject({ 'grid-column': '2', 'justify-self': 'end' });
     expect(ruleFor('.setting-item-bool .setting-item-value-description > .setting-item-description')).toMatchObject({ 'grid-column': '1' });

@@ -1297,7 +1297,12 @@
 	max-width: none;
 }
 
-/* Booleans: the switch and the words join the row grid; the switch sits at the end of the control column. */
+/* Booleans: the switch and the words join the row grid. The control column shrinks to the switch, so the words
+   take everything up to it instead of wrapping beside an empty 220px track. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-value-description {
 	display: contents;
 }
