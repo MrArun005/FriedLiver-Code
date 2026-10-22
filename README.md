@@ -279,9 +279,10 @@ Patches:
 | `0100-bundle-geist-fonts` | Geist and Geist Mono ship with the app and are the default fonts |
 | `0110-modern-workbench` | The workbench built from the design system: imports the generated tokens and `workbench/friedliver.css` (buttons, fields, menus, the palette, toasts, dialogs from COMPONENTS.md); menu rows and toast sizes read the tokens; custom menus and dialogs on macOS. High contrast untouched |
 | `0130-chat-list-below-explorer` | The FriedLiver chat list (`friedliver-chats`) gets activity-bar order 0.5: right below Explorer on new and existing profiles, then wherever the user drags it |
+| `0190-extension-icon-fallback` | An extension icon whose URL and fallback URL both fail (offline) shows the default extensions icon instead of a blank slot |
 | `0200-fast-shell-env` | The extension host starts with the last launch's shell environment instead of waiting for the login shell, then gets the fresh one in the background; only non-secret variables are cached (`friedliver.fastShellEnv`, [DEFAULTS.md](docs/DEFAULTS.md)) |
 | `0210-node-compile-cache-posix` | macOS/Linux: the extension host, shared process and pty host keep a writable Node.js compile cache in `CachedData/<commit>/node` (upstream: Windows only, packaged); argv.json `"node-compile-cache": false` turns it off |
-| `0140-welcome-says-friedliver` | The welcome page and walkthroughs say FriedLiver, not VS Code; the first launch opens the Agents walkthrough, never upstream's Copilot onboarding; a walkthrough step whose `onContext:` already holds (a folder is open) starts done |
+| `0140-welcome-says-friedliver` | Startup and Help → Get Started open the FriedLiver Welcome page (the Agents extension's webview; the stock page only if that extension is disabled); upstream's built-in walkthroughs (Setup's Copilot step) don't register, extensions' walkthroughs still do; never upstream's Copilot onboarding; a walkthrough step whose `onContext:` already holds (a folder is open) starts done |
 
 ### Writing a patch
 

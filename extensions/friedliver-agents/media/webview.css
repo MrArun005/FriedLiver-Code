@@ -5187,17 +5187,34 @@ body[data-surface='welcome'] {
   color: var(--fg-2);
   font-size: var(--t-90);
 }
-.wl-first {
-  display: flex;
+/* First run (V17): the agents 2×2 with their sign-in and a Connect action, the demo agent, and what happens next. */
+.wl-agents > .wl-tile {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-3);
+}
+@media (max-width: 600px) {
+  .wl-first .wl-agents {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.wl-col > .wl-demo {
+  flex-direction: row;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
+  gap: var(--sp-1) var(--sp-3);
 }
-.wl-first p {
-  flex-basis: 100%;
+.wl-demo .wl-empty {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+}
+.wl-steps {
+  display: flex;
+  flex-direction: column;
   margin: 0;
-  color: var(--fg-2);
-  font-size: var(--t-90);
+  padding: 0;
+  list-style: none;
 }
 .wl-keys {
   display: flex;
