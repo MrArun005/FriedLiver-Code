@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { approvalOf } from '../shared/approval';
+import { approvalOf, tilde } from '../shared/approval';
 import { entryActions, inbox, type InboxEntry } from '../shared/inbox';
 import type { WebviewMessage } from '../shared/messages';
 import type { AppState } from '../shared/model';
@@ -192,6 +192,34 @@ export function characterFor(agentId: string, o: CharacterOptions): CharacterLoo
   return fromSetting() ?? fromDir(o.folder) ?? fromDir(o.repoDir) ?? fallback();
 }
 
+const count = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
+
+/**
+ * The card's words: a short, human question ("Run a command?", "Edit 3 files?", "Read a file?"), and
+ * what it acts on in full in the detail (the command exactly as it will run, every path).
+ */
+export function askWords(entry: InboxEntry, a: ReturnType<typeof approvalOf>): { question: string; detail?: string } {
+  const i = entry.item;
+  const where = a.where && !/^and \d+ more$/.test(a.where) ? a.where : undefined;
+  const words = (question: string, lines: (string | undefined)[]) => {
+    const detail = [...lines, where].filter((l): l is string => !!l).join('\n');
+    return detail ? { question, detail } : { question };
+  };
+  const line = i.kind === 'command' ? i.commandLine : i.kind === 'permission' ? i.detail?.command?.line : undefined;
+  if (line) return words('Run a command?', [line]);
+  if (i.kind === 'review') return words('Accept this edit?', [tilde(i.path)]);
+  if (i.kind === 'permission') {
+    const files = i.detail?.files?.map((f) => tilde(f.path)) ?? [];
+    if (files.length) return words(`${a.verb || 'Edit'} ${count(files.length, 'a file', 'files')}?`, files);
+    const reads = i.detail?.locations?.map(tilde) ?? [];
+    if (reads.length) return words(`${i.toolKind === 'search' ? 'Search' : 'Read'} ${count(reads.length, 'a file', 'files')}?`, reads);
+    if (i.detail?.url) return words('Fetch a web page?', [i.detail.url]);
+    return words('Use a tool?', [i.title]);
+  }
+  if (i.kind === 'bridge') return words(entry.kind === 'browser' ? 'Use the browser?' : entry.kind === 'memory' ? 'Use memory?' : 'Message another agent?', [entry.title]);
+  return words(entry.title, []);
+}
+
 /** One waiting entry as the companion shows it, and the message each choice sends. Never a remembered scope. */
 export function companionEntry(state: Pick<AppState, 'chats'>, entry: InboxEntry): { item: Omit<CompanionItem, 'character' | 'characterRun'>; agent: string; answers: Map<string, WebviewMessage> } | undefined {
   const chat = state.chats.find((c) => c.id === entry.chatId);
@@ -199,7 +227,7 @@ export function companionEntry(state: Pick<AppState, 'chats'>, entry: InboxEntry
   const i = entry.item;
   const answers = new Map<string, WebviewMessage>();
   const choices: CompanionChoice[] = [];
-  let question = entry.title;
+  let question: string;
   let detail: string | undefined;
   const actions = entryActions(entry, state);
   if (i.kind === 'question') {
@@ -210,9 +238,7 @@ export function companionEntry(state: Pick<AppState, 'chats'>, entry: InboxEntry
     });
   } else {
     const a = approvalOf(i, chat, state);
-    // A command shows whole, as it will run: the title may shorten it.
-    const line = i.kind === 'command' ? i.commandLine : i.kind === 'permission' ? i.detail?.command?.line : undefined;
-    detail = [line, a.where].filter(Boolean).join('\n') || undefined;
+    ({ question, detail } = askWords(entry, a));
     // Careful requests are press-and-hold in the chat, and plans and mode switches need reading: those are allowed there, not here.
     const readFirst = actions.primary === 'open' || (i.kind === 'permission' && (!!i.detail?.plan || i.toolKind === 'switch_mode'));
     if (actions.allow && !a.hold && !readFirst) {

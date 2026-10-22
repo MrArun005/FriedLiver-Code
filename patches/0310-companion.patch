@@ -12,10 +12,10 @@ index 47c5748..d2c91bd 100644
  					'self'
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
 new file mode 100644
-index 0000000..ad7d982
+index 0000000..b263754
 --- /dev/null
 +++ b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
-@@ -0,0 +1,650 @@
+@@ -0,0 +1,659 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0310): the companion. When an agent in any chat waits for you, its character
 + *  runs in from the right along the status bar line to the middle of the window, plays its arrival,
@@ -151,7 +151,7 @@ index 0000000..ad7d982
 +			this._playPolicy();
 +			return;
 +		}
-+		const generation = this._reset();
++		const generation = this._reset(video.key);
 +		this._img?.remove();
 +		this._img = undefined;
 +		const v = this._video ??= append(this.element, $<HTMLVideoElement>('video'));
@@ -190,7 +190,7 @@ index 0000000..ad7d982
 +		if (src && this._img?.getAttribute('src') === src) {
 +			return;
 +		}
-+		const generation = this._reset();
++		const generation = this._reset(src);
 +		this._video?.pause();
 +		this._video?.remove();
 +		this._video = undefined;
@@ -211,14 +211,17 @@ index 0000000..ad7d982
 +		img.src = src;
 +	}
 +
-+	/** A new source: drop the old one's verdict, keying and timers; hidden until its own verdict. */
-+	private _reset(): number {
++	/** A new source: drop the old one's keying and timers; hidden until its verdict, unless it is already known (no flicker). */
++	private _reset(key: string | undefined): number {
 +		this._clearTimer();
 +		this._stopKey();
 +		this.element.classList.remove('fl-companion__character--portal', 'fl-companion__character--none');
-+		this.element.classList.add('fl-companion__character--pending');
++		const known = key !== undefined ? verdicts.get(key) : undefined;
++		this.element.classList.toggle('fl-companion__character--pending', !known);
++		this.element.classList.toggle('fl-companion__character--portal', known?.kind === 'frame');
 +		return ++this._generation;
 +	}
++
 +
 +	private _judge(key: string, source: HTMLImageElement | HTMLVideoElement, generation: number): void {
 +		const known = verdicts.get(key);
@@ -385,6 +388,7 @@ index 0000000..ad7d982
 +	private _armedAt = Infinity;
 +	private _leaving = false;
 +	private readonly _visible: IContextKey<boolean>;
++	private _character: CharacterView | undefined;
 +
 +	constructor(
 +		@ILayoutService private readonly _layout: ILayoutService,
@@ -479,7 +483,7 @@ index 0000000..ad7d982
 +		// The character stands on the status bar's top line (the floor when it is hidden).
 +		root.style.bottom = `${this._layout.mainContainer.querySelector<HTMLElement>('.part.statusbar')?.offsetHeight ?? 0}px`;
 +
-+		const view = new CharacterView(root, item, this._videos, this._view, () => this._reducedMotion());
++		const view = this._character = new CharacterView(root, item, this._videos, this._view, () => this._reducedMotion());
 +		const character = view.element;
 +
 +		const bubble = append(root, $('.fl-companion__bubble'));
@@ -558,6 +562,8 @@ index 0000000..ad7d982
 +		}
 +		const box = root.getBoundingClientRect();
 +		const c = character.getBoundingClientRect();
++		// Never over the character's head: the card is no taller than the room above it (CARD_GAP clear); its detail scrolls.
++		card.style.maxHeight = `${Math.max(0, Math.floor(c.top - box.top - CARD_GAP - CARD_MARGIN))}px`;
 +		const w = card.offsetWidth, h = card.offsetHeight;
 +		let left = c.right - box.left + CARD_GAP;
 +		const flipped = left + w > box.width - CARD_MARGIN;
@@ -565,18 +571,19 @@ index 0000000..ad7d982
 +			left = c.left - box.left - CARD_GAP - w;
 +		}
 +		left = Math.max(CARD_MARGIN, Math.min(left, box.width - CARD_MARGIN - w));
-+		const top = Math.max(CARD_MARGIN, Math.min(c.top - box.top - CARD_GAP - h, box.height - CARD_MARGIN - h));
++		const top = c.top - box.top - CARD_GAP - h;
 +		card.style.left = `${Math.round(left)}px`;
-+		card.style.top = `${Math.round(top)}px`;
++		card.style.top = `${Math.floor(top)}px`;
 +		card.classList.toggle('fl-companion__bubble--flipped', flipped);
 +	}
 +
 +	/** Answered (here or elsewhere) or put off: the card shrinks out, the character runs off to the left, then the next. */
 +	private _leave(): void {
 +		const root = this._root;
-+		this._view.clear();
 +		this._armedAt = Infinity;
 +		const done = () => {
++			this._view.clear();
++			this._character = undefined;
 +			this._leaving = false;
 +			this._shown = undefined;
 +			if (root) {
@@ -590,6 +597,8 @@ index 0000000..ad7d982
 +			return;
 +		}
 +		this._leaving = true;
++		// It runs off in its run pose (the run cycle or run picture), not the idle wave.
++		this._character?.show('run');
 +		root.classList.remove('fl-companion--running', 'fl-companion--here', 'fl-companion--fade');
 +		root.classList.add('fl-companion--leaving');
 +		const character = root.querySelector('.fl-companion__character');

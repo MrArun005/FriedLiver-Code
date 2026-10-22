@@ -172,7 +172,8 @@ export class Controller {
   private readonly asked = new Set<string>();
   /** Decisions with a notification of their own still open; later ones are counted in one summary. */
   private readonly toasts = new Set<string>();
-  private summaryOpen = false;
+  /** The open "N decisions waiting" notification's count, while it is open. */
+  private summary: ((count: number) => void) | undefined;
   /** Commands whose open notification offers Run; its Run button approves nothing else. */
   private readonly runnable = new Set<string>();
   /** Actions on their way to the webviews, sent in batches while agents stream. */
@@ -1653,6 +1654,8 @@ export class Controller {
    */
   private notifyDecision(id: string, chatId: string | undefined, message: string, buttons: { title: string; run(): void }[]): void {
     if (!vscode.workspace.getConfiguration('friedliver.notify').get<boolean>('decisions', true) || this.onScreen(chatId)) return;
+    // The companion brings every ask a chat holds to the window: its card and the chat's are enough.
+    if (chatId && this.companionShows()) return;
     if (this.toasts.size > 0) {
       this.notifySummary();
       return;
@@ -1667,14 +1670,38 @@ export class Controller {
     });
   }
 
+  /**
+   * "N decisions waiting": a notification that follows the count and closes itself at zero (a plain
+   * message can't be closed or changed once shown).
+   */
   private notifySummary(): void {
-    if (this.summaryOpen) return;
-    this.summaryOpen = true;
     const n = this.core.decisions().length;
-    void vscode.window.showWarningMessage(`${n} decision${n === 1 ? '' : 's'} waiting`, 'Show').then((picked) => {
-      this.summaryOpen = false;
-      if (picked) void this.nextDecision();
-    });
+    if (this.summary) {
+      this.summary(n);
+      return;
+    }
+    void vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Waiting for you', cancellable: true }, (progress, token) =>
+      new Promise<void>((resolve) => {
+        let last = -1;
+        const done = () => {
+          this.summary = undefined;
+          resolve();
+        };
+        this.summary = (count) => {
+          if (count === 0) return done();
+          if (count === last) return;
+          last = count;
+          progress.report({ message: `${count} decision${count === 1 ? '' : 's'} [Show](command:friedliver.nextDecision)` });
+        };
+        token.onCancellationRequested(done);
+        this.summary(n);
+      }),
+    );
+  }
+
+  /** Whether the companion (patch 0310) shows the asks: on, in FriedLiver, and its command answered. */
+  private companionShows(): boolean {
+    return !this.companionBroken && /friedliver/i.test(vscode.env.appName) && vscode.workspace.getConfiguration('friedliver.companion').get<boolean>('enabled', true);
   }
 
   /** Commands wait in the chat; a notification offers Run only when it shows the whole command exactly as it will run. */
@@ -1751,6 +1778,7 @@ export class Controller {
 
   /** Decisions made in a view, the board or the diff editor no longer hold their notification's place. */
   private closeAnswered(): void {
+    this.summary?.(this.core.decisions().length);
     if (this.toasts.size === 0 && this.runnable.size === 0) return;
     const open = new Set(this.core.decisions().map((d) => d.id));
     for (const id of [...this.toasts]) if (!open.has(id)) this.toasts.delete(id);
@@ -2189,6 +2217,11 @@ export class Controller {
       for (const s of this.surfaces) post(s, message);
     }
     if (e.affectsConfiguration('friedliver.companion.repo')) void this.characterRepo.sync(this.characterRepoUrl());
+    // On or off, or other characters: at once. A new look re-shows what waits (it runs in again).
+    if (e.affectsConfiguration('friedliver.companion')) {
+      if (!e.affectsConfiguration('friedliver.companion.enabled')) this.companion.clear();
+      this.companion.update(this.core.snapshot);
+    }
     if (e.affectsConfiguration('friedliver.images')) void this.tidyImages().finally(() => this.postImageStore());
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {

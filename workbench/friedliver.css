@@ -1324,7 +1324,9 @@
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion {
 	position: absolute;
 	inset: 0;
-	z-index: var(--fl-z-toast);
+	/* Upstream's stack, not a design token: above notification toasts (2545), below the quick input
+	   (2550), context menus and dialogs (2575). */
+	z-index: 2548;
 	pointer-events: none;
 	overflow: hidden;
 }

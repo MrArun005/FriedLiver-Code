@@ -152,6 +152,47 @@ describe('the companion', () => {
   });
 });
 
+describe('card words', () => {
+  const first = (items: Item[]) => {
+    const t = setup();
+    t.set(state(chat('a', { items })));
+    return t.shown()[0];
+  };
+
+  it('a command asks "Run a command?" and shows the whole command line in the detail', () => {
+    const line = "ELECTRON_RUN_AS_NODE=1 '/Applications/FriedLiver.app/Contents/Frameworks/FriedLiver Helper.app/Contents/MacOS/FriedLiver Helper' --version";
+    const item = first([run('r1', line)]);
+    expect(item.question).toBe('Run a command?');
+    expect(item.detail?.split('\n')[0]).toBe(line);
+    const cmd: Item = { kind: 'command', commandId: 'c1', commandLine: line, cwd: '/w', outside: false, state: 'awaiting', output: '', at: 1 };
+    expect(first([cmd])).toMatchObject({ question: 'Run a command?' });
+    expect(first([cmd]).detail).toContain(line);
+  });
+
+  it('edits and reads say how many files, with every path in the detail', () => {
+    const edit: Item = { kind: 'permission', requestId: 'e', title: 'Edit', toolKind: 'edit', options: OPTIONS, detail: { files: [{ path: '/w/a.ts' }, { path: '/w/b.ts' }, { path: '/w/c.ts' }] }, at: 1 } as Item;
+    expect(first([edit])).toMatchObject({ question: 'Edit 3 files?', detail: '/w/a.ts\n/w/b.ts\n/w/c.ts' });
+    const read: Item = { kind: 'permission', requestId: 'r', title: 'Read /Users/me/secrets/.env', toolKind: 'read', options: OPTIONS, detail: { locations: ['/Users/me/secrets/.env'] }, at: 1 } as Item;
+    expect(first([read])).toMatchObject({ question: 'Read a file?', detail: '~/secrets/.env' });
+    const review: Item = { kind: 'review', reviewId: 'v', path: '/w/x.ts', added: 1, removed: 0, isNew: false, state: 'pending', at: 1 };
+    expect(first([review])).toMatchObject({ question: 'Accept this edit?', detail: '/w/x.ts\n+1 −0' });
+  });
+
+  it('turning the setting back on shows what waits; a new look runs in again', () => {
+    let on = false;
+    const calls: string[] = [];
+    const s = state(chat('a', { items: [run('r1', 'ls')] }));
+    const c = new Companion({ run: (cmd) => calls.push(cmd), answer: () => {}, enabled: () => on, state: () => s, character: () => ({ character: '' }) });
+    c.update(s);
+    expect(calls).toEqual([]);
+    on = true;
+    c.update(s);
+    c.clear();
+    c.update(s);
+    expect(calls).toEqual(['_friedliver.companion.show', '_friedliver.companion.hide', '_friedliver.companion.show']);
+  });
+});
+
 describe('characters', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-companion-'));
   const builtinDir = path.join(dir, 'builtin');

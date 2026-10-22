@@ -221,3 +221,22 @@ describe('patch 0310 wires itself up', () => {
     }
   });
 });
+
+describe('the companion stacks above notification toasts', () => {
+  it('sits between upstream toasts (2545) and the quick input (2550)', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '..', 'workbench', 'friedliver.css'), 'utf8');
+    const rule = css.slice(css.indexOf('.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion {'));
+    const z = Number(/z-index: (\d+);/.exec(rule.slice(0, rule.indexOf('}')))?.[1]);
+    expect(z).toBeGreaterThan(2545);
+    expect(z).toBeLessThan(2550);
+  });
+
+  it('keeps the card clear of the head and runs off in its run pose', () => {
+    const contribution = newFileFromPatch(PATCH, 'src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts');
+    expect(contribution).toContain('card.style.maxHeight = `${Math.max(0, Math.floor(c.top - box.top - CARD_GAP - CARD_MARGIN))}px`;');
+    expect(contribution).toMatch(/const CARD_GAP = (\d+);/);
+    expect(Number(/const CARD_GAP = (\d+);/.exec(contribution)![1])).toBeGreaterThanOrEqual(8);
+    const leave = contribution.slice(contribution.indexOf('private _leave('), contribution.indexOf('private _count('));
+    expect(leave).toContain("this._character?.show('run');");
+  });
+});
