@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CharacterRepo, cloneArgs, failureOf, gitEnv, pullArgs, repoDir, repoUrlOk, type RunGit } from '../src/host/characterRepo';
+import { CharacterRepo, cloneArgs, failureOf, gitEnv, pullArgs, repoDir, repoUrlOk, sshCommandArgs, type RunGit } from '../src/host/characterRepo';
 import { characterFor } from '../src/host/companion';
 
 const svg = (s: string) => `data:image/svg+xml;base64,${Buffer.from(s).toString('base64')}`;
@@ -44,7 +44,14 @@ describe('how git runs', () => {
   it('never prompts: no terminal prompt, no credential manager window, ssh in batch mode', () => {
     const env = gitEnv({ PATH: '/bin' });
     expect(env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes', PATH: '/bin' });
+  });
+
+  it("leaves your own ssh setup alone: GIT_SSH_COMMAND, GIT_SSH or core.sshCommand", () => {
     expect(gitEnv({ GIT_SSH_COMMAND: 'ssh -i k' }).GIT_SSH_COMMAND).toBe('ssh -i k');
+    expect(gitEnv({ GIT_SSH: '/usr/bin/plink' })).not.toHaveProperty('GIT_SSH_COMMAND');
+    expect(gitEnv({}, true)).not.toHaveProperty('GIT_SSH_COMMAND');
+    expect(gitEnv({}, true).GIT_TERMINAL_PROMPT).toBe('0');
+    expect(sshCommandArgs('/h')).toEqual(expect.arrayContaining(['core.hooksPath=/h', 'config', '--get', 'core.sshCommand']));
   });
 
   it('names what went wrong', () => {
@@ -60,7 +67,7 @@ describe('the clone', () => {
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-repo-'));
     const warnings: string[] = [];
     const calls: { args: string[]; cwd?: string; env: NodeJS.ProcessEnv; timeout: number }[] = [];
-    const repo = new CharacterRepo({ storage: () => storage, git: () => '/usr/bin/git', warn: (m) => warnings.push(m), run: async (file, args, options) => { calls.push({ args, ...options }); await run(file, args, options); } });
+    const repo = new CharacterRepo({ storage: () => storage, git: () => '/usr/bin/git', warn: (m) => warnings.push(m), run: async (file, args, options) => { calls.push({ args, ...options }); return run(file, args, options); } });
     return { storage, warnings, calls, repo };
   };
 
@@ -73,20 +80,31 @@ describe('the clone', () => {
     await t.repo.sync(url);
     expect(t.repo.dir(url)).toBe(repoDir(t.storage, url));
     await t.repo.sync(url);
-    expect(t.calls.map((c) => c.args.find((a) => a === 'clone' || a === 'pull'))).toEqual(['clone', 'pull']);
-    expect(t.calls[1].cwd).toBe(repoDir(t.storage, url));
+    expect(t.calls.map((c) => c.args.find((a) => a === 'clone' || a === 'pull' || a === 'config'))).toEqual(['config', 'clone', 'config', 'pull']);
+    expect(t.calls[3].cwd).toBe(repoDir(t.storage, url));
+    expect(t.calls[1].env.GIT_SSH_COMMAND).toBe(process.env.GIT_SSH_COMMAND || process.env.GIT_SSH ? process.env.GIT_SSH_COMMAND : 'ssh -o BatchMode=yes');
     expect(t.calls.every((c) => c.timeout === 60_000 && c.env.GIT_TERMINAL_PROMPT === '0')).toBe(true);
     expect(t.warnings).toEqual([]);
   });
 
+  it('a core.sshCommand of yours keeps ssh as you set it up', async () => {
+    const t = setup(async (_file, args) => (args.includes('config') ? 'ssh -i ~/.ssh/work\n' : undefined));
+    await t.repo.sync('git@github.com:a/b.git');
+    const clone = t.calls.find((c) => c.args.includes('clone'))!;
+    expect(clone.env.GIT_SSH_COMMAND).toBe(process.env.GIT_SSH_COMMAND);
+    expect(clone.env.GIT_TERMINAL_PROMPT).toBe('0');
+  });
+
   it('a failure is said once per kind per session and never throws; a bad address never runs git', async () => {
-    const t = setup(async () => {
+    const t = setup(async (_file, args) => {
+      if (args.includes('config')) throw Object.assign(new Error('exit 1'), { stderr: '' });
       throw Object.assign(new Error('Command failed'), { stderr: 'fatal: Authentication failed for https://github.com/a/b' });
     });
     await t.repo.sync('https://github.com/a/b');
     await t.repo.sync('https://github.com/a/b');
     await t.repo.sync('file:///etc');
-    expect(t.calls).toHaveLength(2);
+    expect(t.calls.filter((c) => c.args.includes('clone'))).toHaveLength(2);
+    expect(t.calls.some((c) => c.args.includes('file:///etc'))).toBe(false);
     expect(t.warnings).toHaveLength(2);
     expect(t.warnings[0]).toMatch(/^Couldn't update your characters from https:\/\/github.com\/a\/b: git couldn't sign in/);
     expect(t.warnings[1]).toMatch(/^Couldn't update your characters from file:\/\/\/etc: only https:\/\//);

@@ -35,15 +35,18 @@ export function safeConfig(emptyHooks: string): string[] {
   return ['-c', `core.hooksPath=${emptyHooks}`, '-c', 'protocol.file.allow=never', '-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false'];
 }
 
-/** Never a prompt: a credential helper or ssh agent answers, or git fails. */
-export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return {
-    ...base,
-    GIT_TERMINAL_PROMPT: '0',
-    GCM_INTERACTIVE: 'never',
-    // ponytail: replaces a GIT_SSH_COMMAND only when there is none; a core.sshCommand in your config is overridden.
-    GIT_SSH_COMMAND: base.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes',
-  };
+/**
+ * Never a prompt: a credential helper or ssh agent answers, or git fails. ssh is put in batch mode only
+ * when you haven't set it up yourself (GIT_SSH_COMMAND, GIT_SSH, or core.sshCommand in your git config).
+ */
+export function gitEnv(base: NodeJS.ProcessEnv = process.env, sshCommandConfigured = false): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
+  if (!base.GIT_SSH_COMMAND && !base.GIT_SSH && !sshCommandConfigured) env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
+  return env;
+}
+
+export function sshCommandArgs(emptyHooks: string): string[] {
+  return [...safeConfig(emptyHooks), 'config', '--get', 'core.sshCommand'];
 }
 
 export function cloneArgs(url: string, dir: string, emptyHooks: string): string[] {
@@ -73,11 +76,12 @@ const REASONS: Record<RepoFailure, string> = {
   git: 'git failed (is it installed?)',
 };
 
-export type RunGit = (file: string, args: string[], options: { cwd?: string; env: NodeJS.ProcessEnv; timeout: number }) => Promise<void>;
+/** Runs git without a shell; resolves to its output. */
+export type RunGit = (file: string, args: string[], options: { cwd?: string; env: NodeJS.ProcessEnv; timeout: number }) => Promise<string | void>;
 
 const runGit: RunGit = (file, args, options) =>
   new Promise((resolve, reject) =>
-    execFile(file, args, { ...options, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, _out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve())),
+    execFile(file, args, { ...options, encoding: 'utf8', windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(out))),
   );
 
 export interface CharacterRepoOptions {
@@ -116,12 +120,16 @@ export class CharacterRepo {
     const hooks = path.join(this.o.storage(), 'companion', 'no-hooks');
     try {
       fs.mkdirSync(hooks, { recursive: true });
-      const options = { env: gitEnv(), timeout: GIT_TIMEOUT_MS };
-      if (fs.existsSync(path.join(dir, '.git'))) {
-        await run(this.o.git(), pullArgs(hooks), { ...options, cwd: dir });
+      const pulling = fs.existsSync(path.join(dir, '.git'));
+      const cwd = pulling ? dir : path.join(this.o.storage(), 'companion');
+      // Your own ssh setup wins: batch mode only when git has no ssh command of yours (exit 1 = none).
+      const ssh = await run(this.o.git(), sshCommandArgs(hooks), { cwd, env: gitEnv(process.env, true), timeout: GIT_TIMEOUT_MS }).catch(() => '');
+      const options = { cwd, env: gitEnv(process.env, !!(ssh || '').trim()), timeout: GIT_TIMEOUT_MS };
+      if (pulling) {
+        await run(this.o.git(), pullArgs(hooks), options);
       } else {
         fs.rmSync(dir, { recursive: true, force: true }); // a clone cut off half way
-        await run(this.o.git(), cloneArgs(url, dir, hooks), { ...options, cwd: path.join(this.o.storage(), 'companion') });
+        await run(this.o.git(), cloneArgs(url, dir, hooks), options);
       }
     } catch (err) {
       this.fail(url, failureOf(err), err);
