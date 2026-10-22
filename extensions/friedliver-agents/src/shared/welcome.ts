@@ -1,5 +1,6 @@
 // The Welcome page's one sentence of state and its three lists (COMPONENTS.md v2 §2.38), from the chats:
 // one source, so the page never disagrees with the board.
+import type { SignInState } from './accounts';
 import type { ChatView } from './model';
 import { needsYou, statusOf } from './view';
 
@@ -35,4 +36,20 @@ export function welcomeSummary(chats: ChatView[], now: number): WelcomeSummary {
   const tail = [done.length ? `${done.length} task${done.length === 1 ? '' : 's'} done today` : '', currency && spent > 0 ? `${new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(spent)} spent` : ''].filter(Boolean);
   if (tail.length) parts.push(`${tail.join(', ')}.`);
   return { needs, working, done, sentence: parts.join(' ') };
+}
+
+/** An agent's tile on the first-run Welcome page: its sign-in in plain words, and whether it still needs connecting. */
+export function connectStatus(state: SignInState | undefined): { words: string; connected: boolean } {
+  switch (state) {
+    case 'signed-in':
+      return { words: 'Connected', connected: true };
+    case 'needs-sign-in':
+      return { words: 'Installed, needs sign-in', connected: false };
+    case 'not-installed':
+      return { words: 'Not installed', connected: false };
+    case 'error':
+      return { words: 'Problem signing in', connected: false };
+    default:
+      return { words: 'Not checked yet', connected: false };
+  }
 }

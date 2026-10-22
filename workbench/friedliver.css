@@ -1169,6 +1169,49 @@
 	font-weight: var(--fl-w-medium);
 }
 
+/* Icons are 32 with --r-8 (W6). One that doesn't load shows the default icon (patch 0190), drawn as a neutral
+   tile: pill-bg with the extensions glyph. The icon box is exactly the icon, so badges anchor to its corners. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .extension-list-item > .icon-container {
+	align-self: center;
+	margin-inline-end: var(--fl-sp-3);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .extension-list-item > .icon-container > .extension-icon .icon,
+.monaco-workbench:not(.hc-black):not(.hc-light) .extension-list-item > .icon-container > .extension-icon .codicon {
+	box-sizing: border-box;
+	width: var(--fl-h-lg);
+	height: var(--fl-h-lg);
+	margin: 0;
+	padding: 0;
+	border-radius: var(--fl-r-8);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .extension-list-item > .icon-container > .extension-icon .codicon {
+	background-color: var(--fl-pill-bg);
+	color: var(--fl-fg-2);
+	font-size: var(--fl-t-title) !important;
+	line-height: var(--fl-h-lg);
+	text-align: center;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .extension-list-item > .icon-container .extension-badge {
+	right: calc(-1 * var(--fl-sp-1));
+	bottom: calc(-1 * var(--fl-sp-1));
+	left: auto;
+}
+
+/* The pre-release / recommended bookmark sits on the icon's top-start corner, not the row's: the row is its
+   containing block, and the icon is centred in it at the list item's start padding. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .extensions-list .extension-bookmark-container {
+	position: static;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .extensions-list .extension-bookmark-container > .extension-bookmark {
+	top: calc(50% - var(--fl-h-lg) / 2 - var(--fl-sp-1));
+	left: calc(var(--vscode-spacing-size160, var(--fl-sp-4)) - var(--fl-sp-1));
+	z-index: 1;
+}
+
 /* ---- SCM §6.20: the commit field is an Input ------------------------------------------------ */
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .scm-view .scm-editor-container {
@@ -1219,23 +1262,33 @@
 	box-shadow: inset 0 var(--fl-line) 0 var(--fl-hairline);
 }
 
-/* Settings rows (§6.14): title and description on the left, the control at the end (220-320). */
-.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents {
+/* Settings rows (§6.14): title and description take column 1 (all the width that's left), the control column is
+   220-320 and gives way first, so a narrow editor doesn't squeeze the words (W3). Switch rows use the same grid. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text, .setting-item-bool) .setting-item-contents {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(calc(5.5 * var(--fl-h-xl)), calc(8 * var(--fl-h-xl)));
+	grid-template-columns: minmax(0, 1fr) clamp(calc(5.5 * var(--fl-h-xl)), 30%, calc(8 * var(--fl-h-xl)));
 	column-gap: var(--fl-sp-6);
 	align-items: start;
 }
 
-.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents > * {
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text, .setting-item-bool) .setting-item-contents > *,
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-value-description > .setting-item-description {
 	grid-column: 1;
 }
 
-.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents > .setting-item-value {
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-contents > .setting-item-value,
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-value-description > .setting-item-bool-control {
 	grid-column: 2;
 	grid-row: 1 / span 3;
 	align-self: center;
 	margin-top: 0;
+}
+
+/* The control fills its column (upstream gives text 420 and numbers a 200 minimum). */
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-value > .setting-item-control {
+	flex: 1;
+	width: auto;
+	min-width: 0;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container :is(.setting-item-enum, .setting-item-number, .setting-item-text) .setting-item-value .monaco-select-box,
@@ -1244,12 +1297,18 @@
 	max-width: none;
 }
 
-/* Booleans: the words first, the switch at the end of the row. */
+/* Booleans: the switch and the words join the row grid. The control column shrinks to the switch, so the words
+   take everything up to it instead of wrapping beside an empty 220px track. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-value-description {
-	display: flex;
-	flex-direction: row-reverse;
-	justify-content: space-between;
-	gap: var(--fl-sp-6);
+	display: contents;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .setting-item-value-description > .setting-item-bool-control {
+	justify-self: end;
 }
 
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .monaco-custom-toggle.setting-value-checkbox {
