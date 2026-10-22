@@ -22,13 +22,12 @@ export function insideRoots(file: unknown, roots: readonly string[], p: path.Pla
   if (typeof file !== 'string' || !file || file.includes('\0') || roots.length === 0) return null;
   let resolved = p.resolve(roots[0], file);
   if (!roots.some((root) => contains(p, p.resolve(root), resolved))) {
-    // A root opened by another name (C:\Users\RUNNER~1\… on Windows, or a link) still holds the paths git and
-    // agents report under its real one. Such a path is given back under the root as given, so every later
-    // check by name (inGitFolder, per-root rules) sees one spelling. The real-path check below still decides.
+    // Under a root's real name: given back in the root's own spelling (spelledUnder), so every later check by
+    // name (inGitFolder, per-root rules) sees one form. The real-path check below still decides.
     if (p !== path) return null;
-    const alias = roots.map((r) => [path.resolve(r), realPath(path.resolve(r))] as const).find(([, real]) => real !== null && contains(p, real, resolved));
-    if (!alias) return null;
-    resolved = path.join(alias[0], path.relative(alias[1]!, resolved));
+    const spelled = spelledUnder(resolved, roots);
+    if (spelled === resolved) return null;
+    resolved = spelled;
   }
   if (p !== path) return resolved;
   const real = realPath(resolved);
@@ -39,6 +38,17 @@ export function insideRoots(file: unknown, roots: readonly string[], p: path.Pla
   })
     ? resolved
     : null;
+}
+
+/**
+ * `file` (absolute) in the spelling of the root it lies under. A root opened by another name (an 8.3 name like
+ * C:\Users\RUNNER~1\… on Windows, or a link) holds paths git and agents report under its real one: those are
+ * rewritten under the root as given. Unchanged when under a root by name already, or under none.
+ */
+export function spelledUnder(file: string, roots: readonly string[]): string {
+  if (roots.some((r) => contains(path, path.resolve(r), file))) return file;
+  const alias = roots.map((r) => [path.resolve(r), realPath(path.resolve(r))] as const).find(([, real]) => real !== null && contains(path, real, file));
+  return alias ? path.join(alias[0], path.relative(alias[1]!, file)) : file;
 }
 
 /**

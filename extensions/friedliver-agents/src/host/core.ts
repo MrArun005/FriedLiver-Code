@@ -77,7 +77,7 @@ import { Checkpoints, type RewindPlan } from './checkpoints';
 import { BridgeRequests, type AgentToAgent, type BridgeAnswer, type ToolHost } from './bridgeRequests';
 import { Connections, type NewChat, type TurnResult } from './connections';
 import { MAX_AGENT_READ_BYTES, compactUpdate, imageDataUri } from './limits';
-import { inGitFolder, insideRoots, realPath, workspacePath } from './paths';
+import { inGitFolder, insideRoots, realPath, spelledUnder, workspacePath } from './paths';
 import type { Permissions } from './permissions';
 import { settleRestored, type SavedState } from './persist';
 import { applyDiffs, diffsByFile, proposedFile, type Proposal } from './proposals';
@@ -1333,17 +1333,19 @@ export class AgentCore {
       },
       remove: (f) => rm(this.checkWrite(f), { force: true }),
     });
-    const handled = new Set([...snap.restored, ...snap.kept]);
+    // One spelling for both lists (spelledUnder): a root opened by another name is named by its real path in git.
+    const spell = (f: string) => spelledUnder(f, this.roots());
+    const handled = new Set([...snap.restored, ...snap.kept].map(spell));
     const logged =
       this.turns.current(chatId) === turnId
         ? await this.turns.undo(
             chatId,
             turnId,
             { write: (f, c) => writeTextFile(this.checkWrite(f), c), remove: (f) => rm(this.checkWrite(f), { force: true }) },
-            (f) => handled.has(f),
+            (f) => handled.has(spell(f)),
           )
         : [];
-    const files = [...snap.restored, ...logged];
+    const files = [...new Set([...snap.restored, ...logged].map(spell))];
     this.dispatch({ t: 'undone', chatId, turnId });
     if (snap.kept.length) {
       const names = snap.kept.map((f) => path.basename(f)).join(', ');
@@ -1808,7 +1810,7 @@ export class AgentCore {
     // agent's spelling first, as it matches the chat's folder.
     const key = (f: string) => (this.platform === 'win32' ? (realPath(f) ?? path.resolve(f)).toLowerCase() : f);
     const files = new Map<string, string>();
-    for (const f of [...changed, ...snap]) if (!files.has(key(f))) files.set(key(f), f);
+    for (const f of [...changed, ...snap].map((f) => spelledUnder(f, this.roots()))) if (!files.has(key(f))) files.set(key(f), f);
     return [...files.values()];
   }
 

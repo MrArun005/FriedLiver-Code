@@ -87,6 +87,23 @@ describe('AgentCore with the demo agent', () => {
     expect(core.chat(chat.id)!.items.find((i) => i.kind === 'changes')).toMatchObject({ undone: true });
   });
 
+  // git names the repository by its real path; a workspace opened by another name (a link here, an 8.3 name
+  // like RUNNER~1 on Windows) must still list each changed file once, in the workspace's spelling. Not on
+  // Windows, where a directory link needs Developer Mode: the tour test above covers it there (RUNNER~1).
+  it.skipIf(process.platform === 'win32')('a workspace opened through a link lists and undoes each file once, in its own spelling', async () => {
+    const real = await gitRepo();
+    const dir = path.join(await mkdtemp(path.join(os.tmpdir(), 'fl-alias-')), 'ws');
+    symlinkSync(real, dir);
+    const { core } = makeCore(dir);
+    const chat = await core.createChat('demo');
+    await core.send(chat.id, 'tour');
+    const notes = path.join(dir, 'NOTES.md');
+    const changes = core.chat(chat.id)!.items.find((i) => i.kind === 'changes');
+    expect(changes).toMatchObject({ files: [notes] });
+    expect(await core.undo(chat.id, changes!.kind === 'changes' ? changes!.turnId : '')).toEqual([notes]);
+    expect(existsSync(notes)).toBe(false);
+  });
+
   it('works like a busy agent on "busy <seconds>": streamed markdown, tool calls, a plan and file reads, nothing to decide', async () => {
     const dir = await gitRepo();
     const reads: string[] = [];
