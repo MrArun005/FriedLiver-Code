@@ -49,6 +49,7 @@ import { chatOfSession, clip, linkResumeChats, needsYou, panelTitle, statusOf } 
 import { agentName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
 import { codexModelVisibility } from './host/codexModels';
+import { Companion, characterFor, type CharacterSetting } from './host/companion';
 
 /** friedliver.links.openIn: where web links you click open. */
 const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
@@ -403,8 +404,11 @@ export class Controller {
       this.batcher.push(action);
       this.stateFile?.schedule();
       if (action.t === 'turnUsage') this.checkUsage(state);
+      this.companionSoon();
     });
     context.subscriptions.push({ dispose: unsubscribe });
+    command('friedliver.agents.companionAnswer', (id: unknown, choiceId: unknown) => this.companion.answer(id, choiceId));
+    command('friedliver.agents.openChat', (chatId: unknown) => typeof chatId === 'string' && this.core.chat(chatId) && this.showChat(chatId));
 
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
     command('friedliver.moveToCenter', () => this.moveToCenter());
@@ -518,7 +522,42 @@ export class Controller {
     if (added) await this.openRuleFile(PROJECT_RULES);
   }
 
+  // ---- The companion (host/companion.ts; drawn by patches/0310-companion.patch) ----
+
+  private readonly companion = new Companion({
+    run: (command, arg) => void vscode.commands.executeCommand(command, arg).then(undefined, () => {}), // ponytail: no workbench patch (a plain VS Code) = no companion
+    // The same calls the chat's cards reach through handle(): permission, command, review, bridge, question.
+    answer: (m) => {
+      if (m.type === 'permission') this.core.answerPermission(m.requestId, m.optionId);
+      else if (m.type === 'command') this.core.decideCommand(m.commandId, m.approve);
+      else if (m.type === 'review' && m.action === 'accept') this.reviews.accept(m.reviewId);
+      else if (m.type === 'review' && m.action === 'reject') this.reviews.reject(m.reviewId);
+      else if (m.type === 'bridge') this.core.answerBridge(m.requestId, m.answer);
+      else if (m.type === 'answerQuestion') this.core.answerQuestion(m.requestId, m.action, m.values);
+    },
+    enabled: () => vscode.workspace.getConfiguration('friedliver.companion').get<boolean>('enabled', true),
+    state: () => this.core.snapshot,
+    character: (agentId) => {
+      const config = vscode.workspace.getConfiguration('friedliver.companion');
+      // The user's own settings only: a repository must not point these at files.
+      const characters = userSetting(config.inspect<Record<string, CharacterSetting>>('characters')).value;
+      const folder = userSetting(config.inspect<string>('folder')).value;
+      return characterFor(agentId, { builtinDir: path.join(this.context.extensionPath, 'media', 'characters'), characters: characters && typeof characters === 'object' ? characters : undefined, folder: typeof folder === 'string' ? folder : undefined });
+    },
+  });
+  private companionTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** ponytail: coalesces the state's bursts (streaming) into one check per 50 ms; a click re-checks at once. */
+  private companionSoon(): void {
+    this.companionTimer ??= setTimeout(() => {
+      this.companionTimer = undefined;
+      this.companion.update(this.core.snapshot);
+    }, 50);
+  }
+
   async dispose(): Promise<void> {
+    clearTimeout(this.companionTimer);
+    this.companion.clear();
     // Save before the core shuts down: stopping cancels running turns, and a
     // restored chat should read "stopped when the window closed", not "cancelled".
     await this.stateFile?.flush();

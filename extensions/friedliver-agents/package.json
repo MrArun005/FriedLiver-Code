@@ -904,6 +904,29 @@
           "default": true,
           "description": "Show a notification with buttons when an agent waits for you and its chat isn't on screen or the window isn't focused."
         },
+        "friedliver.companion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent in any chat waits for you (a permission, a command, an edit to review, a question), a character runs in along the bottom of the window and asks from the bottom-left corner, with the answer buttons. Careful requests and plans are answered in the chat."
+        },
+        "friedliver.companion.characters": {
+          "type": "object",
+          "scope": "machine",
+          "default": { "claude": "jas", "codex": "bolt", "gemini": "owl", "antigravity": "thunder", "copilot": "fox", "opencode": "panda" },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "object", "properties": { "idle": { "type": "string" }, "run": { "type": "string" } }, "required": ["idle"], "additionalProperties": false }
+            ]
+          },
+          "markdownDescription": "The character each agent sends, by agent id. A value is a built-in name (`jas`, `bolt`, `owl`, `thunder`, `fox`, `panda`, `smash`, `skip`), an absolute path to your own picture, or `{ \"idle\": path, \"run\": path }` with a running picture too. Pictures: local `.svg`, `.png`, `.gif` or `.webp` files of at most 5 MB (no web addresses); one that doesn't load falls back to the built-in character. An agent with no entry keeps its default (`skip` for custom agents). Read from your user settings only.\n\nExample: `{ \"claude\": \"/Users/me/Pictures/cat.png\", \"codex\": { \"idle\": \"/Users/me/Pictures/dog.png\", \"run\": \"/Users/me/Pictures/dog-run.gif\" } }`"
+        },
+        "friedliver.companion.folder": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "A folder of your own characters, checked first: `<folder>/<agent id>.svg|png|gif|webp`, and `<agent id>-run.*` for the running picture. Local files of at most 5 MB. Read from your user settings only.\n\nExample: `/Users/me/Pictures/companions` holding `claude.png` and `claude-run.gif`."
+        },
         "friedliver.notify.finished": {
           "type": "boolean",
           "default": true,

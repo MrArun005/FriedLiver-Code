@@ -1314,3 +1314,239 @@
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .settings-tree-container .setting-item-bool .monaco-custom-toggle.setting-value-checkbox {
 	margin-right: 0;
 }
+
+/* ---- Companion (patch 0310): an agent's character runs in along the bottom, peeks from the
+   bottom-left corner (30% cut off by it) and asks in a glass bubble 25% of the window wide, min 320.
+   Ember only on the one primary answer. Under reduced motion it fades in at the corner. ---------- */
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 0;
+	z-index: var(--fl-z-toast);
+	pointer-events: none;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character {
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: calc(3.5 * var(--fl-h-xl));
+	height: calc(3.5 * var(--fl-h-xl));
+	object-fit: contain;
+	transform: translate(-30%, 30%);
+	user-select: none;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--none {
+	display: none;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--running .fl-companion__character {
+	animation: fl-companion-run calc(5 * var(--fl-dur-spring)) var(--fl-ease-out) both;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--here .fl-companion__character {
+	animation: fl-companion-settle var(--fl-dur-slow) var(--fl-ease-out) both;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--fade .fl-companion__character,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--fade .fl-companion__bubble {
+	animation: fl-companion-fade var(--fl-dur) var(--fl-ease-out) both;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--leaving .fl-companion__character {
+	animation: fl-companion-hop calc(2 * var(--fl-dur-slow)) var(--fl-ease-in-out) both;
+}
+
+@keyframes fl-companion-run {
+	from {
+		left: 100%;
+		transform: translate(0, 0);
+	}
+
+	to {
+		left: 0;
+		transform: translate(-30%, 0);
+	}
+}
+
+@keyframes fl-companion-settle {
+	from {
+		transform: translate(-30%, 0);
+	}
+
+	to {
+		transform: translate(-30%, 30%);
+	}
+}
+
+@keyframes fl-companion-fade {
+	from {
+		opacity: 0;
+	}
+
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes fl-companion-hop {
+	from {
+		transform: translate(-30%, 30%);
+	}
+
+	40% {
+		transform: translate(-50%, 0);
+	}
+
+	to {
+		transform: translate(-130%, 30%);
+	}
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble {
+	position: absolute;
+	left: calc(2.5 * var(--fl-h-xl));
+	bottom: calc(2 * var(--fl-h-xl));
+	width: max(calc(10 * var(--fl-sp-8)), 25%);
+	max-width: calc(100% - 3 * var(--fl-h-xl));
+	box-sizing: border-box;
+	display: none;
+	flex-direction: column;
+	gap: var(--fl-sp-2);
+	padding: var(--fl-sp-3) var(--fl-sp-4);
+	text-align: left;
+	color: var(--fl-fg);
+	font-family: var(--fl-font);
+	font-size: var(--fl-t-md);
+	background: var(--fl-glass-bg);
+	backdrop-filter: var(--fl-glass-blur);
+	border: var(--fl-line) solid var(--fl-dialog-border);
+	border-radius: var(--fl-r-float) var(--fl-r-float) var(--fl-r-float) var(--fl-r-3);
+	box-shadow: var(--fl-elev-3);
+	pointer-events: auto;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--here .fl-companion__bubble,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--fade .fl-companion__bubble {
+	display: flex;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--here .fl-companion__bubble {
+	transform-origin: bottom left;
+	animation: fl-open var(--fl-dur-pop) var(--fl-spring-snap) both;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__head {
+	display: flex;
+	align-items: center;
+	gap: var(--fl-sp-2);
+	color: var(--fl-fg-2);
+	font-size: var(--fl-t-sm);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__from {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__more:not(:empty) {
+	padding: 0 var(--fl-sp-2);
+	border-radius: var(--fl-r-pill);
+	background: var(--fl-pill-bg);
+	color: var(--fl-fg);
+	font-variant-numeric: tabular-nums;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__question {
+	font-size: var(--fl-t-lg);
+	font-weight: var(--fl-w-medium);
+	line-height: var(--fl-lh-tight);
+	overflow-wrap: anywhere;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__detail {
+	margin: 0;
+	max-height: calc(6 * var(--fl-h-sm));
+	overflow: auto;
+	padding: var(--fl-sp-2);
+	border-radius: var(--fl-r-6);
+	background: var(--fl-code-bg);
+	color: var(--fl-inline-code-fg);
+	font-family: var(--fl-mono);
+	font-size: var(--fl-fs-mono);
+	line-height: var(--fl-lh-code);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--fl-sp-2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__open {
+	height: var(--fl-h-md);
+	padding: 0 var(--fl-sp-3);
+	border: none;
+	border-radius: var(--fl-r-ctl);
+	font: inherit;
+	font-weight: var(--fl-w-medium);
+	cursor: pointer;
+	transition: background-color var(--fl-dur-out) var(--fl-ease-out);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn {
+	background: var(--fl-pill-bg);
+	color: var(--fl-fg);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn:hover {
+	background: var(--fl-pill-hover);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn--primary {
+	background: var(--fl-primary-bg);
+	color: var(--fl-primary-fg);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn--primary:hover {
+	background: var(--fl-accent-hover);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn--danger {
+	color: var(--vscode-errorForeground);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__open {
+	margin-left: auto;
+	background: transparent;
+	color: var(--fl-link);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__open:hover {
+	background: var(--fl-ghost-hover);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn:focus-visible,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__open:focus-visible,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__detail:focus-visible {
+	outline: none;
+	box-shadow: var(--fl-focus-halo);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character,
+	.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble {
+		animation: none;
+	}
+}

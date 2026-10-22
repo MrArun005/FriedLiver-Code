@@ -1,0 +1,423 @@
+diff --git a/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
+new file mode 100644
+index 0000000..5f326fd
+--- /dev/null
++++ b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
+@@ -0,0 +1,279 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0310): the companion. When an agent in any chat waits for you, its character
++ *  runs in along the bottom of the window, peeks from the bottom-left corner (partly cut off by it)
++ *  and asks in a speech bubble with the answer buttons. One ask at a time, "+N" for the rest.
++ *  - The Agents extension decides what shows: _friedliver.companion.show(item) / .hide(id).
++ *  - A click runs friedliver.agents.companionAnswer(id, choiceId), which answers that request by its
++ *    own id through the chat card's path; the extension ignores ids that no longer wait.
++ *  - Nothing answers on its own: the buttons arm a moment after the bubble opens (no stray click
++ *    lands on a button that just appeared), focus is never taken, and Esc puts it off unanswered.
++ *  Styles: workbench/friedliver.css (Companion).
++ *--------------------------------------------------------------------------------------------*/
++
++import { localize, localize2 } from '../../../../nls.js';
++import { $, addDisposableListener, append, clearNode, EventType, getWindow } from '../../../../base/browser/dom.js';
++import { status } from '../../../../base/browser/ui/aria/aria.js';
++import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
++import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
++import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
++import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
++import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
++import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
++import { CompanionQueue, ICompanionItem, parseCompanionItem } from '../common/companion.js';
++
++/** After the bubble opens, clicks wait this long before they count. */
++const ARM_MS = 400;
++
++/** Calls that arrive before the contribution is up (the extension can start first). */
++let instance: CompanionContribution | undefined;
++const early: ({ show: unknown } | { hide: unknown })[] = [];
++
++CommandsRegistry.registerCommand('_friedliver.companion.show', (_accessor, item: unknown) => {
++	if (instance) {
++		instance.show(item);
++	} else if (early.length < 100) {
++		early.push({ show: item });
++	}
++});
++CommandsRegistry.registerCommand('_friedliver.companion.hide', (_accessor, id: unknown) => {
++	if (instance) {
++		instance.hide(id);
++	} else {
++		early.push({ hide: id });
++	}
++});
++
++class CompanionContribution extends Disposable implements IWorkbenchContribution {
++	static readonly ID = 'workbench.contrib.friedliverCompanion';
++
++	private readonly _queue = new CompanionQueue();
++	private readonly _view = this._register(new DisposableStore());
++	private _root: HTMLElement | undefined;
++	/** The item on screen, which may be leaving while the queue already moved on. */
++	private _shown: ICompanionItem | undefined;
++	private _armedAt = Infinity;
++	private _leaving = false;
++
++	constructor(
++		@ILayoutService private readonly _layout: ILayoutService,
++		@ICommandService private readonly _commands: ICommandService,
++	) {
++		super();
++		instance = this;
++		this._register({ dispose: () => { instance = undefined; this._root?.remove(); } });
++		for (const call of early.splice(0)) {
++			if ('show' in call) {
++				this.show(call.show);
++			} else {
++				this.hide(call.hide);
++			}
++		}
++	}
++
++	show(raw: unknown): void {
++		const item = parseCompanionItem(raw);
++		if (item && this._queue.show(item)) {
++			this._sync();
++		}
++	}
++
++	hide(id: unknown): void {
++		if (typeof id === 'string') {
++			this._queue.hide(id);
++			this._sync();
++		}
++	}
++
++	focus(): void {
++		this._root?.querySelector<HTMLElement>('.fl-companion__btn')?.focus();
++	}
++
++	/** Brings the screen in line with the queue: the same item stays, a new one runs in, none hops out. */
++	private _sync(): void {
++		const next = this._queue.current;
++		if (this._shown && next?.id === this._shown.id) {
++			this._count();
++			return;
++		}
++		if (this._leaving) {
++			return; // the hop's end calls _sync again
++		}
++		if (this._shown) {
++			this._leave();
++			return;
++		}
++		if (next && !this._highContrast()) {
++			this._enter(next);
++		}
++	}
++
++	private _reducedMotion(): boolean {
++		const main = this._layout.mainContainer;
++		return main.classList.contains('monaco-reduce-motion') || getWindow(main).matchMedia('(prefers-reduced-motion: reduce)').matches;
++	}
++
++	/** High contrast is left to upstream (friedliver.css styles nothing there), so it isn't drawn: the asks wait in their chats. */
++	private _highContrast(): boolean {
++		const main = this._layout.mainContainer;
++		return main.classList.contains('hc-black') || main.classList.contains('hc-light');
++	}
++
++	private _enter(item: ICompanionItem): void {
++		this._view.clear();
++		this._shown = item;
++		this._armedAt = Infinity;
++		const root = this._root ??= append(this._layout.mainContainer, $('.fl-companion'));
++		clearNode(root);
++		root.className = 'fl-companion';
++
++		const character = append(root, $<HTMLImageElement>('img.fl-companion__character'));
++		character.alt = '';
++		character.setAttribute('aria-hidden', 'true');
++		character.draggable = false;
++		if (!item.character) {
++			character.classList.add('fl-companion__character--none');
++		}
++
++		const bubble = append(root, $('.fl-companion__bubble'));
++		bubble.setAttribute('role', 'region');
++		bubble.setAttribute('aria-label', localize('companion.region', "{0} needs you", item.agentLabel));
++		const head = append(bubble, $('.fl-companion__head'));
++		append(head, $('span.fl-companion__from')).textContent = item.chatTitle ? `${item.agentLabel} · ${item.chatTitle}` : item.agentLabel;
++		append(head, $('span.fl-companion__more'));
++		append(bubble, $('.fl-companion__question')).textContent = item.question;
++		if (item.detail) {
++			const detail = append(bubble, $('pre.fl-companion__detail'));
++			detail.textContent = item.detail;
++			detail.tabIndex = 0;
++		}
++		const actions = append(bubble, $('.fl-companion__actions'));
++		for (const choice of item.choices) {
++			const button = append(actions, $<HTMLButtonElement>(`button.fl-companion__btn.fl-companion__btn--${choice.kind}`));
++			button.type = 'button';
++			button.textContent = choice.label;
++			this._view.add(addDisposableListener(button, EventType.CLICK, () => this._answer(item.id, choice.id)));
++		}
++		const open = append(actions, $<HTMLButtonElement>('button.fl-companion__open'));
++		open.type = 'button';
++		open.textContent = localize('companion.openChat', "Open chat");
++		this._view.add(addDisposableListener(open, EventType.CLICK, () => {
++			if (Date.now() >= this._armedAt) {
++				this._commands.executeCommand('friedliver.agents.openChat', item.chatId);
++			}
++		}));
++		this._view.add(addDisposableListener(root, EventType.KEY_DOWN, (e: KeyboardEvent) => {
++			if (e.key === 'Escape') {
++				e.preventDefault();
++				e.stopPropagation();
++				this._queue.later();
++				this._sync();
++			}
++		}));
++		this._count();
++		status(localize('companion.arrived', "{0} needs you: {1}", item.agentLabel, item.question));
++
++		// Arrive: run in from the right (the run cycle, or the idle picture sliding), settle into the
++		// corner, swap to the idle picture, then the bubble pops. Reduced motion: it fades in at the corner.
++		const settle = () => {
++			if (this._shown !== item) {
++				return;
++			}
++			if (item.character) {
++				character.src = item.character;
++			}
++			root.classList.remove('fl-companion--running');
++			root.classList.add('fl-companion--here');
++			this._armedAt = Date.now() + ARM_MS;
++		};
++		if (this._reducedMotion() || !item.character) {
++			if (item.character) {
++				character.src = item.character;
++			}
++			root.classList.add('fl-companion--fade');
++			settle();
++			return;
++		}
++		character.src = item.characterRun ?? item.character;
++		if (item.characterRun) {
++			this._view.add(addDisposableListener(character, EventType.ERROR, () => {
++				if (character.src !== item.character) {
++					character.src = item.character;
++				}
++			}));
++		}
++		root.classList.add('fl-companion--running');
++		this._view.add(addDisposableListener(character, 'animationend', (e: AnimationEvent) => {
++			if (e.animationName === 'fl-companion-run') {
++				settle();
++			}
++		}));
++	}
++
++	/** Answered (here or elsewhere) or put off: a short hop out of view to the left, then the next. */
++	private _leave(): void {
++		const root = this._root;
++		this._view.clear();
++		this._armedAt = Infinity;
++		const done = () => {
++			this._leaving = false;
++			this._shown = undefined;
++			if (root) {
++				clearNode(root);
++				root.className = 'fl-companion';
++			}
++			this._sync();
++		};
++		if (!root || this._reducedMotion()) {
++			done();
++			return;
++		}
++		this._leaving = true;
++		root.classList.remove('fl-companion--running', 'fl-companion--here', 'fl-companion--fade');
++		root.classList.add('fl-companion--leaving');
++		const character = root.querySelector('.fl-companion__character');
++		const fallback = getWindow(root).setTimeout(done, 1_000);
++		if (character) {
++			this._view.add(addDisposableListener(character, 'animationend', (e: AnimationEvent) => {
++				if (e.animationName === 'fl-companion-hop') {
++					getWindow(root).clearTimeout(fallback);
++					done();
++				}
++			}));
++		}
++	}
++
++	private _count(): void {
++		const more = this._root?.querySelector('.fl-companion__more');
++		if (more) {
++			more.textContent = this._queue.more ? `+${this._queue.more}` : '';
++			more.setAttribute('aria-label', this._queue.more ? localize('companion.more', "{0} more waiting", this._queue.more) : '');
++		}
++	}
++
++	private _answer(id: string, choiceId: string): void {
++		// Only the item on screen, one of its own choices, once it has settled and armed.
++		if (Date.now() < this._armedAt || !this._queue.offers(id, choiceId)) {
++			return;
++		}
++		this._armedAt = Infinity;
++		this._commands.executeCommand('friedliver.agents.companionAnswer', id, choiceId);
++		this._queue.hide(id);
++		this._sync();
++	}
++}
++
++registerWorkbenchContribution2(CompanionContribution.ID, CompanionContribution, WorkbenchPhase.BlockRestore);
++
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'friedliver.companion.focus',
++			title: localize2('companion.focus', "Focus the Agent Request in the Corner"),
++			category: localize2('companion.category', "FriedLiver"),
++			f1: true,
++		});
++	}
++	run(_accessor: ServicesAccessor): void {
++		instance?.focus();
++	}
++});
+diff --git a/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
+new file mode 100644
+index 0000000..61882dc
+--- /dev/null
++++ b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
+@@ -0,0 +1,118 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0310): the companion's rules, kept free of imports so tests can run them.
++ *  What an item from the Agents extension may hold, and the queue: one shown, the rest counted,
++ *  the next one up when it is answered, hidden or put off for later.
++ *--------------------------------------------------------------------------------------------*/
++
++export type CompanionChoiceKind = 'primary' | 'secondary' | 'danger';
++
++export interface ICompanionChoice {
++	readonly id: string;
++	readonly label: string;
++	readonly kind: CompanionChoiceKind;
++}
++
++export interface ICompanionItem {
++	readonly id: string;
++	readonly chatId: string;
++	readonly agentLabel: string;
++	readonly chatTitle: string;
++	readonly question: string;
++	readonly detail?: string;
++	readonly choices: readonly ICompanionChoice[];
++	/** A data: image URI, or '' for none. */
++	readonly character: string;
++	readonly characterRun?: string;
++}
++
++const MAX_TEXT = 2_000;
++const MAX_DETAIL = 20_000;
++const MAX_CHOICES = 12;
++/** Only inline pictures: the workbench never loads a file or address an item names. */
++const IMAGE = /^data:image\/(?:svg\+xml|png|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
++
++const text = (v: unknown, max = MAX_TEXT): string | undefined => typeof v === 'string' && v.length <= max ? v : undefined;
++const id = (v: unknown): string | undefined => typeof v === 'string' && v.length > 0 && v.length <= 200 ? v : undefined;
++
++export function isCompanionImage(v: unknown): v is string {
++	return typeof v === 'string' && IMAGE.test(v);
++}
++
++/** The item, or undefined when anything in it is not what the companion shows. */
++export function parseCompanionItem(raw: unknown): ICompanionItem | undefined {
++	if (!raw || typeof raw !== 'object') {
++		return undefined;
++	}
++	const r = raw as Record<string, unknown>;
++	const itemId = id(r.id), chatId = id(r.chatId), agentLabel = text(r.agentLabel), chatTitle = text(r.chatTitle), question = text(r.question);
++	if (!itemId || !chatId || agentLabel === undefined || chatTitle === undefined || !question || !Array.isArray(r.choices) || r.choices.length > MAX_CHOICES) {
++		return undefined;
++	}
++	const choices: ICompanionChoice[] = [];
++	for (const c of r.choices as unknown[]) {
++		const o = c && typeof c === 'object' ? c as Record<string, unknown> : undefined;
++		const cid = id(o?.id), label = text(o?.label, 200), kind = o?.kind;
++		if (!cid || !label || (kind !== 'primary' && kind !== 'secondary' && kind !== 'danger') || choices.some(x => x.id === cid)) {
++			return undefined;
++		}
++		choices.push({ id: cid, label, kind });
++	}
++	const detail = r.detail === undefined ? undefined : text(r.detail, MAX_DETAIL);
++	if (r.detail !== undefined && detail === undefined) {
++		return undefined;
++	}
++	const character = r.character === '' || isCompanionImage(r.character) ? r.character as string : undefined;
++	if (character === undefined) {
++		return undefined;
++	}
++	const characterRun = isCompanionImage(r.characterRun) ? r.characterRun : undefined;
++	return { id: itemId, chatId, agentLabel, chatTitle, question, ...(detail ? { detail } : {}), choices, character, ...(characterRun ? { characterRun } : {}) };
++}
++
++/** Waiting items in arrival order. The first is the one shown; the others are the "+N". */
++export class CompanionQueue {
++	private readonly _items = new Map<string, ICompanionItem>();
++	/** Put off with Esc: not shown again (they still wait in their chat and the Inbox). */
++	private readonly _later = new Set<string>();
++
++	get current(): ICompanionItem | undefined {
++		return this._items.values().next().value;
++	}
++
++	/** How many wait behind the one shown. */
++	get more(): number {
++		return Math.max(0, this._items.size - 1);
++	}
++
++	/** Adds an item; an id already queued or put off keeps its place and is not replaced. */
++	show(item: ICompanionItem): boolean {
++		if (this._items.has(item.id) || this._later.has(item.id)) {
++			return false;
++		}
++		this._items.set(item.id, item);
++		return true;
++	}
++
++	/** Removes it (answered, here or elsewhere). True when it was the one shown. */
++	hide(itemId: string): boolean {
++		const wasCurrent = this.current?.id === itemId;
++		this._items.delete(itemId);
++		this._later.delete(itemId);
++		return wasCurrent;
++	}
++
++	/** Esc: the shown item goes away without an answer. */
++	later(): void {
++		const c = this.current;
++		if (c) {
++			this._items.delete(c.id);
++			this._later.add(c.id);
++		}
++	}
++
++	/** Whether a click on (itemId, choiceId) is one the shown item offers. */
++	offers(itemId: string, choiceId: string): boolean {
++		const c = this.current;
++		return !!c && c.id === itemId && c.choices.some(x => x.id === choiceId);
++	}
++}
+diff --git a/src/vs/workbench/workbench.desktop.main.ts b/src/vs/workbench/workbench.desktop.main.ts
+index 7bd1e21..87fecbf 100644
+--- a/src/vs/workbench/workbench.desktop.main.ts
++++ b/src/vs/workbench/workbench.desktop.main.ts
+@@ -205,6 +205,9 @@ import './contrib/encryption/electron-browser/encryption.contribution.js';
+ // Modern UI
+ import './contrib/modernUI/electron-browser/frostedGlass.contribution.js';
+ 
++// FriedLiver: the companion (patch 0310)
++import './contrib/friedliverCompanion/browser/companion.contribution.js';
++
+ // Emergency Alert
+ import './contrib/emergencyAlert/electron-browser/emergencyAlert.contribution.js';
+ 
