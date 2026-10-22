@@ -698,8 +698,10 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
   const recent = recentChats(chats, undefined, 5).sort((a, b) => b.lastActivity - a.lastActivity);
   return (
     <div class="empty">
-      <BrandMark size={40} class="empty-mark" />
-      <h2>Start a chat</h2>
+      <div class="empty-head">
+        <BrandMark size={40} class="empty-mark" />
+        <h2>Start a chat</h2>
+      </div>
       <div class="pick">
         {agents.map((agent) => (
           <button key={agent} class="pick-agent" onClick={() => send({ type: 'newChat', agent })}>
