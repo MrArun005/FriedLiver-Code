@@ -61,7 +61,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
+import { AddAgentItem, ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
 import { Viewer } from './viewer';
 import { ContextRail } from './contextRail';
 
@@ -400,6 +400,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                 </button>
               ))}
               <div class="fl-menu__sep" role="separator" />
+              <AddAgentItem close={close} />
               <MenuItem icon="key" label="Agents &amp; Accounts…" onSelect={() => (close(false), send({ type: 'openAccounts' }))} />
             </>
           );
@@ -718,6 +719,10 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         .
       </p>
       <p class="hint">
+        <Button variant="link" onClick={() => send({ type: 'addAgent' })}>
+          Add an agent…
+        </Button>{' '}
+        ·{' '}
         <Button variant="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…
         </Button>
@@ -1395,7 +1400,10 @@ function Composer({
       }))
     : mentions.length
       ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
-      : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
+      : query !== null
+        ? // No agent by that name: the way to add one.
+          [{ key: 'add-agent', title: 'Add an agent…', label: query ? `No agent called @${query}` : 'Any ACP agent', choose: () => send({ type: 'addAgent' }) }]
+        : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
   // "#" names a workspace file; the agent gets it as a file, not only as words.
   const hash = shut || mentions.length || slashes.length || models.length ? null : hashQuery(text, caret);
   const asked = useRef('');

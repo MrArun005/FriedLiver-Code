@@ -2,7 +2,8 @@
 // for (docs/ACCOUNTS.md). Pure, so the host, the page and the tests agree.
 // Secrets never come here: a card says only whether a key is set.
 import type { LinkMode } from './links';
-import { agentFace, allAgentKeys, customAgents, isAgentKey, isBuiltinAgent, type AgentKey, type BuiltinAgentKey, type CustomAgent } from './model';
+import { parseDraft, type AgentDraft } from './agentForm';
+import { agentFace, allAgentKeys, CUSTOM_AGENT_ID, customAgents, isAgentKey, isBuiltinAgent, type AgentKey, type BuiltinAgentKey, type CustomAgent, type CustomAgentKey } from './model';
 import { isSystemTool, type SystemSettingsView, type SystemTool } from './system';
 import { defaultChoices, offers, optionKey, type AgentDefaults, type SessionOption } from './session';
 
@@ -334,7 +335,7 @@ export function rosterOf(showDemo: boolean, records: Partial<Record<AgentKey, Ac
   const agents = shownAgents(showDemo);
   const signIn: AgentRoster['signIn'] = {};
   for (const a of agents) if (records[a]) signIn[a] = records[a]!.status;
-  const custom = customAgents().map(({ key, id, name, install, signIn: hint }) => ({ key, id, name, ...(install ? { install } : {}), ...(hint ? { signIn: hint } : {}) }));
+  const custom = customAgents().map(({ key, id, name, install, signIn: hint, glyph }) => ({ key, id, name, ...(install ? { install } : {}), ...(hint ? { signIn: hint } : {}), ...(glyph ? { glyph } : {}) }));
   return { agents, signIn, ...(custom.length ? { custom } : {}) };
 }
 
@@ -386,6 +387,8 @@ export interface AccountCard {
   cli?: CliAccount;
   /** A custom agent's sign-in hint, from the user's own settings. */
   hint?: string;
+  /** A custom agent's settings as the form edits them (secret values left out). */
+  custom?: AgentDraft;
   /** One sentence: which way of signing in is in use. */
   active?: string;
   model?: SessionOption;
@@ -401,6 +404,10 @@ export interface AccountsView {
   links: LinkMode;
   /** "Mac & Windows control": the system_* tools' settings. */
   system?: SystemSettingsView;
+  /** The custom agents (names and marks only), so the page draws their marks. */
+  custom?: CustomAgent[];
+  /** Grows each time "Add Agent…" opens the page on the form. */
+  form?: number;
 }
 
 /** Which way of signing in is in use, as well as FriedLiver can tell without asking the agent. */
@@ -439,7 +446,13 @@ export type AccountsMessage =
   /** friedliver.system.enabled, .fullAutoAllowed, or one tool in .tools (the host confirms turning Full auto on). */
   | { type: 'setSystem'; key: 'enabled' | 'fullAutoAllowed' | SystemTool; value: boolean }
   /** Shows the "FriedLiver: System Actions" log. */
-  | { type: 'systemLog' };
+  | { type: 'systemLog' }
+  /** Writes friedliver.agents.custom (user settings) from the form; `editing` is the id it had. */
+  | { type: 'saveAgent'; draft: AgentDraft; editing?: string }
+  /** Asks first; the agent's chats stay. */
+  | { type: 'removeAgent'; agent: CustomAgentKey }
+  /** Starts the program once: ACP initialize and a session, nothing else. */
+  | { type: 'testAgent'; draft: AgentDraft; editing?: string };
 
 const METHOD_ID = /^[\w.:-]{1,128}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -459,6 +472,12 @@ export function parseAccountsMessage(raw: unknown, shown: readonly AgentKey[]): 
     const key = m.key;
     return (key === 'enabled' || key === 'fullAutoAllowed' || isSystemTool(key)) && typeof m.value === 'boolean' ? { type: 'setSystem', key, value: m.value } : null;
   }
+  if (m.type === 'saveAgent' || m.type === 'testAgent') {
+    const draft = parseDraft(m.draft);
+    const editing = m.editing === undefined ? undefined : typeof m.editing === 'string' && CUSTOM_AGENT_ID.test(m.editing) ? m.editing : null;
+    return draft && editing !== null ? { type: m.type, draft, ...(editing ? { editing } : {}) } : null;
+  }
+  if (m.type === 'removeAgent') return isAgentKey(m.agent) && !isBuiltinAgent(m.agent) ? { type: 'removeAgent', agent: m.agent } : null;
   if (!isAgentKey(m.agent) || !shown.includes(m.agent)) return null;
   const agent = m.agent;
   switch (m.type) {

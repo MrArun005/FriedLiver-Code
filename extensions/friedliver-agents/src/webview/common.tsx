@@ -3,6 +3,7 @@ import { createContext, createElement, type ComponentChildren, type FunctionComp
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Avatar } from './ui/display';
 import { Button, IconButton } from './ui/controls';
+import { MenuItem } from './ui/menu';
 import { highlight } from '../shared/highlight';
 import { lineCount, parseDoc, type Block, type Inline, type ListBlock, type ListItem, type MarkdownDoc, type PathRef } from '../shared/markdown';
 import { SIGN_IN_TEXT, type AccountsMessage, type AgentRoster } from '../shared/accounts';
@@ -49,6 +50,11 @@ function setRoster(next: AgentRoster): void {
   setCustomAgents(next.custom ?? []);
   roster = next;
   for (const wake of rosterWatchers) wake();
+}
+
+/** The last item of every agent picker: Agents & Accounts on its "Add an agent" form. */
+export function AddAgentItem({ close }: { close?: (refocus?: boolean) => void }) {
+  return <MenuItem icon="plus" label="Add an agent…" onSelect={() => (close?.(false), send({ type: 'addAgent' }))} />;
 }
 
 /** The roster, drawing the component again when it changes (a check, a sign-in). */

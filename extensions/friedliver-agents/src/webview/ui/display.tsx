@@ -4,7 +4,8 @@ import { Icon, type IconName } from './icon';
 import { agentFace, type AgentKey } from '../../shared/model';
 import { messageTime, messageTimeTitle, type MessageStamp } from '../../shared/view';
 import { IconButton, cx } from './controls';
-import { markFor } from './marks';
+import type { AgentGlyph } from '../../shared/agentForm';
+import { GLYPHS, markFor } from './marks';
 import { useTooltip } from './overlays';
 import { Keycaps } from './keycap';
 
@@ -152,8 +153,8 @@ export function Avatar({ agent, size, mark = true, working }: { agent: AgentKey;
 }
 
 /** An agent's mark as an <svg>; `box` places it inside another SVG (the map). */
-export function MarkSvg({ agent, box }: { agent: string; box?: { x: number; y: number; size: number } }) {
-  const m = markFor(agent);
+export function MarkSvg({ agent, box, glyph }: { agent: string; box?: { x: number; y: number; size: number }; glyph?: AgentGlyph }) {
+  const m = glyph ? GLYPHS[glyph] : markFor(agent);
   const at = box ? { x: box.x, y: box.y, width: box.size, height: box.size } : {};
   // A vendor's multi-layer logo, as published (a static asset of ours, never agent text).
   if (m.svg) return <svg {...at} viewBox={m.viewBox} aria-hidden="true" focusable="false" dangerouslySetInnerHTML={{ __html: m.svg }} />;

@@ -17,7 +17,7 @@ import { ProjectIndexHost } from './host/projectIndexHost';
 import type { AgentToAgent, BridgeAnswer } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
-import { parseCustomAgents, publicCustomAgents, type CustomAgentConfig } from './host/customAgents';
+import { CustomSecrets, parseCustomAgents, publicCustomAgents, type CustomAgentConfig } from './host/customAgents';
 import { OTHER_AGENTS } from './host/otherAgents';
 import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
@@ -40,7 +40,7 @@ import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Sur
 import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
 import { discussLayoutOf, type DiscussLayout } from './shared/discussView';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
-import { agentFace, isAgentKey, isBuiltinAgent, setCustomAgents, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
+import { agentFace, customAgent, isAgentKey, isBuiltinAgent, setCustomAgents, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
 import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
@@ -161,6 +161,8 @@ export class Controller {
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
   private customConfig = this.readCustomAgents();
+  /** Custom agents' variables that look like keys (SecretStorage). */
+  private readonly customSecrets: CustomSecrets;
   /** Remembered "Always allow" answers: the user's own storage (global for websites and agent tools, this workspace's for folders and commands). */
   readonly permissions: Permissions;
   private permissionsPanel?: { panel: vscode.WebviewPanel; ready: boolean };
@@ -252,7 +254,13 @@ export class Controller {
       links: () => (vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin'),
       openInBrowser: (url, signal) => this.browser.call({ tool: 'browser_open', url }, signal),
     });
-    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => testAgentsOn(), (line) => this.log.warn(line));
+    this.customSecrets = new CustomSecrets(context.secrets);
+    void this.customSecrets.load(this.customConfig.map((c) => c.id)).catch((err: unknown) => this.log.warn(`Custom agents' variables: ${messageOf(err)}`));
+    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => testAgentsOn(), (line) => this.log.warn(line), {
+      configs: () => this.customConfig,
+      secrets: this.customSecrets,
+      clientVersion: String(context.extension.packageJSON.version ?? '0.0.0'),
+    });
     this.core = new AgentCore({
       folders: () => this.folders(),
       noFolderCwd,
@@ -305,7 +313,11 @@ export class Controller {
         },
       },
       agentCommand: (id) => this.agentConfig[id],
-      customAgent: (key) => this.customConfig.find((c) => c.key === key),
+      // Its settings, plus the variables kept in SecretStorage (customSecrets): those never go in settings.
+      customAgent: (key) => {
+        const c = this.customConfig.find((x) => x.key === key);
+        return c && { ...c, env: { ...c.env, ...this.customSecrets.env(c.id) } };
+      },
       apiKey: (id) => this.accounts.apiKey(id),
       credentialEnv: (id) => this.accounts.credentialEnv(id),
       accountSeen: (agent, patch) => this.accounts.note(agent, patch),
@@ -410,6 +422,8 @@ export class Controller {
     context.subscriptions.push({ dispose: unsubscribe });
 
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
+    // The editor title's chat button (every tab, beside Split Editor): the same "New chat with…" picker.
+    command('friedliver.newChatFromTitle', () => this.newChat());
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
     command('friedliver.openBrowser', () => this.browser.show());
@@ -439,6 +453,7 @@ export class Controller {
       if (!this.reviews.reject(typeof reviewId === 'string' ? reviewId : undefined)) void vscode.window.showInformationMessage('No agent edit is waiting here.');
     });
     command('friedliver.accounts', (agent?: unknown) => this.accountsPage.show(isAgentKey(agent) ? agent : undefined));
+    command('friedliver.addAgent', () => this.accountsPage.showForm());
     command('friedliver.accounts.check', (node?: { agent?: unknown }) => {
       if (isAgentKey(node?.agent)) void this.accounts.check(node.agent);
       else this.accountsPage.show();
@@ -730,7 +745,7 @@ export class Controller {
         panel.title = title;
         // The agent's mark in its v2 hue: the dark theme's hue, and a deeper one on light themes (scripts/agent-icons.mjs).
         // A custom agent's tab shows the neutral glyph (media/agent-custom.svg).
-        const file = agent && (isBuiltinAgent(agent) ? agent : 'custom');
+        const file = agent && markFile(agent);
         panel.iconPath = file ? { dark: icon(`agent-${file}`), light: icon(`agent-${file}-light`) } : icon('agents');
       };
     this.addSurface(surface, panel.title, panel);
@@ -1125,6 +1140,9 @@ export class Controller {
         case 'otherAgents':
           await this.otherAgents();
           return;
+        case 'addAgent':
+          this.accountsPage.showForm();
+          return;
         case 'openAccounts':
           this.accountsPage.show(m.agent);
           return;
@@ -1180,7 +1198,7 @@ export class Controller {
     const roots = this.core.roots();
     const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
     // An agent's terminal is its own tab, "<Agent> · <command>", with the agent's mark (COMPONENTS.md v2 §6.7).
-    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${isBuiltinAgent(chat.agent) ? chat.agent : 'custom'}${kind}.svg`);
+    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${markFile(chat.agent)}${kind}.svg`);
     const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)} · ${clip(command, 40)}`, cwd: folder, iconPath: { light: mark('-light'), dark: mark('') } });
     terminal.show();
     terminal.sendText(command, true);
@@ -1236,14 +1254,21 @@ export class Controller {
   async newChat(agent?: AgentKey, surface?: Surface): Promise<string | undefined> {
     const shown = shownAgents(testAgentsOn());
     const ordered: AgentKey[] = shown.includes('antigravity') ? ['antigravity', ...shown.filter((a) => a !== 'antigravity')] : shown;
-    const chosen =
-      agent ??
-      (
-        await vscode.window.showQuickPick(
-          ordered.map((a) => ({ label: agentFace(a).name, description: this.pickHint(a), agent: a })),
+    const picked = agent
+      ? { agent }
+      : await vscode.window.showQuickPick<vscode.QuickPickItem & { agent?: AgentKey }>(
+          [
+            ...ordered.map((a) => ({ label: agentFace(a).name, description: this.pickHint(a), agent: a })),
+            { label: '', kind: vscode.QuickPickItemKind.Separator },
+            ADD_AGENT_PICK,
+          ],
           { title: 'New chat with…' },
-        )
-      )?.agent;
+        );
+    if (picked && !picked.agent) {
+      this.accountsPage.showForm();
+      return undefined;
+    }
+    const chosen = picked?.agent;
     if (!chosen) return undefined;
     try {
       const chat = await this.core.createChat(chosen);
@@ -2093,6 +2118,7 @@ export class Controller {
     if (e.affectsConfiguration('friedliver.agents.custom')) {
       const customBefore = this.customConfig;
       this.customConfig = this.readCustomAgents();
+      void this.customSecrets.load(this.customConfig.filter((c) => !customBefore.some((b) => b.id === c.id)).map((c) => c.id));
       // A custom agent that changed or went away stops; the next message starts the new one (or says it's gone).
       restart.push(...customBefore.filter((c) => JSON.stringify(c) !== JSON.stringify(this.customConfig.find((n) => n.key === c.key))).map((c) => c.key));
       this.postRoster();
@@ -2110,6 +2136,16 @@ export class Controller {
       if (picked) this.log.show(true);
     });
   }
+}
+
+/** The last item of the host's agent pickers: Agents & Accounts on its "Add an agent" form. */
+export const ADD_AGENT_PICK: vscode.QuickPickItem = { label: '$(add) Add an agent…', description: 'any ACP agent' };
+
+/** media/agent-<this>.svg: a built-in agent's own, or a custom agent's glyph (scripts/agent-icons.mjs). */
+function markFile(agent: AgentKey): string {
+  if (isBuiltinAgent(agent)) return agent;
+  const glyph = customAgent(agent)?.glyph;
+  return glyph && glyph !== 'agent' ? `custom-${glyph}` : 'custom';
 }
 
 function clamp(value: number, min: number, max: number): number {

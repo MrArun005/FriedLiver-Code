@@ -136,9 +136,21 @@
       },
       {
         "command": "friedliver.newChat",
-        "title": "New Chat",
+        "title": "New Chat with…",
         "category": "FriedLiver",
         "icon": "$(add)"
+      },
+      {
+        "command": "friedliver.addAgent",
+        "title": "Add Agent…",
+        "category": "FriedLiver",
+        "icon": "$(add)"
+      },
+      {
+        "command": "friedliver.newChatFromTitle",
+        "title": "New Chat",
+        "category": "FriedLiver",
+        "icon": "$(comment)"
       },
       {
         "command": "friedliver.moveToCenter",
@@ -454,6 +466,15 @@
           "command": "friedliver.inlineEdit.reject",
           "when": "resourceScheme == friedliver-inline",
           "group": "navigation@3"
+        },
+        {
+          "command": "friedliver.newChatFromTitle",
+          "group": "navigation@90"
+        },
+        {
+          "command": "friedliver.openBrowser",
+          "when": "activeEditor != 'workbench.editor.browser'",
+          "group": "navigation@91"
         }
       ],
       "commandPalette": [
@@ -484,6 +505,10 @@
         {
           "command": "friedliver.inlineEdit.reject",
           "when": "friedliver.inlineEdit.pending || friedliver.inlineEdit.running"
+        },
+        {
+          "command": "friedliver.newChatFromTitle",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -517,6 +542,12 @@
         "key": "ctrl+n",
         "mac": "cmd+n",
         "when": "focusedView == 'friedliver.agents' || activeWebviewPanelId == 'friedliver.chatPanel'"
+      },
+      {
+        "command": "friedliver.newChat",
+        "key": "ctrl+alt+n",
+        "mac": "ctrl+cmd+n",
+        "when": "!friedliver.reviewActive || isMac"
       },
       {
         "command": "friedliver.inlineEdit",

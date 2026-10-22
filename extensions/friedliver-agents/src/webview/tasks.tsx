@@ -542,6 +542,9 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
               <SignInMark agent={a} />
             </button>
           ))}
+          <Button size="sm" variant="quiet" icon="plus" onClick={() => send({ type: 'addAgent' })} title="Agents & Accounts: add any ACP agent">
+            Add an agent…
+          </Button>
         </div>
         {several && <span class="hint">same task, {agents.length} agents</span>}
         <TaskOptions agents={agents} defaults={defaults} choices={choices} onChange={(agent, key, value) => setChoices((c) => ({ ...c, [agent]: { ...c[agent], [key]: value } }))} />

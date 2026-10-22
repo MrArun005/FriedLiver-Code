@@ -215,7 +215,7 @@ function page(params) {
   // Agents & Accounts gets its page view instead of a snapshot.
   const snapshot =
     surface === 'accounts'
-      ? { type: 'accounts', view: { ...accountsFixture(Date.now()), ...(focus ? { focus: { agent: focus, n: 1 } } : {}) } }
+      ? { type: 'accounts', view: { ...accountsFixture(Date.now()), ...(focus ? { focus: { agent: focus, n: 1 } } : {}), ...(params.get('form') ? { form: 1 } : {}) } }
       : { type: 'snapshot', state: data.state, selected: params.get('select') ?? undefined, now: Date.now(), defaults: data.defaults, ...(params.get('discussLayout') ? { discussLayout: params.get('discussLayout') } : {}) };
   // textSize: a tab's saved text size, as vscode.setState would have kept it.
   const savedEntries = [['view', params.get('view')], ['textSize', params.get('textSize') && Number(params.get('textSize'))], ['imagesTab', params.get('imagesTab')], ['openTabs', openTabs]].filter(([, v]) => v);
@@ -256,6 +256,8 @@ function page(params) {
         // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none).
         if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && !location.search.includes('firstRun=1')) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
         if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
+        // Agents & Accounts' Test connection, answered as the host would for a Qwen Code install not signed in.
+        if (m && m.type === 'testAgent') setTimeout(() => window.postMessage({ type: 'agentTest', result: { ok: true, agent: 'Qwen Code 0.12.0', signIn: ['Qwen OAuth', 'API key'], needsSignIn: false, models: ['Qwen3 Coder Plus', 'Qwen3 Coder Flash'], modelCount: 2, modes: ['Default', 'Auto edit', 'Plan', 'YOLO'] } }, '*'), 300);
         // An outside subagent's detail, as the host sends it while the sheet follows its transcript.
         if (m && m.type === 'watchSubagent' && m.id && details && details[m.id]) setTimeout(() => window.postMessage({ type: 'subagentDetail', detail: details[m.id] }, '*'), 0);
         if (m && m.type === 'ready' && claude) setTimeout(() => window.postMessage({ type: 'claudeSessions', sessions: claude }, '*'), 0);
@@ -333,6 +335,58 @@ if (opts.serve) {
 
 // ---- Checks and screenshots ----
 
+/**
+ * --only agents-config: Agents & Accounts' "Add an agent" form (filled in, tested) and a custom agent's card, and
+ * "Add an agent…" in the chat's pickers, Dark and Light 2026 at 1440: screenshots to
+ * ~/code/FriedLiver-Code-design/review/agents-config/.
+ */
+async function agentsConfigChecks({ open, check, posted }) {
+  const dir = path.join(os.homedir(), 'code/FriedLiver-Code-design/review/agents-config');
+  fs.mkdirSync(dir, { recursive: true });
+  const shot = async (p, name, options = {}) => {
+    const file = path.join(dir, `${name}.png`);
+    await (options.element ? p.locator(options.element) : p).screenshot({ path: file, animations: 'disabled', caret: 'hide', ...(options.fullPage ? { fullPage: true } : {}) });
+    console.log(`  ${file}`);
+  };
+  for (const theme of ['dark-2026', 'light-2026']) {
+    const p = await open(`surface=accounts&theme=${theme}&form=1`, 1440, 900);
+    check(await p.isVisible('#agent-form'), `${theme}: Add Agent… opens the form`);
+    await p.fill('#agent-form input[placeholder="Qwen Code"]', 'Qwen Code');
+    check((await p.inputValue('#agent-form input[placeholder="qwen"]:not(.mono)')) === 'qwencode', `${theme}: the id follows the name`);
+    await p.fill('#agent-form input.mono[placeholder="qwen"]', 'qwen; rm -rf ~');
+    await p.click('#agent-form >> text=Add agent');
+    check(await p.isVisible('#agent-form .fl-field__help[data-tone="error"]'), `${theme}: a command with shell characters is refused before saving`);
+    await p.fill('#agent-form input.mono[placeholder="qwen"]', 'qwen');
+    await p.fill('#agent-form input[placeholder="--acp"]', '--acp');
+    await p.click('#agent-form >> text=Add a variable');
+    await p.fill('#agent-form .acct-env input[aria-label="Variable name"]', 'DASHSCOPE_API_KEY');
+    await p.fill('#agent-form .acct-env input[type="password"], #agent-form .acct-env input.grow', 'sk-test-123');
+    check(await p.isVisible('#agent-form .acct-env .acct-tag'), `${theme}: a key-looking variable is marked secret`);
+    await p.click('#agent-form >> text=Test connection');
+    await p.waitForSelector('#agent-form >> text=answered over ACP');
+    await shot(p, `form-1440-${theme}`, { fullPage: true });
+    await p.click('#agent-form >> text=Add agent');
+    const saved = (await posted(p)).find((m) => m.type === 'saveAgent');
+    check(saved?.draft?.id === 'qwencode' && saved?.draft?.command === 'qwen', `${theme}: Add agent sends the form to the host`);
+    await p.close();
+    const c = await open(`surface=accounts&theme=${theme}&focus=custom:qwen`, 1440, 900);
+    await shot(c, `custom-card-1440-${theme}`, { element: '#card-custom\\:qwen' });
+    await c.click('#card-custom\\:qwen >> text=Edit');
+    check((await c.inputValue('#agent-form input.mono[placeholder="qwen"]')) === 'qwen', `${theme}: Edit opens the form on the agent`);
+    await shot(c, `edit-1440-${theme}`, { fullPage: true });
+    await c.close();
+    const chat = await open(`surface=chat&theme=${theme}&side=1`, 420, 900);
+    await chat.click('.switcher [aria-label="New chat with"], .switcher button[title="New chat"]');
+    check(await chat.isVisible('text=Add an agent…'), `${theme}: the New chat menu ends with Add an agent…`);
+    await shot(chat, `new-chat-menu-${theme}`);
+    await chat.keyboard.press('Escape');
+    await chat.fill('.composer textarea', '@zz');
+    check(await chat.isVisible('text=Add an agent…'), `${theme}: @ with no matching agent offers Add an agent…`);
+    await shot(chat, `mention-none-${theme}`);
+    await chat.close();
+  }
+}
+
 async function shoot() {
   const { chromium } = await import('playwright');
   const browser = await chromium.launch({ ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}), args: ['--use-mock-keychain', '--password-store=basic'] });
@@ -360,7 +414,7 @@ async function shoot() {
     if (!ok) problems.push(what);
   };
 
-  const only = { discuss: discussChecks, 'discuss-models': discussModelsChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'manager-overflow': managerOverflowChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
+  const only = { 'agents-config': agentsConfigChecks, discuss: discussChecks, 'discuss-models': discussModelsChecks, images: imagesChecks, inbox: inboxChecks, approvals: approvalsChecks, labels: labelChecks, gutter: gutterChecks, narrow: narrowChecks, 'subagent-detail': subagentDetailChecks, 'manager-overflow': managerOverflowChecks, 'agent-errors': agentErrorsChecks }[opts.only ?? ''];
   if (only) {
     await only({ open, check, posted, save });
     await browser.close();

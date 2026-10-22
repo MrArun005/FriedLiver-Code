@@ -3,7 +3,7 @@
 import { useContext, useState } from 'preact/hooks';
 import { agentFace, allAgentKeys, linkedChat, type AgentKey, type ChatView } from '../shared/model';
 import { clip, openChats } from '../shared/view';
-import { Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
+import { AddAgentItem, Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
 import { chatName, chatRef } from '../shared/names';
 import { Button, MenuItem, MenuSep, MenuTitle } from './ui';
 
@@ -68,6 +68,8 @@ export function HandoffTargets({ chat, close, title }: { chat: ChatView; close(r
             ))}
         </>
       )}
+      <MenuSep />
+      <AddAgentItem close={close} />
     </>
   );
 }

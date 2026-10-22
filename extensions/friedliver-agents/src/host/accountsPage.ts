@@ -14,7 +14,9 @@ import {
   type KeyView,
   type VendorKey,
 } from '../shared/accounts';
-import { agentFace, customAgent, type AgentKey } from '../shared/model';
+import { draftToEntry, entryToDraft, splitArgs, validateDraft, type AgentDraft, type AgentTestResult, type DraftErrors } from '../shared/agentForm';
+import { agentFace, customAgent, customAgents, type AgentKey } from '../shared/model';
+import { testAgentConnection, withEntry, withoutEntry, type CustomAgentConfig, type CustomSecrets } from './customAgents';
 import { SYSTEM_WORDS, unsupportedOn, type SystemSettingsView, type SystemTool } from '../shared/system';
 import type { Accounts } from './accounts';
 import { messageOf, type AgentCore } from './core';
@@ -25,7 +27,18 @@ import { webviewHtml, webviewOptions } from './webviews';
 
 export const ACCOUNTS_PANEL = 'friedliver.accountsPanel';
 
-type HostToPage = { type: 'accounts'; view: AccountsView };
+type HostToPage =
+  | { type: 'accounts'; view: AccountsView }
+  | { type: 'agentSaved'; ok: true; id: string }
+  | { type: 'agentSaved'; ok: false; errors: DraftErrors }
+  | { type: 'agentTest'; result: AgentTestResult };
+
+/** What the page needs for custom agents: the host's list (with commands), their secrets, and the client's version. */
+export interface CustomAgentsHost {
+  configs(): CustomAgentConfig[];
+  secrets: CustomSecrets;
+  clientVersion: string;
+}
 
 /**
  * Agents & Accounts: one card per agent with its sign-in, its keys, its CLI's
@@ -38,6 +51,7 @@ export class AccountsPage implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private ready = false;
   private focus?: { agent: AgentKey; n: number };
+  private form = 0;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -46,6 +60,7 @@ export class AccountsPage implements vscode.Disposable {
     private readonly core: () => AgentCore,
     private readonly showDemo: () => boolean,
     private readonly log: (line: string) => void,
+    private readonly custom?: CustomAgentsHost,
   ) {
     this.disposables.push(
       accounts.onDidUpdate(() => this.refresh()),
@@ -63,6 +78,13 @@ export class AccountsPage implements vscode.Disposable {
       return;
     }
     this.adopt(vscode.window.createWebviewPanel(ACCOUNTS_PANEL, 'Agents & Accounts', vscode.ViewColumn.Active, { retainContextWhenHidden: false }));
+  }
+
+  /** Opens the page on the "Add an agent" form (FriedLiver: Add Agent…, "Add an agent…" in the pickers). */
+  showForm(): void {
+    this.form++;
+    this.show();
+    this.refresh();
   }
 
   /** A panel the editor restored after a reload, or one just made. */
@@ -109,13 +131,21 @@ export class AccountsPage implements vscode.Disposable {
         ...(envKey ? { envKey } : {}),
         ...(isVendor(agent) ? { cli: CLI_ACCOUNTS[agent] } : {}),
         ...(customAgent(agent)?.signIn ? { hint: customAgent(agent)!.signIn } : {}),
+        ...this.customDraft(agent),
         ...modelChoices(defaults[agent]),
       };
       const active = activeMethod(card);
       return active ? { ...card, active } : card;
     });
     const links = vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin';
-    return { cards, links, system: this.systemView(), ...(this.focus ? { focus: this.focus } : {}) };
+    const custom = customAgents();
+    return { cards, links, system: this.systemView(), ...(this.focus ? { focus: this.focus } : {}), ...(custom.length ? { custom: [...custom] } : {}), ...(this.form ? { form: this.form } : {}) };
+  }
+
+  /** A custom agent's settings for the form's Edit; its secret variables by name only. */
+  private customDraft(agent: AgentKey): { custom?: AgentDraft } {
+    const c = this.custom?.configs().find((x) => x.key === agent);
+    return c ? { custom: entryToDraft(c, this.custom!.secrets.names(c.id)) } : {};
   }
 
   private systemView(): SystemSettingsView {
@@ -216,11 +246,69 @@ export class AccountsPage implements vscode.Disposable {
         if (line) await vscode.env.clipboard.writeText(line);
         return;
       }
+      case 'saveAgent':
+        await this.saveAgent(m.draft, m.editing);
+        return;
+      case 'removeAgent':
+        await this.removeAgent(m.agent);
+        return;
+      case 'testAgent':
+        this.post({ type: 'agentTest', result: await this.testAgent(m.draft, m.editing) });
+        return;
       case 'setDefault':
         if (!this.core().setDefaultChoice(m.agent, m.key, m.value)) this.log(`Agents & Accounts: ${m.agent} didn't offer ${m.key} ${m.value}.`);
         this.refresh();
         return;
     }
+  }
+
+  /**
+   * Writes the agent into the user's friedliver.agents.custom (never a workspace's): secrets first, so the
+   * agent never starts without them. An agent keeps its id: chats find it by that.
+   */
+  private async saveAgent(draft: AgentDraft, editing?: string): Promise<void> {
+    if (!this.custom) return;
+    if (editing && editing !== draft.id) return this.post({ type: 'agentSaved', ok: false, errors: { id: 'An agent keeps its id. Remove it and add a new one to change it.' } });
+    const taken = this.custom.configs().map((c) => c.id).filter((id) => id !== editing);
+    const errors = validateDraft(draft, taken);
+    if (Object.keys(errors).length) return this.post({ type: 'agentSaved', ok: false, errors });
+    const { entry, secrets, keep } = draftToEntry(draft);
+    const old = editing ? this.custom.secrets.env(editing) : {};
+    await this.custom.secrets.set(draft.id, { ...Object.fromEntries(keep.filter((k) => k in old).map((k) => [k, old[k]])), ...secrets });
+    const config = vscode.workspace.getConfiguration('friedliver.agents');
+    await config.update('custom', withEntry(config.inspect<unknown>('custom')?.globalValue, entry, editing), vscode.ConfigurationTarget.Global);
+    this.log(`Agents & Accounts: ${editing ? 'updated' : 'added'} the agent "${draft.id}" in your user settings.`);
+    this.post({ type: 'agentSaved', ok: true, id: draft.id });
+  }
+
+  private async removeAgent(agent: AgentKey): Promise<void> {
+    const c = this.custom?.configs().find((x) => x.key === agent);
+    if (!c || !this.custom) return;
+    const ok = await vscode.window.showWarningMessage(
+      `Remove ${c.name}?`,
+      { modal: true, detail: `It goes from your friedliver.agents.custom setting, with any variables FriedLiver keeps for it. Its chats stay; they can't start until you add it again.` },
+      'Remove',
+    );
+    if (ok !== 'Remove') return;
+    const config = vscode.workspace.getConfiguration('friedliver.agents');
+    await config.update('custom', withoutEntry(config.inspect<unknown>('custom')?.globalValue, c.id), vscode.ConfigurationTarget.Global);
+    await this.custom.secrets.remove(c.id);
+  }
+
+  /** Test connection: the draft as it would run (with the secrets it keeps), in an empty folder. */
+  private async testAgent(draft: AgentDraft, editing?: string): Promise<AgentTestResult> {
+    if (!this.custom) return { ok: false, error: 'Not available here.' };
+    const { command, args, env } = validateDraft({ ...draft, id: draft.id || 'test' }, []);
+    const problem = command ?? args ?? env;
+    if (problem) return { ok: false, error: problem };
+    const { entry, secrets, keep } = draftToEntry(draft);
+    const old = editing ? this.custom.secrets.env(editing) : {};
+    const kept = Object.fromEntries(keep.filter((k) => k in old).map((k) => [k, old[k]]));
+    const label = draft.name.trim() || draft.command.trim();
+    return testAgentConnection(
+      { id: `custom:${draft.id || 'test'}`, label, command: draft.command.trim(), args: splitArgs(draft.args) ?? [], env: { ...(entry.env as Record<string, string> | undefined), ...kept, ...secrets }, installCommand: draft.install.trim(), loginHint: '' },
+      this.custom.clientVersion,
+    );
   }
 
   private post(message: HostToPage): void {

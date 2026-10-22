@@ -11,7 +11,7 @@ const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-marks-')), 'marks.mjs');
 process.on('exit', () => fs.rmSync(path.dirname(out), { recursive: true, force: true }));
 await build({ entryPoints: [path.join(ext, 'src/webview/ui/marks.ts')], bundle: true, format: 'esm', outfile: out, logLevel: 'error' });
-const { markFor } = await import(pathToFileURL(out).href);
+const { markFor, GLYPHS } = await import(pathToFileURL(out).href);
 // The agents' v2 hues (package.json friedliver.agent* defaults; tokens.css --hue-*): an editor tab icon is a
 // file, so it can't read the theme; the tab gets { dark, light } (extension.ts). Neutral agents use --fg-2.
 const HUE = {
@@ -24,9 +24,11 @@ const LOGO = {
   light: { 'var(--logo-claude)': '#d97757', 'var(--logo-openai)': '#242220', 'var(--logo-gemini)': '#8e75b2', 'var(--logo-github)': '#242220' },
 };
 // `custom`: every agent from friedliver.agents.custom gets the neutral glyph (markFor of an unknown agent).
+// A custom agent's glyph other than the robot: media/agent-custom-<glyph>.svg (extension.ts).
+for (const g of Object.keys(GLYPHS)) if (g !== 'agent') for (const hues of Object.values(HUE)) hues[`custom-${g}`] = hues.custom;
 for (const [kind, hues] of Object.entries(HUE))
   for (const [agent, colour] of Object.entries(hues)) {
-    const m = markFor(agent);
+    const m = agent.startsWith('custom-') ? GLYPHS[agent.slice('custom-'.length)] : markFor(agent);
     const open = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="${m.viewBox ?? '0 0 16 16'}">`;
     const svg = m.svg
       ? `${open}${m.svg}</svg>\n`

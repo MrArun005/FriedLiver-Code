@@ -8,6 +8,7 @@ import { appendOutput, claudeMeta, streamedOutput, toolInput, toolOut, type Perm
 import { stepFacts, withRawOutput, type StepFacts } from './steps';
 import { isSystemTool, SYSTEM_VERBS, type SystemTool } from './system';
 import type { DiscussionItem } from './discuss';
+import type { AgentGlyph } from './agentForm';
 
 export const AGENT_KEYS = ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode', 'demo'] as const;
 export type BuiltinAgentKey = (typeof AGENT_KEYS)[number];
@@ -37,6 +38,8 @@ export interface CustomAgent {
   name: string;
   install?: string;
   signIn?: string;
+  /** Its neutral mark (ui/marks.ts GLYPHS); the robot face when absent. */
+  glyph?: AgentGlyph;
 }
 
 /** A custom agent's id: lower-case letters and digits, so "@id" mentions it like a built-in one. */

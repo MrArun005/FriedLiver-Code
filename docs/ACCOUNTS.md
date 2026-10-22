@@ -94,22 +94,42 @@ before sign-in, the modes Agent, Plan and Autopilot, an `allow_all` option, and
 
 ## Custom agents
 
-Any other program that speaks ACP on stdin/stdout can be added in your user
-settings (never a workspace's; machine scope):
+Any other program that speaks ACP on stdin/stdout can be added, from
+**Add an agent** at the top of this page, **FriedLiver: Add Agent…** in the
+command palette, or **Add an agent…** at the bottom of every agent picker (New
+chat, Hand off, the Agent Manager's New task, and `@` when no agent matches).
+
+The form asks for a name, an id (what `@` mentions), the command (a program
+name or path: no shell, so no `;`, `|`, `$` or quotes), its arguments,
+optional environment variables, an install line and a sign-in hint, and a
+mark. OpenCode and GitHub Copilot sit at its top: they're built in, so those
+jump to their own cards. **Test connection** starts the program once in an
+empty folder (ACP `initialize` and a session, no prompt) and shows what came
+back: its name and version, how it signs in, its models and modes.
+
+Saving writes your user settings (never a workspace's; machine scope).
+Variables whose name or value looks like a key (`…_KEY`, `…_TOKEN`, `sk-…`)
+go to the editor's secret storage instead and reach only that agent. Each
+custom agent's card has **Edit** and **Remove** (it asks first; its chats stay
+and can't start until it's back). An id can't be a built-in agent's name or
+alias, and an agent keeps its id.
+
+By hand, in settings.json:
 
 ```json
 "friedliver.agents.custom": [
-  { "id": "qwen", "name": "Qwen Code", "command": "qwen", "args": ["--acp"],
-    "install": "npm install -g @qwen-code/qwen-code", "signIn": "Run qwen and type /auth." }
+  { "id": "qwen", "name": "Qwen Code", "command": "qwen", "args": ["--acp"] }
 ]
 ```
 
+plus `env`, `install`, `signIn` and `glyph` (`agent`, `terminal`, `hexagon`
+or `spark`) if you like. OpenCode would be
+`{ "id": "opencode", "name": "OpenCode", "command": "opencode", "args": ["acp"] }`,
+but it is built in, so that id is taken.
+
 Each one appears like the built-in agents: pickers, `@<id>`, its card here
-(install line and sign-in hint, if given; the sign-in methods and models it
-reports), approvals, Full auto guards and `/discuss`. It gets a neutral mark and
-no keys kept by FriedLiver (`env` is passed as written, so keep secrets in your
-shell environment). An id can't be a built-in agent's name or alias. Removing
-one keeps its chats; they can't start until it's back.
+(install line and sign-in hint; the sign-in methods and models it reports),
+approvals, Full auto guards and `/discuss`.
 
 One key setup is kept per agent: saving the Gemini API key replaces Vertex AI
 settings and the other way round. After a key is saved, FriedLiver restarts the
