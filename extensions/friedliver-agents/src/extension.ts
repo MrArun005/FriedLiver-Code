@@ -408,6 +408,7 @@ export class Controller {
     });
     context.subscriptions.push({ dispose: unsubscribe });
     command('friedliver.agents.companionAnswer', (id: unknown, choiceId: unknown) => this.companion.answer(id, choiceId));
+    command('friedliver.agents.companionMediaFailed', (key: unknown) => this.companion.videoFailed(key));
     command('friedliver.agents.openChat', (chatId: unknown) => typeof chatId === 'string' && this.core.chat(chatId) && this.showChat(chatId));
 
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
@@ -537,12 +538,17 @@ export class Controller {
     },
     enabled: () => vscode.workspace.getConfiguration('friedliver.companion').get<boolean>('enabled', true),
     state: () => this.core.snapshot,
-    character: (agentId) => {
+    videoFailed: (file) => {
+      const message = `${path.basename(file)} can't play in FriedLiver — save it as .webm (VP9) or a GIF.`;
+      this.log.warn(`Companion: ${message} (${file})`);
+      void vscode.window.showWarningMessage(plainText(message));
+    },
+    character: (agentId, failed) => {
       const config = vscode.workspace.getConfiguration('friedliver.companion');
       // The user's own settings only: a repository must not point these at files.
       const characters = userSetting(config.inspect<Record<string, CharacterSetting>>('characters')).value;
       const folder = userSetting(config.inspect<string>('folder')).value;
-      return characterFor(agentId, { builtinDir: path.join(this.context.extensionPath, 'media', 'characters'), characters: characters && typeof characters === 'object' ? characters : undefined, folder: typeof folder === 'string' ? folder : undefined });
+      return characterFor(agentId, { builtinDir: path.join(this.context.extensionPath, 'media', 'characters'), characters: characters && typeof characters === 'object' ? characters : undefined, folder: typeof folder === 'string' ? folder : undefined, failed });
     },
   });
   private companionTimer: ReturnType<typeof setTimeout> | undefined;

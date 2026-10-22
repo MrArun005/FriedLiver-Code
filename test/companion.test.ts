@@ -90,3 +90,77 @@ describe('patch 0310', () => {
     expect(enter).not.toContain('.focus(');
   });
 });
+
+describe('how a character sits (frameVerdict, chromaKey)', () => {
+  type V = { kind: string; color?: number[] };
+  let c: {
+    frameVerdict(frames: { data: Uint8ClampedArray; width: number; height: number }[]): V;
+    chromaKey(data: Uint8ClampedArray, color: readonly [number, number, number]): void;
+    characterSources(item: unknown, phase: 'run' | 'idle', playable: (v: { key: string }) => boolean): unknown[];
+    parseCompanionVideo(raw: unknown): unknown;
+    MAX_VIDEO_BYTES: number;
+  };
+  beforeAll(async () => {
+    c = await import(writePatchedFile(PATCH, 'src/vs/workbench/contrib/friedliverCompanion/common/companion.ts'));
+  });
+  const SIZE = 12;
+  /** A frame whose border (2 px) is `edge` and whose middle is `centre`, both RGBA; `noise` jitters the border. */
+  const frame = (edge: number[], centre: number[], noise = 0, seed = 1) => {
+    const data = new Uint8ClampedArray(SIZE * SIZE * 4);
+    let r = seed;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const border = x < 2 || y < 2 || x >= SIZE - 2 || y >= SIZE - 2;
+        const px = border ? edge.map((v, i) => (i < 3 && noise ? v + (((r = (r * 9301 + 49297) % 233280) / 233280) * 2 - 1) * noise : v)) : centre;
+        data.set(px, (y * SIZE + x) * 4);
+      }
+    }
+    return { data, width: SIZE, height: SIZE };
+  };
+
+  it('transparent edges float as they are (VP9-alpha webm, cut-out GIF/WebP)', () => {
+    expect(c.frameVerdict([frame([0, 0, 0, 0], [200, 50, 50, 255])])).toEqual({ kind: 'alpha' });
+  });
+
+  it('a flat-coloured border is keyed out, across the first few frames', () => {
+    const v = c.frameVerdict([frame([0, 177, 64, 255], [200, 50, 50, 255], 8, 1), frame([0, 177, 64, 255], [190, 60, 40, 255], 8, 2)]);
+    expect(v.kind).toBe('key');
+    v.color!.forEach((x, i) => expect(Math.abs(x - [0, 177, 64][i])).toBeLessThan(10));
+  });
+
+  it('a busy border sits in the frame; so does a border that drifts between frames, and nothing at all', () => {
+    expect(c.frameVerdict([frame([120, 120, 120, 255], [0, 0, 0, 255], 120)])).toEqual({ kind: 'frame' });
+    expect(c.frameVerdict([frame([0, 177, 64, 255], [0, 0, 0, 255]), frame([200, 30, 30, 255], [0, 0, 0, 255])])).toEqual({ kind: 'frame' });
+    expect(c.frameVerdict([])).toEqual({ kind: 'frame' });
+  });
+
+  it('chromaKey clears the key colour, keeps the subject, softens the edge and pulls back spill there', () => {
+    const px = new Uint8ClampedArray([0, 177, 64, 255, 200, 50, 50, 255, 60, 200, 110, 255]);
+    c.chromaKey(px, [0, 177, 64]);
+    expect(px[3]).toBe(0); // the screen
+    expect(Array.from(px.slice(4, 8))).toEqual([200, 50, 50, 255]); // the subject, untouched
+    expect(px[11]).toBeGreaterThan(0); // a fringe pixel: partly see-through
+    expect(px[11]).toBeLessThan(255);
+    expect(px[9]).toBeLessThanOrEqual(Math.max(px[8], px[10])); // its green pulled back
+  });
+
+  it('video sources: run video, then the corner video, then the pictures; failed videos passed over', () => {
+    const item = { character: 'data:image/svg+xml;base64,AA==', characterRun: 'data:image/svg+xml;base64,BB==', video: { key: 'v' }, videoRun: { key: 'r' } };
+    expect(c.characterSources(item, 'run', () => true)).toEqual([{ video: { key: 'r' } }, { video: { key: 'v' } }, { image: item.characterRun }, { image: item.character }]);
+    expect(c.characterSources(item, 'idle', (v) => v.key !== 'v')).toEqual([{ image: item.character }]);
+  });
+
+  it('video refs: allowed types only, bytes up to 20 MB, as a Uint8Array or a VSBuffer', () => {
+    expect(c.parseCompanionVideo({ key: 'k', type: 'video/webm' })).toEqual({ key: 'k', type: 'video/webm' });
+    expect(c.parseCompanionVideo({ key: 'k', type: 'video/mp4', bytes: { buffer: new Uint8Array(3) } })).toMatchObject({ bytes: new Uint8Array(3) });
+    expect(c.parseCompanionVideo({ key: 'k', type: 'text/html' })).toBeNull();
+    expect(c.parseCompanionVideo({ key: 'k', type: 'video/webm', bytes: new Uint8Array(c.MAX_VIDEO_BYTES + 1) })).toBeNull();
+    expect(c.parseCompanionVideo(undefined)).toBeUndefined();
+  });
+
+  it('lets the workbench play blob: media and nothing wider', () => {
+    const patch = fs.readFileSync(path.resolve(__dirname, '..', 'patches', PATCH), 'utf8');
+    expect(patch).toContain("+\t\t\t\t\tblob:\n \t\t\t\t;\n \t\t\t\tframe-src");
+    expect(patch).not.toMatch(/^\+.*media-src.*\*/m);
+  });
+});

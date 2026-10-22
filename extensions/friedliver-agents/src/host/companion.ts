@@ -3,7 +3,9 @@
 // The workbench draws it (patches/0310-companion.patch); this side decides what it shows and routes
 // a click back through the very message the chat's own card sends, by the request's own id.
 // Nothing here answers on its own: an answer needs a click on a choice of an item still waiting.
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { approvalOf } from '../shared/approval';
 import { entryActions, inbox, type InboxEntry } from '../shared/inbox';
@@ -29,6 +31,23 @@ export interface CompanionItem {
   character: string;
   /** A data: URI of the run cycle; without it the idle picture slides in. */
   characterRun?: string;
+  /** A video for the corner (and the run-in, without a run video); the pictures above are its fallback. */
+  video?: CompanionVideo;
+  videoRun?: CompanionVideo;
+}
+
+/** A video as the workbench gets it: its bytes once, with the first ask that uses it; after that by key. */
+export interface CompanionVideo {
+  key: string;
+  type: string;
+  bytes?: Uint8Array;
+}
+
+/** A video file a character uses. `key` changes with the file (path, size, time). */
+export interface VideoRef {
+  key: string;
+  type: string;
+  path: string;
 }
 
 /** A character: a built-in name, a local image path, or `{ idle, run }` paths. */
@@ -47,7 +66,10 @@ export const DEFAULT_CHARACTERS: Record<string, string> = {
 export const CUSTOM_CHARACTER = 'skip';
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
 const TYPES: Record<string, string> = { '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp' };
+const VIDEO_TYPES: Record<string, string> = { '.webm': 'video/webm', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime' };
+const EXTENSIONS = [...Object.keys(TYPES), ...Object.keys(VIDEO_TYPES)];
 const BUILTIN_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 
 /**
@@ -68,11 +90,43 @@ export function imageData(file: string): string | undefined {
   }
 }
 
-/** `<dir>/<stem>.(svg|png|gif|webp)`, the first that loads. */
-function firstImage(dir: string, stem: string): string | undefined {
-  for (const ext of Object.keys(TYPES)) {
-    const data = imageData(path.join(dir, `${stem}${ext}`));
-    if (data) return data;
+/**
+ * A local video: an absolute path to a .webm/.mp4/.m4v/.mov file of at most 20 MB that hasn't failed
+ * to play before as it is now. Its bytes are read when it is first shown, never base64'd.
+ */
+export function videoRef(file: string, failed: (key: string) => boolean = () => false): VideoRef | undefined {
+  try {
+    if (!path.isAbsolute(file)) return undefined;
+    const type = VIDEO_TYPES[path.extname(file).toLowerCase()];
+    if (!type) return undefined;
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > MAX_VIDEO_BYTES || st.size === 0) return undefined;
+    const key = createHash('sha256').update(`${file}\0${st.size}\0${st.mtimeMs}`).digest('hex');
+    return failed(key) ? undefined : { key, type, path: file };
+  } catch {
+    return undefined;
+  }
+}
+
+/** A picture (data: URI) or a video. */
+type Media = { image: string } | { video: VideoRef };
+
+/** `~/x` is in your home folder. */
+export const expandHome = (p: string): string => (p === '~' || p.startsWith('~/') || p.startsWith('~\\') ? path.join(os.homedir(), p.slice(1)) : p);
+
+function media(raw: string, failed: (key: string) => boolean): Media | undefined {
+  const file = expandHome(raw);
+  const image = imageData(file);
+  if (image) return { image };
+  const video = videoRef(file, failed);
+  return video ? { video } : undefined;
+}
+
+/** `<dir>/<stem>.(svg|png|gif|webp|webm|mp4|m4v|mov)`, the first that loads. */
+function firstMedia(dir: string, stem: string, failed: (key: string) => boolean): Media | undefined {
+  for (const ext of EXTENSIONS) {
+    const m = media(path.join(dir, `${stem}${ext}`), failed);
+    if (m) return m;
   }
   return undefined;
 }
@@ -84,6 +138,15 @@ export interface CharacterOptions {
   characters: Record<string, CharacterSetting> | undefined;
   /** friedliver.companion.folder, from the user's own settings only. */
   folder: string | undefined;
+  /** Videos that couldn't play here (by key): passed over, so the built-in character stands in. */
+  failed?: (key: string) => boolean;
+}
+
+export interface CharacterLook {
+  character: string;
+  characterRun?: string;
+  video?: VideoRef;
+  videoRun?: VideoRef;
 }
 
 /**
@@ -91,28 +154,37 @@ export interface CharacterOptions {
  * characters setting (a name, a path, or `{ idle, run }`), then the built-in default. Any picture that
  * doesn't load falls back to the built-in default (`skip` for a custom agent).
  */
-export function characterFor(agentId: string, o: CharacterOptions): { character: string; characterRun?: string } | undefined {
-  const builtin = (name: string) => {
+export function characterFor(agentId: string, o: CharacterOptions): CharacterLook | undefined {
+  const failed = o.failed ?? (() => false);
+  const builtin = (name: string): CharacterLook | undefined => {
     if (!BUILTIN_NAME.test(name)) return undefined;
     const idle = imageData(path.join(o.builtinDir, `${name}.svg`));
     const run = imageData(path.join(o.builtinDir, `${name}-run.svg`));
     return { character: idle ?? '', ...(run ? { characterRun: run } : {}) };
   };
   const fallback = () => builtin(Object.prototype.hasOwnProperty.call(DEFAULT_CHARACTERS, agentId) ? DEFAULT_CHARACTERS[agentId] : CUSTOM_CHARACTER);
-  const pair = (idle: string | undefined, run: string | undefined) => (idle ? { character: idle, ...(run ? { characterRun: run } : {}) } : fallback());
+  // Own media over the built-in: a video keeps the built-in pictures as its fallback; one video runs in and stays.
+  const pair = (idle: Media | undefined, run: Media | undefined): CharacterLook | undefined => {
+    if (!idle) return fallback();
+    const base: CharacterLook = 'image' in idle ? { character: idle.image } : { ...(fallback() ?? { character: '' }), video: idle.video };
+    if (run && 'image' in run) base.characterRun = run.image;
+    if (run && 'video' in run) base.videoRun = run.video;
+    return base;
+  };
 
-  if (o.folder && path.isAbsolute(o.folder) && /^[\w-]+$/.test(agentId)) {
-    const idle = firstImage(o.folder, agentId);
-    if (idle) return pair(idle, firstImage(o.folder, `${agentId}-run`));
+  const folder = o.folder && expandHome(o.folder);
+  if (folder && path.isAbsolute(folder) && /^[\w-]+$/.test(agentId)) {
+    const idle = firstMedia(folder, agentId, failed);
+    if (idle) return pair(idle, firstMedia(folder, `${agentId}-run`, failed));
   }
   const own = o.characters && Object.prototype.hasOwnProperty.call(o.characters, agentId) ? o.characters[agentId] : undefined;
   if (typeof own === 'string' && own) {
-    if (path.isAbsolute(own)) return pair(imageData(own), undefined);
+    if (path.isAbsolute(expandHome(own))) return pair(media(own, failed), undefined);
     return builtin(own) ?? fallback();
   }
   if (own && typeof own === 'object') {
-    const idle = typeof own.idle === 'string' ? imageData(own.idle) : undefined;
-    const run = typeof own.run === 'string' ? imageData(own.run) : undefined;
+    const idle = typeof own.idle === 'string' ? media(own.idle, failed) : undefined;
+    const run = typeof own.run === 'string' ? media(own.run, failed) : undefined;
     return pair(idle, run);
   }
   return fallback();
@@ -165,7 +237,9 @@ export interface CompanionDeps {
   enabled(): boolean;
   /** The core's state now: a click re-checks against it, so an answer that just arrived elsewhere wins. */
   state(): Pick<AppState, 'chats'>;
-  character(agentId: string): { character: string; characterRun?: string } | undefined;
+  character(agentId: string, failed: (key: string) => boolean): CharacterLook | undefined;
+  /** A video file couldn't play in the window: said once per file as it is now. */
+  videoFailed?(file: string): void;
 }
 
 export class Companion {
@@ -173,6 +247,10 @@ export class Companion {
   private readonly shown = new Map<string, Map<string, WebviewMessage>>();
   /** Answered here and still waiting in the state (the core hasn't caught up): never shown or answered again. */
   private readonly sent = new Set<string>();
+  /** Videos whose bytes the workbench has, by key, with their file. */
+  private readonly videos = new Map<string, string>();
+  /** Videos that couldn't play (by key: path, size, time), so they aren't tried on every ask. */
+  private readonly failedVideos = new Set<string>();
 
   constructor(private readonly deps: CompanionDeps) {}
 
@@ -190,11 +268,14 @@ export class Companion {
           continue;
         }
         const e = companionEntry(state, entry);
-        const look = e && this.deps.character(e.agent);
+        const look = e && this.deps.character(e.agent, (key) => this.failedVideos.has(key));
         if (!e || !look) continue;
         live.add(entry.id);
         this.shown.set(entry.id, e.answers);
-        this.deps.run('_friedliver.companion.show', { ...e.item, ...look } satisfies CompanionItem);
+        const { video, videoRun, ...pictures } = look;
+        const v = this.sendVideo(video);
+        const vr = videoRun && videoRun.key === video?.key ? (v && { key: v.key, type: v.type }) : this.sendVideo(videoRun);
+        this.deps.run('_friedliver.companion.show', { ...e.item, ...pictures, ...(v ? { video: v } : {}), ...(vr ? { videoRun: vr } : {}) } satisfies CompanionItem);
       }
     }
     for (const id of [...this.shown.keys()]) {
@@ -217,6 +298,30 @@ export class Companion {
     this.sent.add(id);
     this.deps.run('_friedliver.companion.hide', id);
     this.deps.answer(message);
+    return true;
+  }
+
+  /** A video for the workbench: its bytes the first time, its key after. A file that can't be read is left out. */
+  private sendVideo(ref: VideoRef | undefined): CompanionVideo | undefined {
+    if (!ref) return undefined;
+    if (this.videos.has(ref.key)) return { key: ref.key, type: ref.type };
+    try {
+      const bytes = fs.readFileSync(ref.path);
+      if (bytes.byteLength > MAX_VIDEO_BYTES) return undefined;
+      this.videos.set(ref.key, ref.path);
+      return { key: ref.key, type: ref.type, bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The workbench couldn't play a video it was sent: remembered for the file as it is now, said once. Unknown keys do nothing. */
+  videoFailed(key: unknown): boolean {
+    if (typeof key !== 'string' || this.failedVideos.has(key)) return false;
+    const file = this.videos.get(key);
+    if (!file) return false;
+    this.failedVideos.add(key);
+    this.deps.videoFailed?.(file);
     return true;
   }
 

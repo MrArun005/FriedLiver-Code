@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Companion, MAX_IMAGE_BYTES, characterFor, imageData, type CompanionItem } from '../src/host/companion';
+import { Companion, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, characterFor, expandHome, imageData, videoRef, type CompanionItem } from '../src/host/companion';
 import type { WebviewMessage } from '../src/shared/messages';
 import { EMPTY_STATE, type AppState, type ChatView, type Item } from '../src/shared/model';
 
@@ -195,5 +195,83 @@ describe('characters', () => {
     expect(imageData(path.join(mine, 'missing.png'))).toBeUndefined();
     expect(imageData('cat.png')).toBeUndefined();
     expect(imageData(mine + '/')).toBeUndefined();
+  });
+});
+
+describe('video characters', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-companion-video-'));
+  const builtinDir = path.join(dir, 'builtin');
+  fs.mkdirSync(builtinDir);
+  fs.writeFileSync(path.join(builtinDir, 'bolt.svg'), '<svg>bolt</svg>');
+  fs.writeFileSync(path.join(builtinDir, 'bolt-run.svg'), '<svg>bolt run</svg>');
+  const clip = (name: string, bytes = 64) => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, Buffer.alloc(bytes, 1));
+    return f;
+  };
+  const svg = (s: string) => `data:image/svg+xml;base64,${Buffer.from(s).toString('base64')}`;
+
+  it('takes .webm, .mp4, .m4v and .mov only, up to 20 MB', () => {
+    expect(videoRef(clip('a.webm'))?.type).toBe('video/webm');
+    expect(videoRef(clip('a.mp4'))?.type).toBe('video/mp4');
+    expect(videoRef(clip('a.m4v'))?.type).toBe('video/mp4');
+    expect(videoRef(clip('a.MOV'))?.type).toBe('video/quicktime');
+    for (const name of ['a.avi', 'a.mkv', 'a.html', 'a.exe']) expect(videoRef(clip(name)), name).toBeUndefined();
+    expect(videoRef(clip('big.webm', MAX_VIDEO_BYTES + 1))).toBeUndefined();
+    expect(videoRef(clip('ok.webm', MAX_IMAGE_BYTES + 1))).toBeDefined(); // videos get 20 MB, pictures 5
+    expect(imageData(clip('big.png', MAX_IMAGE_BYTES + 1))).toBeUndefined();
+    expect(videoRef('relative.webm')).toBeUndefined();
+  });
+
+  it('a changed file is a new key', () => {
+    const f = clip('k.webm');
+    const before = videoRef(f)!.key;
+    fs.writeFileSync(f, Buffer.alloc(99, 2));
+    expect(videoRef(f)!.key).not.toBe(before);
+  });
+
+  it('a video keeps the built-in pictures as its fallback; one video both runs in and stays', () => {
+    const f = clip('codex.webm');
+    const look = characterFor('codex', { builtinDir, folder: undefined, characters: { codex: f } })!;
+    expect(look).toMatchObject({ character: svg('<svg>bolt</svg>'), characterRun: svg('<svg>bolt run</svg>'), video: { path: f, type: 'video/webm' } });
+    expect(look.videoRun).toBeUndefined();
+    const folder = characterFor('codex', { builtinDir, folder: dir, characters: undefined })!;
+    expect(folder.video?.path).toBe(f);
+  });
+
+  it('a video that failed (as the file is now) is passed over for the built-in', () => {
+    const f = clip('fail.mp4');
+    const key = videoRef(f)!.key;
+    const look = characterFor('codex', { builtinDir, folder: undefined, characters: { codex: f }, failed: (k) => k === key })!;
+    expect(look).toEqual({ character: svg('<svg>bolt</svg>'), characterRun: svg('<svg>bolt run</svg>') });
+  });
+
+  it('sends the bytes once, remembers a failure once per file, and ignores unknown keys', () => {
+    const f = clip('codex2.webm', 128);
+    const shows: CompanionItem[] = [];
+    const failures: string[] = [];
+    const c = new Companion({
+      run: (command, arg) => command === '_friedliver.companion.show' && shows.push(arg as CompanionItem),
+      answer: () => {},
+      enabled: () => true,
+      state: () => EMPTY_STATE,
+      character: (agent, failed) => characterFor(agent, { builtinDir, folder: undefined, characters: { claude: f }, failed }),
+      videoFailed: (file) => failures.push(file),
+    });
+    c.update(state(chat('a', { items: [run('r1', 'ls')] })));
+    c.update(state(chat('a', { items: [run('r1', 'ls'), run('r2', 'ls', 2)] })));
+    expect(shows[0].video?.bytes?.byteLength).toBe(128);
+    expect(shows[1].video).toEqual({ key: shows[0].video!.key, type: 'video/webm' });
+    expect(c.videoFailed('not-a-key')).toBe(false);
+    expect(c.videoFailed(shows[0].video!.key)).toBe(true);
+    expect(c.videoFailed(shows[0].video!.key)).toBe(false);
+    expect(failures).toEqual([f]);
+    c.update(state(chat('a', { items: [run('r1', 'ls'), run('r2', 'ls', 2), run('r3', 'ls', 3)] })));
+    expect(shows[2].video).toBeUndefined();
+  });
+
+  it('~ is the home folder', () => {
+    expect(expandHome('~/FriedLiverCharacters/codex.webm')).toBe(path.join(os.homedir(), 'FriedLiverCharacters/codex.webm'));
+    expect(expandHome('/abs/x.webm')).toBe('/abs/x.webm');
   });
 });

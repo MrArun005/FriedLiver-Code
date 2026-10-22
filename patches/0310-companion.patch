@@ -1,9 +1,21 @@
+diff --git a/src/vs/code/electron-browser/workbench/workbench.html b/src/vs/code/electron-browser/workbench/workbench.html
+index 47c5748..d2c91bd 100644
+--- a/src/vs/code/electron-browser/workbench/workbench.html
++++ b/src/vs/code/electron-browser/workbench/workbench.html
+@@ -19,6 +19,7 @@
+ 				;
+ 				media-src
+ 					'self'
++					blob:
+ 				;
+ 				frame-src
+ 					'self'
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
 new file mode 100644
-index 0000000..5f326fd
+index 0000000..9d50c74
 --- /dev/null
 +++ b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
-@@ -0,0 +1,279 @@
+@@ -0,0 +1,550 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0310): the companion. When an agent in any chat waits for you, its character
 + *  runs in along the bottom of the window, peeks from the bottom-left corner (partly cut off by it)
@@ -25,34 +37,318 @@ index 0000000..5f326fd
 +import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 +import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
 +import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
-+import { CompanionQueue, ICompanionItem, parseCompanionItem } from '../common/companion.js';
++import { characterSources, chromaKey, CompanionFrameVerdict, CompanionQueue, frameVerdict, ICompanionFrame, ICompanionItem, ICompanionVideo, parseCompanionItem } from '../common/companion.js';
 +
 +/** After the bubble opens, clicks wait this long before they count. */
 +const ARM_MS = 400;
++/** A video with no frame by then can't play here (Electron has no H.264/HEVC): the picture stands in. */
++const FIRST_FRAME_MS = 1_500;
 +
-+/** Calls that arrive before the contribution is up (the extension can start first). */
-+let instance: CompanionContribution | undefined;
-+const early: ({ show: unknown } | { hide: unknown })[] = [];
++/**
++ * Video characters as blob: URLs, made once from the bytes the extension sends with the first ask
++ * that uses each (workbench.html's media-src allows blob:, patch 0310). Never a file or address.
++ */
++class CompanionVideos extends Disposable {
++	private readonly _urls = new Map<string, string>();
++	private readonly _failed = new Set<string>();
 +
-+CommandsRegistry.registerCommand('_friedliver.companion.show', (_accessor, item: unknown) => {
-+	if (instance) {
-+		instance.show(item);
-+	} else if (early.length < 100) {
-+		early.push({ show: item });
++	constructor(private readonly _onFailed: (key: string) => void) {
++		super();
++		this._register({ dispose: () => { for (const url of this._urls.values()) { URL.revokeObjectURL(url); } } });
 +	}
-+});
-+CommandsRegistry.registerCommand('_friedliver.companion.hide', (_accessor, id: unknown) => {
-+	if (instance) {
-+		instance.hide(id);
-+	} else {
-+		early.push({ hide: id });
++
++	take(video: ICompanionVideo | undefined): void {
++		if (video?.bytes && !this._urls.has(video.key) && !this._failed.has(video.key)) {
++			this._urls.set(video.key, URL.createObjectURL(new Blob([video.bytes.slice().buffer as ArrayBuffer], { type: video.type })));
++		}
 +	}
-+});
++
++	url(video: ICompanionVideo): string | undefined {
++		return this._failed.has(video.key) ? undefined : this._urls.get(video.key);
++	}
++
++	/** Once per video: it is dropped here and the extension remembers it for the file as it is now. */
++	fail(key: string): void {
++		if (this._failed.has(key)) {
++			return;
++		}
++		this._failed.add(key);
++		const url = this._urls.get(key);
++		if (url) {
++			URL.revokeObjectURL(url);
++			this._urls.delete(key);
++		}
++		this._onFailed(key);
++	}
++}
++
++/** How each clip or picture sits (common/companion.ts frameVerdict), decided once: by video key (path, size, time) or picture. */
++const verdicts = new Map<string, CompanionFrameVerdict>();
++/** Frames sampled for the verdict, and how far apart (a clip's first few frames). */
++const SAMPLES = 3;
++const SAMPLE_GAP_MS = 120;
++const SAMPLE_SIZE = 48;
++/** The keyed cut-out redraws at most this often, at the overlay's size only. */
++const KEY_FRAME_MS = 33;
++const KEY_MAX_PX = 280;
++
++/**
++ * The character: a picture or a video. Its first frames decide how it sits: real transparency floats,
++ * a flat-coloured border is keyed out live (a 2D canvas at the overlay's size, ~30 fps) and floats,
++ * anything else sits in a rounded portal frame. Videos are muted, loop, have no controls and never
++ * sound; they pause while the window is hidden or motion is reduced (their first frame shows). A
++ * video that errors or shows no frame in time gives way to the agent's built-in picture.
++ */
++class CharacterView {
++	readonly element: HTMLElement;
++	private _phase: 'run' | 'idle' = 'run';
++	private _video: HTMLVideoElement | undefined;
++	private _img: HTMLImageElement | undefined;
++	private _canvas: HTMLCanvasElement | undefined;
++	private _loop: number | undefined;
++	private _key: (() => void) | undefined;
++	private _frameTimer: number | undefined;
++	/** Bumped on every change of source: late samples and frames of an old one are dropped. */
++	private _generation = 0;
++
++	constructor(
++		parent: HTMLElement,
++		private readonly _item: ICompanionItem,
++		private readonly _videos: CompanionVideos,
++		private readonly _store: DisposableStore,
++		private readonly _still: () => boolean,
++	) {
++		this.element = append(parent, $('.fl-companion__character'));
++		this.element.setAttribute('aria-hidden', 'true');
++		this._store.add(addDisposableListener(parent.ownerDocument, 'visibilitychange', () => this._playPolicy()));
++		this._store.add({ dispose: () => { this._generation++; this._clearTimer(); this._stopKey(); this._video?.pause(); this._video?.removeAttribute('src'); } });
++	}
++
++	/** Whether there is anything to show at all. */
++	get empty(): boolean {
++		const playable = (v: ICompanionVideo) => !!this._videos.url(v);
++		return !characterSources(this._item, 'idle', playable).length && !characterSources(this._item, 'run', playable).length;
++	}
++
++	show(phase: 'run' | 'idle'): void {
++		this._phase = phase;
++		const best = characterSources(this._item, phase, v => !!this._videos.url(v))[0];
++		if (best && 'video' in best) {
++			this._showVideo(best.video);
++		} else {
++			this._showImage(best?.image);
++		}
++	}
++
++	private _showVideo(video: ICompanionVideo): void {
++		if (this._video?.dataset.key === video.key) {
++			this._playPolicy();
++			return;
++		}
++		const generation = this._reset();
++		this._img?.remove();
++		this._img = undefined;
++		const v = this._video ??= append(this.element, $<HTMLVideoElement>('video'));
++		v.muted = true;
++		v.defaultMuted = true;
++		v.volume = 0;
++		v.loop = true;
++		v.playsInline = true;
++		v.controls = false;
++		v.disablePictureInPicture = true;
++		v.preload = 'auto';
++		v.setAttribute('playsinline', '');
++		v.setAttribute('disableremoteplayback', '');
++		v.dataset.key = video.key;
++		const failed = () => {
++			if (generation === this._generation) {
++				this._videos.fail(video.key);
++				v.removeAttribute('src');
++				v.dataset.key = '';
++				this.show(this._phase);
++			}
++		};
++		this._store.add(addDisposableListener(v, EventType.ERROR, failed));
++		this._store.add(addDisposableListener(v, 'loadeddata', () => {
++			if (generation === this._generation) {
++				this._clearTimer();
++				this._judge(video.key, v, generation);
++			}
++		}));
++		this._frameTimer = getWindow(v).setTimeout(() => v.readyState < 2 ? failed() : undefined, FIRST_FRAME_MS);
++		v.src = this._videos.url(video)!;
++		this._playPolicy();
++	}
++
++	private _showImage(src: string | undefined): void {
++		if (src && this._img?.getAttribute('src') === src) {
++			return;
++		}
++		const generation = this._reset();
++		this._video?.pause();
++		this._video?.remove();
++		this._video = undefined;
++		this.element.classList.toggle('fl-companion__character--none', !src);
++		if (!src) {
++			this._img?.remove();
++			this._img = undefined;
++			return;
++		}
++		const img = this._img ??= append(this.element, $<HTMLImageElement>('img'));
++		img.alt = '';
++		img.draggable = false;
++		this._store.add(addDisposableListener(img, 'load', () => {
++			if (generation === this._generation) {
++				this._judge(src, img, generation);
++			}
++		}));
++		img.src = src;
++	}
++
++	/** A new source: drop the old one's verdict, keying and timers; hidden until its own verdict. */
++	private _reset(): number {
++		this._clearTimer();
++		this._stopKey();
++		this.element.classList.remove('fl-companion__character--portal', 'fl-companion__character--none');
++		this.element.classList.add('fl-companion__character--pending');
++		return ++this._generation;
++	}
++
++	private _judge(key: string, source: HTMLImageElement | HTMLVideoElement, generation: number): void {
++		const known = verdicts.get(key);
++		if (known) {
++			this._apply(known, source);
++			return;
++		}
++		const frames: ICompanionFrame[] = [];
++		const animated = source instanceof HTMLVideoElement && !this._still();
++		const take = () => {
++			if (generation !== this._generation) {
++				return;
++			}
++			const frame = sampleFrame(source);
++			if (frame) {
++				frames.push(frame);
++			}
++			if (animated && frame && frames.length < SAMPLES) {
++				getWindow(source).setTimeout(take, SAMPLE_GAP_MS);
++				return;
++			}
++			const verdict = frameVerdict(frames);
++			verdicts.set(key, verdict);
++			this._apply(verdict, source);
++		};
++		take();
++	}
++
++	private _apply(verdict: CompanionFrameVerdict, source: HTMLImageElement | HTMLVideoElement): void {
++		this.element.classList.remove('fl-companion__character--pending');
++		this.element.classList.toggle('fl-companion__character--portal', verdict.kind === 'frame');
++		if (verdict.kind === 'key') {
++			this._startKey(verdict.color, source);
++		}
++	}
++
++	private _startKey(color: readonly [number, number, number], source: HTMLImageElement | HTMLVideoElement): void {
++		const w = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
++		const h = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
++		const canvas = this._canvas = append(this.element, $<HTMLCanvasElement>('canvas'));
++		const ctx = canvas.getContext('2d', { willReadFrequently: true });
++		if (!ctx || !w || !h) {
++			this._stopKey();
++			this.element.classList.add('fl-companion__character--portal');
++			return;
++		}
++		const scale = Math.min(1, KEY_MAX_PX / Math.max(w, h));
++		canvas.width = Math.max(1, Math.round(w * scale));
++		canvas.height = Math.max(1, Math.round(h * scale));
++		source.classList.add('fl-companion__keyed');
++		const win = getWindow(canvas);
++		let last = -Infinity;
++		const draw = (now: number) => {
++			this._loop = undefined;
++			if (this._canvas !== canvas) {
++				return;
++			}
++			if (now - last >= KEY_FRAME_MS) {
++				last = now;
++				try {
++					ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
++					const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
++					chromaKey(pixels.data, color);
++					ctx.putImageData(pixels, 0, 0);
++				} catch {
++					this._stopKey();
++					this.element.classList.add('fl-companion__character--portal');
++					return;
++				}
++			}
++			if (!this._still() && canvas.ownerDocument.visibilityState !== 'hidden') {
++				this._loop = win.requestAnimationFrame(draw);
++			}
++		};
++		this._key = () => {
++			if (this._loop === undefined && this._canvas === canvas) {
++				draw(win.performance.now());
++			}
++		};
++		draw(win.performance.now());
++	}
++
++	private _stopKey(): void {
++		if (this._loop !== undefined && this._canvas) {
++			getWindow(this._canvas).cancelAnimationFrame(this._loop);
++		}
++		this._loop = undefined;
++		this._key = undefined;
++		this._canvas?.remove();
++		this._canvas = undefined;
++		this._video?.classList.remove('fl-companion__keyed');
++		this._img?.classList.remove('fl-companion__keyed');
++	}
++
++	private _playPolicy(): void {
++		const v = this._video;
++		if (v) {
++			if (this._still() || v.ownerDocument.visibilityState === 'hidden') {
++				v.pause();
++			} else {
++				v.play().catch(() => { /* an undecodable file also fires 'error', which falls back */ });
++			}
++		}
++		this._key?.();
++	}
++
++	private _clearTimer(): void {
++		if (this._frameTimer !== undefined) {
++			getWindow(this.element).clearTimeout(this._frameTimer);
++			this._frameTimer = undefined;
++		}
++	}
++}
++
++/** A small copy of the source's current frame, or undefined when it can't be read. */
++function sampleFrame(source: HTMLImageElement | HTMLVideoElement): ICompanionFrame | undefined {
++	try {
++		const canvas = source.ownerDocument.createElement('canvas');
++		canvas.width = canvas.height = SAMPLE_SIZE;
++		const ctx = canvas.getContext('2d', { willReadFrequently: true });
++		if (!ctx) {
++			return undefined;
++		}
++		ctx.drawImage(source, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
++		const { data, width, height } = ctx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
++		return { data, width, height };
++	} catch {
++		return undefined;
++	}
++}
 +
 +class CompanionContribution extends Disposable implements IWorkbenchContribution {
 +	static readonly ID = 'workbench.contrib.friedliverCompanion';
 +
 +	private readonly _queue = new CompanionQueue();
++	private readonly _videos: CompanionVideos;
 +	private readonly _view = this._register(new DisposableStore());
 +	private _root: HTMLElement | undefined;
 +	/** The item on screen, which may be leaving while the queue already moved on. */
@@ -65,6 +361,7 @@ index 0000000..5f326fd
 +		@ICommandService private readonly _commands: ICommandService,
 +	) {
 +		super();
++		this._videos = this._register(new CompanionVideos(key => this._commands.executeCommand('friedliver.agents.companionMediaFailed', key)));
 +		instance = this;
 +		this._register({ dispose: () => { instance = undefined; this._root?.remove(); } });
 +		for (const call of early.splice(0)) {
@@ -78,6 +375,9 @@ index 0000000..5f326fd
 +
 +	show(raw: unknown): void {
 +		const item = parseCompanionItem(raw);
++		// The bytes are kept even for an id already queued: they come once, with the first ask that uses them.
++		this._videos.take(item?.video);
++		this._videos.take(item?.videoRun);
 +		if (item && this._queue.show(item)) {
 +			this._sync();
 +		}
@@ -132,13 +432,8 @@ index 0000000..5f326fd
 +		clearNode(root);
 +		root.className = 'fl-companion';
 +
-+		const character = append(root, $<HTMLImageElement>('img.fl-companion__character'));
-+		character.alt = '';
-+		character.setAttribute('aria-hidden', 'true');
-+		character.draggable = false;
-+		if (!item.character) {
-+			character.classList.add('fl-companion__character--none');
-+		}
++		const view = new CharacterView(root, item, this._videos, this._view, () => this._reducedMotion());
++		const character = view.element;
 +
 +		const bubble = append(root, $('.fl-companion__bubble'));
 +		bubble.setAttribute('role', 'region');
@@ -184,29 +479,17 @@ index 0000000..5f326fd
 +			if (this._shown !== item) {
 +				return;
 +			}
-+			if (item.character) {
-+				character.src = item.character;
-+			}
++			view.show('idle');
 +			root.classList.remove('fl-companion--running');
 +			root.classList.add('fl-companion--here');
 +			this._armedAt = Date.now() + ARM_MS;
 +		};
-+		if (this._reducedMotion() || !item.character) {
-+			if (item.character) {
-+				character.src = item.character;
-+			}
++		if (this._reducedMotion() || view.empty) {
 +			root.classList.add('fl-companion--fade');
 +			settle();
 +			return;
 +		}
-+		character.src = item.characterRun ?? item.character;
-+		if (item.characterRun) {
-+			this._view.add(addDisposableListener(character, EventType.ERROR, () => {
-+				if (character.src !== item.character) {
-+					character.src = item.character;
-+				}
-+			}));
-+		}
++		view.show('run');
 +		root.classList.add('fl-companion--running');
 +		this._view.add(addDisposableListener(character, 'animationend', (e: AnimationEvent) => {
 +			if (e.animationName === 'fl-companion-run') {
@@ -285,10 +568,10 @@ index 0000000..5f326fd
 +});
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
 new file mode 100644
-index 0000000..61882dc
+index 0000000..69fed8d
 --- /dev/null
 +++ b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,247 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0310): the companion's rules, kept free of imports so tests can run them.
 + *  What an item from the Agents extension may hold, and the queue: one shown, the rest counted,
@@ -303,6 +586,18 @@ index 0000000..61882dc
 +	readonly kind: CompanionChoiceKind;
 +}
 +
++/** A video character. Its bytes come once (the first ask that uses it); later asks name it by key. */
++export interface ICompanionVideo {
++	/** The file's path, size and time: a changed file is a new key. */
++	readonly key: string;
++	readonly type: CompanionVideoType;
++	readonly bytes?: Uint8Array;
++}
++
++export type CompanionVideoType = 'video/webm' | 'video/mp4' | 'video/quicktime';
++const VIDEO_TYPES: readonly string[] = ['video/webm', 'video/mp4', 'video/quicktime'];
++export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
++
 +export interface ICompanionItem {
 +	readonly id: string;
 +	readonly chatId: string;
@@ -314,6 +609,9 @@ index 0000000..61882dc
 +	/** A data: image URI, or '' for none. */
 +	readonly character: string;
 +	readonly characterRun?: string;
++	/** A video for the corner (and the run, when there is no run video); the pictures are its fallback. */
++	readonly video?: ICompanionVideo;
++	readonly videoRun?: ICompanionVideo;
 +}
 +
 +const MAX_TEXT = 2_000;
@@ -327,6 +625,29 @@ index 0000000..61882dc
 +
 +export function isCompanionImage(v: unknown): v is string {
 +	return typeof v === 'string' && IMAGE.test(v);
++}
++
++/** Bytes as sent: a Uint8Array, or a VSBuffer (which holds one in `buffer`) after the extension host's IPC. */
++function bytesOf(v: unknown): Uint8Array | undefined {
++	const b = v instanceof Uint8Array ? v : v && typeof v === 'object' && (v as { buffer?: unknown }).buffer instanceof Uint8Array ? (v as { buffer: Uint8Array }).buffer : undefined;
++	return b && b.byteLength > 0 && b.byteLength <= MAX_VIDEO_BYTES ? b : undefined;
++}
++
++/** A video reference, null when present but malformed (the whole item is refused), undefined when absent. */
++export function parseCompanionVideo(raw: unknown): ICompanionVideo | undefined | null {
++	if (raw === undefined) {
++		return undefined;
++	}
++	const r = raw && typeof raw === 'object' ? raw as Record<string, unknown> : undefined;
++	const key = id(r?.key), type = r?.type;
++	if (!key || typeof type !== 'string' || !VIDEO_TYPES.includes(type)) {
++		return null;
++	}
++	if (r!.bytes === undefined) {
++		return { key, type: type as CompanionVideoType };
++	}
++	const bytes = bytesOf(r!.bytes);
++	return bytes ? { key, type: type as CompanionVideoType, bytes } : null;
 +}
 +
 +/** The item, or undefined when anything in it is not what the companion shows. */
@@ -357,7 +678,22 @@ index 0000000..61882dc
 +		return undefined;
 +	}
 +	const characterRun = isCompanionImage(r.characterRun) ? r.characterRun : undefined;
-+	return { id: itemId, chatId, agentLabel, chatTitle, question, ...(detail ? { detail } : {}), choices, character, ...(characterRun ? { characterRun } : {}) };
++	const video = parseCompanionVideo(r.video), videoRun = parseCompanionVideo(r.videoRun);
++	if (video === null || videoRun === null) {
++		return undefined;
++	}
++	return { id: itemId, chatId, agentLabel, chatTitle, question, ...(detail ? { detail } : {}), choices, character, ...(characterRun ? { characterRun } : {}), ...(video ? { video } : {}), ...(videoRun ? { videoRun } : {}) };
++}
++
++/**
++ * What the character shows in each phase, best first: on the run, the run video, the corner video,
++ * the run picture, the picture; in the corner, the video, then the picture. A video that failed or
++ * never arrived is passed over (`playable`), so the agent's built-in picture stands in.
++ */
++export function characterSources(item: ICompanionItem, phase: 'run' | 'idle', playable: (v: ICompanionVideo) => boolean): ({ video: ICompanionVideo } | { image: string })[] {
++	const videos = (phase === 'run' ? [item.videoRun, item.video] : [item.video]).filter((v): v is ICompanionVideo => !!v && playable(v));
++	const images = (phase === 'run' ? [item.characterRun, item.character] : [item.character]).filter((i): i is string => !!i);
++	return [...videos.map(video => ({ video })), ...images.map(image => ({ image }))];
 +}
 +
 +/** Waiting items in arrival order. The first is the one shown; the others are the "+N". */
@@ -405,6 +741,82 @@ index 0000000..61882dc
 +	offers(itemId: string, choiceId: string): boolean {
 +		const c = this.current;
 +		return !!c && c.id === itemId && c.choices.some(x => x.id === choiceId);
++	}
++}
++
++// ---- How a character sits in the corner, decided once per clip or picture from its first frames ----
++
++/** RGBA pixels, as a canvas's getImageData gives them. */
++export interface ICompanionFrame {
++	readonly data: Uint8ClampedArray;
++	readonly width: number;
++	readonly height: number;
++}
++
++/**
++ * - alpha: it has real transparency at its edges (VP9-alpha webm, a cut-out GIF/WebP/SVG): it floats.
++ * - key: opaque, but its border is one flat colour (a green screen, a plain wall): that colour is keyed out and it floats.
++ * - frame: anything else (a busy background): it sits in the rounded portal.
++ */
++export type CompanionFrameVerdict = { readonly kind: 'alpha' } | { readonly kind: 'key'; readonly color: readonly [number, number, number] } | { readonly kind: 'frame' };
++
++/** The pixels on a frame's outer ring (one pixel in from the edge, so a stray encoder border doesn't count). */
++function ring(f: ICompanionFrame): number[] {
++	const out: number[] = [];
++	const inset = f.width > 4 && f.height > 4 ? 1 : 0;
++	const x0 = inset, y0 = inset, x1 = f.width - 1 - inset, y1 = f.height - 1 - inset;
++	const at = (x: number, y: number) => out.push((y * f.width + x) * 4);
++	for (let x = x0; x <= x1; x++) {
++		at(x, y0);
++		at(x, y1);
++	}
++	for (let y = y0 + 1; y < y1; y++) {
++		at(x0, y);
++		at(x1, y);
++	}
++	return out;
++}
++
++/** Edge alpha below this is transparent. */
++const CLEAR_ALPHA = 16;
++/** A border pixel this close (RGB distance) to the border's mean colour counts as that colour. */
++const FLAT_DISTANCE = 40;
++
++export function frameVerdict(frames: readonly ICompanionFrame[]): CompanionFrameVerdict {
++	const usable = frames.filter(f => f.width > 0 && f.height > 0 && f.data.length >= f.width * f.height * 4);
++	if (!usable.length) {
++		return { kind: 'frame' };
++	}
++	const first = usable[0];
++	const edge = ring(first);
++	if (edge.filter(i => first.data[i + 3] < CLEAR_ALPHA).length >= edge.length / 2) {
++		return { kind: 'alpha' };
++	}
++	const samples: [number, number, number][] = [];
++	for (const f of usable) {
++		for (const i of ring(f)) {
++			samples.push([f.data[i], f.data[i + 1], f.data[i + 2]]);
++		}
++	}
++	const mean = [0, 1, 2].map(c => samples.reduce((a, s) => a + s[c], 0) / samples.length) as [number, number, number];
++	const near = samples.filter(s => Math.hypot(s[0] - mean[0], s[1] - mean[1], s[2] - mean[2]) <= FLAT_DISTANCE).length;
++	return near >= samples.length * 0.9 ? { kind: 'key', color: [Math.round(mean[0]), Math.round(mean[1]), Math.round(mean[2])] } : { kind: 'frame' };
++}
++
++/** Keys `color` out of RGBA pixels in place: soft edges between `inner` and `outer` (RGB distance), spill pulled back there. */
++export function chromaKey(data: Uint8ClampedArray, color: readonly [number, number, number], inner = 48, outer = 110): void {
++	const [kr, kg, kb] = color;
++	// Spill suppression only for a coloured screen: on a grey wall there is no one channel to pull back.
++	const dominant = Math.max(kr, kg, kb) - Math.min(kr, kg, kb) > 60 ? [kr, kg, kb].indexOf(Math.max(kr, kg, kb)) : -1;
++	for (let i = 0; i < data.length; i += 4) {
++		const d = Math.hypot(data[i] - kr, data[i + 1] - kg, data[i + 2] - kb);
++		const a = d <= inner ? 0 : d >= outer ? 1 : (d - inner) / (outer - inner);
++		data[i + 3] = Math.round(data[i + 3] * a);
++		// The soft edge is where the screen's colour bleeds in: its dominant channel goes no higher than the others.
++		if (dominant >= 0 && a > 0 && a < 1) {
++			const others = [0, 1, 2].filter(c => c !== dominant).map(c => data[i + c]);
++			data[i + dominant] = Math.min(data[i + dominant], Math.max(others[0], others[1]));
++		}
 +	}
 +}
 diff --git a/src/vs/workbench/workbench.desktop.main.ts b/src/vs/workbench/workbench.desktop.main.ts

@@ -1335,9 +1335,42 @@
 	bottom: 0;
 	width: calc(3.5 * var(--fl-h-xl));
 	height: calc(3.5 * var(--fl-h-xl));
-	object-fit: contain;
 	transform: translate(-30%, 30%);
 	user-select: none;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character > img,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character > video,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character > canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+/* Until its first frames say how it sits (floating cut-out, keyed, or framed). */
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--pending {
+	visibility: hidden;
+}
+
+/* The keyed canvas shows; its source keeps playing underneath, unseen. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character > .fl-companion__keyed {
+	opacity: 0;
+}
+
+/* A clip or picture with a busy background: a rounded portal peeking from the corner. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--portal {
+	overflow: hidden;
+	border: var(--fl-line) solid var(--fl-hairline);
+	border-radius: var(--fl-r-dialog);
+	background: var(--fl-bg);
+	box-shadow: var(--fl-rim), var(--fl-elev-2);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--portal > img,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--portal > video {
+	object-fit: cover;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--none {
