@@ -129,12 +129,24 @@ describe('full-auto guards and the chosen shell', () => {
       'rundll32 a.dll,Run',
       'IEX $s',
       'Invoke-Expression $s',
+      'ii a.lnk',
+      'Invoke-Item a.exe',
+      'icm -ScriptBlock {ls}',
+      'Invoke-Command -FilePath a.ps1',
+      'sajb {ls}',
+      'Start-Job {ls}',
+      'Start-ThreadJob {ls}',
+      'installutil a.dll',
+      'msbuild evil.proj',
     ]) {
       expect(commandGuard(line, new Set(), true, true), line).toMatch(/Full auto still asks/);
     }
     expect(commandGuard('npm start', new Set(), true, true)).toBeUndefined();
     expect(commandGuard('git status', new Set(), true, true)).toBeUndefined();
-    expect(commandGuard('Start-Process a.exe', new Set(), false, true)).toBeUndefined();
+    // Rule-based auto-approval asks too, not only Full auto.
+    expect(commandGuard('Start-Process a.exe', new Set(), false, true)).toMatch(/Full auto still asks/);
+    expect(commandGuard('msbuild x.proj', new Set(), false, false)).toBeUndefined();
+    expect(commandGuard('Invoke-Item new.exe', new Set(['new.exe']))).toMatch(/new\.exe/);
   });
 
   it('asks when a line sets a startup variable, or points a variable at a fresh file', () => {
@@ -142,9 +154,18 @@ describe('full-auto guards and the chosen shell', () => {
       expect(commandGuard(line, new Set()), line).toMatch(/startup/);
     }
     expect(commandGuard('MYENV=1 make', new Set())).toBeUndefined();
+    // On Full auto, any mention at all asks, in any form.
+    for (const line of ['ls; Get-Item Env:NODE_OPTIONS', 'read BASH_ENV', 'export -n PERL5OPT', 'printenv RUBYOPT', 'set -a; LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'git -c core.x GIT_SSH_COMMAND', 'unset ENV', '$env:pythonstartup']) {
+      expect(commandGuard(line, new Set(), true), line).toMatch(/startup/);
+    }
+    expect(commandGuard('env FOO=1 make', new Set(), true)).toBeUndefined();
+    expect(commandGuard('NODE_OPTIONSX=1 make', new Set(), true)).toBeUndefined();
     expect(commandGuard('LD_PRELOAD=./evil.so ls', new Set(['evil.so']))).toMatch(/evil\.so/);
     expect(commandGuard("$env:X = 'C:\\t\\evil.dll'; ls", new Set(['evil.dll']))).toMatch(/evil\.dll/);
     expect(commandGuard('X=fine ls', new Set(['evil.so']))).toBeUndefined();
+    for (const line of ['NODE_PATH=/a:/tmp/evil.so make', 'X="a b,c;./evil.so" ls', 'OPTS=--require=evil.so ls', 'P5=-Mevil.so perl', "X='C:\\a\\evil.so' ls"]) {
+      expect(commandGuard(line, new Set(['evil.so'])), line).toMatch(/evil\.so/);
+    }
   });
 });
 

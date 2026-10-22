@@ -96,7 +96,7 @@ export class FileTrail {
 
 /** Programs that run (or make runnable) the file they are given. */
 const RUNNERS = new Set(
-  'cp mv ln rsync sh bash zsh dash ksh fish csh tcsh source . exec eval python python2 python3 node deno bun tsx ts-node ruby perl php pwsh powershell osascript open java chmod xattr install'.split(' '),
+  'cp mv ln rsync sh bash zsh dash ksh fish csh tcsh source . exec eval python python2 python3 node deno bun tsx ts-node ruby perl php pwsh powershell osascript open java chmod xattr install ii invoke-item'.split(' '),
 );
 /** Words before the program: `sudo env FOO=1 nohup ./x`. */
 const PREFIX = new Set('sudo doas env nohup time nice command builtin xargs'.split(' '));
@@ -145,12 +145,23 @@ const PIPE_TO_SHELL = new RegExp(
  * way, and PowerShell takes any unique parameter prefix (-OutF, -o), so under PowerShell a line
  * naming any of these simply asks. `start` counts only as a command, not `npm start`.
  */
-const PS_FETCH_OR_RUN = /(?:^|[^\w-])(?:iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|curl|wget|certutil|bitsadmin|start-process|saps|msiexec|rundll32|mshta|regsvr32|cscript|wscript|iex|invoke-expression)(?:\.exe)?(?![\w-])|(?:^|[;&|\n({]\s*)start(?:\.exe)?(?![\w-])/i;
+const PS_FETCH_OR_RUN = /(?:^|[^\w-])(?:iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|curl|wget|certutil|bitsadmin|start-process|saps|msiexec|rundll32|mshta|regsvr32|cscript|wscript|iex|invoke-expression|ii|invoke-item|icm|invoke-command|sajb|start-job|start-threadjob|installutil|msbuild)(?:\.exe)?(?![\w-])|(?:^|[;&|\n({]\s*)start(?:\.exe)?(?![\w-])/i;
 
 /** Variables that make a shell or runtime load code: set in a line, they can turn any later program into anything. */
 const STARTUP_VAR = /(?:^|[^\w$])(?:\$env:)?(BASH_ENV|ENV|NODE_OPTIONS|PYTHONSTARTUP|PROMPT_COMMAND)\s*=/i;
-/** `NAME=value` and `$env:NAME = 'value'` assignments: the value, quotes dropped. */
-const ASSIGNED = /(?:\$env:)?\b[A-Za-z_]\w*\s*=\s*['"]?([^\s'";&|]+)/g;
+/** On Full auto, any mention of these at all asks (read, export -n, Env:, -v ...). Bare ENV only in capitals, so `env` the program passes. */
+const STARTUP_NAME = /(?<!\w)(?:BASH_ENV|NODE_OPTIONS|PYTHONSTARTUP|PROMPT_COMMAND|PERL5OPT|RUBYOPT|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND)(?!\w)/i;
+const STARTUP_ENV = /(?<!\w)ENV(?![\w:])/;
+/** `NAME=value` and `$env:NAME = 'value'` assignments: the whole value, quoted or not. */
+const ASSIGNED = /(?:\$env:)?\b[A-Za-z_]\w*\s*=\s*('[^']*'|"[^"]*"|[^\s;&|]+)/g;
+/** Every file an assigned value could name: split at path and list separators, option prefixes (--x=, -M) dropped. */
+const valueFiles = (value: string) =>
+  value
+    .replace(/^['"]|['"]$/g, '')
+    .split(/[\s,;]+/)
+    .map((e) => e.replace(/^--?[\w-]*=/, '').replace(/^-[A-Za-z](?=.)/, ''))
+    .flatMap((e) => e.split(/[\\/:]+/))
+    .filter(Boolean);
 
 /** Without quoted strings, for checks that only count what the shell itself reads. */
 const unquoted = (line: string) => line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
@@ -188,10 +199,12 @@ export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto 
   if (INSTALL.test(line)) return `${STILL_ASKS}: the command installs or fetches packages`;
   const startup = STARTUP_VAR.exec(line);
   if (startup) return `${STILL_ASKS}: the command sets ${startup[1]}, a startup variable that makes programs load other code`;
-  if (fullAuto && powershell && PS_FETCH_OR_RUN.test(line)) return `${STILL_ASKS}: the command downloads or starts other code in PowerShell`;
+  const named = fullAuto ? (STARTUP_NAME.exec(line) ?? STARTUP_ENV.exec(line)) : null;
+  if (named) return `${STILL_ASKS}: the command names ${named[0]}, a startup variable that makes programs load other code`;
+  if (powershell && PS_FETCH_OR_RUN.test(line)) return `${STILL_ASKS}: the command downloads or starts other code in PowerShell`;
   for (const [, value] of line.matchAll(ASSIGNED)) {
-    const name = value.split(/[\\/]/).pop() ?? '';
-    if (fresh.has(name)) return `${STILL_ASKS}: the command points a variable at ${name}, a file this chat just downloaded or wrote`;
+    const hit = valueFiles(value).find((f) => fresh.has(f));
+    if (hit) return `${STILL_ASKS}: the command points a variable at ${hit}, a file this chat just downloaded or wrote`;
   }
   const why = fullAuto ? unclear(line, powershell) : undefined;
   if (why) return `${STILL_ASKS}: ${why}, so FriedLiver can't check what the command runs`;
@@ -201,7 +214,7 @@ export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto 
     while (i < words.length - 1 && (PREFIX.has(words[i]) || /^\w+=/.test(words[i]) || (words[i].startsWith('-') && i > 0))) i++;
     const prog = words[i];
     const named = (w: string) => fresh.has(path.basename(w));
-    const hit = named(prog) ? prog : RUNNERS.has(path.basename(prog)) ? words.slice(i + 1).find(named) : undefined;
+    const hit = named(prog) ? prog : RUNNERS.has(path.basename(prog).toLowerCase()) ? words.slice(i + 1).find(named) : undefined;
     if (hit) return `${STILL_ASKS}: the command runs ${path.basename(hit)}, a file this chat just downloaded or wrote`;
   }
   return undefined;
