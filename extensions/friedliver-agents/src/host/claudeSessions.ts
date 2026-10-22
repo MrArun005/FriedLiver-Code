@@ -6,12 +6,14 @@
 //
 // Transcripts grow to tens of MB, so each is read once and then only what was appended:
 // a file's parse state is kept with the offset it got to.
-import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { OutsideImage, OutsideImages } from '../shared/gallery';
 import type { ClaudeSession, ClaudeSubagent } from '../shared/messages';
 import { humanTitle } from '../shared/stepImages';
 import { claudeColumn, claudeSubagents } from '../shared/view';
+import { insideRoots, realPath } from './paths';
+import { isSensitive } from './permissions';
 
 const SESSION_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const AGENT_META = /^agent-([0-9a-z]+)\.meta\.json$/i;
@@ -530,7 +532,7 @@ async function list({ home, folders, skip, limit, showAll = false, now = Date.no
   return [...out.filter((s) => !s.archived), ...out.filter((s) => s.archived)];
 }
 
-// ---- Images: what a session's Read and screenshot tools looked at ----
+// ---- Images: what a session's tools looked at, took and made ----
 
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const SCREENSHOT_TOOL = /screenshot/i;
@@ -538,27 +540,56 @@ const SCREENSHOT_TOOL = /screenshot/i;
 const SAVED = [/^Saved to (.+?\.(?:png|jpe?g|gif|webp))\. /m, /\]\(([^)\s]+?\.(?:png|jpe?g|gif|webp))\)/, /save it as (\S+?\.(?:png|jpe?g|gif|webp))\b/];
 /** Bytes of a transcript read for images the first time; later reads take only what was appended. */
 const MAX_SCAN = 64 * 1024 * 1024;
+/** A path to a raster image in a command or its output: no spaces, globs, braces or placeholders. */
+const IMAGE_PATH = /(?<![\w./~@+*{}<>-])(~?[\w./@+-]*\.(?:png|jpe?g|gif|webp))(?![\w.-])/gi;
+const HAS_IMAGE = /\.(?:png|jpe?g|gif|webp)\b/i;
+/** Tools that find files rather than make them: the images their results name, nobody made. */
+const FINDERS = new Set(['Read', 'Glob', 'Grep', 'LS']);
+/** Characters of one tool input or result looked at, paths taken from one, and made-image candidates per transcript. */
+const MAX_TEXT = 64 * 1024;
+const MAX_PER_TEXT = 50;
+const MAX_MADE = 500;
 
 type ImageLine = { timestamp?: string; message?: { content?: string | (Block & { input?: Record<string, unknown>; content?: unknown })[] } };
 
+const resultText = (c: unknown) =>
+  typeof c === 'string' ? c : Array.isArray(c) ? c.map((x: Block) => (x?.type === 'text' ? (x.text ?? '') : '')).join('\n') : '';
+
+/** The image paths named in `text` (its first MAX_TEXT characters), at most MAX_PER_TEXT. */
+export function imagePaths(text: string): string[] {
+  return [...text.slice(0, MAX_TEXT).matchAll(IMAGE_PATH)].slice(0, MAX_PER_TEXT).map((m) => m[1]);
+}
+
 /**
  * Reads a transcript's lines for images, a piece at a time as it grows: a Read
- * of an image file, and the file a screenshot tool saved (from its input's
- * filename, or the path its result names). Relative paths are the session's
- * folder's. Each file once, the first time it shows.
+ * of an image file, the file a screenshot tool saved (from its input's
+ * filename, or the path its result names), and images made: a Write of one,
+ * or a path a command's input or output names (`made`: listClaudeImages keeps
+ * those only when the file exists). Relative paths are the session's folder's.
+ * Each file once, the first time it shows.
  */
 export class ImageScan {
   readonly images: OutsideImage[] = [];
+  /** Paths found by name only (a Write, a command, its output): shown only while the file is there. */
+  readonly made = new Set<string>();
   private readonly seen = new Set<string>();
   /** Screenshot calls waiting for their result: id → when. */
   private readonly pending = new Map<string, number>();
-  constructor(private readonly cwd: string) {}
+  /** Other calls (not finders) waiting for their result, which may name images they saved. */
+  private readonly running = new Set<string>();
+  constructor(
+    private readonly cwd: string,
+    private readonly home = '',
+  ) {}
 
   feed(text: string): void {
     for (const line of text.split('\n')) {
       // Most lines are neither; a quick look first spares parsing them (some are megabytes of base64).
       const use = line.includes('"tool_use"');
-      const result = !use && this.pending.size > 0 && line.includes('"tool_result"') && [...this.pending.keys()].some((id) => line.includes(id));
+      const result =
+        !use &&
+        line.includes('"tool_result"') &&
+        ((this.pending.size > 0 && [...this.pending.keys()].some((id) => line.includes(id))) || (this.running.size > 0 && HAS_IMAGE.test(line)));
       if (!use && !result) continue;
       let o: ImageLine;
       try {
@@ -572,51 +603,80 @@ export class ImageScan {
         if (b.type === 'tool_use' && b.id && b.name) {
           const file = b.input?.file_path ?? b.input?.filename;
           if (b.name === 'Read' && typeof file === 'string') this.add(file, humanTitle(file), 'read', at);
+          else if (b.name === 'Write' && typeof file === 'string') this.add(file, humanTitle(file), 'created', at, true);
           else if (SCREENSHOT_TOOL.test(b.name)) {
             if (typeof file === 'string') this.add(file, humanTitle(file), 'screenshot', at);
             else this.pending.set(b.id, at);
+          } else if (!FINDERS.has(b.name)) {
+            // A command that saves an image: `node shots.mjs -o out/a.png`, `--path …png`.
+            for (const v of Object.values(b.input ?? {})) if (typeof v === 'string') for (const f of imagePaths(v)) this.add(f, humanTitle(f), 'created', at, true);
+            this.running.add(b.id);
           }
         } else if (b.type === 'tool_result' && b.tool_use_id && this.pending.has(b.tool_use_id)) {
           const when = this.pending.get(b.tool_use_id)!;
           this.pending.delete(b.tool_use_id);
-          const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((c: Block) => (c.type === 'text' ? (c.text ?? '') : '')).join('\n') : '';
+          const text = resultText(b.content);
           const file = SAVED.map((re) => re.exec(text)?.[1]).find(Boolean);
           const title = /^(Screenshot of .+)$/m.exec(text)?.[1] ?? /\[(Screenshot[^\]]*)\]/.exec(text)?.[1];
           if (file) this.add(file, title?.trim() || humanTitle(file), 'screenshot', when);
+        } else if (b.type === 'tool_result' && b.tool_use_id && this.running.delete(b.tool_use_id)) {
+          for (const f of imagePaths(resultText(b.content))) this.add(f, humanTitle(f), 'created', at, true);
         }
       }
     }
   }
 
-  private add(file: string, title: string, source: OutsideImage['source'], at: number): void {
+  private add(file: string, title: string, source: OutsideImage['source'], at: number, made = false): void {
     if (!IMAGE_FILE.test(file) || file.includes('\0')) return;
-    const full = path.resolve(this.cwd, file);
+    if (made && this.made.size >= MAX_MADE) return;
+    const full = this.home && file.startsWith('~/') ? path.join(this.home, file.slice(2)) : path.resolve(this.cwd, file);
     if (this.seen.has(full)) return;
     this.seen.add(full);
+    if (made) this.made.add(full);
     this.images.push({ path: full, title: clipTitle(title), source, at });
   }
 }
 
+/**
+ * Where an outside session's images may be shown from: the workspace folders, ~/code, and the session's own folder
+ * when it is below home (never home itself). Thumbnails of those sessions' images are served from these too.
+ */
+export function outsideRoots(home: string, folders: readonly string[], cwds: readonly string[]): string[] {
+  const below = (d: string) => {
+    const rel = path.relative(home, d);
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  return [...new Set([...folders, path.join(home, 'code'), ...cwds.filter(below)])];
+}
+
+/** Whether `file` is a regular file inside `roots` (symlinks resolved) and not in a sensitive place (home dot folders, ~/Library, system folders). */
+export async function shownFile(file: string, roots: readonly string[], home: string): Promise<boolean> {
+  const inside = insideRoots(file, roots);
+  const real = inside && realPath(inside);
+  if (!real || isSensitive(real, home, [], 'read')) return false;
+  return !!(await stat(real).catch(() => null))?.isFile();
+}
+
 const scans = new Map<string, { size: number; mtime: number; offset: number; scan: ImageScan }>();
 
-/** The images in one transcript file, reading only what it gained since last time (a file that shrank is read again). */
-async function scanFile(file: string, cwd: string): Promise<OutsideImage[]> {
+/** One transcript file's scan, reading only what it gained since last time (a file that shrank is read again). */
+async function scanFile(file: string, cwd: string, home: string): Promise<ImageScan | null> {
   const st = await lstat(file).catch(() => null);
-  if (!st?.isFile()) return [];
+  if (!st?.isFile()) return null;
   let s = scans.get(file);
-  if (s && s.size === st.size && s.mtime === st.mtimeMs) return s.scan.images;
+  if (s && s.size === st.size && s.mtime === st.mtimeMs) return s.scan;
   if (!s || st.size < s.size) {
-    s = { size: 0, mtime: 0, offset: Math.max(0, st.size - MAX_SCAN), scan: new ImageScan(cwd) };
+    s = { size: 0, mtime: 0, offset: Math.max(0, st.size - MAX_SCAN), scan: new ImageScan(cwd, home) };
     scans.set(file, s);
   }
   const fh = await open(file, 'r').catch(() => null);
-  if (!fh) return s.scan.images;
+  if (!fh) return s.scan;
   try {
     // Refreshes overlap: another scan may have read on since this one's lstat, so read from where this one starts and
     // move the offset to where it got, never by what it read (which pushed it past the end of the file).
     const from = s.offset;
     const len = st.size - from;
-    if (len <= 0) return s.scan.images;
+    if (len <= 0) return s.scan;
     const buf = Buffer.alloc(len);
     const { bytesRead } = await fh.read(buf, 0, len, from);
     // Only whole lines: the last may still be being written.
@@ -629,13 +689,14 @@ async function scanFile(file: string, cwd: string): Promise<OutsideImage[]> {
   } finally {
     await fh.close();
   }
-  return s.scan.images;
+  return s.scan;
 }
 
 /**
- * The images the workspace folders' Claude Code sessions read or took, with
+ * The images the workspace folders' Claude Code sessions read, took or made, with
  * their subagents', per session, the most recent sessions first. Sessions
- * FriedLiver's own chats have (`skip`) are left out: those chats show them.
+ * FriedLiver's own chats have (`skip`) are left out: those chats show them. A made
+ * image shows only while its file is there, inside outsideRoots.
  */
 export async function listClaudeImages({ home, folders, skip, limit = 50 }: Pick<ListOptions, 'home' | 'folders' | 'skip' | 'limit'>): Promise<OutsideImages[]> {
   // The sessions the Manager lists (headless runs hidden), and the files that listing checked.
@@ -649,11 +710,13 @@ export async function listClaudeImages({ home, folders, skip, limit = 50 }: Pick
     const realSub = await realpath(subDir).catch(() => null);
     const subs = realSub === subDir ? await readdir(subDir).catch(() => [] as string[]) : [];
     const files = [f.file, ...subs.filter((n) => /^agent-[\w-]+\.jsonl$/.test(n)).map((n) => path.join(subDir, n))];
+    const roots = outsideRoots(home, folders, [s.cwd]);
     const images: OutsideImage[] = [];
     const seen = new Set<string>();
     for (const file of files) {
-      for (const img of await scanFile(file, s.cwd)) {
-        if (seen.has(img.path)) continue;
+      const scan = await scanFile(file, s.cwd, home);
+      for (const img of scan?.images ?? []) {
+        if (seen.has(img.path) || (scan!.made.has(img.path) && !(await shownFile(img.path, roots, home)))) continue;
         seen.add(img.path);
         images.push(img);
       }
