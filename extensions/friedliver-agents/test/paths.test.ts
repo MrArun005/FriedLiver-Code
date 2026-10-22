@@ -47,13 +47,35 @@ describe('workspace containment with real symlinks', () => {
     expect(insideRoots(path.join(ws, 'not', 'yet', 'there.txt'), [ws])).toBe(path.join(ws, 'not', 'yet', 'there.txt'));
   });
 
-  it.skipIf(!DIR_LINKS)('a workspace opened through another name (a link; a Windows 8.3 name) holds paths under its real name', () => {
+  it.skipIf(!DIR_LINKS)('a workspace opened through another name (a link; a Windows 8.3 name) holds paths under its real name, given back in its own', () => {
     const { base, ws, outside } = layout();
     const alias = path.join(base, 'alias');
     link(ws, alias, 'dir');
-    expect(insideRoots(path.join(ws, 'src', 'a.ts'), [alias])).toBe(path.join(ws, 'src', 'a.ts'));
+    // One spelling for every later check: the root's as given.
+    expect(insideRoots(path.join(ws, 'src', 'a.ts'), [alias])).toBe(path.join(alias, 'src', 'a.ts'));
     expect(insideRoots(path.join(outside, 'secret.txt'), [alias])).toBeNull();
     expect(insideRoots(path.join(ws, '..', 'outside', 'secret.txt'), [alias])).toBeNull();
+  });
+
+  it.skipIf(!DIR_LINKS)('.git stays unwritable through the root’s real name and through a link into it', () => {
+    const { base, ws } = layout();
+    fs.mkdirSync(path.join(ws, '.git'));
+    fs.writeFileSync(path.join(ws, '.git', 'config'), '');
+    const alias = path.join(base, 'alias');
+    link(ws, alias, 'dir');
+    // <real root>/.git/config named under the real root while the workspace is the alias: refused.
+    const cfg = insideRoots(path.join(ws, '.git', 'config'), [alias]);
+    expect(cfg).toBe(path.join(alias, '.git', 'config'));
+    expect(inGitFolder(cfg!, [alias])).toBe(true);
+    expect(inGitFolder(path.join(ws, '.git', 'config'), [alias])).toBe(true);
+    // A normal file through the alias: allowed.
+    expect(inGitFolder(insideRoots(path.join(ws, 'src', 'a.ts'), [alias])!, [alias])).toBe(false);
+    // A link into .git: not .git by name, .git where it really is: refused.
+    link(path.join(ws, '.git'), path.join(ws, 'src', 'g'), 'dir');
+    const viaLink = insideRoots(path.join(ws, 'src', 'g', 'config'), [ws]);
+    expect(viaLink).toBe(path.join(ws, 'src', 'g', 'config'));
+    expect(inGitFolder(viaLink!, [ws])).toBe(true);
+    expect(inGitFolder(path.join(ws, 'src', 'g', 'new-hook'), [ws])).toBe(true);
   });
 
   it.skipIf(!DIR_LINKS)('refuses a folder link that leads out of the workspace (a repo with keys -> ~/.ssh)', () => {
