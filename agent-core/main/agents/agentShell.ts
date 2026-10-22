@@ -54,7 +54,8 @@ export const COMMAND_VAR = 'FRIEDLIVER_COMMAND';
 export function shellLaunch(shell: Exclude<AgentShell, { kind: 'sh' }>, line: string): { file: string; args: string[]; env: Record<string, string> } {
   if (shell.kind === 'git-bash') {
     // The line travels in a variable and is eval'd: the fixed -c text is all bash parses from the command line.
-    return { file: shell.file, args: ['-c', `__fl_cmd=$${COMMAND_VAR}; unset ${COMMAND_VAR}; eval "$__fl_cmd"`], env: { [COMMAND_VAR]: line } };
+    // No profile or rc files; BASH_ENV and ENV are dropped from the environment by TerminalManager.
+    return { file: shell.file, args: ['--noprofile', '--norc', '-c', `__fl_cmd=$${COMMAND_VAR}; unset ${COMMAND_VAR}; eval "$__fl_cmd"`], env: { [COMMAND_VAR]: line } };
   }
   // -EncodedCommand is base64 UTF-16LE, so nothing in the line is re-parsed on the way. The exit code
   // is the failing native program's, or 1 for a failed cmdlet, as a POSIX shell would report.

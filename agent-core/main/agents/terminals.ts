@@ -9,6 +9,7 @@ const DEFAULT_OUTPUT_LIMIT = 1_000_000;
 export const MAX_OUTPUT_LIMIT = 16_000_000;
 /** Windows names can hold characters like `(x86)`; no name may hold `=` or NUL. */
 const ENV_NAME = /^[^=\0]+$/;
+const INHERITED_STARTUP = ['BASH_ENV', 'ENV', 'NODE_OPTIONS'];
 
 function outputLimit(requested: number | null | undefined): number {
   if (requested == null || !Number.isFinite(requested)) return DEFAULT_OUTPUT_LIMIT;
@@ -186,7 +187,10 @@ export class TerminalManager {
     for (const v of extraEnv) {
       if (!ENV_NAME.test(v.name) || v.value.includes('\0')) throw new Error(`Refused an invalid environment variable name: ${JSON.stringify(v.name)}`);
     }
+    // Inherited startup variables would load code into every command (BASH_ENV, ENV: the shell;
+    // NODE_OPTIONS: any node). An agent may still set them, and then the user sees them to approve.
     const env = { ...process.env };
+    for (const k of Object.keys(env)) if (INHERITED_STARTUP.includes(k.toUpperCase())) delete env[k];
     for (const v of extraEnv) env[v.name] = v.value;
     // With no args the command is a whole shell line ("npm test"); otherwise quote it too,
     // since a path like C:\Program Files\nodejs\node.exe would split at the space.

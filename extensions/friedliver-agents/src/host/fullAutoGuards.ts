@@ -140,6 +140,18 @@ const PIPE_TO_SHELL = new RegExp(
   'i',
 );
 
+/**
+ * PowerShell programs that fetch or start other code. downloadTargets only reads curl/wget the POSIX
+ * way, and PowerShell takes any unique parameter prefix (-OutF, -o), so under PowerShell a line
+ * naming any of these simply asks. `start` counts only as a command, not `npm start`.
+ */
+const PS_FETCH_OR_RUN = /(?:^|[^\w-])(?:iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|curl|wget|certutil|bitsadmin|start-process|saps|msiexec|rundll32|mshta|regsvr32|cscript|wscript|iex|invoke-expression)(?:\.exe)?(?![\w-])|(?:^|[;&|\n({]\s*)start(?:\.exe)?(?![\w-])/i;
+
+/** Variables that make a shell or runtime load code: set in a line, they can turn any later program into anything. */
+const STARTUP_VAR = /(?:^|[^\w$])(?:\$env:)?(BASH_ENV|ENV|NODE_OPTIONS|PYTHONSTARTUP|PROMPT_COMMAND)\s*=/i;
+/** `NAME=value` and `$env:NAME = 'value'` assignments: the value, quotes dropped. */
+const ASSIGNED = /(?:\$env:)?\b[A-Za-z_]\w*\s*=\s*['"]?([^\s'";&|]+)/g;
+
 /** Without quoted strings, for checks that only count what the shell itself reads. */
 const unquoted = (line: string) => line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
 
@@ -174,6 +186,13 @@ function unclear(line: string, powershell: boolean): string | undefined {
 export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto = false, powershell = false): string | undefined {
   if (PIPE_TO_SHELL.test(line)) return `${STILL_ASKS}: the command pipes a download into a shell`;
   if (INSTALL.test(line)) return `${STILL_ASKS}: the command installs or fetches packages`;
+  const startup = STARTUP_VAR.exec(line);
+  if (startup) return `${STILL_ASKS}: the command sets ${startup[1]}, a startup variable that makes programs load other code`;
+  if (fullAuto && powershell && PS_FETCH_OR_RUN.test(line)) return `${STILL_ASKS}: the command downloads or starts other code in PowerShell`;
+  for (const [, value] of line.matchAll(ASSIGNED)) {
+    const name = value.split(/[\\/]/).pop() ?? '';
+    if (fresh.has(name)) return `${STILL_ASKS}: the command points a variable at ${name}, a file this chat just downloaded or wrote`;
+  }
   const why = fullAuto ? unclear(line, powershell) : undefined;
   if (why) return `${STILL_ASKS}: ${why}, so FriedLiver can't check what the command runs`;
   if (!fresh.size) return undefined;
