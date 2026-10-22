@@ -105,6 +105,11 @@
     },
     "commands": [
       {
+        "command": "friedliver.companion.updateCharacters",
+        "title": "Update Characters",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.links.useBuiltin",
         "title": "Open Links in FriedLiver Browser",
         "category": "FriedLiver"
@@ -1024,6 +1029,35 @@
           "type": "boolean",
           "default": true,
           "description": "Show a notification with buttons when an agent waits for you and its chat isn't on screen or the window isn't focused."
+        },
+        "friedliver.companion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent in any chat waits for you (a permission, a command, an edit to review, a question), a character runs in along the bottom of the window to the middle and asks in a card beside it, with the answer buttons. Careful requests and plans are answered in the chat."
+        },
+        "friedliver.companion.characters": {
+          "type": "object",
+          "scope": "machine",
+          "default": { "claude": "jas", "codex": "bolt", "gemini": "owl", "antigravity": "thunder", "copilot": "fox", "opencode": "panda" },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "object", "properties": { "idle": { "type": "string" }, "run": { "type": "string" } }, "required": ["idle"], "additionalProperties": false }
+            ]
+          },
+          "markdownDescription": "The character each agent sends, by agent id. A value is a built-in name (`jas`, `bolt`, `owl`, `thunder`, `fox`, `panda`, `smash`, `skip`), a local file of your own, or `{ \"idle\": file, \"run\": file }` with a run-in too (one file is used for both). Pictures: `.svg`, `.png`, `.gif`, `.webp` up to 5 MB. Short videos: `.webm`, `.mp4`, `.m4v`, `.mov` up to 20 MB, played muted and looping; FriedLiver can't decode H.264/HEVC, so prefer `.webm` (VP9, with alpha for a cut-out). Paths are absolute or start with `~`; no web addresses. A clip or picture with transparency or a flat-coloured background floats (the colour is keyed out); a busy background sits in a rounded frame. Anything that doesn't load or play falls back to the built-in character. Read from your user settings only.\n\nExample: `{ \"claude\": \"~/Pictures/cat.png\", \"codex\": \"~/FriedLiverCharacters/codex.webm\", \"gemini\": { \"idle\": \"~/Pictures/owl.webp\", \"run\": \"~/Pictures/owl-run.gif\" } }`"
+        },
+        "friedliver.companion.folder": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "A folder of your own characters, checked after your `characters` entries and before the repository: `<folder>/<agent id>` with `.svg`, `.png`, `.gif`, `.webp` (up to 5 MB) or `.webm`, `.mp4`, `.m4v`, `.mov` (up to 20 MB; `.webm` VP9 plays best), and `<agent id>-run.*` for the run-in. Read from your user settings only.\n\nExample: `~/FriedLiverCharacters` holding `codex.webm`, `claude.png` and `claude-run.gif`."
+        },
+        "friedliver.companion.repo": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "A git repository of your own characters, so they follow you to every machine. FriedLiver keeps a shallow clone and pulls it at startup, every 6 hours and on **FriedLiver: Update Characters**. Its root holds `<agent id>.*` and `<agent id>-run.*`, the same files and limits as the folder setting. A private repository works through your existing git sign-in (credential helper, `gh auth`, or ssh key); FriedLiver never asks for or stores a token. Only `https://`, `ssh://` and `git@` addresses. Order: your `characters` entry, then the folder, then this repository, then the built-in character. Read from your user settings only.\n\nExample: `https://github.com/MrArun005/friedliver-characters`"
         },
         "friedliver.notify.finished": {
           "type": "boolean",

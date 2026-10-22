@@ -44,7 +44,7 @@ index b9cea60d..bb4c568e 100644
  	}
  
  	const isGeneratingCache = process.env['VSCODE_GENERATE_NODE_COMPILE_CACHE'] === '1';
-@@ -132,6 +127,44 @@ export function enableNodeCompileCache(kind: NodeCompileCacheKind): boolean {
+@@ -132,6 +127,45 @@ export function enableNodeCompileCache(kind: NodeCompileCacheKind): boolean {
  	return isGeneratingCache;
  }
  
@@ -81,7 +81,8 @@ index b9cea60d..bb4c568e 100644
 +	// Node writes the cache only when the process exits normally; utility processes are often
 +	// killed at shutdown, so write what startup compiled once it is over.
 +	if (status === 'enabled') {
-+		setNodeTimeout(() => flushCompileCache(), 20_000).unref();
++		// src's typings make timers a TimeoutHandle; at runtime this is Node's Timeout.
++		(setNodeTimeout(() => flushCompileCache(), 20_000) as unknown as { unref(): void }).unref();
 +	}
 +	return false;
 +}
