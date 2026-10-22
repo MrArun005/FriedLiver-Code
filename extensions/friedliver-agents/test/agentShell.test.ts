@@ -162,6 +162,13 @@ describe('full-auto guards and the chosen shell', () => {
     for (const name of ['BASH_ENV', 'ENV', 'NODE_OPTIONS', 'PYTHONSTARTUP', 'PROMPT_COMMAND', 'PERL5OPT', 'PERL5LIB', 'RUBYOPT', 'RUBYLIB', 'PYTHONPATH', 'NODE_PATH', 'JAVA_TOOL_OPTIONS', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'GIT_SSH_COMMAND']) {
       expect(commandGuard(`echo x; read ${name}`, new Set(), false), name).toMatch(/startup/);
     }
+    // Families by prefix.
+    for (const name of ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_EXEC_PATH', 'GIT_EXTERNAL_DIFF', 'GIT_SSH', 'PYTHONHOME', 'PERLLIB', 'PERL5OPT', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS', 'ZDOTDIR']) {
+      expect(commandGuard(`${name}=x make`, new Set(), false), name).toMatch(/startup/);
+    }
+    for (const line of ['GIT_AUTHOR_NAME=x git commit', 'PYTHONUNBUFFERED=1 python a.py', 'NODE_ENV=test npm test', 'echo OLD_PRELOAD']) {
+      expect(commandGuard(line, new Set(), false), line).toBeUndefined();
+    }
     expect(commandGuard('env FOO=1 make', new Set(), true)).toBeUndefined();
     expect(commandGuard('NODE_OPTIONSX=1 make', new Set(), true)).toBeUndefined();
     expect(commandGuard('X=./evil.so ls', new Set(['evil.so']))).toMatch(/evil\.so/);

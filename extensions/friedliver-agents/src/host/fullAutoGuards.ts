@@ -149,7 +149,8 @@ const PS_FETCH_OR_RUN = /(?:^|[^\w-])(?:iwr|irm|invoke-webrequest|invoke-restmet
 
 /** Variables that make a shell or runtime load code: named anywhere in a line, in any mode, it asks. */
 // Any form counts: NAME=, export, read, -v, $env:, Env:. Bare ENV only in capitals, so `env` the program passes.
-const STARTUP_NAME = /(?<!\w)(?:BASH_ENV|NODE_OPTIONS|NODE_PATH|PYTHONSTARTUP|PYTHONPATH|PROMPT_COMMAND|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND)(?!\w)/i;
+const STARTUP_NAME =
+  /(?<!\w)(?:LD_\w+|DYLD_\w+|GIT_(?:CONFIG\w*|EXEC_PATH|EXTERNAL_DIFF|SSH\w*)|PYTHON(?:STARTUP|PATH|HOME)|PERL\w*(?:LIB|OPT)|RUBY(?:LIB|OPT)|(?:JDK_JAVA|_JAVA|JAVA_TOOL)_OPTIONS|NODE_(?:OPTIONS|PATH)|BASH_ENV|ZDOTDIR|PROMPT_COMMAND)(?!\w)/i;
 const STARTUP_ENV = /(?<!\w)ENV(?![\w:])/;
 /** `NAME=value` and `$env:NAME = 'value'` assignments: the whole value, quoted or not. */
 const ASSIGNED = /(?:\$env:)?\b[A-Za-z_]\w*\s*=\s*('[^']*'|"[^"]*"|[^\s;&|]+)/g;
