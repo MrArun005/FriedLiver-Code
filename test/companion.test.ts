@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { writePatchedFile } from './patchedFile';
+import { newFileFromPatch, writePatchedFile } from './patchedFile';
 
 // The companion's rules (patch 0310): what an item from the Agents extension may hold, and the queue.
 const PATCH = '0310-companion.patch';
@@ -188,5 +188,36 @@ describe('where the companion stands (workbench/friedliver.css + patch 0310)', (
     expect(patch).toContain('+		let left = c.right - box.left + CARD_GAP;');
     expect(patch).toContain('+			left = c.left - box.left - CARD_GAP - w;');
     expect(patch).toContain("+		root.style.bottom = `${this._layout.mainContainer.querySelector<HTMLElement>('.part.statusbar')?.offsetHeight ?? 0}px`;");
+  });
+});
+
+describe('patch 0310 wires itself up', () => {
+  const contribution = newFileFromPatch(PATCH, 'src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts');
+
+  it('registers both commands the Agents extension calls, and declares what they and the class use', () => {
+    expect(contribution).toContain("CommandsRegistry.registerCommand('_friedliver.companion.show',");
+    expect(contribution).toContain("CommandsRegistry.registerCommand('_friedliver.companion.hide',");
+    expect(contribution).toMatch(/^let instance: CompanionContribution \| undefined;$/m);
+    expect(contribution).toMatch(/^const early: /m);
+    expect(contribution).toMatch(/^const COMPANION_VISIBLE = new RawContextKey<boolean>\('friedliverCompanionVisible'/m);
+  });
+
+  it('every module-level name the file uses is declared or imported', () => {
+    const code = contribution.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, "''");
+    const imported = new Set([...code.matchAll(/^import \{([^}]+)\} from/gm)].flatMap((m) => m[1].split(',').map((x) => x.trim())));
+    const declared = new Set([...code.matchAll(/^(?:const|let|class|function) (\w+)|static readonly (\w+)/gm)].map((m) => m[1] ?? m[2]));
+    // Bare (not a property) capitalised names, and the module-level state the commands share.
+    const used = new Set([...code.matchAll(/(?<![.\w$])([A-Z]\w*|instance|early|verdicts|sampleFrame)\b/g)].map((m) => m[1]));
+    const dom = ['Map', 'Set', 'HTMLElement', 'HTMLImageElement', 'HTMLVideoElement', 'HTMLCanvasElement', 'HTMLButtonElement', 'KeyboardEvent', 'AnimationEvent', 'Event', 'URL', 'Blob', 'Date', 'Math', 'Infinity', 'ArrayBuffer'];
+    expect([...used].filter((n) => !imported.has(n) && !declared.has(n) && !dom.includes(n))).toEqual([]);
+  });
+
+  it('Escape puts a card off through a real keybinding, behind the editor and quick input', () => {
+    expect(contribution).toContain("id: 'friedliver.companion.later'");
+    expect(contribution).toContain('primary: KeyCode.Escape');
+    expect(contribution).toContain('weight: KeybindingWeight.WorkbenchContrib');
+    for (const key of ['suggestWidgetVisible', 'findWidgetVisible', 'inQuickOpen', 'editorHasSelection', 'notificationCenterVisible']) {
+      expect(contribution).toContain(`ContextKeyExpr.not('${key}')`);
+    }
   });
 });

@@ -550,7 +550,14 @@ export class Controller {
   // ---- The companion (host/companion.ts; drawn by patches/0310-companion.patch) ----
 
   private readonly companion = new Companion({
-    run: (command, arg) => void vscode.commands.executeCommand(command, arg).then(undefined, () => {}), // ponytail: no workbench patch (a plain VS Code) = no companion
+    // A plain VS Code has no workbench patch, so no companion and nothing to say. In FriedLiver a missing
+    // command means patch 0310 didn't load: said once in the log, so it doesn't fail silently again.
+    run: (command, arg) =>
+      void vscode.commands.executeCommand(command, arg).then(undefined, (err: unknown) => {
+        if (this.companionBroken || !/friedliver/i.test(vscode.env.appName)) return;
+        this.companionBroken = true;
+        this.log.error(`Companion: ${command} failed, so agent requests won't show in the window (is patch 0310 in this build?): ${err instanceof Error ? err.message : String(err)}`);
+      }),
     // The same calls the chat's cards reach through handle(): permission, command, review, bridge, question.
     answer: (m) => {
       if (m.type === 'permission') this.core.answerPermission(m.requestId, m.optionId);
@@ -583,6 +590,7 @@ export class Controller {
     },
   });
   private companionTimer: ReturnType<typeof setTimeout> | undefined;
+  private companionBroken = false;
   private readonly characterRepo = new CharacterRepo({
     storage: () => this.context.globalStorageUri.fsPath,
     git: gitProgram,

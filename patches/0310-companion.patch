@@ -12,9 +12,665 @@ index 47c5748..d2c91bd 100644
  					'self'
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
 new file mode 100644
-index 0000000..3b83e2c
+index 0000000..ad7d982
 --- /dev/null
 +++ b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
+@@ -0,0 +1,650 @@
++/*---------------------------------------------------------------------------------------------
++ *  FriedLiver (patch 0310): the companion. When an agent in any chat waits for you, its character
++ *  runs in from the right along the status bar line to the middle of the window, plays its arrival,
++ *  and its card pops beside it with the answer buttons. One ask at a time, "+N" for the rest.
++ *  - The Agents extension decides what shows: _friedliver.companion.show(item) / .hide(id).
++ *  - A click runs friedliver.agents.companionAnswer(id, choiceId), which answers that request by its
++ *    own id through the chat card's path; the extension ignores ids that no longer wait.
++ *  - Nothing answers on its own: the buttons arm a moment after the bubble opens (no stray click
++ *    lands on a button that just appeared), focus is never taken, and Esc puts it off unanswered.
++ *  Styles: workbench/friedliver.css (Companion).
++ *--------------------------------------------------------------------------------------------*/
++
++import { localize, localize2 } from '../../../../nls.js';
++import { $, addDisposableListener, append, clearNode, EventType, getWindow } from '../../../../base/browser/dom.js';
++import { status } from '../../../../base/browser/ui/aria/aria.js';
++import { KeyCode } from '../../../../base/common/keyCodes.js';
++import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
++import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
++import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
++import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
++import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
++import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
++import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
++import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
++import { characterSources, chromaKey, CompanionFrameVerdict, CompanionQueue, frameVerdict, ICompanionFrame, ICompanionItem, ICompanionVideo, parseCompanionItem } from '../common/companion.js';
++
++/** After the bubble opens, clicks wait this long before they count. */
++const ARM_MS = 400;
++/** Between the character's top-right and the card's bottom-left corner, and the card's margin from the window's edges. */
++const CARD_GAP = 10;
++const CARD_MARGIN = 16;
++/** A video with no frame by then can't play here (Electron has no H.264/HEVC): the picture stands in. */
++const FIRST_FRAME_MS = 1_500;
++
++/**
++ * Video characters as blob: URLs, made once from the bytes the extension sends with the first ask
++ * that uses each (workbench.html's media-src allows blob:, patch 0310). Never a file or address.
++ */
++class CompanionVideos extends Disposable {
++	private readonly _urls = new Map<string, string>();
++	private readonly _failed = new Set<string>();
++
++	constructor(private readonly _onFailed: (key: string) => void) {
++		super();
++		this._register({ dispose: () => { for (const url of this._urls.values()) { URL.revokeObjectURL(url); } } });
++	}
++
++	take(video: ICompanionVideo | undefined): void {
++		if (video?.bytes && !this._urls.has(video.key) && !this._failed.has(video.key)) {
++			this._urls.set(video.key, URL.createObjectURL(new Blob([video.bytes.slice().buffer as ArrayBuffer], { type: video.type })));
++		}
++	}
++
++	url(video: ICompanionVideo): string | undefined {
++		return this._failed.has(video.key) ? undefined : this._urls.get(video.key);
++	}
++
++	/** Once per video: it is dropped here and the extension remembers it for the file as it is now. */
++	fail(key: string): void {
++		if (this._failed.has(key)) {
++			return;
++		}
++		this._failed.add(key);
++		const url = this._urls.get(key);
++		if (url) {
++			URL.revokeObjectURL(url);
++			this._urls.delete(key);
++		}
++		this._onFailed(key);
++	}
++}
++
++/** How each clip or picture sits (common/companion.ts frameVerdict), decided once: by video key (path, size, time) or picture. */
++const verdicts = new Map<string, CompanionFrameVerdict>();
++/** Frames sampled for the verdict, and how far apart (a clip's first few frames). */
++const SAMPLES = 3;
++const SAMPLE_GAP_MS = 120;
++const SAMPLE_SIZE = 48;
++/** The keyed cut-out redraws at most this often, at the overlay's size only. */
++const KEY_FRAME_MS = 33;
++const KEY_MAX_PX = 280;
++
++/**
++ * The character: a picture or a video. Its first frames decide how it sits: real transparency floats,
++ * a flat-coloured border is keyed out live (a 2D canvas at the overlay's size, ~30 fps) and floats,
++ * anything else sits in a rounded portal frame. Videos are muted, loop, have no controls and never
++ * sound; they pause while the window is hidden or motion is reduced (their first frame shows). A
++ * video that errors or shows no frame in time gives way to the agent's built-in picture.
++ */
++class CharacterView {
++	readonly element: HTMLElement;
++	private _phase: 'run' | 'idle' = 'run';
++	private _video: HTMLVideoElement | undefined;
++	private _img: HTMLImageElement | undefined;
++	private _canvas: HTMLCanvasElement | undefined;
++	private _loop: number | undefined;
++	private _key: (() => void) | undefined;
++	private _frameTimer: number | undefined;
++	/** Bumped on every change of source: late samples and frames of an old one are dropped. */
++	private _generation = 0;
++
++	constructor(
++		parent: HTMLElement,
++		private readonly _item: ICompanionItem,
++		private readonly _videos: CompanionVideos,
++		private readonly _store: DisposableStore,
++		private readonly _still: () => boolean,
++	) {
++		this.element = append(parent, $('.fl-companion__character'));
++		this.element.setAttribute('aria-hidden', 'true');
++		this._store.add(addDisposableListener(parent.ownerDocument, 'visibilitychange', () => this._playPolicy()));
++		this._store.add({ dispose: () => { this._generation++; this._clearTimer(); this._stopKey(); this._video?.pause(); this._video?.removeAttribute('src'); } });
++	}
++
++	/** Whether there is anything to show at all. */
++	get empty(): boolean {
++		const playable = (v: ICompanionVideo) => !!this._videos.url(v);
++		return !characterSources(this._item, 'idle', playable).length && !characterSources(this._item, 'run', playable).length;
++	}
++
++	show(phase: 'run' | 'idle'): void {
++		this._phase = phase;
++		const best = characterSources(this._item, phase, v => !!this._videos.url(v))[0];
++		if (best && 'video' in best) {
++			this._showVideo(best.video);
++		} else {
++			this._showImage(best?.image);
++		}
++	}
++
++	private _showVideo(video: ICompanionVideo): void {
++		if (this._video?.dataset.key === video.key) {
++			this._playPolicy();
++			return;
++		}
++		const generation = this._reset();
++		this._img?.remove();
++		this._img = undefined;
++		const v = this._video ??= append(this.element, $<HTMLVideoElement>('video'));
++		v.muted = true;
++		v.defaultMuted = true;
++		v.volume = 0;
++		v.loop = true;
++		v.playsInline = true;
++		v.controls = false;
++		v.disablePictureInPicture = true;
++		v.preload = 'auto';
++		v.setAttribute('playsinline', '');
++		v.setAttribute('disableremoteplayback', '');
++		v.dataset.key = video.key;
++		const failed = () => {
++			if (generation === this._generation) {
++				this._videos.fail(video.key);
++				v.removeAttribute('src');
++				v.dataset.key = '';
++				this.show(this._phase);
++			}
++		};
++		this._store.add(addDisposableListener(v, EventType.ERROR, failed));
++		this._store.add(addDisposableListener(v, 'loadeddata', () => {
++			if (generation === this._generation) {
++				this._clearTimer();
++				this._judge(video.key, v, generation);
++			}
++		}));
++		this._frameTimer = getWindow(v).setTimeout(() => v.readyState < 2 ? failed() : undefined, FIRST_FRAME_MS);
++		v.src = this._videos.url(video)!;
++		this._playPolicy();
++	}
++
++	private _showImage(src: string | undefined): void {
++		if (src && this._img?.getAttribute('src') === src) {
++			return;
++		}
++		const generation = this._reset();
++		this._video?.pause();
++		this._video?.remove();
++		this._video = undefined;
++		this.element.classList.toggle('fl-companion__character--none', !src);
++		if (!src) {
++			this._img?.remove();
++			this._img = undefined;
++			return;
++		}
++		const img = this._img ??= append(this.element, $<HTMLImageElement>('img'));
++		img.alt = '';
++		img.draggable = false;
++		this._store.add(addDisposableListener(img, 'load', () => {
++			if (generation === this._generation) {
++				this._judge(src, img, generation);
++			}
++		}));
++		img.src = src;
++	}
++
++	/** A new source: drop the old one's verdict, keying and timers; hidden until its own verdict. */
++	private _reset(): number {
++		this._clearTimer();
++		this._stopKey();
++		this.element.classList.remove('fl-companion__character--portal', 'fl-companion__character--none');
++		this.element.classList.add('fl-companion__character--pending');
++		return ++this._generation;
++	}
++
++	private _judge(key: string, source: HTMLImageElement | HTMLVideoElement, generation: number): void {
++		const known = verdicts.get(key);
++		if (known) {
++			this._apply(known, source);
++			return;
++		}
++		const frames: ICompanionFrame[] = [];
++		const animated = source instanceof HTMLVideoElement && !this._still();
++		const take = () => {
++			if (generation !== this._generation) {
++				return;
++			}
++			const frame = sampleFrame(source);
++			if (frame) {
++				frames.push(frame);
++			}
++			if (animated && frame && frames.length < SAMPLES) {
++				getWindow(source).setTimeout(take, SAMPLE_GAP_MS);
++				return;
++			}
++			const verdict = frameVerdict(frames);
++			verdicts.set(key, verdict);
++			this._apply(verdict, source);
++		};
++		take();
++	}
++
++	private _apply(verdict: CompanionFrameVerdict, source: HTMLImageElement | HTMLVideoElement): void {
++		this.element.classList.remove('fl-companion__character--pending');
++		this.element.classList.toggle('fl-companion__character--portal', verdict.kind === 'frame');
++		if (verdict.kind === 'key') {
++			this._startKey(verdict.color, source);
++		}
++	}
++
++	private _startKey(color: readonly [number, number, number], source: HTMLImageElement | HTMLVideoElement): void {
++		const w = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
++		const h = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
++		const canvas = this._canvas = append(this.element, $<HTMLCanvasElement>('canvas'));
++		const ctx = canvas.getContext('2d', { willReadFrequently: true });
++		if (!ctx || !w || !h) {
++			this._stopKey();
++			this.element.classList.add('fl-companion__character--portal');
++			return;
++		}
++		const scale = Math.min(1, KEY_MAX_PX / Math.max(w, h));
++		canvas.width = Math.max(1, Math.round(w * scale));
++		canvas.height = Math.max(1, Math.round(h * scale));
++		source.classList.add('fl-companion__keyed');
++		const win = getWindow(canvas);
++		let last = -Infinity;
++		const draw = (now: number) => {
++			this._loop = undefined;
++			if (this._canvas !== canvas) {
++				return;
++			}
++			if (now - last >= KEY_FRAME_MS) {
++				last = now;
++				try {
++					ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
++					const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
++					chromaKey(pixels.data, color);
++					ctx.putImageData(pixels, 0, 0);
++				} catch {
++					this._stopKey();
++					this.element.classList.add('fl-companion__character--portal');
++					return;
++				}
++			}
++			if (!this._still() && canvas.ownerDocument.visibilityState !== 'hidden') {
++				this._loop = win.requestAnimationFrame(draw);
++			}
++		};
++		this._key = () => {
++			if (this._loop === undefined && this._canvas === canvas) {
++				draw(win.performance.now());
++			}
++		};
++		draw(win.performance.now());
++	}
++
++	private _stopKey(): void {
++		if (this._loop !== undefined && this._canvas) {
++			getWindow(this._canvas).cancelAnimationFrame(this._loop);
++		}
++		this._loop = undefined;
++		this._key = undefined;
++		this._canvas?.remove();
++		this._canvas = undefined;
++		this._video?.classList.remove('fl-companion__keyed');
++		this._img?.classList.remove('fl-companion__keyed');
++	}
++
++	private _playPolicy(): void {
++		const v = this._video;
++		if (v) {
++			if (this._still() || v.ownerDocument.visibilityState === 'hidden') {
++				v.pause();
++			} else {
++				v.play().catch(() => { /* an undecodable file also fires 'error', which falls back */ });
++			}
++		}
++		this._key?.();
++	}
++
++	private _clearTimer(): void {
++		if (this._frameTimer !== undefined) {
++			getWindow(this.element).clearTimeout(this._frameTimer);
++			this._frameTimer = undefined;
++		}
++	}
++}
++
++/** A small copy of the source's current frame, or undefined when it can't be read. */
++function sampleFrame(source: HTMLImageElement | HTMLVideoElement): ICompanionFrame | undefined {
++	try {
++		const canvas = source.ownerDocument.createElement('canvas');
++		canvas.width = canvas.height = SAMPLE_SIZE;
++		const ctx = canvas.getContext('2d', { willReadFrequently: true });
++		if (!ctx) {
++			return undefined;
++		}
++		ctx.drawImage(source, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
++		const { data, width, height } = ctx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
++		return { data, width, height };
++	} catch {
++		return undefined;
++	}
++}
++
++/** While a card is on screen: Escape puts it off (friedliver.companion.later). */
++const COMPANION_VISIBLE = new RawContextKey<boolean>('friedliverCompanionVisible', false, localize('companion.visible', "Whether an agent's request card is on screen"));
++
++/** The running contribution, for the commands; calls that arrive before it is up wait in `early` (the extension can start first). */
++let instance: CompanionContribution | undefined;
++const early: ({ show: unknown } | { hide: unknown })[] = [];
++const EARLY_MAX = 200;
++
++CommandsRegistry.registerCommand('_friedliver.companion.show', (_accessor: ServicesAccessor, item: unknown) => {
++	if (instance) {
++		instance.show(item);
++	} else if (early.length < EARLY_MAX) {
++		early.push({ show: item });
++	}
++});
++CommandsRegistry.registerCommand('_friedliver.companion.hide', (_accessor: ServicesAccessor, id: unknown) => {
++	if (instance) {
++		instance.hide(id);
++	} else if (early.length < EARLY_MAX) {
++		early.push({ hide: id });
++	}
++});
++
++class CompanionContribution extends Disposable implements IWorkbenchContribution {
++	static readonly ID = 'workbench.contrib.friedliverCompanion';
++
++	private readonly _queue = new CompanionQueue();
++	private readonly _videos: CompanionVideos;
++	private readonly _view = this._register(new DisposableStore());
++	private _root: HTMLElement | undefined;
++	/** The item on screen, which may be leaving while the queue already moved on. */
++	private _shown: ICompanionItem | undefined;
++	private _armedAt = Infinity;
++	private _leaving = false;
++	private readonly _visible: IContextKey<boolean>;
++
++	constructor(
++		@ILayoutService private readonly _layout: ILayoutService,
++		@ICommandService private readonly _commands: ICommandService,
++		@IContextKeyService contextKeyService: IContextKeyService,
++	) {
++		super();
++		this._visible = COMPANION_VISIBLE.bindTo(contextKeyService);
++		this._videos = this._register(new CompanionVideos(key => this._commands.executeCommand('friedliver.agents.companionMediaFailed', key)));
++		instance = this;
++		this._register({ dispose: () => { instance = undefined; this._root?.remove(); } });
++		for (const call of early.splice(0)) {
++			if ('show' in call) {
++				this.show(call.show);
++			} else {
++				this.hide(call.hide);
++			}
++		}
++	}
++
++	show(raw: unknown): void {
++		const item = parseCompanionItem(raw);
++		// The bytes are kept even for an id already queued: they come once, with the first ask that uses them.
++		this._videos.take(item?.video);
++		this._videos.take(item?.videoRun);
++		if (item && this._queue.show(item)) {
++			this._sync();
++		}
++	}
++
++	hide(id: unknown): void {
++		if (typeof id === 'string') {
++			this._queue.hide(id);
++			this._sync();
++		}
++	}
++
++	/** Escape: the card on screen goes away unanswered (it still waits in its chat and the Inbox). */
++	later(): void {
++		if (this._shown && !this._leaving) {
++			this._queue.later();
++			this._sync();
++		}
++	}
++
++	focus(): void {
++		this._root?.querySelector<HTMLElement>('.fl-companion__btn')?.focus();
++	}
++
++	/** Brings the screen in line with the queue: the same item stays, a new one runs in, none hops out. */
++	private _sync(): void {
++		this._syncNow();
++		this._visible.set(!!this._shown && !this._leaving);
++	}
++
++	private _syncNow(): void {
++		const next = this._queue.current;
++		if (this._shown && next?.id === this._shown.id) {
++			this._count();
++			return;
++		}
++		if (this._leaving) {
++			return; // the hop's end calls _sync again
++		}
++		if (this._shown) {
++			this._leave();
++			return;
++		}
++		if (next && !this._highContrast()) {
++			this._enter(next);
++		}
++	}
++
++	private _reducedMotion(): boolean {
++		const main = this._layout.mainContainer;
++		return main.classList.contains('monaco-reduce-motion') || getWindow(main).matchMedia('(prefers-reduced-motion: reduce)').matches;
++	}
++
++	/** High contrast is left to upstream (friedliver.css styles nothing there), so it isn't drawn: the asks wait in their chats. */
++	private _highContrast(): boolean {
++		const main = this._layout.mainContainer;
++		return main.classList.contains('hc-black') || main.classList.contains('hc-light');
++	}
++
++	private _enter(item: ICompanionItem): void {
++		this._view.clear();
++		this._shown = item;
++		this._armedAt = Infinity;
++		const root = this._root ??= append(this._layout.mainContainer, $('.fl-companion'));
++		clearNode(root);
++		root.className = 'fl-companion';
++		// The character stands on the status bar's top line (the floor when it is hidden).
++		root.style.bottom = `${this._layout.mainContainer.querySelector<HTMLElement>('.part.statusbar')?.offsetHeight ?? 0}px`;
++
++		const view = new CharacterView(root, item, this._videos, this._view, () => this._reducedMotion());
++		const character = view.element;
++
++		const bubble = append(root, $('.fl-companion__bubble'));
++		this._view.add(addDisposableListener(getWindow(root), EventType.RESIZE, () => this._place(bubble, character)));
++		bubble.setAttribute('role', 'region');
++		bubble.setAttribute('aria-label', localize('companion.region', "{0} needs you", item.agentLabel));
++		const head = append(bubble, $('.fl-companion__head'));
++		append(head, $('span.fl-companion__from')).textContent = item.chatTitle ? `${item.agentLabel} · ${item.chatTitle}` : item.agentLabel;
++		append(head, $('span.fl-companion__more'));
++		append(bubble, $('.fl-companion__question')).textContent = item.question;
++		if (item.detail) {
++			const detail = append(bubble, $('pre.fl-companion__detail'));
++			detail.textContent = item.detail;
++			detail.tabIndex = 0;
++		}
++		const actions = append(bubble, $('.fl-companion__actions'));
++		for (const choice of item.choices) {
++			const button = append(actions, $<HTMLButtonElement>(`button.fl-companion__btn.fl-companion__btn--${choice.kind}`));
++			button.type = 'button';
++			button.textContent = choice.label;
++			this._view.add(addDisposableListener(button, EventType.CLICK, () => this._answer(item.id, choice.id)));
++		}
++		const open = append(actions, $<HTMLButtonElement>('button.fl-companion__open'));
++		open.type = 'button';
++		open.textContent = localize('companion.openChat', "Open chat");
++		this._view.add(addDisposableListener(open, EventType.CLICK, () => {
++			if (Date.now() >= this._armedAt) {
++				this._commands.executeCommand('friedliver.agents.openChat', item.chatId);
++			}
++		}));
++		this._view.add(addDisposableListener(root, EventType.KEY_DOWN, (e: KeyboardEvent) => {
++			if (e.key === 'Escape') {
++				e.preventDefault();
++				e.stopPropagation();
++				this.later();
++			}
++		}));
++		this._count();
++		status(localize('companion.arrived', "{0} needs you: {1}", item.agentLabel, item.question));
++
++		// Arrive: run in from the right (the run cycle, or the idle picture sliding) to the middle, swap to
++		// the idle picture (its arrival wave plays) or the clip's loop, then the card pops beside it.
++		// Reduced motion: both fade in.
++		const settle = () => {
++			if (this._shown !== item) {
++				return;
++			}
++			view.show('idle');
++			root.classList.remove('fl-companion--running');
++			root.classList.add('fl-companion--here');
++			this._place(bubble, character);
++			this._armedAt = Date.now() + ARM_MS;
++		};
++		if (this._reducedMotion() || view.empty) {
++			root.classList.add('fl-companion--fade');
++			settle();
++			return;
++		}
++		view.show('run');
++		root.classList.add('fl-companion--running');
++		this._view.add(addDisposableListener(character, 'animationend', (e: AnimationEvent) => {
++			if (e.animationName === 'fl-companion-run') {
++				settle();
++			}
++		}));
++	}
++
++	/**
++	 * The card's bottom-left corner at the character's top-right; flipped to its top-left when that
++	 * runs off the window, and kept inside with a margin either way. Its size follows what it says.
++	 */
++	private _place(card: HTMLElement, character: HTMLElement): void {
++		const root = this._root;
++		if (!root || !card.isConnected || !card.offsetWidth) {
++			return;
++		}
++		const box = root.getBoundingClientRect();
++		const c = character.getBoundingClientRect();
++		const w = card.offsetWidth, h = card.offsetHeight;
++		let left = c.right - box.left + CARD_GAP;
++		const flipped = left + w > box.width - CARD_MARGIN;
++		if (flipped) {
++			left = c.left - box.left - CARD_GAP - w;
++		}
++		left = Math.max(CARD_MARGIN, Math.min(left, box.width - CARD_MARGIN - w));
++		const top = Math.max(CARD_MARGIN, Math.min(c.top - box.top - CARD_GAP - h, box.height - CARD_MARGIN - h));
++		card.style.left = `${Math.round(left)}px`;
++		card.style.top = `${Math.round(top)}px`;
++		card.classList.toggle('fl-companion__bubble--flipped', flipped);
++	}
++
++	/** Answered (here or elsewhere) or put off: the card shrinks out, the character runs off to the left, then the next. */
++	private _leave(): void {
++		const root = this._root;
++		this._view.clear();
++		this._armedAt = Infinity;
++		const done = () => {
++			this._leaving = false;
++			this._shown = undefined;
++			if (root) {
++				clearNode(root);
++				root.className = 'fl-companion';
++			}
++			this._sync();
++		};
++		if (!root || this._reducedMotion()) {
++			done();
++			return;
++		}
++		this._leaving = true;
++		root.classList.remove('fl-companion--running', 'fl-companion--here', 'fl-companion--fade');
++		root.classList.add('fl-companion--leaving');
++		const character = root.querySelector('.fl-companion__character');
++		const fallback = getWindow(root).setTimeout(done, 1_500);
++		if (character) {
++			this._view.add(addDisposableListener(character, 'animationend', (e: AnimationEvent) => {
++				if (e.animationName === 'fl-companion-run-off') {
++					getWindow(root).clearTimeout(fallback);
++					done();
++				}
++			}));
++		}
++	}
++
++	private _count(): void {
++		const more = this._root?.querySelector('.fl-companion__more');
++		if (more) {
++			more.textContent = this._queue.more ? `+${this._queue.more}` : '';
++			more.setAttribute('aria-label', this._queue.more ? localize('companion.more', "{0} more waiting", this._queue.more) : '');
++		}
++	}
++
++	private _answer(id: string, choiceId: string): void {
++		// Only the item on screen, one of its own choices, once it has settled and armed.
++		if (Date.now() < this._armedAt || !this._queue.offers(id, choiceId)) {
++			return;
++		}
++		this._armedAt = Infinity;
++		this._commands.executeCommand('friedliver.agents.companionAnswer', id, choiceId);
++		this._queue.hide(id);
++		this._sync();
++	}
++}
++
++registerWorkbenchContribution2(CompanionContribution.ID, CompanionContribution, WorkbenchPhase.BlockRestore);
++
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'friedliver.companion.later',
++			title: localize2('companion.later', "Put Off the Agent Request"),
++			category: localize2('companion.category', "FriedLiver"),
++			precondition: COMPANION_VISIBLE,
++			keybinding: {
++				primary: KeyCode.Escape,
++				weight: KeybindingWeight.WorkbenchContrib,
++				// Escape in an editor widget, the quick input, a selection or the notification center keeps its own meaning.
++				when: ContextKeyExpr.and(
++					COMPANION_VISIBLE,
++					ContextKeyExpr.not('suggestWidgetVisible'),
++					ContextKeyExpr.not('findWidgetVisible'),
++					ContextKeyExpr.not('inQuickOpen'),
++					ContextKeyExpr.not('editorHasSelection'),
++					ContextKeyExpr.not('notificationCenterVisible'),
++				),
++			},
++		});
++	}
++	run(_accessor: ServicesAccessor): void {
++		instance?.later();
++	}
++});
++
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'friedliver.companion.focus',
++			title: localize2('companion.focus', "Focus the Agent Request"),
++			category: localize2('companion.category', "FriedLiver"),
++			f1: true,
++		});
++	}
++	run(_accessor: ServicesAccessor): void {
++		instance?.focus();
++	}
++});
+diff --git a/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts.frompatch b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts.frompatch
+new file mode 100644
+index 0000000..6e1abb3
+--- /dev/null
++++ b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts.frompatch
 @@ -0,0 +1,582 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0310): the companion. When an agent in any chat waits for you, its character
@@ -598,6 +1254,7 @@ index 0000000..3b83e2c
 +		instance?.focus();
 +	}
 +});
+\ No newline at end of file
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
 new file mode 100644
 index 0000000..46160be

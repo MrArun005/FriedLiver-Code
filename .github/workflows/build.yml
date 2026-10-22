@@ -214,6 +214,16 @@ jobs:
           name: ${{ matrix.artifact }}-installer
           path: installers/*
           if-no-files-found: error
+      # The build strips types without checking them, so a patch's workbench code that doesn't typecheck
+      # (an undeclared name, a wrong signature) would still ship. Upstream's own src typecheck, over the
+      # patched sources, once per build: Linux, after the artifacts are up.
+      - name: Typecheck the patched workbench (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        working-directory: vscode
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: npm run typecheck-client
 
   # What patch 0300's downloads rely on (pause, cancel, user gestures, the quarantine mark and Mark of
   # the Web), in upstream's own Electron version (its .npmrc target at the pinned tag). Its own job: the
