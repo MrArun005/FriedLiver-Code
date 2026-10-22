@@ -76,6 +76,31 @@ describe('workbench/friedliver.css', () => {
     expect([...used].filter((t) => !defined.has(t))).toEqual([]);
   });
 
+  /** The declarations of the rules with a selector ending in `selectorEnd`, merged. */
+  function ruleFor(selectorEnd: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const m of CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!m[1].split(',').some((s) => s.trim().endsWith(selectorEnd))) continue;
+      for (const d of m[2].matchAll(/([\w-]+)\s*:\s*([^;]+);/g)) out[d[1]] = d[2].trim();
+    }
+    return out;
+  }
+
+  it('centres palette row content in the 40px row (W4)', () => {
+    // The entry must fill the row, or its centring has no height to work in and labels sit at the top.
+    expect(ruleFor('.quick-input-list .quick-input-list-entry')).toMatchObject({ height: '100%', 'align-items': 'center' });
+    expect(ruleFor('.quick-input-list .quick-input-list-rows')).toMatchObject({ 'justify-content': 'center' });
+  });
+
+  it('keeps the editor and Agents panel attached (W1)', () => {
+    for (const part of ['.part.editor', '.part.auxiliarybar']) {
+      const rule = ruleFor(`:not(.floating-panels):not(.hc-black):not(.hc-light) ${part}`);
+      expect(rule, part).toMatchObject({ margin: '0', 'border-radius': 'var(--fl-r-box) 0 0 0' });
+      expect(rule['border-top'], part).toMatch(/var\(--fl-hairline\)/);
+      expect(rule['border-left'], part).toMatch(/var\(--fl-hairline\)/);
+    }
+  });
+
   it('leaves high contrast to upstream', () => {
     // Keyframe steps (from, to, 40%) are not selectors.
     const rules = CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}/g, '');
