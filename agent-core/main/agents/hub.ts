@@ -1,5 +1,6 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentConnection, isAuthRequired, type ClientHost, type SessionSetup } from './agentConnection';
+import { agentShell, shellNote } from './agentShell';
 import type { AuthStatus } from './signIn';
 import type { AgentId, AgentSpec } from './registry';
 import type { TerminalListener } from './terminals';
@@ -499,7 +500,10 @@ export class AgentHub {
       }
     }
 
-    const rules = await this.options.rulesFor?.(chat.id, chat.agentId).catch((err: unknown) => void this.options.log?.(`Couldn't read the shared rules: ${String(err)}`));
+    const shared = await this.options.rulesFor?.(chat.id, chat.agentId).catch((err: unknown) => void this.options.log?.(`Couldn't read the shared rules: ${String(err)}`));
+    // On Windows the agent is told which shell its command lines run in, so it writes that syntax.
+    const note = shellNote(agentShell());
+    const rules = note ? { text: [shared?.text, note].filter(Boolean).join('\n\n'), files: shared?.files ?? [] } : shared;
     const system = rules && chat.agentId === 'claude';
     // Both kinds of _meta coexist: a read-only chat's tool limits and the shared rules' system prompt.
     const newMeta = system ? { ...meta, systemPrompt: { append: rules.text } } : meta;
@@ -516,7 +520,7 @@ export class AgentHub {
     chat.sessionId = session.sessionId;
     chat.sessionGeneration = agent.generation;
     this.sessionToChat.set(sessionKey(chat.agentId, session.sessionId), chat.id);
-    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined, ...(rules ? { rules: rules.files } : {}) });
+    await this.announce(chat, agent, { configOptions: session.configOptions, modes: session.modes, models: session.models, loaded: false, replaced: previous !== undefined, ...(shared ? { rules: shared.files } : {}) });
   }
 
   /** Tells the editor what the session offers. Its handler may set options; a failure there doesn't stop the turn. */

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { Dictation, LEVEL_MS, MAX_SPOKEN, PRIVACY_PANES, helperArgs, helperPath, parseHelperLine } from '../src/host/dictation';
+import { DICTATION_SETTINGS, Dictation, LEVEL_MS, MAX_SPOKEN, PRIVACY_PANES, dictationSettings, helperArgs, helperPath, parseHelperLine } from '../src/host/dictation';
 import { BARS, spliceDictation, visualizerFrame } from '../src/shared/dictation';
 import { parseWebviewMessage } from '../src/shared/messages';
 import { turnsLeft } from '../src/shared/session';
@@ -339,5 +339,13 @@ describe('turnsLeft (the usage popover estimate)', () => {
     expect(turnsLeft([30_000, 31_000], 200_000)).toBe('>50');
     expect(turnsLeft([30_000, 30_000], 200_000)).toBe('>50');
     expect(turnsLeft([190_000, 210_000], 200_000)).toBe(0);
+  });
+});
+
+describe('the mic hint’s settings link', () => {
+  it('opens each OS’s own dictation settings, and none on Linux', () => {
+    expect(dictationSettings('darwin')).toBe(DICTATION_SETTINGS);
+    expect(dictationSettings('win32')).toBe('ms-settings:speech');
+    expect(dictationSettings('linux')).toBeUndefined();
   });
 });

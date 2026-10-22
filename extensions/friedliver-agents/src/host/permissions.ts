@@ -25,9 +25,14 @@ type Saved = Grant & { at?: number; agent?: string };
  * Places never always allowed, to read or write (Allow once still works there): system folders,
  * FriedLiver itself and its data (`extra`), and in home every dot file and folder (keys, credentials,
  * shell and tool config: .ssh, .aws, .claude, .codex, .gemini, .config, .npmrc, .netrc, .zshrc…)
- * and ~/Library (keychains, LaunchAgents, other apps' data). For writes also writeSensitive below.
+ * and ~/Library or %USERPROFILE%\AppData (keychains, LaunchAgents, credentials, other apps' data). For
+ * writes also writeSensitive below. On Windows the system folders are Windows, Program Files and ProgramData.
  */
-const SENSITIVE = ['/etc', '/private/etc', '/Library', '/System', '/usr', '/bin', '/sbin'];
+const env = process.env;
+const SENSITIVE =
+  process.platform === 'win32'
+    ? [env.SystemRoot ?? 'C:\\Windows', env.ProgramFiles ?? 'C:\\Program Files', env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', env.ProgramData ?? 'C:\\ProgramData']
+    : ['/etc', '/private/etc', '/Library', '/System', '/usr', '/bin', '/sbin'];
 
 /**
  * Writes no rule covers, anywhere (Allow once only). Fail-safe rather than a list to chase: any
@@ -51,7 +56,7 @@ function writeSensitive(real: string): boolean {
 function homeSensitive(real: string, home: string): boolean {
   if (real === home || !within(home, real)) return false;
   const first = path.relative(home, real).split(path.sep)[0];
-  return first.startsWith('.') || first.toLowerCase() === 'library';
+  return first.startsWith('.') || ['library', 'appdata'].includes(first.toLowerCase());
 }
 
 /** The .app around VS Code's appRoot (…/FriedLiver.app/Contents/Resources/app); appRoot itself elsewhere. */

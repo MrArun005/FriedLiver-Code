@@ -18,7 +18,7 @@ import type { AgentToAgent, BridgeAnswer } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { OTHER_AGENTS } from './host/otherAgents';
-import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
+import { Dictation, dictationSettings, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
 import { InlineEditor } from './host/inlineEditor';
 import { imagePreview, imageThumb, workerScaler } from './host/imageAccess';
@@ -914,9 +914,11 @@ export class Controller {
           // Only shows where the file is; nothing is opened or run.
           if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(m.path));
           return;
-        case 'dictationSettings':
-          await vscode.env.openExternal(vscode.Uri.parse(DICTATION_SETTINGS, true));
+        case 'dictationSettings': {
+          const settings = dictationSettings();
+          if (settings) await vscode.env.openExternal(vscode.Uri.parse(settings, true));
           return;
+        }
         case 'dictate':
           if (m.on) this.dictation.start(surface, m.chatId);
           else this.dictation.stop(m.chatId);

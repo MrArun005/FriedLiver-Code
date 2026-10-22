@@ -1,8 +1,27 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 067580a4..6f664ee5 100644
+index 067580a..47edb69 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-@@ -50,7 +50,7 @@ registerAction2(class extends Action2 {
+@@ -27,7 +27,7 @@ import { IRemoteAgentService } from '../../../services/remote/common/remoteAgent
+ import { isLinux, isMacintosh, isWindows, OperatingSystem as OS } from '../../../../base/common/platform.js';
+ import { IExtensionManagementServerService } from '../../../services/extensionManagement/common/extensionManagement.js';
+ import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+-import { StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
++import { friedliverWelcomeCommand, StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
+ import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
+ import { DisposableStore } from '../../../../base/common/lifecycle.js';
+ import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
+@@ -41,7 +41,8 @@ registerAction2(class extends Action2 {
+ 	constructor() {
+ 		super({
+ 			id: 'workbench.action.openWalkthrough',
+-			title: localize2('miWelcome', 'Welcome'),
++			// FriedLiver: Help → Get Started opens the FriedLiver Welcome page (see run()).
++			title: localize2('miGetStarted', 'Get Started'),
+ 			category: Categories.Help,
+ 			f1: true,
+ 			menu: {
+@@ -50,7 +51,7 @@ registerAction2(class extends Action2 {
  				order: 1,
  			},
  			metadata: {
@@ -11,7 +30,25 @@ index 067580a4..6f664ee5 100644
  			}
  		});
  	}
-@@ -320,7 +320,7 @@ configurationRegistry.registerConfiguration({
+@@ -69,6 +70,17 @@ registerAction2(class extends Action2 {
+ 		const inactive = typeof optionsOrToSide === 'object' ? optionsOrToSide.inactive : false;
+ 		const activeEditor = editorService.activeEditor;
+ 
++		// FriedLiver: with no walkthrough asked for, open the FriedLiver Welcome page (extensions/friedliver-agents,
++		// COMPONENTS.md §2.38) instead of the stock page; an extension's walkthrough asked for by id still opens here.
++		// The stock page stays the fallback when the Agents extension is disabled.
++		if (!walkthroughID) {
++			commandService.executeCommand(friedliverWelcomeCommand).catch(() => editorService.openEditor({
++				resource: GettingStartedInput.RESOURCE,
++				options: { preserveFocus: toSide ?? false, inactive }
++			}, toSide ? SIDE_GROUP : undefined));
++			return;
++		}
++
+ 		// If no specific walkthrough is requested and agent sessions welcome is preferred, open that instead
+ 		if (!walkthroughID && !chatEntitlementService.sentiment.hidden && configurationService.getValue<string>('workbench.startupEditor') === 'agentSessionsWelcomePage') {
+ 			commandService.executeCommand(AgentSessionsWelcomePage.COMMAND_ID);
+@@ -320,7 +332,7 @@ configurationRegistry.registerConfiguration({
  			'enum': ['none', 'welcomePage', 'readme', 'newUntitledFile', 'welcomePageInEmptyWorkbench', 'terminal', 'agentSessionsWelcomePage'],
  			'enumDescriptions': [
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.none' }, "Start without an editor."),
@@ -20,7 +57,7 @@ index 067580a4..6f664ee5 100644
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.readme' }, "Open the README when opening a folder that contains one, fallback to 'welcomePage' otherwise. Note: This is only observed as a global configuration, it will be ignored if set in a workspace or folder configuration."),
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.newUntitledFile' }, "Open a new untitled text file (only applies when opening an empty window)."),
  				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.welcomePageInEmptyWorkbench' }, "Open the Welcome page when opening an empty workbench."),
-@@ -342,7 +342,8 @@ configurationRegistry.registerConfiguration({
+@@ -342,7 +354,8 @@ configurationRegistry.registerConfiguration({
  		'workbench.welcomePage.experimentalOnboarding': {
  			scope: ConfigurationScope.APPLICATION,
  			type: 'boolean',
@@ -31,7 +68,7 @@ index 067580a4..6f664ee5 100644
  			description: localize('workbench.welcomePage.experimentalOnboarding', "When enabled, show the new onboarding experience instead of the classic walkthrough on first launch."),
  			experiment: {
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
-index 322ec1ab..f211319d 100644
+index 322ec1a..1909d43 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
 @@ -927,7 +927,7 @@ export class GettingStartedPage extends EditorPane {
@@ -49,17 +86,35 @@ index 322ec1ab..f211319d 100644
  			footer.appendChild(telemetryNotice);
 -		} else if (!this.productService.openToWelcomeMainPage && this.showFeaturedWalkthrough && this.storageService.isNew(StorageScope.APPLICATION) && !this.configurationService.getValue<boolean>('workbench.welcomePage.experimentalOnboarding')) {
 +		} else if (!this.productService.openToWelcomeMainPage && this.showFeaturedWalkthrough && this.storageService.isNew(StorageScope.APPLICATION) && !this.configurationService.getValue<boolean>('workbench.welcomePage.experimentalOnboarding')
-+			// FriedLiver: a walkthrough asked for by id (the first launch's Agents walkthrough) that its extension hasn't
-+			// registered yet opens once it does; don't replace it with the first built-in one meanwhile.
++			// FriedLiver: a walkthrough asked for by id that its extension hasn't registered yet opens once it does; don't
++			// replace it with the first featured one meanwhile.
 +			&& !editorInput?.selectedCategory) {
  			const firstSessionDateString = this.storageService.get(firstSessionDateStorageKey, StorageScope.APPLICATION) || new Date().toUTCString();
  			const daysSinceFirstSession = ((+new Date()) - (+new Date(firstSessionDateString))) / 1000 / 60 / 60 / 24;
  			const fistContentBehaviour = daysSinceFirstSession < 1 ? 'openToFirstCategory' : 'index';
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts
-index ac89ae8e..2c161390 100644
+index ac89ae8..3dea386 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStartedService.ts
-@@ -626,6 +626,7 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+@@ -181,12 +181,15 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+ 
+ 	private registerWalkthroughs() {
+ 
+-		walkthroughs.forEach(async (category, index) => {
++		// FriedLiver: none of upstream's built-in walkthroughs ship (Setup leads with "Use AI features with Copilot",
++		// which 0010 removes); the FriedLiver Welcome page replaces them. Extensions' walkthroughs still register.
++		const builtIn: typeof walkthroughs = [];
++		builtIn.forEach(async (category, index) => {
+ 
+ 			this._registerWalkthrough({
+ 				...category,
+ 				icon: { type: 'icon', icon: category.icon },
+-				order: walkthroughs.length - index,
++				order: builtIn.length - index,
+ 				source: BUILT_IN_SOURCE,
+ 				when: ContextKeyExpr.deserialize(category.when) ?? ContextKeyExpr.true(),
+ 				steps:
+@@ -626,6 +629,7 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
  			step.completionEvents.push('stepSelected');
  		}
  
@@ -67,7 +122,7 @@ index ac89ae8e..2c161390 100644
  		for (let event of step.completionEvents) {
  			const [_, eventType, argument] = /^([^:]*):?(.*)$/.exec(event) ?? [];
  
-@@ -643,8 +644,10 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+@@ -643,8 +647,10 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
  						this.stepCompletionContextKeyExpressions.add(expression);
  						expression.keys().forEach(key => this.stepCompletionContextKeys.add(key));
  						event = eventType + ':' + expression.serialize();
@@ -79,7 +134,7 @@ index ac89ae8e..2c161390 100644
  						}
  					} else {
  						console.error('Unable to parse context key expression:', expression, 'in walkthrough step', step.id);
-@@ -667,6 +670,9 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
+@@ -667,6 +673,9 @@ export class WalkthroughsService extends Disposable implements IWalkthroughsServ
  
  			this.registerCompletionListener(event, step);
  		}
@@ -90,37 +145,29 @@ index ac89ae8e..2c161390 100644
  
  	private registerCompletionListener(event: string, step: IWalkthroughStep) {
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
-index 777f3ad8..ded32e70 100644
+index 777f3ad..15a0b6a 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
 @@ -42,6 +42,8 @@ export type RestoreWalkthroughsConfigurationValue = { folder: string; category?:
  const configurationKey = 'workbench.startupEditor';
  const oldConfigurationKey = 'workbench.welcome.enabled';
  const telemetryOptOutStorageKey = 'workbench.telemetryOptOutShown';
-+/** FriedLiver: the walkthrough the first launch opens, contributed by the built-in extensions/friedliver-agents. */
-+export const friedliverWalkthroughId = 'friedliver.friedliver-agents#friedliver.gettingStarted';
++/** FriedLiver: the Welcome page (COMPONENTS.md §2.38), a webview of the built-in extensions/friedliver-agents. */
++export const friedliverWelcomeCommand = 'friedliver.welcome';
  
  export class StartupPageEditorResolverContribution extends Disposable implements IWorkbenchContribution {
  
-@@ -212,13 +214,17 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+@@ -212,6 +214,10 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
  		}
  
  		if (startupEditorTypeID === gettingStartedInputTypeId) {
-+			// FriedLiver: the first launch opens the Agents walkthrough instead of upstream's Copilot-led Setup one. The
-+			// page waits for the extension to register it (GettingStartedPage rebuilds when a walkthrough is added).
-+			const firstLaunch = this.storageService.isNew(StorageScope.APPLICATION);
++			// FriedLiver: open the FriedLiver Welcome page; the stock page only when the Agents extension is disabled.
++			if (await this.commandService.executeCommand(friedliverWelcomeCommand).then(() => true, () => false)) {
++				return;
++			}
  			this.editorService.openEditor({
  				resource: GettingStartedInput.RESOURCE,
  				options: {
- 					index: editor ? 0 : undefined,
- 					pinned: false,
- 					preserveFocus: this.shouldPreserveFocus(),
--					...{ showTelemetryNotice }
-+					...{ showTelemetryNotice },
-+					...(firstLaunch ? { selectedCategory: friedliverWalkthroughId } : {})
- 				},
- 			});
- 		}
 @@ -246,8 +252,8 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
  			return; // experimental onboarding is disabled
  		}
@@ -132,141 +179,8 @@ index 777f3ad8..ded32e70 100644
  		}
  
  		if (!this.storageService.isNew(StorageScope.APPLICATION)) {
-diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
-index 168a3d01..d95769b5 100644
---- a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
-+++ b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
-@@ -244,7 +244,7 @@ function createCopilotSetupStep(id: string, button: string, when: string, includ
- 		description,
- 		when: `${when} && !chatSetupHidden && !chatSetupDisabledInWorkspace`,
- 		media: {
--			type: 'svg', altText: 'VS Code Copilot multi file edits', path: 'multi-file-edits.svg'
-+			type: 'svg', altText: 'FriedLiver Copilot multi file edits', path: 'multi-file-edits.svg'
- 		},
- 	};
- }
-@@ -252,12 +252,12 @@ function createCopilotSetupStep(id: string, button: string, when: string, includ
- export const walkthroughs: GettingStartedWalkthroughContent = [
- 	{
- 		id: 'Setup',
--		title: localize('gettingStarted.setup.title', "Get started with VS Code"),
-+		title: localize('gettingStarted.setup.title', "Get started with FriedLiver"),
- 		description: localize('gettingStarted.setup.description', "Customize your editor, learn the basics, and start coding"),
- 		isFeatured: true,
- 		icon: setupIcon,
- 		when: '!isWeb',
--		walkthroughPageTitle: localize('gettingStarted.setup.walkthroughPageTitle', 'Setup VS Code'),
-+		walkthroughPageTitle: localize('gettingStarted.setup.walkthroughPageTitle', 'Setup FriedLiver'),
- 		next: 'Beginner',
- 		content: {
- 			type: 'steps',
-@@ -279,8 +279,8 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 				{
- 					id: 'videoTutorial',
- 					title: localize('gettingStarted.videoTutorial.title', "Watch video tutorials"),
--					description: localize('gettingStarted.videoTutorial.description.interpolated', "Watch the first in a series of short & practical video tutorials for VS Code's key features.\n{0}", Button(localize('watch', "Watch Tutorial"), 'https://aka.ms/vscode-getting-started-video')),
--					media: { type: 'svg', altText: 'VS Code Settings', path: 'learn.svg' },
-+					description: localize('gettingStarted.videoTutorial.description.interpolated', "Watch the first in a series of short & practical video tutorials for FriedLiver's key features.\n{0}", Button(localize('watch', "Watch Tutorial"), 'https://aka.ms/vscode-getting-started-video')),
-+					media: { type: 'svg', altText: 'FriedLiver Settings', path: 'learn.svg' },
- 				}
- 			]
- 		}
-@@ -288,13 +288,13 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 
- 	{
- 		id: 'SetupWeb',
--		title: localize('gettingStarted.setupWeb.title', "Get Started with VS Code for the Web"),
-+		title: localize('gettingStarted.setupWeb.title', "Get Started with FriedLiver for the Web"),
- 		description: localize('gettingStarted.setupWeb.description', "Customize your editor, learn the basics, and start coding"),
- 		isFeatured: true,
- 		icon: setupIcon,
- 		when: 'isWeb',
- 		next: 'Beginner',
--		walkthroughPageTitle: localize('gettingStarted.setupWeb.walkthroughPageTitle', 'Setup VS Code Web'),
-+		walkthroughPageTitle: localize('gettingStarted.setupWeb.walkthroughPageTitle', 'Setup FriedLiver Web'),
- 		content: {
- 			type: 'steps',
- 			steps: [
-@@ -320,10 +320,10 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 				{
- 					id: 'extensionsWebWeb',
- 					title: localize('gettingStarted.extensions.title', "Code with extensions"),
--					description: localize('gettingStarted.extensionsWeb.description.interpolated', "Extensions are VS Code's power-ups. A growing number are becoming available in the web.\n{0}", Button(localize('browsePopularWeb', "Browse Popular Web Extensions"), 'command:workbench.extensions.action.showPopularExtensions')),
-+					description: localize('gettingStarted.extensionsWeb.description.interpolated', "Extensions are FriedLiver's power-ups. A growing number are becoming available in the web.\n{0}", Button(localize('browsePopularWeb', "Browse Popular Web Extensions"), 'command:workbench.extensions.action.showPopularExtensions')),
- 					when: 'workspacePlatform == \'webworker\'',
- 					media: {
--						type: 'svg', altText: 'VS Code extension marketplace with featured language extensions', path: 'extensions-web.svg'
-+						type: 'svg', altText: 'FriedLiver extension marketplace with featured language extensions', path: 'extensions-web.svg'
- 					},
- 				},
- 				{
-@@ -348,13 +348,13 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 				{
- 					id: 'commandPaletteTaskWeb',
- 					title: localize('gettingStarted.commandPalette.title', "Unlock productivity with the Command Palette "),
--					description: localize('gettingStarted.commandPalette.description.interpolated', "Run commands without reaching for your mouse to accomplish any task in VS Code.\n{0}", Button(localize('commandPalette', "Open Command Palette"), 'command:workbench.action.showCommands')),
-+					description: localize('gettingStarted.commandPalette.description.interpolated', "Run commands without reaching for your mouse to accomplish any task in FriedLiver.\n{0}", Button(localize('commandPalette', "Open Command Palette"), 'command:workbench.action.showCommands')),
- 					media: { type: 'svg', altText: 'Command Palette overlay for searching and executing commands.', path: 'commandPalette.svg' },
- 				},
- 				{
- 					id: 'pickAFolderTask-WebWeb',
- 					title: localize('gettingStarted.setup.OpenFolder.title', "Open up your code"),
--					description: localize('gettingStarted.setup.OpenFolderWeb.description.interpolated', "You're all set to start coding. You can open a local project or a remote repository to get your files into VS Code.\n{0}\n{1}", Button(localize('openFolder', "Open Folder"), 'command:workbench.action.addRootFolder'), Button(localize('openRepository', "Open Repository"), 'command:remoteHub.openRepository')),
-+					description: localize('gettingStarted.setup.OpenFolderWeb.description.interpolated', "You're all set to start coding. You can open a local project or a remote repository to get your files into FriedLiver.\n{0}\n{1}", Button(localize('openFolder', "Open Folder"), 'command:workbench.action.addRootFolder'), Button(localize('openRepository', "Open Repository"), 'command:remoteHub.openRepository')),
- 					when: 'workspaceFolderCount == 0',
- 					media: {
- 						type: 'svg', altText: 'Explorer view showing buttons for opening folder and cloning repository.', path: 'openFolder.svg'
-@@ -375,12 +375,12 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 	{
- 		id: 'SetupAccessibility',
- 		title: localize('gettingStarted.setupAccessibility.title', "Get Started with Accessibility Features"),
--		description: localize('gettingStarted.setupAccessibility.description', "Learn the tools and shortcuts that make VS Code accessible. Note that some actions are not actionable from within the context of the walkthrough."),
-+		description: localize('gettingStarted.setupAccessibility.description', "Learn the tools and shortcuts that make FriedLiver accessible. Note that some actions are not actionable from within the context of the walkthrough."),
- 		isFeatured: true,
- 		icon: setupIcon,
- 		when: CONTEXT_ACCESSIBILITY_MODE_ENABLED.key,
- 		next: 'Setup',
--		walkthroughPageTitle: localize('gettingStarted.setupAccessibility.walkthroughPageTitle', 'Setup VS Code Accessibility'),
-+		walkthroughPageTitle: localize('gettingStarted.setupAccessibility.walkthroughPageTitle', 'Setup FriedLiver Accessibility'),
- 		content: {
- 			type: 'steps',
- 			steps: [
-@@ -411,7 +411,7 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 				{
- 					id: 'commandPaletteTaskAccessibility',
- 					title: localize('gettingStarted.commandPaletteAccessibility.title', "Unlock productivity with the Command Palette "),
--					description: localize('gettingStarted.commandPaletteAccessibility.description.interpolated', "Run commands without reaching for your mouse to accomplish any task in VS Code.\n{0}", Button(localize('commandPalette', "Open Command Palette"), 'command:workbench.action.showCommands')),
-+					description: localize('gettingStarted.commandPaletteAccessibility.description.interpolated', "Run commands without reaching for your mouse to accomplish any task in FriedLiver.\n{0}", Button(localize('commandPalette', "Open Command Palette"), 'command:workbench.action.showCommands')),
- 					media: { type: 'markdown', path: 'empty' },
- 				},
- 				{
-@@ -491,20 +491,20 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
- 				{
- 					id: 'settingsAndSync',
- 					title: localize('gettingStarted.settings.title', "Tune your settings"),
--					description: localize('gettingStarted.settingsAndSync.description.interpolated', "Customize every aspect of VS Code and [sync](command:workbench.userDataSync.actions.turnOn) customizations across devices.\n{0}", Button(localize('tweakSettings', "Open Settings"), 'command:toSide:workbench.action.openSettings')),
-+					description: localize('gettingStarted.settingsAndSync.description.interpolated', "Customize every aspect of FriedLiver and [sync](command:workbench.userDataSync.actions.turnOn) customizations across devices.\n{0}", Button(localize('tweakSettings', "Open Settings"), 'command:toSide:workbench.action.openSettings')),
- 					when: 'workspacePlatform != \'webworker\' && syncStatus != uninitialized',
- 					completionEvents: ['onEvent:sync-enabled'],
- 					media: {
--						type: 'svg', altText: 'VS Code Settings', path: 'settings.svg'
-+						type: 'svg', altText: 'FriedLiver Settings', path: 'settings.svg'
- 					},
- 				},
- 				{
- 					id: 'extensions',
- 					title: localize('gettingStarted.extensions.title', "Code with extensions"),
--					description: localize('gettingStarted.extensions.description.interpolated', "Extensions are VS Code's power-ups. They range from handy productivity hacks, expanding out-of-the-box features, to adding completely new capabilities.\n{0}", Button(localize('browsePopular', "Browse Popular Extensions"), 'command:workbench.extensions.action.showPopularExtensions')),
-+					description: localize('gettingStarted.extensions.description.interpolated', "Extensions are FriedLiver's power-ups. They range from handy productivity hacks, expanding out-of-the-box features, to adding completely new capabilities.\n{0}", Button(localize('browsePopular', "Browse Popular Extensions"), 'command:workbench.extensions.action.showPopularExtensions')),
- 					when: 'workspacePlatform != \'webworker\'',
- 					media: {
--						type: 'svg', altText: 'VS Code extension marketplace with featured language extensions', path: 'extensions.svg'
-+						type: 'svg', altText: 'FriedLiver extension marketplace with featured language extensions', path: 'extensions.svg'
- 					},
- 				},
- 				{
 diff --git a/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts b/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts
-index d725507e..5fd80031 100644
+index d725507..5fd8003 100644
 --- a/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.ts
 @@ -22,7 +22,8 @@ registerAction2(class extends Action2 {

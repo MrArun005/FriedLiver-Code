@@ -1,6 +1,6 @@
 // The Welcome page's sentence and lists (COMPONENTS.md v2 §2.38): one source with the board.
 import { describe, expect, it } from 'vitest';
-import { welcomeSummary } from '../src/shared/welcome';
+import { connectStatus, welcomeSummary } from '../src/shared/welcome';
 import type { ChatView } from '../src/shared/model';
 
 const NOW = new Date(2026, 9, 20, 15, 0).getTime();
@@ -25,5 +25,15 @@ describe('welcomeSummary', () => {
 
   it('leaves out work finished before midnight', () => {
     expect(welcomeSummary([chat({ lastActivity: new Date(2026, 9, 19, 23, 0).getTime() })], NOW).done).toHaveLength(0);
+  });
+});
+
+describe('connectStatus (first run, V17)', () => {
+  it('only a signed-in agent counts as connected; the rest say why in plain words', () => {
+    expect(connectStatus('signed-in')).toEqual({ words: 'Connected', connected: true });
+    expect(connectStatus('needs-sign-in')).toEqual({ words: 'Installed, needs sign-in', connected: false });
+    expect(connectStatus('not-installed').connected).toBe(false);
+    expect(connectStatus('error').words).toBe('Problem signing in');
+    expect(connectStatus(undefined)).toEqual({ words: 'Not checked yet', connected: false });
   });
 });

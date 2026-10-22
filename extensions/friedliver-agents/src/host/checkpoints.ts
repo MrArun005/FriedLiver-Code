@@ -11,6 +11,7 @@ import path from 'node:path';
 import * as git from '@friedliver/main/workspace/git';
 import { diffLines } from '../shared/diff';
 import { DirSnapshots } from './dirSnapshots';
+import { spelledUnder } from './paths';
 
 interface Turn {
   turnId: string;
@@ -104,7 +105,9 @@ export class Checkpoints {
   /** Snapshots the chat's folder before a turn. Resolves either way: true when the turn has a checkpoint. */
   async begin(chatId: string, cwd: string, turnId: string): Promise<boolean> {
     const repo = await git.repoRoot(cwd);
-    const root = repo ?? path.resolve(cwd);
+    // git names the repository by its real path; kept in the folder's own spelling, so the files a turn
+    // changed match the ones the agent and the workspace name (spelledUnder).
+    const root = repo ? spelledUnder(repo, [cwd]) : path.resolve(cwd);
     const kind = repo ? 'git' : 'dir';
     if (this.skipped.has(root) || (kind === 'dir' && !this.files)) return false;
     const others = this.running.get(root) ?? new Set<string>();

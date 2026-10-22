@@ -2246,6 +2246,9 @@ button.msg-more {
   line-height: 1.5;
 }
 /* The current turn's message, once scrolled away: a copy at the top, full width, never past three lines. */
+/* A solid tone with a hairline under it and a fade below: what scrolls under it goes out of view
+   softly, never a card head or a line cut in half against its edge. Items scrolled to (jump list,
+   Show more) stop below it: scroll-margin-top on the transcript's items. */
 .sticky-prompt {
   position: absolute;
   top: 0;
@@ -2253,17 +2256,21 @@ button.msg-more {
   right: var(--gutter);
   z-index: var(--z-sticky);
   max-height: 30%;
-  padding-top: var(--sp-1);
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--hairline);
   background: var(--bg);
+}
+.transcript > * {
+  scroll-margin-top: calc(var(--sp-12) * 2);
 }
 .sticky-prompt::after {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
-  top: 100%;
-  height: var(--sp-3);
-  background: linear-gradient(to bottom, var(--bg), transparent);
+  top: calc(100% + 1px);
+  height: var(--sp-6);
+  background: linear-gradient(to bottom, var(--bg) 40%, transparent);
   pointer-events: none;
 }
 .sticky-prompt .bubble {
@@ -4150,31 +4157,42 @@ button.jump-item[aria-current='true'] {
   }
 }
 /* No chat yet: one per agent. */
+/* §2.26: unboxed and start-aligned, the whole width; the mark beside the heading. */
 .empty {
-  padding: var(--sp-5) var(--sp-4);
+  padding: var(--sp-5) var(--gutter);
   color: var(--fg-2);
-  text-align: center;
+  text-align: start;
+}
+.empty-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.empty-head .empty-mark {
+  margin: 0;
 }
 .empty h2 {
+  margin: 0;
   font-size: var(--t-title);
   font-weight: 600;
   color: var(--fg);
 }
-/* The agent cards: centred as a row, one size, the glyphs on one line (a note doesn't push its card's up). */
+/* The agent cards: across the width, one size, the glyphs on one line (a note doesn't push its card's up). */
 .pick {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 120px));
-  justify-content: center;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--sp-2);
   margin: var(--sp-4) 0;
 }
 button.pick-agent {
   position: relative;
   flex-direction: column;
+  align-items: flex-start;
   justify-content: center;
   gap: 6px;
+  text-align: start;
   /* Room at the bottom of every card for Demo's note, so it never sits on the name and the glyphs stay in line. */
-  padding: var(--sp-4) var(--sp-2) calc(var(--sp-2) + 1.3em);
+  padding: var(--sp-4) var(--sp-3) calc(var(--sp-2) + 1.3em);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--input-bg);
@@ -4189,8 +4207,8 @@ button.pick-agent:hover {
 .pick-agent .pick-note {
   position: absolute;
   bottom: var(--sp-2);
-  left: var(--sp-1);
-  right: var(--sp-1);
+  left: var(--sp-3);
+  right: var(--sp-3);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -5187,17 +5205,34 @@ body[data-surface='welcome'] {
   color: var(--fg-2);
   font-size: var(--t-90);
 }
-.wl-first {
-  display: flex;
+/* First run (V17): the agents 2×2 with their sign-in and a Connect action, the demo agent, and what happens next. */
+.wl-agents > .wl-tile {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-3);
+}
+@media (max-width: 600px) {
+  .wl-first .wl-agents {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.wl-col > .wl-demo {
+  flex-direction: row;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
+  gap: var(--sp-1) var(--sp-3);
 }
-.wl-first p {
-  flex-basis: 100%;
+.wl-demo .wl-empty {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+}
+.wl-steps {
+  display: flex;
+  flex-direction: column;
   margin: 0;
-  color: var(--fg-2);
-  font-size: var(--t-90);
+  padding: 0;
+  list-style: none;
 }
 .wl-keys {
   display: flex;

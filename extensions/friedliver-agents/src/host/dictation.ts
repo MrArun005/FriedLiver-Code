@@ -8,6 +8,11 @@ import type { DictationState, DictationUpdate } from '../shared/dictation';
 /** System Settings › Keyboard › Dictation: the old hint's link, kept for builds without the helper. */
 export const DICTATION_SETTINGS = 'x-apple.systempreferences:com.apple.Keyboard-Settings.extension';
 
+/** The OS's own dictation settings the mic hint links to: macOS's, Windows's Speech page (Win+H), none elsewhere. */
+export function dictationSettings(platform: NodeJS.Platform = process.platform): string | undefined {
+  return platform === 'darwin' ? DICTATION_SETTINGS : platform === 'win32' ? 'ms-settings:speech' : undefined;
+}
+
 /** The privacy pane to open when macOS said no. */
 export const PRIVACY_PANES = {
   'mic-denied': 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',

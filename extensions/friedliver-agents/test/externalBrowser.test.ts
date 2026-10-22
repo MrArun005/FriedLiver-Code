@@ -4,6 +4,9 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SERVER_NAME, claudeEntry, isOurEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from '../src/host/externalBrowser';
 
+/** Windows has no POSIX mode bits (stat says 0o666 whatever was asked), so file modes are checked elsewhere only. */
+const POSIX_MODES = process.platform !== 'win32';
+
 const tmp = () => mkdtemp(path.join(os.tmpdir(), 'flx-'));
 const T1 = 'a'.repeat(64);
 const T2 = 'b'.repeat(64);
@@ -14,8 +17,8 @@ describe('the external token file', () => {
   it('is 0600 in a 0700 dir, a new launch replaces it, and it can be removed', async () => {
     const storage = await tmp();
     const first = await writeTokenFile(storage, 'http://127.0.0.1:1/mcp', T1);
-    expect((await stat(first)).mode & 0o777).toBe(0o600);
-    expect((await stat(path.dirname(first))).mode & 0o777).toBe(0o700);
+    if (POSIX_MODES) expect((await stat(first)).mode & 0o777).toBe(0o600);
+    if (POSIX_MODES) expect((await stat(path.dirname(first))).mode & 0o777).toBe(0o700);
     expect(JSON.parse(await readFile(first, 'utf8'))).toEqual({ url: 'http://127.0.0.1:1/mcp', token: T1, pid: process.pid });
     const second = await writeTokenFile(storage, 'http://127.0.0.1:2/mcp', T2);
     expect(second).toBe(first);
@@ -43,7 +46,7 @@ describe("Claude Code's config", () => {
     await writeFile(file, JSON.stringify(fixture), { mode: 0o600 });
     expect(await registerClaude(file, E1)).toBe('added');
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ ...fixture, mcpServers: { ...fixture.mcpServers, [SERVER_NAME]: E1 } });
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    if (POSIX_MODES) expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(`${file}.friedliver-backup`, 'utf8'))).toEqual(fixture);
     expect(await registerClaude(file, E1)).toBe('unchanged');
     expect(await registerClaude(file, E2)).toBe('updated');
@@ -66,7 +69,7 @@ describe("Claude Code's config", () => {
   it('creates the file when there is none, and leaves a file it cannot parse alone', async () => {
     const file = path.join(await tmp(), '.claude.json');
     expect(await registerClaude(file, E1)).toBe('added');
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    if (POSIX_MODES) expect((await stat(file)).mode & 0o777).toBe(0o600);
     await writeFile(file, '{ broken');
     await expect(registerClaude(file, E1)).rejects.toThrow();
     expect(await readFile(file, 'utf8')).toBe('{ broken');

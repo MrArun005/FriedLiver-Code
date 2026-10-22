@@ -41,7 +41,8 @@ describe('reading the FSEvents journal', () => {
     for (const [why, text] of Object.entries(cases)) expect(parseJournal(text, ROOT, MARK), why).toBeNull();
   });
 
-  it('runs the helper and treats a failing or missing helper as no journal', async () => {
+  // The fake helper is a #!/bin/sh script, which Windows can't spawn; the FSEvents journal is macOS-only anyway.
+  it.skipIf(process.platform === 'win32')('runs the helper and treats a failing or missing helper as no journal', async () => {
     const d = await tmp('fl-journal-');
     const fake = path.join(d, 'helper.sh');
     await writeFile(fake, `#!/bin/sh\nprintf 'uuid=U-1\\0now=300\\0E11000 %s/a.ts\\0END\\0' "$1"\n`, { mode: 0o755 });

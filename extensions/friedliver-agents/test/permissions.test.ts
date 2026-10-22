@@ -14,8 +14,9 @@ function memento(): Store & { data: Record<string, unknown> } {
 }
 
 function home() {
-  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'fl-home-')));
-  for (const d of ['Desktop/trip', 'Documents', '.ssh', '.aws', 'Library/Keychains', 'proj/.git', 'proj/src']) mkdirSync(path.join(dir, d), { recursive: true });
+  // .native: Windows 8.3 names (RUNNER~1) expanded, as the code's realpath does.
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'fl-home-')));
+  for (const d of ['Desktop/trip', 'Documents', '.ssh', '.aws', 'Library/Keychains', 'AppData/Roaming', 'proj/.git', 'proj/src']) mkdirSync(path.join(dir, d), { recursive: true });
   writeFileSync(path.join(dir, 'Desktop/trip/plan.txt'), 'x');
   return dir;
 }
@@ -148,7 +149,8 @@ describe('folder rules', () => {
     const app = path.join(home(), 'FriedLiver.app');
     mkdirSync(app);
     const { h, p } = store(undefined, undefined, undefined, [app]);
-    for (const f of ['.ssh', '.aws', 'Library/Keychains', '/etc', app]) {
+    const system = process.platform === 'win32' ? process.env.SystemRoot! : '/etc';
+    for (const f of ['.ssh', '.aws', 'Library/Keychains', 'AppData/Roaming', system, app]) {
       const folder = path.isAbsolute(f) ? f : path.join(h, f);
       expect(isSensitive(realpathSync(folder), h, [app]), f).toBe(true);
       expect(p.add({ kind: 'folder', folder, access: 'write' }), f).toBe(false);
@@ -257,7 +259,7 @@ describe('the app itself', () => {
   it('is the .app bundle around the app root', () => {
     expect(appBundle('/Applications/FriedLiver.app/Contents/Resources/app')).toBe('/Applications/FriedLiver.app');
     expect(appBundle('/opt/friedliver/resources/app')).toBe('/opt/friedliver/resources/app');
-    expect(userDataDir('/Users/a/Library/Application Support/FriedLiver/User/globalStorage/friedliver.friedliver-agents')).toBe('/Users/a/Library/Application Support/FriedLiver');
+    expect(userDataDir('/Users/a/Library/Application Support/FriedLiver/User/globalStorage/friedliver.friedliver-agents')).toBe(path.resolve('/Users/a/Library/Application Support/FriedLiver'));
   });
 });
 

@@ -139,7 +139,7 @@ describe('listing the dropped commits never runs a program the repository names'
     const c = READ_ONLY_CONFIG.join(' ');
     for (const k of ['--no-pager', 'core.fsmonitor=false', 'core.hooksPath=/dev/null', 'core.pager=cat', 'log.showSignature=false', 'gpg.program=false', 'diff.external=', 'core.sshCommand=false', 'core.gitProxy=', 'credential.helper=', 'protocol.allow=never', 'safe.bareRepository=explicit', 'uploadpack.packObjectsHook='])
       expect(c, k).toContain(k);
-    expect(READ_ONLY_ENV).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_ASKPASS: '', SSH_ASKPASS: '' });
+    expect(READ_ONLY_ENV).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_ASKPASS: '', SSH_ASKPASS: '' });
   });
 
   it('reads only a root whose .git is a real folder: not a worktree’s .git file, not a link', async () => {

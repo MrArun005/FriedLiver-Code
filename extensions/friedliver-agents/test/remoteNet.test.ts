@@ -1,6 +1,6 @@
 import type os from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { TAILSCALE_PATHS, checkBindHost, detectTailscale, isPrivateLan, isTailscaleIp, lanAddresses, splitPem, tailscaleCert } from '../src/remote/net';
+import { TAILSCALE_PATHS, checkBindHost, detectTailscale, fixedEnv, isPrivateLan, isTailscaleIp, lanAddresses, splitPem, tailscaleCert } from '../src/remote/net';
 
 const v4 = (address: string, internal = false) => ({ address, family: 'IPv4', internal, netmask: '255.255.255.0', mac: '', cidr: null }) as os.NetworkInterfaceInfo;
 const v6 = (address: string) => ({ address, family: 'IPv6', internal: false, netmask: '', mac: '', cidr: null, scopeid: 0 }) as os.NetworkInterfaceInfo;
@@ -96,5 +96,14 @@ describe('Tailscale detection', () => {
     expect(splitPem('junk')).toEqual({ cert: '', key: '' });
     expect(await tailscaleCert({ binary: '/usr/bin/tailscale', ip: '100.101.102.103' }, async () => pem)).toBeUndefined();
     expect(await tailscaleCert({ binary: '/usr/bin/tailscale', ip: '1', dnsName: 'a.ts.net' }, async () => 'nope')).toBeUndefined();
+  });
+});
+
+describe('runFixed’s environment', () => {
+  it('gives Windows programs SystemRoot and WINDIR (Tailscale fails to start without them), and System32 as PATH', () => {
+    expect(fixedEnv('win32', { SystemRoot: 'D:\\Win' })).toMatchObject({ SystemRoot: 'D:\\Win', WINDIR: 'D:\\Win', PATH: 'D:\\Win\\System32' });
+    expect(fixedEnv('win32', {})).toMatchObject({ SystemRoot: 'C:\\Windows' });
+    expect(fixedEnv('darwin', { SystemRoot: 'x' })).toMatchObject({ PATH: '/usr/bin:/bin' });
+    expect(fixedEnv('darwin', {})).not.toHaveProperty('SystemRoot');
   });
 });
