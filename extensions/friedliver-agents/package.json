@@ -105,6 +105,11 @@
     },
     "commands": [
       {
+        "command": "friedliver.companion.updateCharacters",
+        "title": "Update Characters",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.links.useBuiltin",
         "title": "Open Links in FriedLiver Browser",
         "category": "FriedLiver"
@@ -925,7 +930,13 @@
           "type": "string",
           "scope": "machine",
           "default": "",
-          "markdownDescription": "A folder of your own characters, checked first: `<folder>/<agent id>` with `.svg`, `.png`, `.gif`, `.webp` (up to 5 MB) or `.webm`, `.mp4`, `.m4v`, `.mov` (up to 20 MB; `.webm` VP9 plays best), and `<agent id>-run.*` for the run-in. Read from your user settings only.\n\nExample: `~/FriedLiverCharacters` holding `codex.webm`, `claude.png` and `claude-run.gif`."
+          "markdownDescription": "A folder of your own characters, checked after your `characters` entries and before the repository: `<folder>/<agent id>` with `.svg`, `.png`, `.gif`, `.webp` (up to 5 MB) or `.webm`, `.mp4`, `.m4v`, `.mov` (up to 20 MB; `.webm` VP9 plays best), and `<agent id>-run.*` for the run-in. Read from your user settings only.\n\nExample: `~/FriedLiverCharacters` holding `codex.webm`, `claude.png` and `claude-run.gif`."
+        },
+        "friedliver.companion.repo": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "markdownDescription": "A git repository of your own characters, so they follow you to every machine. FriedLiver keeps a shallow clone and pulls it at startup, every 6 hours and on **FriedLiver: Update Characters**. Its root holds `<agent id>.*` and `<agent id>-run.*`, the same files and limits as the folder setting. A private repository works through your existing git sign-in (credential helper, `gh auth`, or ssh key); FriedLiver never asks for or stores a token. Only `https://`, `ssh://` and `git@` addresses. Order: your `characters` entry, then the folder, then this repository, then the built-in character. Read from your user settings only.\n\nExample: `https://github.com/MrArun005/friedliver-characters`"
         },
         "friedliver.notify.finished": {
           "type": "boolean",

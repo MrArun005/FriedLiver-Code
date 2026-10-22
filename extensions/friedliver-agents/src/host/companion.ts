@@ -138,6 +138,8 @@ export interface CharacterOptions {
   characters: Record<string, CharacterSetting> | undefined;
   /** friedliver.companion.folder, from the user's own settings only. */
   folder: string | undefined;
+  /** The clone of friedliver.companion.repo, when there is one (host/characterRepo.ts). */
+  repoDir?: string;
   /** Videos that couldn't play here (by key): passed over, so the built-in character stands in. */
   failed?: (key: string) => boolean;
 }
@@ -165,29 +167,29 @@ export function characterFor(agentId: string, o: CharacterOptions): CharacterLoo
   const fallback = () => builtin(Object.prototype.hasOwnProperty.call(DEFAULT_CHARACTERS, agentId) ? DEFAULT_CHARACTERS[agentId] : CUSTOM_CHARACTER);
   // Own media over the built-in: a video keeps the built-in pictures as its fallback; one video runs in and stays.
   const pair = (idle: Media | undefined, run: Media | undefined): CharacterLook | undefined => {
-    if (!idle) return fallback();
+    if (!idle) return undefined;
     const base: CharacterLook = 'image' in idle ? { character: idle.image } : { ...(fallback() ?? { character: '' }), video: idle.video };
     if (run && 'image' in run) base.characterRun = run.image;
     if (run && 'video' in run) base.videoRun = run.video;
     return base;
   };
-
-  const folder = o.folder && expandHome(o.folder);
-  if (folder && path.isAbsolute(folder) && /^[\w-]+$/.test(agentId)) {
-    const idle = firstMedia(folder, agentId, failed);
-    if (idle) return pair(idle, firstMedia(folder, `${agentId}-run`, failed));
-  }
-  const own = o.characters && Object.prototype.hasOwnProperty.call(o.characters, agentId) ? o.characters[agentId] : undefined;
-  if (typeof own === 'string' && own) {
-    if (path.isAbsolute(expandHome(own))) return pair(media(own, failed), undefined);
-    return builtin(own) ?? fallback();
-  }
-  if (own && typeof own === 'object') {
-    const idle = typeof own.idle === 'string' ? media(own.idle, failed) : undefined;
-    const run = typeof own.run === 'string' ? media(own.run, failed) : undefined;
-    return pair(idle, run);
-  }
-  return fallback();
+  // `<dir>/<agentId>.*` and `<agentId>-run.*`: the folder setting, or the repository's clone.
+  const fromDir = (raw: string | undefined) => {
+    const dir = raw && expandHome(raw);
+    if (!dir || !path.isAbsolute(dir) || !/^[\w-]+$/.test(agentId)) return undefined;
+    const idle = firstMedia(dir, agentId, failed);
+    return idle ? pair(idle, firstMedia(dir, `${agentId}-run`, failed)) : undefined;
+  };
+  const fromSetting = () => {
+    const own = o.characters && Object.prototype.hasOwnProperty.call(o.characters, agentId) ? o.characters[agentId] : undefined;
+    if (typeof own === 'string' && own) return path.isAbsolute(expandHome(own)) ? pair(media(own, failed), undefined) : builtin(own);
+    if (own && typeof own === 'object') {
+      return pair(typeof own.idle === 'string' ? media(own.idle, failed) : undefined, typeof own.run === 'string' ? media(own.run, failed) : undefined);
+    }
+    return undefined;
+  };
+  // Your own entry, then your folder, then your repository, then the built-in; anything that doesn't load passes to the next.
+  return fromSetting() ?? fromDir(o.folder) ?? fromDir(o.repoDir) ?? fallback();
 }
 
 /** One waiting entry as the companion shows it, and the message each choice sends. Never a remembered scope. */

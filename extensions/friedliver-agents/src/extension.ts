@@ -50,6 +50,8 @@ import { agentName, chatPick, statusTexts, turnEndedText, chatRef } from './shar
 import { linkDestination, linkTarget } from './shared/links';
 import { codexModelVisibility } from './host/codexModels';
 import { Companion, characterFor, type CharacterSetting } from './host/companion';
+import { CharacterRepo, PULL_EVERY_MS } from './host/characterRepo';
+import { gitProgram } from '@friedliver/main/workspace/git';
 
 /** friedliver.links.openIn: where web links you click open. */
 const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
@@ -408,6 +410,10 @@ export class Controller {
     });
     context.subscriptions.push({ dispose: unsubscribe });
     command('friedliver.agents.companionAnswer', (id: unknown, choiceId: unknown) => this.companion.answer(id, choiceId));
+    command('friedliver.companion.updateCharacters', () => this.characterRepo.sync(this.characterRepoUrl()));
+    void this.characterRepo.sync(this.characterRepoUrl());
+    const pullCharacters = setInterval(() => void this.characterRepo.sync(this.characterRepoUrl()), PULL_EVERY_MS);
+    context.subscriptions.push({ dispose: () => clearInterval(pullCharacters) });
     command('friedliver.agents.companionMediaFailed', (key: unknown) => this.companion.videoFailed(key));
     command('friedliver.agents.openChat', (chatId: unknown) => typeof chatId === 'string' && this.core.chat(chatId) && this.showChat(chatId));
 
@@ -546,12 +552,33 @@ export class Controller {
     character: (agentId, failed) => {
       const config = vscode.workspace.getConfiguration('friedliver.companion');
       // The user's own settings only: a repository must not point these at files.
-      const characters = userSetting(config.inspect<Record<string, CharacterSetting>>('characters')).value;
+      // Your own entries only: the manifest's default map is the built-ins, which must not outrank your folder or repository.
+      const characters = config.inspect<Record<string, CharacterSetting>>('characters')?.globalValue;
       const folder = userSetting(config.inspect<string>('folder')).value;
-      return characterFor(agentId, { builtinDir: path.join(this.context.extensionPath, 'media', 'characters'), characters: characters && typeof characters === 'object' ? characters : undefined, folder: typeof folder === 'string' ? folder : undefined, failed });
+      return characterFor(agentId, {
+        builtinDir: path.join(this.context.extensionPath, 'media', 'characters'),
+        characters: characters && typeof characters === 'object' ? characters : undefined,
+        folder: typeof folder === 'string' ? folder : undefined,
+        repoDir: this.characterRepo.dir(this.characterRepoUrl()),
+        failed,
+      });
     },
   });
   private companionTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly characterRepo = new CharacterRepo({
+    storage: () => this.context.globalStorageUri.fsPath,
+    git: gitProgram,
+    warn: (message) => {
+      this.log.warn(`Companion: ${message}`);
+      void vscode.window.showWarningMessage(plainText(message));
+    },
+  });
+
+  /** friedliver.companion.repo, from your user settings only: a repository must not point it anywhere. */
+  private characterRepoUrl(): string | undefined {
+    const url = userSetting(vscode.workspace.getConfiguration('friedliver.companion').inspect<string>('repo')).value;
+    return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+  }
 
   /** ponytail: coalesces the state's bursts (streaming) into one check per 50 ms; a click re-checks at once. */
   private companionSoon(): void {
@@ -2105,6 +2132,7 @@ export class Controller {
       const message: HostMessage = { type: 'discussLayout', layout: this.discussLayout() };
       for (const s of this.surfaces) post(s, message);
     }
+    if (e.affectsConfiguration('friedliver.companion.repo')) void this.characterRepo.sync(this.characterRepoUrl());
     if (e.affectsConfiguration('friedliver.images')) void this.tidyImages().finally(() => this.postImageStore());
     if (e.affectsConfiguration('friedliver.restoreChats')) {
       if (vscode.workspace.getConfiguration('friedliver').get<boolean>('restoreChats', true)) {
