@@ -1315,27 +1315,27 @@
 	margin-right: 0;
 }
 
-/* ---- Companion (patch 0310): an agent's character runs in along the bottom, peeks from the
-   bottom-left corner (30% cut off by it) and asks in a glass bubble 25% of the window wide, min 320.
-   Ember only on the one primary answer. Under reduced motion it fades in at the corner. ---------- */
+/* ---- Companion (patch 0310): an agent's character runs in from the right along the status bar
+   line to the middle of the window, stops, and plays its arrival (the idle picture's own wave, or
+   the clip's loop). Then its card pops, bottom-left corner at the character's top-right (flipped
+   or clamped inside by the workbench when it won't fit). iPhone-sized glass card, one ember
+   button. Reduced motion: both fade in. Answered: the card shrinks out, the character runs off left. */
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion {
 	position: absolute;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	height: 0;
+	inset: 0;
 	z-index: var(--fl-z-toast);
 	pointer-events: none;
+	overflow: hidden;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character {
 	position: absolute;
-	left: 0;
+	left: 50%;
 	bottom: 0;
 	width: calc(3.5 * var(--fl-h-xl));
 	height: calc(3.5 * var(--fl-h-xl));
-	transform: translate(-30%, 30%);
+	transform: translateX(-50%);
 	user-select: none;
 }
 
@@ -1349,6 +1349,10 @@
 	object-fit: contain;
 }
 
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--none {
+	display: none;
+}
+
 /* Until its first frames say how it sits (floating cut-out, keyed, or framed). */
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--pending {
 	visibility: hidden;
@@ -1359,7 +1363,7 @@
 	opacity: 0;
 }
 
-/* A clip or picture with a busy background: a rounded portal peeking from the corner. */
+/* A clip or picture with a busy background: a rounded portal frame. */
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--portal {
 	overflow: hidden;
 	border: var(--fl-line) solid var(--fl-hairline);
@@ -1373,16 +1377,8 @@
 	object-fit: cover;
 }
 
-.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character--none {
-	display: none;
-}
-
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--running .fl-companion__character {
-	animation: fl-companion-run calc(5 * var(--fl-dur-spring)) var(--fl-ease-out) both;
-}
-
-.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--here .fl-companion__character {
-	animation: fl-companion-settle var(--fl-dur-slow) var(--fl-ease-out) both;
+	animation: fl-companion-run calc(4 * var(--fl-dur-pop)) var(--fl-ease-out) both;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--fade .fl-companion__character,
@@ -1391,28 +1387,35 @@
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--leaving .fl-companion__character {
-	animation: fl-companion-hop calc(2 * var(--fl-dur-slow)) var(--fl-ease-in-out) both;
+	animation: fl-companion-run-off calc(2 * var(--fl-dur-pop)) var(--fl-ease-in-out) both;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--leaving .fl-companion__bubble {
+	display: flex;
+	animation: fl-companion-shrink var(--fl-dur-fast) var(--fl-ease-in-out) both;
 }
 
 @keyframes fl-companion-run {
 	from {
 		left: 100%;
-		transform: translate(0, 0);
+		transform: translateX(0);
+	}
+
+	to {
+		left: 50%;
+		transform: translateX(-50%);
+	}
+}
+
+@keyframes fl-companion-run-off {
+	from {
+		left: 50%;
+		transform: translateX(-50%);
 	}
 
 	to {
 		left: 0;
-		transform: translate(-30%, 0);
-	}
-}
-
-@keyframes fl-companion-settle {
-	from {
-		transform: translate(-30%, 0);
-	}
-
-	to {
-		transform: translate(-30%, 30%);
+		transform: translateX(-100%);
 	}
 }
 
@@ -1426,31 +1429,43 @@
 	}
 }
 
-@keyframes fl-companion-hop {
+@keyframes fl-companion-pop {
 	from {
-		transform: translate(-30%, 30%);
-	}
-
-	40% {
-		transform: translate(-50%, 0);
+		opacity: 0;
+		transform: scale(0.92);
 	}
 
 	to {
-		transform: translate(-130%, 30%);
+		opacity: 1;
+		transform: scale(1);
 	}
 }
 
+@keyframes fl-companion-shrink {
+	from {
+		opacity: 1;
+		transform: scale(1);
+	}
+
+	to {
+		opacity: 0;
+		transform: scale(0.92);
+	}
+}
+
+/* The card: placed by the workbench (left/top), so it grows and shrinks with what it says. */
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble {
 	position: absolute;
-	left: calc(2.5 * var(--fl-h-xl));
-	bottom: calc(2 * var(--fl-h-xl));
-	width: max(calc(10 * var(--fl-sp-8)), 25%);
-	max-width: calc(100% - 3 * var(--fl-h-xl));
+	left: 0;
+	top: 0;
+	width: min(calc(var(--fl-w-menu) + var(--fl-sp-2) + var(--fl-sp-half)), calc(100% - 2 * var(--fl-sp-4)));
+	min-width: min(calc(10 * var(--fl-sp-8)), calc(100% - 2 * var(--fl-sp-4)));
+	max-height: calc(100% - 2 * var(--fl-sp-4));
 	box-sizing: border-box;
 	display: none;
 	flex-direction: column;
-	gap: var(--fl-sp-2);
-	padding: var(--fl-sp-3) var(--fl-sp-4);
+	gap: var(--fl-sp-3);
+	padding: var(--fl-sp-4);
 	text-align: left;
 	color: var(--fl-fg);
 	font-family: var(--fl-font);
@@ -1458,9 +1473,33 @@
 	background: var(--fl-glass-bg);
 	backdrop-filter: var(--fl-glass-blur);
 	border: var(--fl-line) solid var(--fl-dialog-border);
-	border-radius: var(--fl-r-float) var(--fl-r-float) var(--fl-r-float) var(--fl-r-3);
-	box-shadow: var(--fl-elev-3);
+	border-radius: var(--fl-r-dialog);
+	box-shadow: var(--fl-rim), var(--fl-elev-3);
+	transform-origin: bottom left;
 	pointer-events: auto;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble--flipped {
+	transform-origin: bottom right;
+}
+
+/* The notch: a small corner pointing down at the character. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble::after {
+	content: '';
+	position: absolute;
+	left: var(--fl-sp-4);
+	bottom: calc(-0.5 * var(--fl-sp-3) - var(--fl-line));
+	width: var(--fl-sp-3);
+	height: var(--fl-sp-3);
+	background: var(--fl-menu-bg);
+	border-right: var(--fl-line) solid var(--fl-dialog-border);
+	border-bottom: var(--fl-line) solid var(--fl-dialog-border);
+	transform: rotate(45deg);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble--flipped::after {
+	left: auto;
+	right: var(--fl-sp-4);
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--here .fl-companion__bubble,
@@ -1469,8 +1508,7 @@
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion--here .fl-companion__bubble {
-	transform-origin: bottom left;
-	animation: fl-open var(--fl-dur-pop) var(--fl-spring-snap) both;
+	animation: fl-companion-pop var(--fl-dur) var(--fl-spring-snap) both;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__head {
@@ -1478,7 +1516,7 @@
 	align-items: center;
 	gap: var(--fl-sp-2);
 	color: var(--fl-fg-2);
-	font-size: var(--fl-t-sm);
+	font-size: var(--fl-t-lg);
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__from {
@@ -1494,26 +1532,30 @@
 	border-radius: var(--fl-r-pill);
 	background: var(--fl-pill-bg);
 	color: var(--fl-fg);
+	font-size: var(--fl-t-sm);
 	font-variant-numeric: tabular-nums;
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__question {
-	font-size: var(--fl-t-lg);
-	font-weight: var(--fl-w-medium);
+	font-size: var(--fl-t-title);
+	font-weight: var(--fl-w-strong);
 	line-height: var(--fl-lh-tight);
 	overflow-wrap: anywhere;
 }
 
+/* Long detail scrolls inside; the card stays within 60% of the window's height. */
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__detail {
+	flex: 0 1 auto;
+	min-height: 0;
+	max-height: 60vh;
 	margin: 0;
-	max-height: calc(6 * var(--fl-h-sm));
 	overflow: auto;
-	padding: var(--fl-sp-2);
-	border-radius: var(--fl-r-6);
+	padding: var(--fl-sp-2) var(--fl-sp-3);
+	border-radius: var(--fl-r-8);
 	background: var(--fl-code-bg);
 	color: var(--fl-inline-code-fg);
 	font-family: var(--fl-mono);
-	font-size: var(--fl-fs-mono);
+	font-size: var(--fl-t-md);
 	line-height: var(--fl-lh-code);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
@@ -1528,17 +1570,21 @@
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn,
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__open {
-	height: var(--fl-h-md);
-	padding: 0 var(--fl-sp-3);
+	height: var(--fl-h-lg);
+	padding: 0 var(--fl-sp-4);
 	border: none;
 	border-radius: var(--fl-r-ctl);
 	font: inherit;
+	font-size: var(--fl-t-md);
 	font-weight: var(--fl-w-medium);
+	white-space: nowrap;
 	cursor: pointer;
 	transition: background-color var(--fl-dur-out) var(--fl-ease-out);
 }
 
+/* Buttons share the row and stack when it's narrow. */
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__btn {
+	flex: 1 1 auto;
 	background: var(--fl-pill-bg);
 	color: var(--fl-fg);
 }
@@ -1561,7 +1607,6 @@
 }
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__open {
-	margin-left: auto;
 	background: transparent;
 	color: var(--fl-link);
 }

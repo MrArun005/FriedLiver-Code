@@ -907,7 +907,7 @@
         "friedliver.companion.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "When an agent in any chat waits for you (a permission, a command, an edit to review, a question), a character runs in along the bottom of the window and asks from the bottom-left corner, with the answer buttons. Careful requests and plans are answered in the chat."
+          "description": "When an agent in any chat waits for you (a permission, a command, an edit to review, a question), a character runs in along the bottom of the window to the middle and asks in a card beside it, with the answer buttons. Careful requests and plans are answered in the chat."
         },
         "friedliver.companion.characters": {
           "type": "object",

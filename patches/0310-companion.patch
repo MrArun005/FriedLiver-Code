@@ -12,14 +12,14 @@ index 47c5748..d2c91bd 100644
  					'self'
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
 new file mode 100644
-index 0000000..9d50c74
+index 0000000..3b83e2c
 --- /dev/null
 +++ b/src/vs/workbench/contrib/friedliverCompanion/browser/companion.contribution.ts
-@@ -0,0 +1,550 @@
+@@ -0,0 +1,582 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0310): the companion. When an agent in any chat waits for you, its character
-+ *  runs in along the bottom of the window, peeks from the bottom-left corner (partly cut off by it)
-+ *  and asks in a speech bubble with the answer buttons. One ask at a time, "+N" for the rest.
++ *  runs in from the right along the status bar line to the middle of the window, plays its arrival,
++ *  and its card pops beside it with the answer buttons. One ask at a time, "+N" for the rest.
 + *  - The Agents extension decides what shows: _friedliver.companion.show(item) / .hide(id).
 + *  - A click runs friedliver.agents.companionAnswer(id, choiceId), which answers that request by its
 + *    own id through the chat card's path; the extension ignores ids that no longer wait.
@@ -41,6 +41,9 @@ index 0000000..9d50c74
 +
 +/** After the bubble opens, clicks wait this long before they count. */
 +const ARM_MS = 400;
++/** Between the character's top-right and the card's bottom-left corner, and the card's margin from the window's edges. */
++const CARD_GAP = 10;
++const CARD_MARGIN = 16;
 +/** A video with no frame by then can't play here (Electron has no H.264/HEVC): the picture stands in. */
 +const FIRST_FRAME_MS = 1_500;
 +
@@ -431,11 +434,14 @@ index 0000000..9d50c74
 +		const root = this._root ??= append(this._layout.mainContainer, $('.fl-companion'));
 +		clearNode(root);
 +		root.className = 'fl-companion';
++		// The character stands on the status bar's top line (the floor when it is hidden).
++		root.style.bottom = `${this._layout.mainContainer.querySelector<HTMLElement>('.part.statusbar')?.offsetHeight ?? 0}px`;
 +
 +		const view = new CharacterView(root, item, this._videos, this._view, () => this._reducedMotion());
 +		const character = view.element;
 +
 +		const bubble = append(root, $('.fl-companion__bubble'));
++		this._view.add(addDisposableListener(getWindow(root), EventType.RESIZE, () => this._place(bubble, character)));
 +		bubble.setAttribute('role', 'region');
 +		bubble.setAttribute('aria-label', localize('companion.region', "{0} needs you", item.agentLabel));
 +		const head = append(bubble, $('.fl-companion__head'));
@@ -473,8 +479,9 @@ index 0000000..9d50c74
 +		this._count();
 +		status(localize('companion.arrived', "{0} needs you: {1}", item.agentLabel, item.question));
 +
-+		// Arrive: run in from the right (the run cycle, or the idle picture sliding), settle into the
-+		// corner, swap to the idle picture, then the bubble pops. Reduced motion: it fades in at the corner.
++		// Arrive: run in from the right (the run cycle, or the idle picture sliding) to the middle, swap to
++		// the idle picture (its arrival wave plays) or the clip's loop, then the card pops beside it.
++		// Reduced motion: both fade in.
 +		const settle = () => {
 +			if (this._shown !== item) {
 +				return;
@@ -482,6 +489,7 @@ index 0000000..9d50c74
 +			view.show('idle');
 +			root.classList.remove('fl-companion--running');
 +			root.classList.add('fl-companion--here');
++			this._place(bubble, character);
 +			this._armedAt = Date.now() + ARM_MS;
 +		};
 +		if (this._reducedMotion() || view.empty) {
@@ -498,7 +506,31 @@ index 0000000..9d50c74
 +		}));
 +	}
 +
-+	/** Answered (here or elsewhere) or put off: a short hop out of view to the left, then the next. */
++	/**
++	 * The card's bottom-left corner at the character's top-right; flipped to its top-left when that
++	 * runs off the window, and kept inside with a margin either way. Its size follows what it says.
++	 */
++	private _place(card: HTMLElement, character: HTMLElement): void {
++		const root = this._root;
++		if (!root || !card.isConnected || !card.offsetWidth) {
++			return;
++		}
++		const box = root.getBoundingClientRect();
++		const c = character.getBoundingClientRect();
++		const w = card.offsetWidth, h = card.offsetHeight;
++		let left = c.right - box.left + CARD_GAP;
++		const flipped = left + w > box.width - CARD_MARGIN;
++		if (flipped) {
++			left = c.left - box.left - CARD_GAP - w;
++		}
++		left = Math.max(CARD_MARGIN, Math.min(left, box.width - CARD_MARGIN - w));
++		const top = Math.max(CARD_MARGIN, Math.min(c.top - box.top - CARD_GAP - h, box.height - CARD_MARGIN - h));
++		card.style.left = `${Math.round(left)}px`;
++		card.style.top = `${Math.round(top)}px`;
++		card.classList.toggle('fl-companion__bubble--flipped', flipped);
++	}
++
++	/** Answered (here or elsewhere) or put off: the card shrinks out, the character runs off to the left, then the next. */
 +	private _leave(): void {
 +		const root = this._root;
 +		this._view.clear();
@@ -520,10 +552,10 @@ index 0000000..9d50c74
 +		root.classList.remove('fl-companion--running', 'fl-companion--here', 'fl-companion--fade');
 +		root.classList.add('fl-companion--leaving');
 +		const character = root.querySelector('.fl-companion__character');
-+		const fallback = getWindow(root).setTimeout(done, 1_000);
++		const fallback = getWindow(root).setTimeout(done, 1_500);
 +		if (character) {
 +			this._view.add(addDisposableListener(character, 'animationend', (e: AnimationEvent) => {
-+				if (e.animationName === 'fl-companion-hop') {
++				if (e.animationName === 'fl-companion-run-off') {
 +					getWindow(root).clearTimeout(fallback);
 +					done();
 +				}
@@ -557,7 +589,7 @@ index 0000000..9d50c74
 +	constructor() {
 +		super({
 +			id: 'friedliver.companion.focus',
-+			title: localize2('companion.focus', "Focus the Agent Request in the Corner"),
++			title: localize2('companion.focus', "Focus the Agent Request"),
 +			category: localize2('companion.category', "FriedLiver"),
 +			f1: true,
 +		});
@@ -568,7 +600,7 @@ index 0000000..9d50c74
 +});
 diff --git a/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
 new file mode 100644
-index 0000000..69fed8d
+index 0000000..46160be
 --- /dev/null
 +++ b/src/vs/workbench/contrib/friedliverCompanion/common/companion.ts
 @@ -0,0 +1,247 @@
@@ -609,7 +641,7 @@ index 0000000..69fed8d
 +	/** A data: image URI, or '' for none. */
 +	readonly character: string;
 +	readonly characterRun?: string;
-+	/** A video for the corner (and the run, when there is no run video); the pictures are its fallback. */
++	/** A video for the character standing (and the run, when there is no run video); the pictures are its fallback. */
 +	readonly video?: ICompanionVideo;
 +	readonly videoRun?: ICompanionVideo;
 +}

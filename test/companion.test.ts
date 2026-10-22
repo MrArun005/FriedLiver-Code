@@ -164,3 +164,29 @@ describe('how a character sits (frameVerdict, chromaKey)', () => {
     expect(patch).not.toMatch(/^\+.*media-src.*\*/m);
   });
 });
+
+describe('where the companion stands (workbench/friedliver.css + patch 0310)', () => {
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'workbench', 'friedliver.css'), 'utf8').replace(/\r\n/g, '\n');
+  const patch = fs.readFileSync(path.resolve(__dirname, '..', 'patches', PATCH), 'utf8');
+  const keyframes = (name: string) => css.slice(css.indexOf(`@keyframes ${name} {`), css.indexOf('\n}\n', css.indexOf(`@keyframes ${name} {`)));
+
+  it('runs in from the right edge to the middle, whole (not cut off), and runs off to the left', () => {
+    expect(css).toMatch(/\.fl-companion__character \{[^}]*left: 50%;[^}]*transform: translateX\(-50%\);/);
+    expect(keyframes('fl-companion-run')).toMatch(/from \{\s*left: 100%;[\s\S]*to \{\s*left: 50%;\s*transform: translateX\(-50%\);/);
+    expect(keyframes('fl-companion-run-off')).toMatch(/to \{\s*left: 0;\s*transform: translateX\(-100%\);/);
+    expect(css).not.toContain('translate(-30%, 30%)');
+  });
+
+  it('pops the card at 0.92 to 1 and fades; the iPhone-sized width is kept inside the window', () => {
+    expect(keyframes('fl-companion-pop')).toMatch(/scale\(0\.92\)[\s\S]*scale\(1\)/);
+    expect(css).toContain('width: min(calc(var(--fl-w-menu) + var(--fl-sp-2) + var(--fl-sp-half)), calc(100% - 2 * var(--fl-sp-4)));');
+    expect(css).toContain('max-height: 60vh;');
+  });
+
+  it("places the card at the character's top-right, flips to its top-left, and clamps 16 px inside", () => {
+    expect(patch).toContain('+const CARD_MARGIN = 16;');
+    expect(patch).toContain('+		let left = c.right - box.left + CARD_GAP;');
+    expect(patch).toContain('+			left = c.left - box.left - CARD_GAP - w;');
+    expect(patch).toContain("+		root.style.bottom = `${this._layout.mainContainer.querySelector<HTMLElement>('.part.statusbar')?.offsetHeight ?? 0}px`;");
+  });
+});

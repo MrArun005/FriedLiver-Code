@@ -1,4 +1,4 @@
-// The companion: a character peeks in at the bottom-left corner of the window with whatever an agent
+// The companion: a character runs in to the middle of the window with whatever an agent
 // waits on (a permission, a command, an edit to review, a question), and answers it right there.
 // The workbench draws it (patches/0310-companion.patch); this side decides what it shows and routes
 // a click back through the very message the chat's own card sends, by the request's own id.
@@ -31,7 +31,7 @@ export interface CompanionItem {
   character: string;
   /** A data: URI of the run cycle; without it the idle picture slides in. */
   characterRun?: string;
-  /** A video for the corner (and the run-in, without a run video); the pictures above are its fallback. */
+  /** A video for the character standing (and the run-in, without a run video); the pictures above are its fallback. */
   video?: CompanionVideo;
   videoRun?: CompanionVideo;
 }
