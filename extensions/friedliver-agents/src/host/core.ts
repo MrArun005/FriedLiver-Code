@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentStartError, agentErrorMessage } from '@friedliver/main/agents/agentConnection';
+import { agentShell } from '@friedliver/main/agents/agentShell';
 import { readIfExists, readTextFile, writeTextFile } from '@friedliver/main/agents/fileAccess';
 import { AgentHub, AuthRequiredError, NoSessionError, type SessionStart } from '@friedliver/main/agents/hub';
 import { DEFAULT_AGENTS, demoAgentSpec, type AgentSpec, type VendorAgentId } from '@friedliver/main/agents/registry';
@@ -2395,7 +2396,7 @@ export class AgentCore {
   private commandGuard(chatId: string | undefined, line: string): string | undefined {
     if (!chatId || this.options.fullAutoGuards?.() === false) return undefined;
     for (const f of downloadTargets(line)) this.trail.add(chatId, f);
-    return commandGuard(line, this.trail.names(chatId), this.chat(chatId)?.approval === 'full');
+    return commandGuard(line, this.trail.names(chatId), this.chat(chatId)?.approval === 'full', /^(?:pwsh|powershell)$/.test(agentShell().kind));
   }
 
   /** Nothing an agent asks to run starts before the user approves it. */

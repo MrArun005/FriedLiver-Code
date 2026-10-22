@@ -96,7 +96,7 @@ export class FileTrail {
 
 /** Programs that run (or make runnable) the file they are given. */
 const RUNNERS = new Set(
-  'cp mv ln rsync sh bash zsh dash ksh fish csh tcsh source . exec eval python python2 python3 node deno bun tsx ts-node ruby perl php pwsh powershell osascript open java chmod xattr install'.split(' '),
+  'cp mv ln rsync sh bash zsh dash ksh fish csh tcsh source . exec eval python python2 python3 node deno bun tsx ts-node ruby perl php pwsh powershell osascript open java chmod xattr install ii invoke-item'.split(' '),
 );
 /** Words before the program: `sudo env FOO=1 nohup ./x`. */
 const PREFIX = new Set('sudo doas env nohup time nice command builtin xargs'.split(' '));
@@ -140,6 +140,29 @@ const PIPE_TO_SHELL = new RegExp(
   'i',
 );
 
+/**
+ * PowerShell programs that fetch or start other code. downloadTargets only reads curl/wget the POSIX
+ * way, and PowerShell takes any unique parameter prefix (-OutF, -o), so under PowerShell a line
+ * naming any of these simply asks. `start` counts only as a command, not `npm start`.
+ */
+const PS_FETCH_OR_RUN = /(?:^|[^\w-])(?:iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|curl|wget|certutil|bitsadmin|start-process|saps|msiexec|rundll32|mshta|regsvr32|cscript|wscript|iex|invoke-expression|ii|invoke-item|icm|invoke-command|sajb|start-job|start-threadjob|installutil|msbuild)(?:\.exe)?(?![\w-])|(?:^|[;&|\n({]\s*)start(?:\.exe)?(?![\w-])/i;
+
+/** Variables that make a shell or runtime load code: named anywhere in a line, in any mode, it asks. */
+// Any form counts: NAME=, export, read, -v, $env:, Env:. Bare ENV only in capitals, so `env` the program passes.
+const STARTUP_NAME =
+  /(?<!\w)(?:LD_\w+|DYLD_\w+|GIT_(?:CONFIG\w*|EXEC_PATH|EXTERNAL_DIFF|SSH\w*)|PYTHON(?:STARTUP|PATH|HOME)|PERL\w*(?:LIB|OPT)|RUBY(?:LIB|OPT)|(?:JDK_JAVA|_JAVA|JAVA_TOOL)_OPTIONS|NODE_(?:OPTIONS|PATH)|BASH_ENV|ZDOTDIR|PROMPT_COMMAND)(?!\w)/i;
+const STARTUP_ENV = /(?<!\w)ENV(?![\w:])/;
+/** `NAME=value` and `$env:NAME = 'value'` assignments: the whole value, quoted or not. */
+const ASSIGNED = /(?:\$env:)?\b[A-Za-z_]\w*\s*=\s*('[^']*'|"[^"]*"|[^\s;&|]+)/g;
+/** Every file an assigned value could name: split at path and list separators, option prefixes (--x=, -M) dropped. */
+const valueFiles = (value: string) =>
+  value
+    .replace(/^['"]|['"]$/g, '')
+    .split(/[\s,;]+/)
+    .map((e) => e.replace(/^--?[\w-]*=/, '').replace(/^-[A-Za-z](?=.)/, ''))
+    .flatMap((e) => e.split(/[\\/:]+/))
+    .filter(Boolean);
+
 /** Without quoted strings, for checks that only count what the shell itself reads. */
 const unquoted = (line: string) => line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
 
@@ -148,8 +171,10 @@ const unquoted = (line: string) => line.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "'
  * substitution, a quoted program, any quote, backslash, $ or brace, an unquoted glob, a download
  * piped anywhere, or a download whose file can't be told (bundled or attached -o/-O, a redirect).
  */
-function unclear(line: string): string | undefined {
+function unclear(line: string, powershell: boolean): string | undefined {
   if (/\$\(|`|<\(|>\(/.test(line)) return 'it uses command substitution';
+  // In PowerShell any parenthesis runs what is inside it first: `iex (iwr URL).Content`.
+  if (powershell && /\(/.test(line)) return 'it uses command substitution';
   const bare = unquoted(line);
   if (/(?:^|[;&|\n]\s*)(?:\w+=\S*\s+)*(?:''|\\)/.test(bare)) return 'its program is quoted';
   if (/['"\\${}]/.test(line)) return 'it has quotes, backslashes, $ or braces';
@@ -167,11 +192,19 @@ function unclear(line: string): string | undefined {
  * Why Full auto must still ask before running `line`, or undefined: it pipes a download into a
  * shell, installs or fetches packages, or runs, copies or moves a file named in `fresh` (this chat's
  * recent downloads and writes); on `fullAuto`, also a line too unclear to check (unclear()).
+ * `powershell`: agent command lines run in PowerShell here (agentShell), which reads more as code.
  */
-export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto = false): string | undefined {
+export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto = false, powershell = false): string | undefined {
   if (PIPE_TO_SHELL.test(line)) return `${STILL_ASKS}: the command pipes a download into a shell`;
   if (INSTALL.test(line)) return `${STILL_ASKS}: the command installs or fetches packages`;
-  const why = fullAuto ? unclear(line) : undefined;
+  const named = STARTUP_NAME.exec(line) ?? STARTUP_ENV.exec(line);
+  if (named) return `${STILL_ASKS}: the command names ${named[0]}, a startup variable that makes programs load other code`;
+  if (powershell && PS_FETCH_OR_RUN.test(line)) return `${STILL_ASKS}: the command downloads or starts other code in PowerShell`;
+  for (const [, value] of line.matchAll(ASSIGNED)) {
+    const hit = valueFiles(value).find((f) => fresh.has(f));
+    if (hit) return `${STILL_ASKS}: the command points a variable at ${hit}, a file this chat just downloaded or wrote`;
+  }
+  const why = fullAuto ? unclear(line, powershell) : undefined;
   if (why) return `${STILL_ASKS}: ${why}, so FriedLiver can't check what the command runs`;
   if (!fresh.size) return undefined;
   for (const words of simpleCommands(line)) {
@@ -179,7 +212,7 @@ export function commandGuard(line: string, fresh: ReadonlySet<string>, fullAuto 
     while (i < words.length - 1 && (PREFIX.has(words[i]) || /^\w+=/.test(words[i]) || (words[i].startsWith('-') && i > 0))) i++;
     const prog = words[i];
     const named = (w: string) => fresh.has(path.basename(w));
-    const hit = named(prog) ? prog : RUNNERS.has(path.basename(prog)) ? words.slice(i + 1).find(named) : undefined;
+    const hit = named(prog) ? prog : RUNNERS.has(path.basename(prog).toLowerCase()) ? words.slice(i + 1).find(named) : undefined;
     if (hit) return `${STILL_ASKS}: the command runs ${path.basename(hit)}, a file this chat just downloaded or wrote`;
   }
   return undefined;

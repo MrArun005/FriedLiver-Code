@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import type * as acp from '@agentclientprotocol/sdk';
+import { agentShell, shellLaunch, type AgentShell } from './agentShell';
 import { killProcessTree, launchFor, quoteWindowsArg } from './processes';
 
 const DEFAULT_OUTPUT_LIMIT = 1_000_000;
@@ -8,6 +9,7 @@ const DEFAULT_OUTPUT_LIMIT = 1_000_000;
 export const MAX_OUTPUT_LIMIT = 16_000_000;
 /** Windows names can hold characters like `(x86)`; no name may hold `=` or NUL. */
 const ENV_NAME = /^[^=\0]+$/;
+const INHERITED_STARTUP = ['BASH_ENV', 'ENV', 'NODE_OPTIONS'];
 
 function outputLimit(requested: number | null | undefined): number {
   if (requested == null || !Number.isFinite(requested)) return DEFAULT_OUTPUT_LIMIT;
@@ -171,6 +173,8 @@ export class TerminalManager {
   constructor(
     private readonly defaultCwd: string,
     private readonly listener?: TerminalListener,
+    /** Where bare command lines run (agentShell); tests pass their own. */
+    private readonly shell: AgentShell = agentShell(),
   ) {}
 
   async create(req: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
@@ -183,7 +187,10 @@ export class TerminalManager {
     for (const v of extraEnv) {
       if (!ENV_NAME.test(v.name) || v.value.includes('\0')) throw new Error(`Refused an invalid environment variable name: ${JSON.stringify(v.name)}`);
     }
+    // Inherited startup variables would load code into every command (BASH_ENV, ENV: the shell;
+    // NODE_OPTIONS: any node). An agent may still set them, and then the user sees them to approve.
     const env = { ...process.env };
+    for (const k of Object.keys(env)) if (INHERITED_STARTUP.includes(k.toUpperCase())) delete env[k];
     for (const v of extraEnv) env[v.name] = v.value;
     // With no args the command is a whole shell line ("npm test"); otherwise quote it too,
     // since a path like C:\Program Files\nodejs\node.exe would split at the space.
@@ -204,10 +211,15 @@ export class TerminalManager {
     // arguments starts directly, so nothing re-splits them (see launchFor).
     const detached = process.platform !== 'win32';
     let child: ChildProcess;
-    if (!launch) {
+    const shell = this.shell;
+    if (launch) {
+      child = spawn(launch.file, launch.args, { cwd, env, detached, windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+    } else if (shell.kind === 'sh') {
       child = spawn(shellLine, { cwd, env, shell: true, detached, windowsHide: true });
     } else {
-      child = spawn(launch.file, launch.args, { cwd, env, detached, windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+      // Windows: Git Bash or PowerShell by absolute path, never cmd.exe (agentShell.ts).
+      const run = shellLaunch(shell, shellLine);
+      child = spawn(run.file, run.args, { cwd, env: { ...env, ...run.env }, detached, windowsHide: true });
     }
 
     this.listener?.onStart(info);
