@@ -125,8 +125,9 @@ describe('removeTemp: deletes only inside the allowlist', () => {
   });
 });
 
-describe('trusted roots: a root another user could control is dropped', () => {
-  const uid = process.getuid!();
+// POSIX only: ownership by uid and group/world-writable bits don't exist on Windows (no process.getuid).
+describe.skipIf(process.platform === 'win32')('trusted roots: a root another user could control is dropped', () => {
+  const uid = process.getuid?.() ?? -1;
 
   it('accepts a folder of this user that only it can write to', async () => {
     expect(await trustedRoot(temp, uid)).toBe(temp);

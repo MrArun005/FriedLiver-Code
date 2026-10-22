@@ -10,6 +10,9 @@ import { parseCall } from '../src/bridge/protocol';
 import type { Journal } from '../src/host/changeJournal';
 import { answerIndex, globToRegex, imports, INDEX_DEFAULTS, INDEX_LIMITS, isSecret, outline, partialIndex, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
 
+/** Windows has no POSIX mode bits (stat says 0o666 whatever was asked), so file modes are checked elsewhere only. */
+const POSIX_MODES = process.platform !== 'win32';
+
 const dirs: string[] = [];
 afterEach(async () => {
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
@@ -369,8 +372,8 @@ describe('the Merkle tree over the index', () => {
     const ix = await build(root);
     ix.tree.snapshot();
     await saveIndexFile(file, ix);
-    expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
-    for (const f of [file, docsFileOf(file)]) expect((await stat(f)).mode & 0o777).toBe(0o600);
+    if (POSIX_MODES) expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    if (POSIX_MODES) for (const f of [file, docsFileOf(file)]) expect((await stat(f)).mode & 0o777).toBe(0o600);
     expect((await reopen(root, file)).counts.read).toBe(0);
     const tree = await readFile(file, 'utf8');
     const docs = await readFile(docsFileOf(file), 'utf8');
