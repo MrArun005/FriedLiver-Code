@@ -665,6 +665,15 @@ button.fl-pill:focus-visible {
   background: var(--pill-hover);
 }
 
+/* The agent map's pill (svg, webview.css .map-group): pressed as a node's "▸ N agents" branch toggle. */
+.map-branch:hover .group-pill {
+  stroke: var(--fg);
+}
+.map-branch:focus-visible .group-pill {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+
 /* ---- Count (§2.6): 16 tall, pill, 600 tabular; loud is needs-you only; it bumps once when it changes ---- */
 
 .fl-count {

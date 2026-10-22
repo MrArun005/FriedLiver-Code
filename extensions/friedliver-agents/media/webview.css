@@ -483,12 +483,6 @@ button.count-item .icon {
   list-style: none;
   border-left: 1px solid var(--border);
 }
-.map-fold .box {
-  stroke-dasharray: 4 3;
-}
-.map-fold .node-label {
-  fill: var(--fg-2);
-}
 .sub-row {
   cursor: pointer;
 }
@@ -1016,6 +1010,23 @@ td.num {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.map-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.map-head .map-legend {
+  flex: 1;
+}
+/* A node's "▸ N agents": the fan-out pill (.map-group .group-pill), pressable like a node. */
+.map-branch {
+  cursor: pointer;
+  outline: none;
+  transition: opacity 0.15s;
+}
+.map-branch.dim {
+  opacity: 0.45;
 }
 .map-legend {
   display: flex;
