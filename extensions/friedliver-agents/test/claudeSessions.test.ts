@@ -169,11 +169,11 @@ describe('images in Claude Code sessions', () => {
       ),
     );
     expect(scan.images.map((i) => [i.path, i.source])).toEqual([
-      ['/w/out/chart.png', 'created'],
-      ['/w/shots/a.png', 'created'],
-      ['/home/u/code/d/b.jpg', 'created'],
-      ['/w/review/c.webp', 'created'],
-      ['/w/d.png', 'created'],
+      [R('/w/out/chart.png'), 'created'],
+      [R('/w/shots/a.png'), 'created'],
+      [path.join('/home/u', 'code/d/b.jpg'), 'created'],
+      [R('/w/review/c.webp'), 'created'],
+      [R('/w/d.png'), 'created'],
     ]);
     expect([...scan.made]).toEqual(scan.images.map((i) => i.path));
   });
