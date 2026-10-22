@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { agentShell, shellNote } from '@friedliver/main/agents/agentShell';
 import { parseCall } from '../src/bridge/protocol';
 import { BridgeRequests, type ToolHost } from '../src/host/bridgeRequests';
 import { combineRules, ensureFile, importRules, loadRules, mergeRules, PERSONAL_LABEL, PROJECT_MEMORY, PROJECT_RULES, remember } from '../src/host/sharedRules';
@@ -210,7 +211,8 @@ describe('rules reach every agent', () => {
     const chat = await core.createChat('claude', { readOnly: true });
     await core.send(chat.id, 'session');
     const meta = JSON.parse(replies(core, chat.id).match(/meta (\{.*\})/)![1]);
-    expect(meta.systemPrompt).toEqual({ append: RULES.text });
+    // On Windows the shell note follows the rules (hub.ts).
+    expect(meta.systemPrompt).toEqual({ append: [RULES.text, shellNote(agentShell())].filter(Boolean).join('\n\n') });
     expect(meta.claudeCode.options.tools).toEqual([]);
     expect(meta.claudeCode.options.disallowedTools).toContain('Bash');
   });

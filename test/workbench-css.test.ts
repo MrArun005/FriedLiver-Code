@@ -76,6 +76,52 @@ describe('workbench/friedliver.css', () => {
     expect([...used].filter((t) => !defined.has(t))).toEqual([]);
   });
 
+  /** The declarations of the rules with a selector ending in `selectorEnd`, merged. */
+  function ruleFor(selectorEnd: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const m of CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!m[1].split(',').some((s) => s.trim().endsWith(selectorEnd))) continue;
+      for (const d of m[2].matchAll(/([\w-]+)\s*:\s*([^;]+);/g)) out[d[1]] = d[2].trim();
+    }
+    return out;
+  }
+
+  it('centres palette row content in the 40px row (W4)', () => {
+    // The entry must fill the row, or its centring has no height to work in and labels sit at the top.
+    expect(ruleFor('.quick-input-list .quick-input-list-entry')).toMatchObject({ height: '100%', 'align-items': 'center' });
+    expect(ruleFor('.quick-input-list .quick-input-list-rows')).toMatchObject({ 'justify-content': 'center' });
+  });
+
+  it('keeps the editor and Agents panel attached (W1)', () => {
+    for (const part of ['.part.editor', '.part.auxiliarybar']) {
+      const rule = ruleFor(`:not(.floating-panels):not(.hc-black):not(.hc-light) ${part}`);
+      expect(rule, part).toMatchObject({ margin: '0', 'border-radius': 'var(--fl-r-box) 0 0 0' });
+      expect(rule['border-top'], part).toMatch(/var\(--fl-hairline\)/);
+      expect(rule['border-left'], part).toMatch(/var\(--fl-hairline\)/);
+    }
+  });
+
+  it('gives settings words column 1 and the control a 220-320 column, switch rows too (W3)', () => {
+    const grid = ruleFor('.setting-item-bool) .setting-item-contents'); // the :is() list, split at its commas
+    // A fixed control track: minmax(220, 320) grew to 320 before 1fr got anything, squeezing the words to ~130px.
+    expect(grid['grid-template-columns']).toBe('minmax(0, 1fr) clamp(calc(5.5 * var(--fl-h-xl)), 30%, calc(8 * var(--fl-h-xl)))');
+    // Switch rows: the control track is just the switch, so the words don't wrap beside an empty 220px column.
+    expect(ruleFor('.settings-tree-container .setting-item-bool .setting-item-contents')).toMatchObject({ 'grid-template-columns': 'minmax(0, 1fr) auto' });
+    expect(ruleFor('.setting-item-bool .setting-item-value-description')).toMatchObject({ display: 'contents' });
+    expect(ruleFor('.setting-item-bool .setting-item-value-description > .setting-item-bool-control')).toMatchObject({ 'grid-column': '2', 'justify-self': 'end' });
+    expect(ruleFor('.setting-item-bool .setting-item-value-description > .setting-item-description')).toMatchObject({ 'grid-column': '1' });
+  });
+
+  it('shows a neutral tile for an extension icon that does not load, badges on the icon (W6)', () => {
+    expect(ruleFor('.extension-list-item > .icon-container > .extension-icon .codicon')).toMatchObject({ 'background-color': 'var(--fl-pill-bg)', width: 'var(--fl-h-lg)', 'border-radius': 'var(--fl-r-8)' });
+    expect(ruleFor('.extension-list-item > .icon-container')).toMatchObject({ 'align-self': 'center' });
+    expect(ruleFor('.extensions-list .extension-bookmark-container')).toMatchObject({ position: 'static' });
+    // Upstream listened for one error, so a failed fallback URL left a blank slot instead of the default icon.
+    const patch = fs.readFileSync(path.resolve(__dirname, '..', 'patches', '0190-extension-icon-fallback.patch'), 'utf8');
+    expect(patch).toContain('+					if (this.extension?.iconUrlFallback && !triedFallback) {');
+    expect(patch).toContain('-				}, { once: true });');
+  });
+
   it('leaves high contrast to upstream', () => {
     // Keyframe steps (from, to, 40%) are not selectors.
     const rules = CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}/g, '');

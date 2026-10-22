@@ -646,6 +646,14 @@ describe('Antigravity in FriedLiver', () => {
     expect(spec.env).toMatchObject({ ELECTRON_RUN_AS_NODE: '1', FRIEDLIVER_AGY: process.execPath, FRIEDLIVER_AGY_ARGS: '["--project","p1"]' });
   });
 
+  it('off macOS: a new chat or an @antigravity question is refused with the reason, never started', async () => {
+    const core = makeCore(await gitRepo(), { platform: 'win32', agyAdapterScript: '/ext/dist/agy-acp.js' });
+    await expect(core.createChat('antigravity')).rejects.toThrow(/^Antigravity isn’t available on Windows yet/);
+    const chat = await core.createChat('claude');
+    await expect(core.send(chat.id, '@antigravity what is this repo?')).rejects.toThrow(/^Antigravity isn’t available on Windows yet/);
+    expect(core.snapshot.chats.map((c) => c.agent)).toEqual(['claude']);
+  });
+
   it('missing agy: Agents & Accounts says Not installed, with agy’s official installer', async () => {
     const core = makeCore(await gitRepo(), {
       agyAdapterScript: '/ext/dist/agy-acp.js',

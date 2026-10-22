@@ -84,6 +84,8 @@ const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** The mic button: dictation through the app's macOS speech helper (host/dictation.ts). */
 const MAC = document.body.dataset.platform === 'mac';
+/** The OS's own dictation keys, for the mic's fallback hint; none on Linux, where the hint isn't shown. */
+const DICTATE_HINT = MAC ? 'Press Fn twice to dictate' : document.body.dataset.platform === 'windows' ? 'Press Win+H to dictate' : undefined;
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
 /** A chat's own editor tab (chats in the editor area): this chat only, no strip; the editor's tab row is the strip. */
@@ -699,8 +701,10 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
   const recent = recentChats(chats, undefined, 5).sort((a, b) => b.lastActivity - a.lastActivity);
   return (
     <div class="empty">
-      <BrandMark size={40} class="empty-mark" />
-      <h2>Start a chat</h2>
+      <div class="empty-head">
+        <BrandMark size={40} class="empty-mark" />
+        <h2>Start a chat</h2>
+      </div>
       <div class="pick">
         {agents.map((agent) => (
           <button key={agent} class="pick-agent" onClick={() => send({ type: 'newChat', agent })}>
@@ -1632,9 +1636,9 @@ function Composer({
           )}
           <EditsBar chat={chat} />
           <RunningAgents chat={chat} />
-          {micHint && (
+          {micHint && DICTATE_HINT && (
             <div class="banner mic-hint" role="status">
-              <span class="banner-text">Press Fn twice to dictate</span>
+              <span class="banner-text">{DICTATE_HINT}</span>
               <a href="#" onClick={(e) => (e.preventDefault(), send({ type: 'dictationSettings' }))}>
                 Dictation settings
               </a>

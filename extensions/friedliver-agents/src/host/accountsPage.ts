@@ -7,6 +7,7 @@ import {
   modelChoices,
   parseAccountsMessage,
   shownAgents,
+  unavailableOn,
   signInMethodsFor,
   type AccountCard,
   type AccountsMessage,
@@ -115,7 +116,9 @@ export class AccountsPage implements vscode.Disposable {
 
   view(): AccountsView {
     const defaults = this.core().agentDefaults();
-    const cards = shownAgents(this.showDemo()).map((agent): AccountCard => {
+    // Every agent, the ones this platform can't run too: their card says so instead of vanishing.
+    const cards = shownAgents(this.showDemo(), 'darwin').map((agent): AccountCard => {
+      if (unavailableOn(agent, process.platform)) return { agent, name: agentFace(agent).name, signIn: [], keys: [], chosen: {}, unavailable: 'macOS only for now' };
       const record = this.accounts.record(agent);
       const keys = isVendor(agent) ? this.keyViews(agent) : [];
       const envKey = isVendor(agent) && !keys.some((k) => k.active) ? KEY_SETUPS[agent].flatMap((s) => s.fields).find((f) => f.secret && process.env[f.env])?.env : undefined;

@@ -1,0 +1,25 @@
+diff --git a/src/vs/workbench/contrib/extensions/browser/extensionsWidgets.ts b/src/vs/workbench/contrib/extensions/browser/extensionsWidgets.ts
+index 57c7a5c..b5e873a 100644
+--- a/src/vs/workbench/contrib/extensions/browser/extensionsWidgets.ts
++++ b/src/vs/workbench/contrib/extensions/browser/extensionsWidgets.ts
+@@ -119,14 +119,18 @@ export class ExtensionIconWidget extends ExtensionWidget {
+ 				this.iconElement.style.display = 'inherit';
+ 				this.defaultIconElement.style.display = 'none';
+ 				this.iconUrl = this.extension.iconUrl;
++				// FriedLiver: when the fallback fails too (offline), show the default icon instead of a blank slot.
++				// Upstream listened once, so a failed fallback left an empty, hidden image.
++				let triedFallback = false;
+ 				this.iconErrorDisposable.value = addDisposableListener(this.iconElement, 'error', () => {
+-					if (this.extension?.iconUrlFallback) {
++					if (this.extension?.iconUrlFallback && !triedFallback) {
++						triedFallback = true;
+ 						this.iconElement.src = this.extension.iconUrlFallback;
+ 					} else {
+ 						this.iconElement.style.display = 'none';
+ 						this.defaultIconElement.style.display = 'inherit';
+ 					}
+-				}, { once: true });
++				});
+ 				this.iconElement.src = this.iconUrl;
+ 				if (!this.iconElement.complete) {
+ 					this.iconElement.style.visibility = 'hidden';

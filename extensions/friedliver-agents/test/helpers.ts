@@ -16,7 +16,8 @@ afterAll(() => {
 
 /** A fresh temp folder (by its real path), removed after this test file. */
 export function tmpDir(prefix: string): string {
-  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), prefix)));
+  // .native: on Windows it expands 8.3 names (RUNNER~1) the way the code under test's realpath does.
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), prefix)));
   made.push(dir);
   return dir;
 }

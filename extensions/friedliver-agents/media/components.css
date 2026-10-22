@@ -665,6 +665,15 @@ button.fl-pill:focus-visible {
   background: var(--pill-hover);
 }
 
+/* The agent map's pill (svg, webview.css .map-group): pressed as a node's "▸ N agents" branch toggle. */
+.map-branch:hover .group-pill {
+  stroke: var(--fg);
+}
+.map-branch:focus-visible .group-pill {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+
 /* ---- Count (§2.6): 16 tall, pill, 600 tabular; loud is needs-you only; it bumps once when it changes ---- */
 
 .fl-count {
@@ -1392,10 +1401,17 @@ textarea.fl-input {
 /* ---- Toast (§2.15): glass, --r-float, rim + elevation 3, bottom right; arrives on the pop spring from 8px
    below; a 2px --fg-2 bar drains along its foot while it counts down ---- */
 
+/* Above the composer, never over its mode/model/Send controls: anchored to the composer's top (it
+   tracks the composer's height as it grows); 16 from the window's bottom where there is none. */
+.composer-dock {
+  anchor-name: --fl-composer;
+}
 .fl-toasts {
   position: fixed;
   right: var(--sp-4);
   bottom: var(--sp-4);
+  position-anchor: --fl-composer;
+  bottom: calc(anchor(top, 0px) + var(--sp-4));
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;

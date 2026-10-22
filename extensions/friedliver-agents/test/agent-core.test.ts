@@ -205,7 +205,8 @@ describe('agent terminals', () => {
     await expect(
       m.create({ sessionId: 's', command: 'npm', args: ['test'], env: [{ name: 'NODE_OPTIONS', value: '--require /tmp/evil.js' }] }),
     ).rejects.toThrow(/denied/);
-    expect(seen[0].commandLine).toBe("NODE_OPTIONS='--require /tmp/evil.js' npm test");
+    // POSIX quoting, or cmd.exe's double quotes on Windows.
+    expect(seen[0].commandLine).toBe(process.platform === 'win32' ? 'NODE_OPTIONS="--require /tmp/evil.js" npm test' : "NODE_OPTIONS='--require /tmp/evil.js' npm test");
   });
 
   it('resolves a relative folder against the session folder, as shown', async () => {

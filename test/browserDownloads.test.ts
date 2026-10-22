@@ -26,6 +26,7 @@ let m: {
   needsSizeConfirm(total: number): boolean;
   pruneDownloads<T extends { state: State }>(list: T[], max?: number): T[];
   MAX_AGENT_SCOPE_MS: number;
+  DETACH_GRACE_MS: number;
   DownloadAttribution: new (now?: () => number, maxScopeMs?: number) => Attribution;
 };
 type Who = { byAgent: boolean; agentCall?: string; waitingFor?: 'agent' | 'page' };
@@ -33,6 +34,8 @@ interface Attribution {
   begin(): string;
   end(token: string): void;
   userInput(page: object, type: string): void;
+  attach(page: object): void;
+  detach(page: object): void;
   classify(page: object | undefined, hasUserGesture: boolean): Who;
 }
 
@@ -339,6 +342,87 @@ describe('whose download it is', () => {
 
   it('says why it waits', () => {
     expect(m.describeDownload({ state: 'awaiting', waitingFor: 'page', receivedBytes: 0, totalBytes: 0, bytesPerSecond: 0 })).toBe('the page started it · waiting for your OK');
+  });
+});
+
+// Attribution in core, with no extension call: a page a CDP session is attached to is agent-driven.
+describe('whose download it is, with a CDP session attached', () => {
+  let t = 0;
+  const make = () => new m.DownloadAttribution(() => t);
+  const page = (): object => ({});
+  const agentWaits = { byAgent: true, waitingFor: 'agent' };
+
+  it('needs approval for a click on a page with a CDP session attached, gesture and input-event or not', () => {
+    t = 50_000;
+    const a = make();
+    const p = page();
+    a.attach(p);
+    a.userInput(p, 'mouseDown'); // CDP's synthetic click fires input-event and sets the gesture
+    expect(a.classify(p, true)).toEqual(agentWaits);
+  });
+
+  it("is the user's for a real click with no session attached", () => {
+    t = 60_000;
+    const a = make();
+    const p = page();
+    a.userInput(p, 'mouseDown');
+    expect(a.classify(p, true)).toEqual({ byAgent: false });
+  });
+
+  it("goes back to the user after detach once they really click; input just after detach doesn't count", () => {
+    t = 70_000;
+    const a = make();
+    const p = page();
+    a.attach(p);
+    a.detach(p);
+    a.userInput(p, 'mouseDown'); // a synthetic click delivered just after the session went
+    expect(a.classify(p, true)).toEqual(agentWaits);
+    t += m.DETACH_GRACE_MS + 1;
+    a.userInput(p, 'mouseDown');
+    expect(a.classify(p, true)).toEqual({ byAgent: false });
+  });
+
+  it('stays agent-driven until every session detached; a stray detach changes nothing', () => {
+    t = 80_000;
+    const a = make();
+    const p = page();
+    a.detach(p);
+    a.attach(p);
+    a.attach(p);
+    a.detach(p);
+    t += m.DETACH_GRACE_MS + 1;
+    a.userInput(p, 'mouseDown');
+    expect(a.classify(p, true)).toEqual(agentWaits);
+  });
+
+  it('fails closed when a session attaches between the click and the download', () => {
+    t = 90_000;
+    const a = make();
+    const p = page();
+    a.userInput(p, 'mouseDown');
+    a.attach(p);
+    expect(a.classify(p, true)).toEqual(agentWaits);
+    // a popup the agent's page opened, which the user never touched, is the agent's too
+    expect(a.classify(page(), true)).toEqual(agentWaits);
+  });
+
+  it('names the acting call when one is open, so its chat takes the OK', () => {
+    t = 100_000;
+    const a = make();
+    const p = page();
+    a.attach(p);
+    const call = a.begin();
+    expect(a.classify(p, true)).toEqual({ byAgent: true, agentCall: call, waitingFor: 'agent' });
+  });
+});
+
+describe('patch 0300 main-process wiring', () => {
+  it('reports CDP session attach and detach from the CDP target to the downloads service', () => {
+    const text = fs.readFileSync(`${__dirname}/../patches/${PATCH}`, 'utf8');
+    expect(text).toContain('+++ b/src/vs/platform/browserView/electron-main/browserViewCDPTarget.ts');
+    expect(text).toContain('onDidChangeCDPAttachment.fire({ contents: this.view.webContents, attached: true })');
+    expect(text).toContain('onDidChangeCDPAttachment.fire({ contents: this.view.webContents, attached: false })');
+    expect(text).toContain('BrowserViewCDPTarget.onDidChangeCDPAttachment(');
   });
 });
 

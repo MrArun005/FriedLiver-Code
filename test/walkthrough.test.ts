@@ -59,10 +59,16 @@ it('starts the accounts check and the Agent Manager from their steps', () => {
   expect(byId.editInPlace).toEqual([{ id: 'friedliver.editSelection', args: [] }]);
 });
 
-it('is the walkthrough the first launch opens (patch 0140), and upstream Copilot onboarding stays off', () => {
-  const pkg = manifest as unknown as { publisher: string; name: string };
+it('startup and Help → Get Started open the FriedLiver Welcome page; built-in walkthroughs and Copilot onboarding stay off (patch 0140)', () => {
   const patch = readFileSync(path.join(__dirname, '..', 'patches', '0140-welcome-says-friedliver.patch'), 'utf8').replace(/\r\n/g, '\n');
-  expect(patch).toContain(`+export const friedliverWalkthroughId = '${pkg.publisher}.${pkg.name}#${walkthrough.id}';`);
+  expect(patch).toContain("+export const friedliverWelcomeCommand = 'friedliver.welcome';");
+  expect(manifest.contributes.commands.map((c) => c.command)).toContain('friedliver.welcome');
+  // Both the startup page and the Help menu's action run it, with the stock page only as the fallback.
+  expect(patch.match(/executeCommand\(friedliverWelcomeCommand\)/g)).toHaveLength(2);
+  expect(patch).toContain("+			title: localize2('miGetStarted', 'Get Started'),");
+  // Upstream's built-in walkthroughs (Setup's "Use AI features with Copilot" step) never register; extensions' still do.
+  expect(patch).toContain('+		const builtIn: typeof walkthroughs = [];');
+  expect(patch).not.toContain('gettingStartedContent.ts');
   expect(patch).toMatch(/'workbench\.welcomePage\.experimentalOnboarding': \{[^}]*\n\+\t\t\tdefault: false,/);
   // Its first step completes when a folder is already open: the service completes a step whose context already holds.
   expect(steps[0].completionEvents).toContain('onContext:workspaceFolderCount > 0');

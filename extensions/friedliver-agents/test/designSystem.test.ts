@@ -129,7 +129,7 @@ function current() {
   );
   const tsx = Object.fromEntries(
     SURFACES.flatMap(tsxFiles)
-      .map((f) => [path.relative(src, f), rawControls(f)] as const)
+      .map((f) => [path.relative(src, f).split(path.sep).join('/'), rawControls(f)] as const)
       .filter(([, n]) => n > 0)
       .sort(([a], [b]) => a.localeCompare(b)),
   );

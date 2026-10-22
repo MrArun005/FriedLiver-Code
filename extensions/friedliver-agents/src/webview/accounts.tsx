@@ -156,6 +156,19 @@ function Card({ card, focused, onEdit }: { card: AccountCard; focused: boolean; 
   const r = card.record;
   const status = card.checking ? 'checking' : (r?.status ?? 'unknown');
   const vendor = card.agent !== 'demo';
+  if (card.unavailable)
+    return (
+      <section id={`card-${card.agent}`} class="acct-card" data-focused={focused ? '' : undefined} tabIndex={-1} aria-labelledby={`title-${card.agent}`}>
+        <div class="acct-top">
+          <Glyph agent={card.agent} size="lg" />
+          <div class="grow">
+            <h2 id={`title-${card.agent}`}>{card.name}</h2>
+            <div class="acct-active hint">FriedLiver runs it only inside macOS’s sandbox; on this system it isn’t offered yet.</div>
+          </div>
+          <span class="acct-tag">{card.unavailable}</span>
+        </div>
+      </section>
+    );
   return (
     <section id={`card-${card.agent}`} class="acct-card" data-focused={focused ? '' : undefined} tabIndex={-1} aria-labelledby={`title-${card.agent}`}>
       <div class="acct-top">

@@ -9,7 +9,7 @@ import { ACCOUNTS_PANEL, AccountsPage } from './host/accountsPage';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { runRewind } from './host/rewindFlow';
-import { encodeCwd, listClaudeImages, listClaudeSessions } from './host/claudeSessions';
+import { encodeCwd, listClaudeImages, listClaudeSessions, outsideRoots, shownFile } from './host/claudeSessions';
 import { SubagentWatch } from './host/subagentDetail';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
@@ -19,7 +19,7 @@ import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
 import { CustomSecrets, parseCustomAgents, publicCustomAgents, type CustomAgentConfig } from './host/customAgents';
 import { OTHER_AGENTS } from './host/otherAgents';
-import { DICTATION_SETTINGS, Dictation, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
+import { Dictation, dictationSettings, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
 import { InlineEditor } from './host/inlineEditor';
 import { imagePreview, imageThumb, workerScaler } from './host/imageAccess';
@@ -657,7 +657,12 @@ export class Controller {
 
   /** The thumbnail or full image (`full`) from FriedLiver's copy, else from the file itself. */
   private async imageFor(file: string, full: boolean): Promise<string | null> {
-    const copy: Copy | null = await this.imageStore.ingest(file, this.imageRoots()).catch(() => null);
+    const roots = this.imageRoots();
+    // An outside session's image may also be under ~/code or that session's folder (see listClaudeImages).
+    const session = this.claudeImages.find((s) => s.images.some((i) => i.path === file));
+    const extra = session ? outsideRoots(os.homedir(), this.folders(), [session.cwd]) : [];
+    if (extra.length && (await shownFile(file, extra, os.homedir()))) roots.push(...extra);
+    const copy: Copy | null = await this.imageStore.ingest(file, roots).catch(() => null);
     const thumb = (f: string, roots: string[]) => {
       const job = this.thumbQueue.then(() => imageThumb(f, roots, path.join(this.context.globalStorageUri.fsPath, 'thumbs'), this.scaler));
       this.thumbQueue = job.catch(() => {});
@@ -667,7 +672,7 @@ export class Controller {
       const src = full ? await imagePreview(copy.file, [this.imageStore.dir]) : await thumb(copy.preview ?? copy.file, [this.imageStore.dir]);
       if (src) return src;
     }
-    return full ? imagePreview(file, this.imageRoots()) : thumb(file, this.imageRoots());
+    return full ? imagePreview(file, roots) : thumb(file, roots);
   }
 
   /** Each chat panel's and the Agents view's title follows the chat it has open: switched, renamed or titled by the agent. */
@@ -929,9 +934,11 @@ export class Controller {
           // Only shows where the file is; nothing is opened or run.
           if (isImagePath(m.path) && path.isAbsolute(m.path)) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(m.path));
           return;
-        case 'dictationSettings':
-          await vscode.env.openExternal(vscode.Uri.parse(DICTATION_SETTINGS, true));
+        case 'dictationSettings': {
+          const settings = dictationSettings();
+          if (settings) await vscode.env.openExternal(vscode.Uri.parse(settings, true));
           return;
+        }
         case 'dictate':
           if (m.on) this.dictation.start(surface, m.chatId);
           else this.dictation.stop(m.chatId);

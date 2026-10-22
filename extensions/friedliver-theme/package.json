@@ -129,7 +129,8 @@
       },
       "diffEditor.renderSideBySideInlineBreakpoint": 900,
       "diffEditor.experimental.showMoves": true,
-      "workbench.experimental.modernUIEditorTabStyle": "pill"
+      "workbench.experimental.modernUIEditorTabStyle": "pill",
+      "workbench.experimental.modernUI": false
     },
     "colors": [
       {

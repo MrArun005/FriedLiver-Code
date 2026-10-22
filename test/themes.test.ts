@@ -333,6 +333,9 @@ it('sets the modern editor defaults and keeps the memory-related ones (docs/DEFA
     'diffEditor.renderSideBySideInlineBreakpoint': 900,
     'diffEditor.experimental.showMoves': true,
     'workbench.experimental.modernUIEditorTabStyle': 'pill',
+    // §0 principle 7: the editor and agents panel stay attached, not Modern UI's floating cards. Glass
+    // stays on without it (patch 0110, frostedGlass.contribution.ts).
+    'workbench.experimental.modernUI': false,
   });
   const watcherExclude = defaults['files.watcherExclude'] as Record<string, boolean>;
   for (const dir of ['node_modules/*', '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.next', '.nuxt', '.turbo', '.parcel-cache', '.gradle']) {

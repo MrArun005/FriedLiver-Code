@@ -117,7 +117,7 @@ describe('"Always allow" from the phone', () => {
   });
 
   it('remembers a folder only after the OK, and only one the card offered', async () => {
-    const dir = realpathSync(await gitRepo());
+    const dir = realpathSync.native(await gitRepo());
     const { c, asked, permissions } = setup(dir, true);
     const chat = await c.createChat('demo');
     const turn = c.send(chat.id, 'native-edit README.md');

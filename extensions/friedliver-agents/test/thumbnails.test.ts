@@ -6,6 +6,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { MAX_IMAGE_FILE_BYTES, MAX_PREVIEW_BYTES, THUMB_CACHE_BYTES, THUMB_PX, imageThumb, pruneThumbs, thumbKey, workerScaler } from '../src/host/imageAccess';
 import { MAX_DECODED, MAX_PIXELS, MAX_SIDE, downscalePng, encodeRgba, pngLimits, pngSize } from '../src/host/png';
 
+/** Windows has no POSIX mode bits (stat says 0o666 whatever was asked), so file modes are checked elsewhere only. */
+const POSIX_MODES = process.platform !== 'win32';
+
 /** Filters a row the way an encoder would, so the decoder's unfiltering is exercised for every type. */
 function filterRow(type: number, row: Buffer, prev: Buffer, bpp: number): Buffer {
   const out = Buffer.alloc(row.length);
@@ -147,10 +150,10 @@ describe('the thumbnail cache', () => {
     const first = (await imageThumb(f, [dir], cache))!;
     expect(first).toMatch(/^data:image\/png;base64,/);
     expect(pngSize(Buffer.from(first.split(',')[1], 'base64'))).toEqual({ width: 320, height: 240 });
-    expect(fs.statSync(cache).mode & 0o777).toBe(0o700);
+    if (POSIX_MODES) expect(fs.statSync(cache).mode & 0o777).toBe(0o700);
     const files = fs.readdirSync(cache);
     expect(files).toHaveLength(1);
-    expect(fs.statSync(path.join(cache, files[0])).mode & 0o777).toBe(0o600);
+    if (POSIX_MODES) expect(fs.statSync(path.join(cache, files[0])).mode & 0o777).toBe(0o600);
     // A hit reads the cache: change the cached file and the change shows.
     const stand = Buffer.concat(Array.from({ length: 4 }, () => Buffer.from([0, ...Array.from({ length: 4 }, () => [1, 2, 3, 255]).flat()])));
     fs.writeFileSync(path.join(cache, files[0]), encodeRgba(4, 4, stand));

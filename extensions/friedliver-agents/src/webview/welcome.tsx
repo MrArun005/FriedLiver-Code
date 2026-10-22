@@ -6,11 +6,19 @@ import { useState } from 'preact/hooks';
 import type { RecentFolder } from '../shared/messages';
 import type { AgentKey, ChatView } from '../shared/model';
 import { agentFace } from '../shared/model';
-import { preselectAgents } from '../shared/accounts';
+import { isVendor, preselectAgents } from '../shared/accounts';
 import { ago, cardLine, needsYou, openChats, planProgress, statusOf } from '../shared/view';
-import { welcomeSummary } from '../shared/welcome';
+import { connectStatus, welcomeSummary } from '../shared/welcome';
 import { Dot, send, useHost, useNow, useRoster } from './common';
-import { AskBox, Avatar, BrandMark, Button, Count, Keycaps, Progress, Row } from './ui';
+import { AskBox, Avatar, BrandMark, Button, Card, Count, Icon, Keycaps, Progress, Row, type IconName } from './ui';
+
+/** First run: what happens after you connect an agent (V17). */
+const NEXT_STEPS: { icon: IconName; title: string; text: string }[] = [
+  { icon: 'user', title: 'Connect an agent', text: 'Sign in with its account or an API key. Nothing runs until you do.' },
+  { icon: 'ask', title: 'Describe a task', text: 'Type it in the box above. The agent plans it and starts in this window.' },
+  { icon: 'hand', title: 'Decide when it asks', text: 'Before it runs a command or changes files, it asks. Requests wait in Needs you.' },
+  { icon: 'diff', title: 'Review and keep', text: 'Read the changes, then keep them or send them back.' },
+];
 
 const greeting = (d: Date) => (d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening');
 
@@ -60,15 +68,61 @@ function Welcome() {
       </div>
 
       {firstRun ? (
-        <section class="wl-first" aria-label="Get started">
-          <Button icon="user" onClick={() => send({ type: 'openAccounts' })}>
-            Connect an agent
-          </Button>
-          <Button variant="quiet" icon="play" onClick={() => send({ type: 'createTask', agent: 'demo', prompt: 'Show me what you can do', worktree: false })}>
-            Try the demo agent
-          </Button>
-          <p>The demo agent runs on this machine with no account, so you can see a chat, a request and a review before you sign in.</p>
-        </section>
+        <div class="wl-cols wl-first">
+          <div class="wl-col">
+            <section aria-label="Connect an agent">
+              <h2 class="wl-h">
+                Connect an agent <span class="wl-grow" />
+                <Button variant="link" muted onClick={() => send({ type: 'openAccounts' })}>
+                  Agents &amp; Accounts
+                </Button>
+              </h2>
+              <div class="wl-agents">
+                {roster.agents.filter(isVendor).map((a) => {
+                  const s = connectStatus(roster.signIn[a]);
+                  return (
+                    <Card key={a} as="div" variant="flat" class="wl-tile">
+                      <Avatar agent={a} size="lg" />
+                      <span class="wl-two">
+                        <b>{agentFace(a).name}</b>
+                        <span>{s.words}</span>
+                      </span>
+                      {s.connected ? (
+                        <Dot state="done" still />
+                      ) : (
+                        <Button size="sm" aria-label={`Connect ${agentFace(a).name}`} onClick={() => send({ type: 'openAccounts', agent: a })}>
+                          Connect
+                        </Button>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            </section>
+            <section aria-label="Try the demo agent" class="wl-demo">
+              <Button variant="quiet" icon="play" onClick={() => send({ type: 'createTask', agent: 'demo', prompt: 'Show me what you can do', worktree: false })}>
+                Try the demo agent
+              </Button>
+              <p class="wl-empty">It runs on this machine with no account, so you can see a chat, a request and a review before you sign in.</p>
+            </section>
+          </div>
+          <div class="wl-col">
+            <section aria-label="What happens next">
+              <h2 class="wl-h">What happens next</h2>
+              <ol class="wl-steps">
+                {NEXT_STEPS.map((step) => (
+                  <li key={step.title} class="wl-row wl-live">
+                    <Icon name={step.icon} />
+                    <span class="wl-two">
+                      <b>{step.title}</b>
+                      <span>{step.text}</span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          </div>
+        </div>
       ) : (
         <div class="wl-cols">
           <div class="wl-col">

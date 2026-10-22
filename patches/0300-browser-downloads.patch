@@ -31,10 +31,10 @@ index 41ec3495..5e28e723 100644
  		mainProcessElectronServer.registerChannel('sign', signChannel);
 diff --git a/src/vs/platform/browserView/common/browserDownloads.ts b/src/vs/platform/browserView/common/browserDownloads.ts
 new file mode 100644
-index 00000000..78b8bb84
+index 00000000..f3bd5c3b
 --- /dev/null
 +++ b/src/vs/platform/browserView/common/browserDownloads.ts
-@@ -0,0 +1,335 @@
+@@ -0,0 +1,366 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): downloads in the integrated browser.
 + *  The rules, with no imports so FriedLiver's own tests run them as they ship:
@@ -307,22 +307,52 @@ index 00000000..78b8bb84
 +/** Input that gives a page user activation (as the browser view's popup blocker counts it); a mouse move doesn't. */
 +const ACTIVATING_INPUT = new Set(['rawKeyDown', 'keyDown', 'mouseDown', 'pointerDown', 'pointerUp', 'touchEnd']);
 +
++/** Input on a page this soon after its last CDP session detached may still be that session's synthetic input. */
++export const DETACH_GRACE_MS = 1_000;
++
 +/**
-+ * Whose a download is. Agents' browser calls each hold a token (begin … end); a download that starts
-+ * while calls act belongs to the newest of them, and only that call takes the OK in its chat. After an
-+ * agent acted, every page stays the agent's until the user interacts with it (input while an agent acts
-+ * doesn't count: CDP's clicks are input too). A download is the user's only when it has a user gesture
-+ * and the user interacted with that page since an agent last acted; one without a gesture is the page's.
++ * Whose a download is. A page with a CDP session attached (an agent driving it; the main process reports
++ * attach/detach, no extension call needed) is agent-driven: its input-events are CDP's synthetic clicks
++ * and don't count, and its downloads wait. Agents' browser calls also each hold a token (begin … end); a
++ * download that starts while calls act belongs to the newest of them, and only that call takes the OK in
++ * its chat. After an agent acted (a call or a session began or ended), every page stays the agent's
++ * until the user interacts with it. A download is the user's only when it has a user gesture, no session
++ * is attached to its page, and the user interacted with that page since an agent last acted; one without
++ * a gesture is the page's.
 + */
 +export class DownloadAttribution<Page extends object = object> {
 +	private readonly calls = new Map<string, number>();
 +	private seq = 0;
 +	/** Orders agent acts and user input; times can tie. */
 +	private tick = 0;
-+	/** The tick an agent last acted at: a call began, ended or was dropped. */
++	/** The tick an agent last acted at: a call or CDP session began, ended or was dropped. */
 +	private agentAt = 0;
 +	/** Each page's tick of the user's last activating input there. */
 +	private readonly userAt = new WeakMap<Page, number>();
++	/** Each page's open CDP sessions, and when its last one detached. */
++	private readonly sessions = new WeakMap<Page, number>();
++	private readonly detachedAt = new WeakMap<Page, number>();
++
++	/** A CDP session attached to `page`: it is agent-driven until every session detached. */
++	attach(page: Page): void {
++		this.sessions.set(page, (this.sessions.get(page) ?? 0) + 1);
++		this.agentAt = ++this.tick;
++	}
++
++	/** One CDP session on `page` detached. A detach without an attach changes nothing. */
++	detach(page: Page): void {
++		const open = this.sessions.get(page) ?? 0;
++		if (open <= 0) {
++			return;
++		}
++		this.sessions.set(page, open - 1);
++		this.detachedAt.set(page, this.now());
++		this.agentAt = ++this.tick;
++	}
++
++	private driven(page: Page | undefined): boolean {
++		return !!page && (this.sessions.get(page) ?? 0) > 0;
++	}
 +
 +	constructor(private readonly now: () => number = Date.now, private readonly maxScopeMs = MAX_AGENT_SCOPE_MS) { }
 +
@@ -341,10 +371,11 @@ index 00000000..78b8bb84
 +		}
 +	}
 +
-+	/** Electron's input-event `type` on a browser view's page. */
++	/** Electron's input-event `type` on a browser view's page. Ignored while a call acts or a CDP session drives the page (it is synthetic). */
 +	userInput(page: Page, type: string): void {
 +		this.prune();
-+		if (ACTIVATING_INPUT.has(type) && this.calls.size === 0) {
++		const sinceDetach = this.now() - (this.detachedAt.get(page) ?? -Infinity);
++		if (ACTIVATING_INPUT.has(type) && this.calls.size === 0 && !this.driven(page) && sinceDetach > DETACH_GRACE_MS) {
 +			this.userAt.set(page, ++this.tick);
 +		}
 +	}
@@ -355,7 +386,7 @@ index 00000000..78b8bb84
 +		if (agentCall) {
 +			return { byAgent: true, agentCall, waitingFor: 'agent' };
 +		}
-+		if ((page ? this.userAt.get(page) ?? 0 : 0) < this.agentAt) {
++		if (this.driven(page) || (page ? this.userAt.get(page) ?? 0 : 0) < this.agentAt) {
 +			return { byAgent: true, waitingFor: 'agent' };
 +		}
 +		return hasUserGesture ? { byAgent: false } : { byAgent: false, waitingFor: 'page' };
@@ -420,10 +451,10 @@ index 00000000..44b885f7
 +}
 diff --git a/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
 new file mode 100644
-index 00000000..5c7f3fb8
+index 00000000..adc97018
 --- /dev/null
 +++ b/src/vs/platform/browserView/electron-main/browserDownloadsMainService.ts
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,467 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): saves what the integrated browser downloads.
 + *
@@ -434,6 +465,8 @@ index 00000000..5c7f3fb8
 + *    user last did), or one over 500 MB, is paused until the user allows it. It is written to a
 + *    staging folder (Chromium may already put its first chunk on disk while it is paused:
 + *    scripts/downloads-probe.cjs) and moved into the downloads folder only once it is finished.
++ *  - A view with an agent's CDP session attached is agent-driven: its input-events (CDP's synthetic
++ *    clicks) don't count as the user's and its downloads wait (BrowserViewCDPTarget reports the sessions).
 + *  - Downloads that start during an agent's browser call are that call's alone (DownloadAttribution).
 + *  - Nothing is ever opened or run automatically. Finished files keep (or get) the OS's
 + *    downloaded-from-the-internet mark: com.apple.quarantine on macOS, Zone.Identifier on Windows.
@@ -456,6 +489,7 @@ index 00000000..5c7f3fb8
 +import { IBrowserDownload, BrowserDownloadEvent, DownloadAttribution, canCancelDownload, canRetryDownload, expandHome, formatBytes, isAllowedDownloadUrl, isDownloadFinished, isExecutableName, needsSizeConfirm, nextDownloadState, pruneDownloads, sanitizeFilename, uniqueFilename } from '../common/browserDownloads.js';
 +import { IBrowserDownloadsService } from '../common/browserDownloadsService.js';
 +import { BrowserSession } from './browserSession.js';
++import { BrowserViewCDPTarget } from './browserViewCDPTarget.js';
 +import { IBrowserViewMainService } from './browserViewMainService.js';
 +
 +export const IBrowserDownloadsMainService = createDecorator<IBrowserDownloadsMainService>('browserDownloadsMainService');
@@ -497,6 +531,8 @@ index 00000000..5c7f3fb8
 +	) {
 +		super();
 +		this._register(BrowserSession.onWillDownload(e => this.willDownload(e.event, e.item, e.webContents, e.session)));
++		// An agent's CDP session drives the view while attached, whether or not the extension called beginAgentCall.
++		this._register(BrowserViewCDPTarget.onDidChangeCDPAttachment(e => e.attached ? this.attribution.attach(e.contents) : this.attribution.detach(e.contents)));
 +		// The user's input in a browser view's page (not the workbench's), to tell their downloads from the page's.
 +		const watch = (contents: Electron.WebContents) => {
 +			if (BrowserSession.isBrowserViewWebContents(contents)) {
@@ -933,6 +969,44 @@ index 99a1c114..5d20bb9f 100644
  		this.electronSession.registerPreloadScript({
  			type: 'frame',
  			filePath: FileAccess.asFileUri('vs/platform/browserView/electron-browser/preload-browserView.js').fsPath
+diff --git a/src/vs/platform/browserView/electron-main/browserViewCDPTarget.ts b/src/vs/platform/browserView/electron-main/browserViewCDPTarget.ts
+index c1d359ec..5abe8fc2 100644
+--- a/src/vs/platform/browserView/electron-main/browserViewCDPTarget.ts
++++ b/src/vs/platform/browserView/electron-main/browserViewCDPTarget.ts
+@@ -8,12 +8,22 @@ import { Disposable } from '../../../base/common/lifecycle.js';
+ import { CDPTargetInfo, ICDPConnection, ICDPSessionCreatedEvent, ICDPTarget } from '../common/cdp/types.js';
+ import type { BrowserView } from './browserView.js';
+ 
++/**
++ * FriedLiver (patch 0300): every CDP session an outside client (an agent) attaches to a browser view, and
++ * its detach, for download attribution (BrowserDownloadsMainService). At module level so no static
++ * initializer reads the class binding.
++ */
++const onDidChangeCDPAttachment = new Emitter<{ readonly contents: Electron.WebContents; readonly attached: boolean }>();
++
+ /**
+  * Wraps a {@link BrowserViewDebugger} transport as an {@link ICDPTarget},
+  * tracking sessions and forwarding target-info changes for a single
+  * CDP target (page, worker, iframe, etc.).
+  */
+ export class BrowserViewCDPTarget extends Disposable implements ICDPTarget {
++	/** FriedLiver (patch 0300): a client's CDP session attached to (true) or detached from (false) a view's page. */
++	static readonly onDidChangeCDPAttachment = onDidChangeCDPAttachment.event;
++
+ 	protected readonly _sessions = new Map<string, ICDPConnection>();
+ 	get sessions(): ReadonlyMap<string, ICDPConnection> { return this._sessions; }
+ 
+@@ -78,8 +88,10 @@ export class BrowserViewCDPTarget extends Disposable implements ICDPTarget {
+ 		}
+ 
+ 		this._sessions.set(session.sessionId, session);
++		onDidChangeCDPAttachment.fire({ contents: this.view.webContents, attached: true });
+ 		session.onClose(() => {
+ 			this._sessions.delete(session.sessionId);
++			onDidChangeCDPAttachment.fire({ contents: this.view.webContents, attached: false });
+ 			if (this.sessions.size === 0) {
+ 				// Last session detached, update target info to reflect detached state.
+ 				this._onTargetInfoChanged.fire(this.targetInfo);
 diff --git a/src/vs/platform/browserView/electron-main/browserViewMainService.ts b/src/vs/platform/browserView/electron-main/browserViewMainService.ts
 index 6071bc72..b5427f0c 100644
 --- a/src/vs/platform/browserView/electron-main/browserViewMainService.ts
@@ -1516,10 +1590,10 @@ index 096492d9..24321e91 100644
  
 diff --git a/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
 new file mode 100644
-index 00000000..1511172b
+index 00000000..89b5e1b0
 --- /dev/null
 +++ b/src/vs/workbench/contrib/browserView/electron-browser/media/browserDownloads.css
-@@ -0,0 +1,328 @@
+@@ -0,0 +1,351 @@
 +/*---------------------------------------------------------------------------------------------
 + *  FriedLiver (patch 0300): browser downloads, COMPONENTS.md §2.39.
 + *  Only design-system tokens (--fl-*, generated from tokens.css into the workbench) and theme
@@ -1614,13 +1688,36 @@ index 00000000..1511172b
 +	padding: var(--fl-sp-1) 0;
 +	border: var(--fl-line) solid var(--fl-dialog-border);
 +	border-radius: var(--fl-r-float);
-+	background: var(--fl-glass-bg);
-+	backdrop-filter: var(--fl-glass-blur);
++	/* Solid menu tone until the glass below can blur: an 84% pane with no working blur lets the page behind show through. */
++	background: var(--fl-menu-bg);
 +	box-shadow: var(--fl-rim), var(--fl-elev-3);
 +	color: var(--fl-fg);
 +	font-size: var(--fl-t-100);
 +	margin-top: var(--fl-sp-1);
 +	animation: fl-dl-rise var(--fl-dur) var(--fl-ease-out);
++}
++
++/* Glass §1.9 (menu tone at --glass-alpha + blur 24 + rim), only where the workbench turns glass on
++   (.modern-ui-frosted-glass: GPU compositing, no reduced transparency, not high contrast). The blur
++   sits on its own layer, as upstream's frosted glass does, so the popover's children stay put. */
++@media (prefers-reduced-transparency: no-preference) and (forced-colors: none) {
++	.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .fl-downloads {
++		position: relative;
++		isolation: isolate;
++		background: transparent;
++	}
++
++	.monaco-workbench.modern-ui-frosted-glass:not(.hc-black):not(.hc-light) .fl-downloads::before {
++		content: '';
++		position: absolute;
++		inset: 0;
++		z-index: -1;
++		border-radius: inherit;
++		background: var(--fl-glass-bg);
++		backdrop-filter: var(--fl-glass-blur);
++		box-shadow: var(--fl-rim);
++		pointer-events: none;
++	}
 +}
 +
 +.monaco-workbench .fl-downloads__head {

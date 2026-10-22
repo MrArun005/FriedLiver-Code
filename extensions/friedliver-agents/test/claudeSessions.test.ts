@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ImageScan, encodeCwd, listClaudeImages, listClaudeSessions, parseSession } from '../src/host/claudeSessions';
+import { ImageScan, encodeCwd, listClaudeImages, listClaudeSessions, outsideRoots, parseSession } from '../src/host/claudeSessions';
+
+/** A POSIX fixture path as the code resolves it: itself on macOS/Linux, on the current drive on Windows. */
+const R = (p: string) => path.resolve(p);
 import type { ClaudeSession } from '../src/shared/messages';
 import { claudeColumn, claudeSubagents, filterClaudeSessions } from '../src/shared/view';
 
@@ -145,18 +148,50 @@ describe('images in Claude Code sessions', () => {
       ),
     );
     expect(scan.images).toEqual([
-      { path: '/work/app/docs/login-page.png', title: 'Login page', source: 'read', at: Date.parse(t(1)) },
-      { path: '/store/shots-x/screenshot-1.png', title: 'Screenshot of https://example.com/ (“Example”)', source: 'screenshot', at: Date.parse(t(3)) },
-      { path: '/work/app/.playwright-mcp/page-1.png', title: 'Screenshot of full page', source: 'screenshot', at: Date.parse(t(5)) },
-      { path: '/work/app/shots/hero.png', title: 'Hero', source: 'screenshot', at: Date.parse(t(7)) },
+      { path: R('/work/app/docs/login-page.png'), title: 'Login page', source: 'read', at: Date.parse(t(1)) },
+      { path: R('/store/shots-x/screenshot-1.png'), title: 'Screenshot of https://example.com/ (“Example”)', source: 'screenshot', at: Date.parse(t(3)) },
+      { path: R('/work/app/.playwright-mcp/page-1.png'), title: 'Screenshot of full page', source: 'screenshot', at: Date.parse(t(5)) },
+      { path: R('/work/app/shots/hero.png'), title: 'Hero', source: 'screenshot', at: Date.parse(t(7)) },
     ]);
+  });
+
+  it('finds images made: a Write, paths in a command, paths its output lists; not what finders list', () => {
+    const scan = new ImageScan('/w', '/home/u');
+    scan.feed(
+      lines(
+        use(1, 'w1', 'Write', { file_path: 'out/chart.png', content: 'x' }),
+        use(2, 'b1', 'Bash', { command: 'node shots.mjs --path shots/a.png -o ~/code/d/b.jpg S/*/*/glob.png "<x>.png"', description: 'shots' }),
+        result(3, 'b1', [{ type: 'text', text: 'wrote /w/review/c.webp\nwrote /w/review/c.webp\nsaved (d.png)' }]),
+        use(4, 'g1', 'Glob', { pattern: '**/*.png' }),
+        result(5, 'g1', '/w/icons/e.png'),
+        use(6, 'r1', 'Read', { file_path: '/w/notes.md' }),
+        result(7, 'r1', 'see /w/f.png'),
+      ),
+    );
+    expect(scan.images.map((i) => [i.path, i.source])).toEqual([
+      [R('/w/out/chart.png'), 'created'],
+      [R('/w/shots/a.png'), 'created'],
+      [path.join('/home/u', 'code/d/b.jpg'), 'created'],
+      [R('/w/review/c.webp'), 'created'],
+      [R('/w/d.png'), 'created'],
+    ]);
+    expect([...scan.made]).toEqual(scan.images.map((i) => i.path));
+  });
+
+  it('bounds the paths taken from one text and per transcript', () => {
+    const scan = new ImageScan('/w');
+    const many = (from: number) => Array.from({ length: 80 }, (_, i) => `/w/p${from + i}.png`).join(' ');
+    scan.feed(lines(use(1, 'b1', 'Bash', { command: many(0) })));
+    expect(scan.images).toHaveLength(50);
+    scan.feed(lines(...Array.from({ length: 12 }, (_, k) => use(2, `b${k + 2}`, 'Bash', { command: many((k + 1) * 100) }))));
+    expect(scan.made.size).toBe(500);
   });
 
   it('a screenshot result split across two reads is still matched', () => {
     const scan = new ImageScan('/w');
     scan.feed(lines(use(1, 'a', 'browser_screenshot', {})));
     scan.feed(lines(result(2, 'a', 'Saved to /w/s.png. Read it.')));
-    expect(scan.images.map((i) => i.path)).toEqual(['/w/s.png']);
+    expect(scan.images.map((i) => i.path)).toEqual([R('/w/s.png')]);
   });
 
   /** A fake home with one session for `ws`, written from lines. */
@@ -178,7 +213,7 @@ describe('images in Claude Code sessions', () => {
     );
     const [s] = await listClaudeImages({ home: h, folders: [ws] });
     expect(s).toMatchObject({ id: A, cwd: ws, title: 'Polish the board' });
-    expect(s.images.map((i) => i.path)).toEqual(['/work/app/a.png', '/work/app/b.png']);
+    expect(s.images.map((i) => i.path)).toEqual([R('/work/app/a.png'), R('/work/app/b.png')]);
     expect(await listClaudeImages({ home: h, folders: [ws], skip: new Set([A]) })).toEqual([]);
   });
 
@@ -186,14 +221,36 @@ describe('images in Claude Code sessions', () => {
     const ws = '/work/grow';
     const { home: h, proj } = sessionHome(ws, lines(use(1, 'r1', 'Read', { file_path: 'one.png' })));
     const file = path.join(proj, `${A}.jsonl`);
-    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/grow/one.png']);
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual([R('/work/grow/one.png')]);
     // A line half written: not read until it ends.
     fs.appendFileSync(file, use(2, 'r2', 'Read', { file_path: 'two.png' }).slice(0, 40));
     expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images).toHaveLength(1);
     fs.appendFileSync(file, `${use(2, 'r2', 'Read', { file_path: 'two.png' }).slice(40)}\n`);
-    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/grow/one.png', '/work/grow/two.png']);
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual([R('/work/grow/one.png'), R('/work/grow/two.png')]);
     fs.writeFileSync(file, lines(use(3, 'r3', 'Read', { file_path: 'three.png' })));
-    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/grow/three.png']);
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual([R('/work/grow/three.png')]);
+  });
+
+  it('lists made images only when the file exists inside the workspace or ~/code, once, with Reads kept as before', async () => {
+    const ws = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-made-')));
+    fs.mkdirSync(path.join(ws, 'shots'));
+    fs.writeFileSync(path.join(ws, 'shots', 'a.png'), 'png');
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fl-out-')));
+    fs.writeFileSync(path.join(outside, 'x.png'), 'png');
+    const { home: h } = sessionHome(
+      ws,
+      lines(use(1, 'b1', 'Bash', { command: `node s.mjs -o shots/a.png -o shots/gone.png -o ${outside}/x.png` }), use(2, 'r1', 'Read', { file_path: 'shots/unread.png' })),
+      { 'agent-sub.jsonl': lines(use(3, 'w1', 'Write', { file_path: `${ws}/shots/a.png` })) },
+    );
+    const [s] = await listClaudeImages({ home: h, folders: [ws] });
+    expect(s.images.map((i) => [i.path, i.source])).toEqual([
+      [path.join(ws, 'shots', 'a.png'), 'created'],
+      [path.join(ws, 'shots', 'unread.png'), 'read'],
+    ]);
+  });
+
+  it('outside roots: workspace, ~/code, and a session folder below home only', () => {
+    expect(outsideRoots('/home/u', ['/ws'], ['/home/u/proj', '/home/u', '/elsewhere'])).toEqual(['/ws', path.join('/home/u', 'code'), '/home/u/proj']);
   });
 
   it('does not follow a subagents folder that links elsewhere', async () => {
@@ -203,6 +260,6 @@ describe('images in Claude Code sessions', () => {
     fs.writeFileSync(path.join(elsewhere, 'agent-x.jsonl'), lines(use(2, 'r2', 'Read', { file_path: 'secret.png' })));
     fs.rmSync(path.join(proj, A, 'subagents'), { recursive: true });
     fs.symlinkSync(elsewhere, path.join(proj, A, 'subagents'));
-    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual(['/work/link/a.png']);
+    expect((await listClaudeImages({ home: h, folders: [ws] }))[0].images.map((i) => i.path)).toEqual([R('/work/link/a.png')]);
   });
 });

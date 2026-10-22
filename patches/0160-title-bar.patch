@@ -25,19 +25,10 @@ index e8edbe1b..ee331113 100644
  
  	/**
 diff --git a/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts b/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
-index 8aacc2e7..5c8b3648 100644
+index 8aacc2e7..3fd06711 100644
 --- a/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
 +++ b/src/vs/workbench/browser/parts/titlebar/commandCenterControl.ts
-@@ -4,6 +4,8 @@
-  *--------------------------------------------------------------------------------------------*/
- 
- import { isActiveDocument, reset } from '../../../../base/browser/dom.js';
-+import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
-+import { OS } from '../../../../base/common/platform.js';
- import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
- import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
- import { IHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegate.js';
-@@ -186,11 +188,15 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
+@@ -186,11 +186,25 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
  							const labelElement = document.createElement('span');
  							labelElement.classList.add('search-label');
  							labelElement.textContent = label;
@@ -49,15 +40,25 @@ index 8aacc2e7..5c8b3648 100644
 +							container.classList.remove('compact-mode');
 +							const keys = document.createElement('span');
 +							keys.classList.add('fl-command-center-keys');
-+							const keybinding = that._keybindingService.lookupKeybinding('workbench.action.quickOpen'); // Go to File's key (the pill runs quick open with modes)
-+							if (keybinding) {
-+								this._store.add(new KeybindingLabel(keys, OS)).set(keybinding);
++							// Go to File's key (the pill runs quick open with modes). Its default (⌘P / Ctrl+P), not a
++							// key added on top of it, and one Keycap (§2.25), not a cap per modifier.
++							const quickOpenKeys = that._keybindingService.getKeybindings().filter(k => k.command === 'workbench.action.quickOpen' && k.resolvedKeybinding);
++							const keybinding = ([...quickOpenKeys].reverse().find(k => k.isDefault) ?? quickOpenKeys[quickOpenKeys.length - 1])?.resolvedKeybinding;
++							const keycap = keybinding?.getLabel();
++							if (keycap) {
++								const cap = document.createElement('span');
++								cap.classList.add('monaco-keybinding');
++								const key = document.createElement('span');
++								key.classList.add('monaco-keybinding-key');
++								key.textContent = keycap;
++								cap.appendChild(key);
++								keys.appendChild(cap);
  							}
 +							reset(container, searchIcon, labelElement, keys);
  
  							const hover = this._store.add(that._hoverService.setupManagedHover(that._hoverDelegate, container, this.getTooltip()));
  
-@@ -214,6 +220,9 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
+@@ -214,6 +228,9 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
  						}
  
  						private _getLabel(): string {

@@ -10,6 +10,9 @@ import { parseCall } from '../src/bridge/protocol';
 import type { Journal } from '../src/host/changeJournal';
 import { answerIndex, globToRegex, imports, INDEX_DEFAULTS, INDEX_LIMITS, isSecret, outline, partialIndex, ProjectIndex, docsFileOf, readIndexFile, saveIndexFile, tokenize } from '../src/host/projectIndex';
 
+/** Windows has no POSIX mode bits (stat says 0o666 whatever was asked), so file modes are checked elsewhere only. */
+const POSIX_MODES = process.platform !== 'win32';
+
 const dirs: string[] = [];
 afterEach(async () => {
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
@@ -139,11 +142,10 @@ describe('what is never indexed', () => {
 
   it('fails closed when git check-ignore errors inside a repo', async () => {
     const root = await project({ 'ok.ts': 'fine' }, true);
-    const fake = path.join(root, '..', `fake-git-${path.basename(root)}`);
-    await writeFile(fake, '#!/bin/sh\nif [ "$1" = rev-parse ]; then echo true; exit 0; fi\nexit 128\n', { mode: 0o755 });
-    dirs.push(fake);
+    // A corrupt index: rev-parse still says "in a work tree", check-ignore dies with 128. Real git, so on every OS.
+    await writeFile(path.join(root, '.git', 'index'), 'not an index');
     const logged: string[] = [];
-    const ix = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1e8, git: fake, log: (m) => logged.push(m) });
+    const ix = new ProjectIndex(root, { maxFiles: 100, maxBytes: 1e8, log: (m) => logged.push(m) });
     await writeFile(path.join(root, 'new.ts'), 'leakword');
     await ix.updateMany(['new.ts']);
     expect(ix.has('new.ts')).toBe(false);
@@ -369,8 +371,8 @@ describe('the Merkle tree over the index', () => {
     const ix = await build(root);
     ix.tree.snapshot();
     await saveIndexFile(file, ix);
-    expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
-    for (const f of [file, docsFileOf(file)]) expect((await stat(f)).mode & 0o777).toBe(0o600);
+    if (POSIX_MODES) expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    if (POSIX_MODES) for (const f of [file, docsFileOf(file)]) expect((await stat(f)).mode & 0o777).toBe(0o600);
     expect((await reopen(root, file)).counts.read).toBe(0);
     const tree = await readFile(file, 'utf8');
     const docs = await readFile(docsFileOf(file), 'utf8');
