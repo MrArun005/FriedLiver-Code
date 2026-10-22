@@ -110,8 +110,34 @@ export function accountsFixture(now = Date.now()) {
       effort: select('effort', 'Effort', 'thought_level', 'medium', efforts(['low', 'medium', 'high', 'xhigh', 'max'])),
       chosen: {},
     },
+    // A custom agent from friedliver.agents.custom, with a key kept in secret storage (its value never comes here).
+    {
+      agent: 'custom:qwen',
+      name: 'Qwen Code',
+      record: { status: 'signed-in', at: now - 10 * 60_000, version: '0.12.0', methods: [] },
+      installCommand: 'npm install -g @qwen-code/qwen-code',
+      hint: 'Run qwen in a terminal and type /auth.',
+      signIn: [],
+      keys: [],
+      active: 'Qwen Code’s own login (its CLI’s saved credentials)',
+      model: select('model', 'Model', 'model', 'qwen3-coder-plus', [choice('qwen3-coder-plus', 'Qwen3 Coder Plus'), choice('qwen3-coder-flash', 'Qwen3 Coder Flash')]),
+      chosen: {},
+      custom: {
+        id: 'qwen',
+        name: 'Qwen Code',
+        command: 'qwen',
+        args: '--acp',
+        env: [
+          { name: 'QWEN_HOME', value: '~/.qwen', secret: false },
+          { name: 'DASHSCOPE_API_KEY', value: '', secret: true, saved: true },
+        ],
+        install: 'npm install -g @qwen-code/qwen-code',
+        signIn: 'Run qwen in a terminal and type /auth.',
+        glyph: 'terminal',
+      },
+    },
   ];
   const tools = ['system_open', 'system_apps', 'system_focus', 'system_shortcut', 'system_clipboard_read', 'system_clipboard_write', 'system_notify', 'system_volume', 'system_screenshot_window'];
   const system = { supported: true, platform: 'mac', enabled: true, fullAutoAllowed: false, tools: Object.fromEntries(tools.map((t) => [t, t !== 'system_volume'])) };
-  return { cards, links: 'builtin', system };
+  return { cards, links: 'builtin', system, custom: [{ key: 'custom:qwen', id: 'qwen', name: 'Qwen Code', install: 'npm install -g @qwen-code/qwen-code', signIn: 'Run qwen in a terminal and type /auth.', glyph: 'terminal' }] };
 }

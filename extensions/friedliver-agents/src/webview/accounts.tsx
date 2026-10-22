@@ -3,22 +3,30 @@
 // The page shows what the host sends and asks it to act; it never sees a key.
 import { Fragment, render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { SIGN_IN_TEXT, type AccountCard, type AccountsView, type CliLine, type CliWhat, type DefaultKey, type KeyView, type MethodView, type VendorKey } from '../shared/accounts';
-import { age } from '../shared/model';
+import { SIGN_IN_TEXT, type AccountCard, type AccountsView, type CliLine, type CliWhat, type DefaultKey, type KeyView, type LineKey, type MethodView, type VendorKey } from '../shared/accounts';
+import { AGENT_EXAMPLE, AGENT_GLYPHS, EMPTY_DRAFT, idFromName, looksSecret, validateDraft, type AgentDraft, type AgentTestResult, type DraftErrors, type EnvRow } from '../shared/agentForm';
+import { age, setCustomAgents, type AgentKey } from '../shared/model';
 import type { SessionOption } from '../shared/session';
 import { NEVER_ALWAYS, SYSTEM_TOOLS, SYSTEM_WORDS, unsupportedOn, type SystemSettingsView } from '../shared/system';
 import { Glyph, Icon, Popover, send } from './common';
-import { BrandMark, Button, IconButton, MenuItem, selectTrigger, Toggle } from './ui';
+import { AgentMark, BrandMark, Button, Field, IconButton, Input, MarkSvg, MenuItem, Segmented, selectTrigger, Toggle } from './ui';
 
 const KIND_TEXT: Record<MethodView['kind'], string> = { browser: 'in your browser', terminal: 'in a terminal', key: 'API key' };
 
 function Page() {
   const [view, setView] = useState<AccountsView | null>(null);
+  /** The form, open on a new agent or on one being edited. */
+  const [form, setForm] = useState<{ draft: AgentDraft; editing?: string; n: number } | null>(null);
   const scrolled = useRef(0);
+  const formShown = useRef(0);
   useEffect(() => {
     const listener = (e: MessageEvent) => {
       const m = e.data as { type?: string; view?: AccountsView };
-      if (m?.type === 'accounts' && m.view) setView(m.view);
+      if (m?.type === 'accounts' && m.view) {
+        // Custom agents' names and marks, for the cards' glyphs.
+        setCustomAgents(m.view.custom ?? []);
+        setView(m.view);
+      }
     };
     window.addEventListener('message', listener);
     send({ type: 'ready' });
@@ -34,7 +42,22 @@ function Page() {
     card?.focus({ preventScroll: true });
   }, [view?.focus?.n]);
 
+  // "Add Agent…" from a picker or the command palette: the form, once per opening.
+  useEffect(() => {
+    if (!view?.form || view.form === formShown.current) return;
+    formShown.current = view.form;
+    setForm({ draft: EMPTY_DRAFT, n: view.form });
+  }, [view?.form]);
+  useEffect(() => {
+    if (form) document.getElementById('agent-form')?.scrollIntoView({ block: 'start' });
+  }, [form?.n, form?.editing]);
+  const jump = (agent: AgentKey) => {
+    setForm(null);
+    requestAnimationFrame(() => document.getElementById(`card-${agent}`)?.scrollIntoView({ block: 'start' }));
+  };
+
   if (!view) return <div class="acct-page" />;
+  const taken = (view.custom ?? []).map((c) => c.id);
   return (
     <main class="acct-page">
       <header class="acct-head">
@@ -61,8 +84,18 @@ function Page() {
           </div>
         </div>
       </section>
+      {form ? (
+        <AgentForm key={`${form.n}-${form.editing ?? ''}`} initial={form.draft} editing={form.editing} taken={taken.filter((id) => id !== form.editing)} onJump={jump} onClose={() => setForm(null)} />
+      ) : (
+        <div class="acct-add">
+          <Button icon="plus" onClick={() => setForm({ draft: EMPTY_DRAFT, n: Date.now() })}>
+            Add an agent
+          </Button>
+          <span class="hint">Any program that speaks ACP: OpenCode and GitHub Copilot are built in below.</span>
+        </div>
+      )}
       {view.cards.map((card) => (
-        <Card key={card.agent} card={card} focused={view.focus?.agent === card.agent} />
+        <Card key={card.agent} card={card} focused={view.focus?.agent === card.agent} onEdit={card.custom ? () => setForm({ draft: card.custom!, editing: card.custom!.id, n: Date.now() }) : undefined} />
       ))}
       {view.system && <SystemCard s={view.system} />}
     </main>
@@ -119,7 +152,7 @@ function Switch({ label, on, disabled, onChange }: { label: string; on: boolean;
   return <Toggle checked={on} label={label} disabled={disabled} onChange={onChange} />;
 }
 
-function Card({ card, focused }: { card: AccountCard; focused: boolean }) {
+function Card({ card, focused, onEdit }: { card: AccountCard; focused: boolean; onEdit?: () => void }) {
   const r = card.record;
   const status = card.checking ? 'checking' : (r?.status ?? 'unknown');
   const vendor = card.agent !== 'demo';
@@ -154,6 +187,16 @@ function Card({ card, focused }: { card: AccountCard; focused: boolean }) {
         <Button icon="history" size="sm" disabled={card.checking} onClick={() => send({ type: 'check', agent: card.agent })} title="Starts the agent and a short session, then stops using it">
           Check
         </Button>
+        {onEdit && (
+          <>
+            <Button size="sm" onClick={onEdit}>
+              Edit
+            </Button>
+            <Button size="sm" variant="quiet" onClick={() => send({ type: 'removeAgent', agent: card.agent as `custom:${string}` })} title="Asks first. Its chats stay.">
+              Remove
+            </Button>
+          </>
+        )}
       </div>
       {r && <div class="hint acct-when">Checked {age(r.at, Date.now())} ago</div>}
       {card.busy && <div class="acct-note" role="status">{card.busy}</div>}
@@ -161,7 +204,7 @@ function Card({ card, focused }: { card: AccountCard; focused: boolean }) {
       {r?.update && <div class="acct-note warn">{r.update}</div>}
       {vendor && card.installCommand && (r?.status === 'not-installed' || !r) && (
         <Block title={r?.status === 'not-installed' ? 'Install' : 'Not installed yet?'}>
-          <Line agent={card.agent as VendorKey} what="install" line={{ command: card.installCommand }} />
+          <Line agent={card.agent as LineKey} what="install" line={{ command: card.installCommand }} />
         </Block>
       )}
       {vendor && r?.status !== 'not-installed' && <SignIn card={card} />}
@@ -199,6 +242,7 @@ function SignIn({ card }: { card: AccountCard }) {
         <KeyRow key={k.id} card={card} k={k} />
       ))}
       {card.envKey && !card.keys.some((k) => k.active) && <p class="hint">{card.envKey} is set in the editor’s environment, so {card.name} gets it.</p>}
+      {card.hint && <p class="hint">{card.hint}</p>}
       {card.cli?.signIn && (
         <div class="acct-cli">
           <span class="hint">Or its own CLI: </span>
@@ -263,7 +307,7 @@ function SignOut({ card }: { card: AccountCard }) {
 }
 
 /** One of FriedLiver's own lines for a terminal, with Copy and Run. */
-function Line({ agent, what, line }: { agent: VendorKey; what: CliWhat; line: CliLine }) {
+function Line({ agent, what, line }: { agent: LineKey; what: CliWhat; line: CliLine }) {
   return (
     <span class="acct-line">
       <code>{line.command}</code>
@@ -352,5 +396,190 @@ function Choice({ card, option, k, label }: { card: AccountCard; option: Session
 }
 
 const MAC = /Mac/.test(navigator.platform);
+
+const GLYPH_NAMES: Record<(typeof AGENT_GLYPHS)[number], string> = { agent: 'Robot', terminal: 'Terminal', hexagon: 'Hexagon', spark: 'Spark' };
+const EXAMPLE_JSON = `"friedliver.agents.custom": [\n  ${JSON.stringify(AGENT_EXAMPLE).replace(/,"/g, ', "').replace(/":/g, '": ')}\n]`;
+
+/**
+ * "Add an agent": a custom ACP agent into the user's friedliver.agents.custom. The host checks it all again
+ * and keeps variables that look like keys in SecretStorage. Test connection starts it once, in an empty folder.
+ */
+function AgentForm({ initial, editing, taken, onJump, onClose }: { initial: AgentDraft; editing?: string; taken: string[]; onJump(agent: AgentKey): void; onClose(): void }) {
+  const [d, setD] = useState<AgentDraft>(initial);
+  const [idEdited, setIdEdited] = useState(!!editing);
+  const [tried, setTried] = useState(false);
+  const [hostErrors, setHostErrors] = useState<DraftErrors>({});
+  const [test, setTest] = useState<AgentTestResult | 'running' | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    const listener = (e: MessageEvent) => {
+      const m = e.data as { type?: string; ok?: boolean; errors?: DraftErrors; result?: AgentTestResult };
+      if (m?.type === 'agentTest' && m.result) setTest(m.result);
+      if (m?.type === 'agentSaved') {
+        setSaving(false);
+        if (m.ok) onClose();
+        else setHostErrors(m.errors ?? {});
+      }
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, []);
+  const set = (patch: Partial<AgentDraft>) => {
+    setHostErrors({});
+    setD((x) => ({ ...x, ...patch, ...(!idEdited && patch.name !== undefined && !editing ? { id: idFromName(patch.name) } : {}) }));
+  };
+  const setRow = (i: number, patch: Partial<EnvRow>) => set({ env: d.env.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+  const errors = { ...(tried ? validateDraft(d, taken) : {}), ...hostErrors };
+  const save = () => {
+    setTried(true);
+    if (Object.keys(validateDraft(d, taken)).length) return;
+    setSaving(true);
+    send({ type: 'saveAgent', draft: d, ...(editing ? { editing } : {}) });
+  };
+  return (
+    <section id="agent-form" class="acct-card acct-form" aria-labelledby="agent-form-title" tabIndex={-1}>
+      <div class="acct-top">
+        <span class="fl-avatar fl-avatar--lg fl-avatar--mark" aria-hidden="true">
+          <span class="fl-mark">
+            <MarkSvg agent="" glyph={d.glyph} />
+          </span>
+        </span>
+        <h2 id="agent-form-title" class="grow">
+          {editing ? `Edit ${initial.name || editing}` : 'Add an agent'}
+        </h2>
+        <IconButton icon="close" label="Close the form" muted size="sm" onClick={onClose} />
+      </div>
+      {!editing && (
+        <div class="acct-block">
+          <h3>Start from</h3>
+          <div class="actions">
+            <Button size="sm" onClick={() => onJump('opencode')} title="Built in: install and sign in on its card">
+              <AgentMark agent="opencode" /> OpenCode
+            </Button>
+            <Button size="sm" onClick={() => onJump('copilot')} title="Built in: install and sign in on its card">
+              <AgentMark agent="copilot" /> GitHub Copilot
+            </Button>
+            <Button size="sm" variant="primary" aria-pressed="true">
+              Other ACP agent
+            </Button>
+          </div>
+          <p class="hint">OpenCode and GitHub Copilot are built in: their cards below install and sign them in. Any other program that speaks ACP on stdin and stdout goes here.</p>
+        </div>
+      )}
+      <div class="acct-block acct-form-grid">
+        <Field label="Name" error={errors.name}>
+          <Input value={d.name} placeholder="Qwen Code" onInput={(e) => set({ name: e.currentTarget.value })} />
+        </Field>
+        <Field label="ID" help={editing ? 'An agent keeps its id: chats find it by that.' : `What @ mentions it: @${d.id || 'id'}`} error={errors.id}>
+          <Input
+            value={d.id}
+            placeholder="qwen"
+            disabled={!!editing}
+            onInput={(e) => {
+              setIdEdited(true);
+              set({ id: e.currentTarget.value.toLowerCase() });
+            }}
+          />
+        </Field>
+        <Field label="Command" help="The program, by name on your PATH or its full path. No shell: it is started directly." error={errors.command}>
+          <Input class="mono" value={d.command} placeholder="qwen" onInput={(e) => set({ command: e.currentTarget.value })} />
+        </Field>
+        <Field label="Arguments" help={'Separated by spaces; "quote" one with spaces in it.'} error={errors.args}>
+          <Input class="mono" value={d.args} placeholder="--acp" onInput={(e) => set({ args: e.currentTarget.value })} />
+        </Field>
+        <Field label="Install line (optional)" help="Shown on its card with Copy and Run in terminal." error={errors.install}>
+          <Input class="mono" value={d.install} placeholder="npm install -g @qwen-code/qwen-code" onInput={(e) => set({ install: e.currentTarget.value })} />
+        </Field>
+        <Field label="Sign-in hint (optional)" error={errors.signIn}>
+          <Input value={d.signIn} placeholder="Run qwen in a terminal and type /auth." onInput={(e) => set({ signIn: e.currentTarget.value })} />
+        </Field>
+      </div>
+      <div class="acct-block">
+        <h3>Environment variables (optional)</h3>
+        {d.env.map((row, i) => {
+          const secret = row.secret || row.saved || looksSecret(row.name, row.value);
+          return (
+            <div key={i} class="acct-key acct-env">
+              <Input class="mono" aria-label="Variable name" value={row.name} placeholder="NAME" onInput={(e) => setRow(i, { name: e.currentTarget.value })} />
+              <Input
+                class="mono grow"
+                aria-label={`Value of ${row.name || 'the variable'}`}
+                type={secret ? 'password' : 'text'}
+                value={row.value}
+                placeholder={row.saved ? 'Saved; leave empty to keep it' : 'value'}
+                onInput={(e) => setRow(i, { value: e.currentTarget.value })}
+              />
+              {secret && (
+                <span class="acct-tag" title="Kept in the editor’s secret storage, not in settings">
+                  <Icon name="key" size={12} /> secret
+                </span>
+              )}
+              <IconButton icon="close" label={`Remove ${row.name || 'this variable'}`} muted size="sm" onClick={() => set({ env: d.env.filter((_, j) => j !== i) })} />
+            </div>
+          );
+        })}
+        {errors.env && <p class="fl-field__help" data-tone="error">{errors.env}</p>}
+        <Button size="sm" variant="quiet" icon="plus" onClick={() => set({ env: [...d.env, { name: '', value: '', secret: false }] })}>
+          Add a variable
+        </Button>
+        <p class="hint">Names or values that look like keys (…_KEY, …_TOKEN, sk-…) go to the editor’s secret storage; the rest to your user settings.</p>
+      </div>
+      <div class="acct-block">
+        <h3>Mark</h3>
+        <Segmented
+          label="Mark"
+          value={d.glyph}
+          onChange={(glyph) => set({ glyph })}
+          options={AGENT_GLYPHS.map((g) => ({ value: g, title: GLYPH_NAMES[g], label: <><span class="fl-mark" aria-hidden="true"><MarkSvg agent="" glyph={g} /></span> {GLYPH_NAMES[g]}</> }))}
+        />
+      </div>
+      <div class="acct-block">
+        <h3>Example</h3>
+        <pre class="acct-example mono">{EXAMPLE_JSON}</pre>
+        <p class="hint">Saving writes this to your user settings.json (never a workspace’s). You can write it there by hand too: id, command and args, plus name, env, install, signIn and glyph if you like.</p>
+      </div>
+      {test && (
+        <div class="acct-block" role="status">
+          <h3>Test connection</h3>
+          {test === 'running' ? (
+            <p class="hint">Starting it in an empty folder…</p>
+          ) : test.ok ? (
+            <>
+              <p>
+                <Icon name="check" size={14} /> {test.agent ?? 'The agent'} answered over ACP.{' '}
+                {test.needsSignIn ? 'It needs a sign-in first.' : test.modelCount ? `It offers ${test.modelCount} model${test.modelCount === 1 ? '' : 's'}.` : 'It reported no models.'}
+              </p>
+              {test.models.length > 0 && <p class="hint">Models: {test.models.join(', ')}{test.modelCount > test.models.length ? ', …' : ''}</p>}
+              {test.modes.length > 0 && <p class="hint">Modes: {test.modes.join(', ')}</p>}
+              {test.signIn.length > 0 && <p class="hint">Sign-in: {test.signIn.join(', ')}</p>}
+            </>
+          ) : (
+            <p class="acct-note warn">{test.error}</p>
+          )}
+        </div>
+      )}
+      <div class="acct-block actions">
+        <Button
+          icon="history"
+          disabled={test === 'running' || !d.command.trim()}
+          onClick={() => {
+            setTest('running');
+            send({ type: 'testAgent', draft: d, ...(editing ? { editing } : {}) });
+          }}
+          title="Starts it once in an empty folder: ACP initialize and a session, no prompt"
+        >
+          Test connection
+        </Button>
+        <span class="grow" />
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" loading={saving} onClick={save}>
+          {editing ? 'Save' : 'Add agent'}
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 render(<Page />, document.getElementById('root')!);

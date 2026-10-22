@@ -212,13 +212,13 @@ describe('models per agent', () => {
 
 describe('Demo visibility', () => {
   it('hides Demo from pickers unless turned on', () => {
-    expect(shownAgents(false, 'darwin')).toEqual(['claude', 'codex', 'gemini', 'antigravity']);
-    expect(shownAgents(true, 'darwin')).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'demo']);
+    expect(shownAgents(false, 'darwin')).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode']);
+    expect(shownAgents(true, 'darwin')).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode', 'demo']);
   });
 
   it('gives pickers the shown agents and their last known sign-in', () => {
     const records: Partial<Record<AgentKey, AccountRecord>> = { gemini: record({ status: 'needs-sign-in' }), demo: record({ status: 'signed-in' }) };
-    expect(rosterOf(false, records, 'darwin')).toEqual({ agents: ['claude', 'codex', 'gemini', 'antigravity'], signIn: { gemini: 'needs-sign-in' } });
+    expect(rosterOf(false, records, 'darwin')).toEqual({ agents: ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode'], signIn: { gemini: 'needs-sign-in' } });
     expect(rosterOf(true, records, 'darwin').signIn).toEqual({ gemini: 'needs-sign-in', demo: 'signed-in' });
   });
 });
@@ -226,7 +226,7 @@ describe('Demo visibility', () => {
 describe('Antigravity off macOS', () => {
   it('is hidden from pickers, the roster and @ suggestions on Windows and Linux, with a reason by name', () => {
     for (const platform of ['win32', 'linux']) {
-      expect(shownAgents(false, platform)).toEqual(['claude', 'codex', 'gemini']);
+      expect(shownAgents(false, platform)).toEqual(['claude', 'codex', 'gemini', 'copilot', 'opencode']);
       expect(rosterOf(true, {}, platform).agents).not.toContain('antigravity');
       expect(mentionOptions('anti', shownAgents(false, platform))).toEqual([]);
     }

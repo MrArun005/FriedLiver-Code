@@ -8,7 +8,7 @@ import { LIMITS, type Attachment, type HostMessage } from '../shared/messages';
 import { spliceDictation, type DictationState, type Segment } from '../shared/dictation';
 import { MicVisualizer } from './micVisualizer';
 import {
-  AGENT_FACES,
+  agentFace,
   EXPIRED,
   bridgeTitle,
   fileConflicts,
@@ -61,7 +61,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
+import { AddAgentItem, ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
 import { Viewer } from './viewer';
 import { ContextRail } from './contextRail';
 
@@ -397,11 +397,12 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
                   }}
                 >
                   <AgentMark agent={agent} />
-                  <span class="grow">{AGENT_FACES[agent].name}</span>
+                  <span class="grow">{agentFace(agent).name}</span>
                   <SignInMark agent={agent} />
                 </button>
               ))}
               <div class="fl-menu__sep" role="separator" />
+              <AddAgentItem close={close} />
               <MenuItem icon="key" label="Agents &amp; Accounts…" onSelect={() => (close(false), send({ type: 'openAccounts' }))} />
             </>
           );
@@ -684,7 +685,7 @@ function AskingBar({ chat }: { chat: ChatView }) {
     <div class="banner asking-bar" role="status">
       <Dot state="needs-you" still />
       <span class="banner-text">
-        {AGENT_FACES[chat.agent].name} is asking · {n} question{n === 1 ? '' : 's'}
+        {agentFace(chat.agent).name} is asking · {n} question{n === 1 ? '' : 's'}
       </span>
       <Button size="sm" onClick={show}>
         Show
@@ -709,7 +710,7 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
           <button key={agent} class="pick-agent" onClick={() => send({ type: 'newChat', agent })}>
             <Glyph agent={agent} size="lg" />
             <span>
-              {AGENT_FACES[agent].name} <SignInMark agent={agent} />
+              {agentFace(agent).name} <SignInMark agent={agent} />
             </span>
           </button>
         ))}
@@ -722,6 +723,10 @@ function Empty({ chats, onSelect }: { chats: ChatView[]; onSelect: Select }) {
         .
       </p>
       <p class="hint">
+        <Button variant="link" onClick={() => send({ type: 'addAgent' })}>
+          Add an agent…
+        </Button>{' '}
+        ·{' '}
         <Button variant="link" onClick={() => send({ type: 'otherAgents' })}>
           Get another agent extension…
         </Button>
@@ -1399,7 +1404,10 @@ function Composer({
       }))
     : mentions.length
       ? mentions.map((o) => ({ key: o.agent, title: o.name, label: `@${o.insert}`, agent: o.agent, choose: () => insert(applyMention(text, o)) }))
-      : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
+      : query !== null
+        ? // No agent by that name: the way to add one.
+          [{ key: 'add-agent', title: 'Add an agent…', label: query ? `No agent called @${query}` : 'Any ACP agent', choose: () => send({ type: 'addAgent' }) }]
+        : slashes.map((c) => ({ key: c.name, title: commandLabel(c), label: c.description, choose: () => insert({ text: `/${c.name} `, caret: c.name.length + 2 }) }));
   // "#" names a workspace file; the agent gets it as a file, not only as words.
   const hash = shut || mentions.length || slashes.length || models.length ? null : hashQuery(text, caret);
   const asked = useRef('');
@@ -1667,7 +1675,7 @@ function Composer({
                       i > 0 && <div class="cc-divider" role="presentation" />
                     ) : (
                       <div class="cc-menu-sub" aria-hidden="true">
-                        <Glyph agent={o.agent!} size="sm" /> {AGENT_FACES[o.agent!].name}
+                        <Glyph agent={o.agent!} size="sm" /> {agentFace(o.agent!).name}
                       </div>
                     ))}
                   <div
@@ -1843,7 +1851,7 @@ function Composer({
             <ComposerPills chat={chat} linked={linked} samples={samples} open={setMenu} />
             {asking && (
               <span class="composer-hint composer-agent">
-                <Glyph agent={asking} size="sm" /> {AGENT_FACES[asking].name} · reply comes back here
+                <Glyph agent={asking} size="sm" /> {agentFace(asking).name} · reply comes back here
               </span>
             )}
             {hint && <span class="composer-hint">{hint}</span>}
@@ -1854,8 +1862,8 @@ function Composer({
               onClick={stopping ? () => send({ type: 'stop', chatId: chat.id }) : submit}
               disabled={!stopping && !canSend}
               data-stop={stopping ? '' : undefined}
-              aria-label={stopping ? 'Stop' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? 'Queue' : 'Send'}
-              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${AGENT_FACES[asking].name}` : queueing ? `Sends when ${agentName(chat.agent)} finishes this turn` : 'Send (Enter)'}
+              aria-label={stopping ? 'Stop' : asking ? `Ask ${agentFace(asking).name}` : queueing ? 'Queue' : 'Send'}
+              title={stopping ? 'Stop (Esc in an empty message box)' : asking ? `Ask ${agentFace(asking).name}` : queueing ? `Sends when ${agentName(chat.agent)} finishes this turn` : 'Send (Enter)'}
             >
               <Icon name={stopping ? 'stop' : asking ? 'ask' : queueing ? 'queue' : 'up'} size={stopping ? 16 : 20} />
             </button>

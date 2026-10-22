@@ -66,7 +66,12 @@ export const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        agent: { type: 'string', enum: AGENT_KEYS.filter((a) => a !== 'demo'), description: 'Which agent: claude, codex (GPT), gemini, or antigravity (Google models through the Antigravity CLI).' },
+        agent: {
+          type: 'string',
+          // Built-in agents, or a custom one the user added (`custom:<id>`, as list_agents names it).
+          pattern: `^(${AGENT_KEYS.filter((a) => a !== 'demo').join('|')}|custom:[a-z][a-z0-9]{1,23})$`,
+          description: 'Which agent: claude, codex (GPT), gemini, antigravity (Google models through the Antigravity CLI), copilot (GitHub Copilot CLI), opencode (OpenCode), or a custom agent by the key list_agents gives.',
+        },
         prompt: { type: 'string', minLength: 1, maxLength: BRIDGE_LIMITS.text, description: 'The question or request, written for the other agent.' },
         chat_id: { description: 'Ask this existing chat (it must be idle and use `agent`) instead of starting or reusing a consultation.', ...CHAT_ID },
       },

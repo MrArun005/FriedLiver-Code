@@ -1,6 +1,7 @@
 // Commands FriedLiver puts in a terminal for an agent: its install line and its own CLI login.
 import { DEFAULT_AGENTS } from '@friedliver/main/agents/registry';
-import type { AgentKey } from '../shared/model';
+import { plainLine } from '../shared/agentForm';
+import { customAgent, isBuiltinAgent, type AgentKey } from '../shared/model';
 
 /**
  * The install command for an agent: FriedLiver's own constant, chosen by the
@@ -9,6 +10,11 @@ import type { AgentKey } from '../shared/model';
  */
 export function installCommandFor(agent: AgentKey): string | null {
   if (agent === 'demo') return null;
+  // A custom agent's install line is the user's own, from their settings; still plain characters only.
+  if (!isBuiltinAgent(agent)) {
+    const install = customAgent(agent)?.install;
+    return install ? cliLineFor(install) : null;
+  }
   return cliLineFor(DEFAULT_AGENTS[agent].installCommand);
 }
 
@@ -18,7 +24,7 @@ export function installCommandFor(agent: AgentKey): string | null {
  * `curl … | bash` (`irm … | iex` on Windows).
  */
 export function cliLineFor(command: string): string | null {
-  return /^[\w@/.: -]+( \| (bash|iex))?$/.test(command) ? command : null;
+  return plainLine(command) ? command : null;
 }
 
 const MAX_LOGIN_ARGS = 32;

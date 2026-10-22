@@ -1,7 +1,7 @@
 import { Fragment, render } from 'preact';
 import { useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  AGENT_FACES,
+  agentFace,
   age,
   decisions,
   fileConflicts,
@@ -538,10 +538,13 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         <div class="agent-pick" role="group" aria-label="Agents">
           {shown.map((a) => (
             <button key={a} type="button" class="agent-option" aria-pressed={agents.includes(a)} onClick={() => toggle(a)}>
-              <Glyph agent={a} size="sm" /> {AGENT_FACES[a].name}
+              <Glyph agent={a} size="sm" /> {agentFace(a).name}
               <SignInMark agent={a} />
             </button>
           ))}
+          <Button size="sm" variant="quiet" icon="plus" onClick={() => send({ type: 'addAgent' })} title="Agents & Accounts: add any ACP agent">
+            Add an agent…
+          </Button>
         </div>
         {several && <span class="hint">same task, {agents.length} agents</span>}
         <TaskOptions agents={agents} defaults={defaults} choices={choices} onChange={(agent, key, value) => setChoices((c) => ({ ...c, [agent]: { ...c[agent], [key]: value } }))} />

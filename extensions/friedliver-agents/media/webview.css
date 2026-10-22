@@ -4652,6 +4652,40 @@ button.new-chat kbd {
 .acct-foot {
   padding: var(--sp-2) 0 var(--sp-5);
 }
+/* "Add an agent": the button row, and the form (a card like the others; fields in as many columns as fit). */
+.acct-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.acct-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--sp-3) var(--sp-4);
+}
+.acct-env {
+  align-items: center;
+}
+.acct-env .fl-input:first-child {
+  flex: 0 0 min(40%, 240px);
+}
+.acct-example {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--t-85);
+}
+.acct-form .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
 
 /* ---- Decision Inbox: the queue on the left, what answering does on the right (webview/inbox.tsx) ---- */
 

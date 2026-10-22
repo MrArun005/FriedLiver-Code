@@ -1,6 +1,6 @@
 // The Images view: every image any agent read, made or was given, by chat.
 // Pure: the host and the webviews both use it, and the tests.
-import { AGENT_FACES, type AgentKey, type AppState, type ChatView, type ImageItem } from './model';
+import { agentFace, type AgentKey, type AppState, type ChatView, type ImageItem } from './model';
 import { stepImage } from './stepImages';
 import { chatName } from './names';
 
@@ -164,7 +164,7 @@ export function filterGallery(images: readonly GalleryImage[], chats: readonly G
     if (f.sources.length && !f.sources.includes(img.source)) return false;
     if (!words.length) return true;
     const chat = chatOf.get(img.chatId);
-    const hay = `${img.title} ${img.path?.split(/[\\/]/).pop() ?? ''} ${chat?.title ?? ''} ${chat ? AGENT_FACES[chat.agent].name : ''}`.toLowerCase();
+    const hay = `${img.title} ${img.path?.split(/[\\/]/).pop() ?? ''} ${chat?.title ?? ''} ${chat ? agentFace(chat.agent).name : ''}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   }
 }

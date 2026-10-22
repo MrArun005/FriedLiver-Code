@@ -142,6 +142,8 @@ export type WebviewMessage =
   | { type: 'findFiles'; chatId: string; query: string }
   /** Claude Code, Cline, Roo Code, Kilo Code or Continue, from the extension gallery. */
   | { type: 'otherAgents' }
+  /** Agents & Accounts on its "Add an agent" form (the last item of every agent picker). */
+  | { type: 'addAgent' }
   /** Agents & Accounts, on the agent's card when given. */
   | { type: 'openAccounts'; agent?: AgentKey }
   /** Continue a Claude Code session started outside FriedLiver in a new chat. */
@@ -340,6 +342,7 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'cloneRepo':
     case 'openInbox':
     case 'otherAgents':
+    case 'addAgent':
     case 'dictationSettings':
       return { type: m.type };
     case 'openRecent':

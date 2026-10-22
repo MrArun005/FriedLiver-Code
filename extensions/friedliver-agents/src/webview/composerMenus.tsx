@@ -3,7 +3,7 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
-import { AGENT_FACES, type ChatView } from '../shared/model';
+import { agentFace, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, savedLines, turnsLeft, usageLines, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
 import { FRIEDLIVER_COMMANDS, agentMissing, commandLabel, sameAgents, sameControls, shortDuration, slashMenu, subagents } from '../shared/view';
 import { Dot, Icon, memo, scrollBehavior, send, useNow, useRoster, type IconName } from './common';
@@ -215,7 +215,7 @@ export function ModelMenu({ chat, close }: MenuProps) {
 
 export function ModesMenu({ chat, close }: MenuProps) {
   const { panel, onKeyDown } = useMenuKeys(close);
-  const agent = AGENT_FACES[chat.agent].name;
+  const agent = agentFace(chat.agent).name;
   // The agent's own, more permissive mode wins the check: the rows must not claim Manual while it bypasses.
   const override = agentOverride(chat.approval ?? 'ask', chat.session);
   const now = override ? (override.cls === 'auto' ? 'full' : null) : currentMode(chat);
@@ -354,7 +354,7 @@ export function SlashMenu({ chat, close, mention, command, openModel }: MenuProp
     ),
     own.length > 0 && (
       <div key="own" class="cc-menu-section">
-        <div class="cc-menu-sub">{AGENT_FACES[chat.agent].name}</div>
+        <div class="cc-menu-sub">{agentFace(chat.agent).name}</div>
         {own.map((c) => item(`cmd-${c.name}`, commandLabel(c), () => command(c.name), undefined, c.description))}
       </div>
     ),
@@ -528,7 +528,7 @@ export const ComposerPills = memo(function ComposerPills({
         </button>
       )}
       <button type="button" class="cc-pill cc-model" title={usageTitle(chat, samples)} aria-label={`Model: ${usageTitle(chat, samples)}`} onClick={() => open('model')}>
-        <span class="cc-pill-text">{modelLabel(model) ?? (chat.session?.starting ? 'Starting…' : AGENT_FACES[chat.agent].name)}</span>
+        <span class="cc-pill-text">{modelLabel(model) ?? (chat.session?.starting ? 'Starting…' : agentFace(chat.agent).name)}</span>
         {effort && <span class="cc-pill-sub">{choiceName(effort)}</span>}
       </button>
     </>
@@ -541,7 +541,7 @@ function sameControlsAndAgents<T extends { chat: ChatView; linked: ChatView[]; s
 
 export const ModeButton = memo(function ModeButton({ chat, open }: { chat: ChatView; open: (m: ComposerMenu) => void; samples?: number[] }) {
   const m = currentMode(chat);
-  const agent = AGENT_FACES[chat.agent].name;
+  const agent = agentFace(chat.agent).name;
   const override = agentOverride(chat.approval ?? 'ask', chat.session);
   if (override) {
     return (
@@ -554,7 +554,7 @@ export const ModeButton = memo(function ModeButton({ chat, open }: { chat: ChatV
     );
   }
   return (
-    <button type="button" class="cc-mode" data-mode={m} title={`${MODE_NAMES[m]}: ${modeHint(m, AGENT_FACES[chat.agent].name)}. Shift+Tab switches.`} aria-label={`Mode: ${MODE_NAMES[m]}`} onClick={() => open('modes')}>
+    <button type="button" class="cc-mode" data-mode={m} title={`${MODE_NAMES[m]}: ${modeHint(m, agentFace(chat.agent).name)}. Shift+Tab switches.`} aria-label={`Mode: ${MODE_NAMES[m]}`} onClick={() => open('modes')}>
       <span class="cc-icon-box">
         <Icon name={MODE_ICONS[m]} size={18} />
       </span>

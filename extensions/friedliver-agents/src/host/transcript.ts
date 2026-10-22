@@ -1,7 +1,7 @@
 // Chats as text for other agents: the context a hand-off starts from, the
 // brief a consulted agent gets, and what the FriedLiver tools return.
 import path from 'node:path';
-import { AGENT_FACES, AGENT_KEYS, lastReply, type AppState, type ChatView, type Item } from '../shared/model';
+import { agentFace, allAgentKeys, lastReply, type AppState, type ChatView, type Item } from '../shared/model';
 import { turnsText } from '../shared/view';
 import { testAgentsOn } from './settings';
 
@@ -202,17 +202,17 @@ export function chatList(state: Pick<AppState, 'chats' | 'links'>, callerId: str
       if (c.id === callerId) notes.push('this chat');
       else if (state.links.some((l) => l.from === callerId && l.to === c.id && l.kind === 'consult')) notes.push('you consulted it');
       if (c.branch) notes.push(`own worktree on ${c.branch}`);
-      return `${c.id} · ${AGENT_FACES[c.agent].name} (${c.label}) · ${JSON.stringify(c.title)} · ${notes.join(', ')}`;
+      return `${c.id} · ${agentFace(c.agent).name} (${c.label}) · ${JSON.stringify(c.title)} · ${notes.join(', ')}`;
     })
     .join('\n');
 }
 
 /** list_agents: the agents FriedLiver can start. */
 export function agentList(): string {
-  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', antigravity: 'Google models through the Antigravity CLI', demo: 'offline test agent; it echoes what it is told' };
-  const keys = AGENT_KEYS.filter((k) => k !== 'demo' || testAgentsOn());
+  const about: Record<string, string> = { codex: 'OpenAI GPT through Codex', antigravity: 'Google models through the Antigravity CLI', copilot: 'GitHub Copilot CLI', opencode: 'OpenCode, with OpenCode Zen and other providers', demo: 'offline test agent; it echoes what it is told' };
+  const keys = allAgentKeys().filter((k) => k !== 'demo' || testAgentsOn());
   return [
-    ...keys.map((k) => `${k} · ${AGENT_FACES[k].name}${about[k] ? ` (${about[k]})` : ''}`),
+    ...keys.map((k) => `${k} · ${agentFace(k).name}${about[k] ? ` (${about[k]})` : ''}`),
     '',
     'Pass the key as `agent` to ask_agent. An agent the user has not installed or signed in to answers with an error.',
   ].join('\n');

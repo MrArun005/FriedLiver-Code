@@ -3,7 +3,7 @@
 // two chats both changed) as an edge, so you can see how the agents are joined.
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
+import { agentFace, basename, decisions, type AppState, type ChatView } from '../shared/model';
 import type { ClaudeSession } from '../shared/messages';
 import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, turnsText, subagents, tipPlace, type MapChip, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
 import { DOT_LABEL, Dot, Glyph, Icon, memo, send, usePersisted } from './common';
@@ -104,7 +104,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 <rect x={MAP.laneX} y={lane.y} width={map.width - MAP.pad - MAP.laneX} height={lane.h} rx="12" />
                 <SvgGlyph agent={lane.agent} x={MAP.col0} y={lane.y + 8} size={16} />
                 <text class="lane-head" x={MAP.col0 + 23} y={lane.y + 20}>
-                  <tspan class="lane-name">{lane.outside ? 'Claude Code · outside FriedLiver' : AGENT_FACES[lane.agent].name}</tspan>
+                  <tspan class="lane-name">{lane.outside ? 'Claude Code · outside FriedLiver' : agentFace(lane.agent).name}</tspan>
                   <tspan class="lane-meta" dx="8">
                     {lane.chats}
                     {lane.working > 0 ? ` · ${lane.working} working` : ''}
@@ -222,7 +222,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                     {n.title}
                   </text>
                   <text class="node-title" x="40" y="31">
-                    {AGENT_FACES[n.agent].name}
+                    {agentFace(n.agent).name}
                   </text>
                   <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
                 </g>
@@ -374,7 +374,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
         {node.title}
       </text>
       <text class="node-title" x="40" y="31">
-        {AGENT_FACES[chat.agent].name}
+        {agentFace(chat.agent).name}
       </text>
       <circle class="node-dot" data-state={status} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
       {chat.approval === 'full' && (
@@ -409,7 +409,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
     >
       <div class="tip-head">
         <Glyph agent={chat.agent} size="sm" />
-        <b title={chatTip(chat)}>{AGENT_FACES[chat.agent].name}</b>
+        <b title={chatTip(chat)}>{agentFace(chat.agent).name}</b>
         <span class="spacer" />
         <Dot state={status} />
         <span class="hint">{DOT_LABEL[status]}</span>

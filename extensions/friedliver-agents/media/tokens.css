@@ -147,6 +147,8 @@
   --logo-claude: #d97757;
   --logo-openai: var(--fg);
   --logo-gemini: #8e75b2;
+  /* GitHub's marks are monochrome too. */
+  --logo-github: var(--fg);
   /* The FriedLiver mark only (oklch .72 .14 52 dark / .62 .15 48 light): never a control, never a status. */
   --brand: #e2884f;
 

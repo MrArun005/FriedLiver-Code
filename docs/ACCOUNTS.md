@@ -44,13 +44,92 @@ can't stop to ask, its Manual, Plan and /discuss chats are talk only
 (FriedLiver reads the project for it); Edit automatically and Auto run it in
 the project.
 
-| | Antigravity | Claude | Codex | Gemini |
-|---|---|---|---|---|
-| Browser / terminal sign-in (from the agent) | none: agy has no ACP mode, so its own CLI line signs in | Claude Subscription, Anthropic Console (terminal) | ChatGPT (browser) | none: FriedLiver doesn't offer Google sign-in for Gemini; use an API key or Vertex AI, or Antigravity for a Google account |
-| Keys FriedLiver keeps | none (agy's API-key mode lives in its own `~/.gemini/antigravity-cli/settings.json`, which FriedLiver never edits) | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY`, then ACP `api-key` | Gemini API key (`GEMINI_API_KEY`, then ACP `gemini-api-key`); Vertex AI (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`, or `GOOGLE_API_KEY`, with `GOOGLE_GENAI_USE_VERTEXAI=true`, then ACP `vertex-ai`) |
-| Own CLI sign-in / sign-out | `agy`, then Google OAuth / `agy`, then `/logout` | `claude auth login` / `claude auth logout` | `codex login` / `codex logout` | none (API key or Vertex AI only) / `gemini`, then `/signout` |
-| Sign-out from the page | the CLI line | ACP `logout` | ACP `logout` | the CLI line |
-| Account reported | not reported; the version is agy's (`agy --version`), the models are what `agy models` lists | plan, email, organization or key source | ChatGPT plan and email, or API key | not reported; the card says which method is in use |
+| | Antigravity | Claude | Codex | Gemini | Copilot | OpenCode |
+|---|---|---|---|---|---|---|
+| Browser / terminal sign-in (from the agent) | none: agy has no ACP mode, so its own CLI line signs in | Claude Subscription, Anthropic Console (terminal) | ChatGPT (browser) | none: FriedLiver doesn't offer Google sign-in for Gemini; use an API key or Vertex AI, or Antigravity for a Google account | none: its ACP method `copilot-login` says to run `copilot login`, so its own CLI line signs in | none needed for OpenCode Zen's free models; its ACP method `opencode-login` says to run `opencode auth login` |
+| Keys FriedLiver keeps | none (agy's API-key mode lives in its own `~/.gemini/antigravity-cli/settings.json`, which FriedLiver never edits) | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY`, then ACP `api-key` | Gemini API key (`GEMINI_API_KEY`, then ACP `gemini-api-key`); Vertex AI (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`, or `GOOGLE_API_KEY`, with `GOOGLE_GENAI_USE_VERTEXAI=true`, then ACP `vertex-ai`) | GitHub token (`GH_TOKEN`: a fine-grained token with the Copilot Requests permission) | OpenCode Zen API key (`OPENCODE_API_KEY`) |
+| Own CLI sign-in / sign-out | `agy`, then Google OAuth / `agy`, then `/logout` | `claude auth login` / `claude auth logout` | `codex login` / `codex logout` | none (API key or Vertex AI only) / `gemini`, then `/signout` | `copilot login` / `copilot`, then `/logout` | `opencode auth login` / `opencode auth logout` |
+| Sign-out from the page | the CLI line | ACP `logout` | ACP `logout` | the CLI line | ACP `logout` | the CLI line |
+| Account reported | not reported; the version is agy's (`agy --version`), the models are what `agy models` lists | plan, email, organization or key source | ChatGPT plan and email, or API key | not reported; the card says which method is in use | whatever its ACP server reports | not reported |
+
+Copilot is GitHub Copilot CLI's own ACP server (`copilot --acp`, in public
+preview: [docs](https://docs.github.com/en/copilot/reference/acp-server)).
+Install: `npm install -g @github/copilot` (macOS, Linux), `winget install
+GitHub.Copilot` (Windows). Copilot Free includes the CLI. Its reasoning effort
+is fixed when the server starts (`--effort=…` in `friedliver.agents.copilot.args`).
+Every FriedLiver level keeps Copilot in its Agent mode: its Autopilot mode turns
+on its own allow-all, which FriedLiver couldn't see, so picking Autopilot by
+hand asks like Full auto, and its `allow_all` option is never offered.
+
+OpenCode is `opencode acp` ([docs](https://opencode.ai/docs/acp/)). Install:
+`curl -fsSL https://opencode.ai/install | bash` (macOS, Linux), `npm install -g
+opencode-ai` (Windows; also Scoop or Chocolatey). OpenCode's permissions
+default to "allow", and a repository's own `opencode.json` or `.opencode/agents`
+can set an agent's permissions to allow. So FriedLiver starts it with
+`OPENCODE_DISABLE_PROJECT_CONFIG=1` (no project config, `.opencode` agents,
+plugins or `AGENTS.md`; FriedLiver's shared rules still reach it) and an inline
+config (`OPENCODE_CONFIG_CONTENT`) that pins every built-in agent (build, plan,
+general, explore) to ask for everything but reading files and listing names;
+`.env` files stay unread and content search (grep) asks. Every edit, command,
+search and fetch then reaches FriedLiver's approvals. Checked with OpenCode
+1.19.4's `opencode debug agent build` in a repository whose config allowed
+everything. Your own global OpenCode config can still add agents of its own;
+FriedLiver keeps chats on `build` and `plan`. OpenCode Zen's free models (listed as
+"… Free" in the model picker, plus Big Pickle) work without signing in.
+
+First real run (2026-10-22, ACP initialize + session/new, not signed in):
+OpenCode 1.19.4 offered 44 models (6 OpenCode Zen ones, default
+`opencode/big-pickle`), modes `build` and `plan`, and with FriedLiver's config
+asked permission before writing a file. Copilot CLI 1.0.103 offered no models
+before sign-in, the modes Agent, Plan and Autopilot, an `allow_all` option, and
+`copilot-login` (run `copilot login`) with ACP `logout`.
+
+### Not added
+
+- **Qwen Code** (`qwen --acp`): its free Qwen OAuth tier ended on 2026-04-15
+  ([auth docs](https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/auth.md));
+  only paid API keys remain. Add it as a custom agent if you have one.
+- **Kimi CLI**: `kimi acp` was in MoonshotAI/kimi-cli, which is archived; its
+  successor (MoonshotAI/kimi-code) doesn't document an ACP mode.
+
+## Custom agents
+
+Any other program that speaks ACP on stdin/stdout can be added, from
+**Add an agent** at the top of this page, **FriedLiver: Add Agent…** in the
+command palette, or **Add an agent…** at the bottom of every agent picker (New
+chat, Hand off, the Agent Manager's New task, and `@` when no agent matches).
+
+The form asks for a name, an id (what `@` mentions), the command (a program
+name or path: no shell, so no `;`, `|`, `$` or quotes), its arguments,
+optional environment variables, an install line and a sign-in hint, and a
+mark. OpenCode and GitHub Copilot sit at its top: they're built in, so those
+jump to their own cards. **Test connection** starts the program once in an
+empty folder (ACP `initialize` and a session, no prompt) and shows what came
+back: its name and version, how it signs in, its models and modes.
+
+Saving writes your user settings (never a workspace's; machine scope).
+Variables whose name or value looks like a key (`…_KEY`, `…_TOKEN`, `sk-…`)
+go to the editor's secret storage instead and reach only that agent. Each
+custom agent's card has **Edit** and **Remove** (it asks first; its chats stay
+and can't start until it's back). An id can't be a built-in agent's name or
+alias, and an agent keeps its id.
+
+By hand, in settings.json:
+
+```json
+"friedliver.agents.custom": [
+  { "id": "qwen", "name": "Qwen Code", "command": "qwen", "args": ["--acp"] }
+]
+```
+
+plus `env`, `install`, `signIn` and `glyph` (`agent`, `terminal`, `hexagon`
+or `spark`) if you like. OpenCode would be
+`{ "id": "opencode", "name": "OpenCode", "command": "opencode", "args": ["acp"] }`,
+but it is built in, so that id is taken.
+
+Each one appears like the built-in agents: pickers, `@<id>`, its card here
+(install line and sign-in hint; the sign-in methods and models it reports),
+approvals, Full auto guards and `/discuss`.
 
 One key setup is kept per agent: saving the Gemini API key replaces Vertex AI
 settings and the other way round. After a key is saved, FriedLiver restarts the

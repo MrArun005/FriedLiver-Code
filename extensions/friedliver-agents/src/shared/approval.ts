@@ -5,7 +5,7 @@
 // a message the host already takes, with its own checks (an option the agent offered, a grant the
 // request offered, the origin again), so the scopes offered here can never widen what policy allows.
 import type { WebviewMessage } from './messages';
-import { AGENT_FACES, type AppState, type ChatView, type Item } from './model';
+import { agentFace, type AppState, type ChatView, type Item } from './model';
 import { describeGrant, siteOrigin, type Grant } from './permissions';
 import { agentToolRisk, browserRisk, commandRisk, filesRisk, type DroppedCommits, type Risk } from './risk';
 import { ruleCandidates, ruleSafe } from './rules';
@@ -68,7 +68,7 @@ const host = (origin?: string) => origin?.replace(/^https?:\/\//, '');
 
 /** What the card says and offers for this request. */
 export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'label' | 'cwd'> & { files?: string[] }, state?: Pick<AppState, 'chats'>): Approval {
-  const agent = AGENT_FACES[chat.agent].name;
+  const agent = agentFace(chat.agent).name;
   const rel = (p: string) => relativePath(chat.cwd, p);
   if (item.kind === 'permission') {
     const d = item.detail;
@@ -215,7 +215,7 @@ export function approvalOf(item: Approvable, chat: Pick<ChatView, 'agent' | 'lab
     : 'memory' in item.target
       ? clip(item.text, 120)
       : 'agent' in item.target
-        ? AGENT_FACES[item.target.agent].name
+        ? agentFace(item.target.agent).name
         : other
           ? clip(other.title, 60)
           : 'another chat';
