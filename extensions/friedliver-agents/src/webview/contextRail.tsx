@@ -3,7 +3,7 @@
 // from shared/contextFacts.ts, the one source; rows open the file or rewind to the point.
 import type { ChatView } from '../shared/model';
 import { chatFacts } from '../shared/contextFacts';
-import { AGENT_FACES } from '../shared/model';
+import { agentFace } from '../shared/model';
 import { basename, send, useNow } from './common';
 import { Avatar, Count, Icon, Row } from './ui';
 
@@ -38,7 +38,7 @@ export function ContextRail({ chat }: { chat: ChatView }) {
             <div class="ctx-l">Agent</div>
             <div class="ctx-v">
               <Avatar agent={chat.agent} size="sm" working={chat.busy} />
-              {AGENT_FACES[chat.agent].name}
+              {agentFace(chat.agent).name}
             </div>
           </div>
           <div>

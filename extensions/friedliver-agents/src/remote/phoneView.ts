@@ -3,7 +3,7 @@
 // (they count under the subagent), long text cut.
 import path from 'node:path';
 import { diffPreview } from '../shared/diff';
-import { AGENT_FACES, bridgeTitle, decisions, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
+import { agentFace, bridgeTitle, decisions, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
 import { approvalOf } from '../shared/approval';
 import { describeGrant, type Grant } from '../shared/permissions';
 import { ESCALATING, denyOption, primaryOption } from '../shared/tools';
@@ -43,7 +43,7 @@ export function summary(chat: ChatView): PhoneSummary {
     id: chat.id,
     agent: chat.agent,
     // The agent's name, never "Claude 4": the topic tells chats apart.
-    label: AGENT_FACES[chat.agent].name,
+    label: agentFace(chat.agent).name,
     title: chat.title,
     status: statusOf(chat),
     folder: chat.branch ?? path.basename(chat.cwd),
@@ -58,7 +58,7 @@ export function summary(chat: ChatView): PhoneSummary {
 export function phoneList(chats: ChatView[], agents: AgentKey[], folders: string[], now = Date.now()): PhoneList {
   return {
     groups: statusGroups(chats).map((g) => ({ status: g.status, title: g.title, chats: g.chats.map(summary) })),
-    agents: agents.map((key) => ({ key, name: AGENT_FACES[key].name })),
+    agents: agents.map((key) => ({ key, name: agentFace(key).name })),
     folders: folders.map((p) => ({ path: p, name: path.basename(p) || p })),
     now,
   };
@@ -194,7 +194,7 @@ function phoneItem(
     case 'changes':
       return { k: 'changes', files: i.files.length, ...(i.undone ? { undone: true } : {}) };
     case 'link':
-      return { k: 'link', label: AGENT_FACES[i.agent].name, text: clip(i.text, 2000), role: i.role };
+      return { k: 'link', label: agentFace(i.agent).name, text: clip(i.text, 2000), role: i.role };
     default:
       return null;
   }

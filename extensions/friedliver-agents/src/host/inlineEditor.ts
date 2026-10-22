@@ -3,7 +3,7 @@
 // (Esc) or Retry with a follow-up. The file changes only on Accept, through a
 // WorkspaceEdit, so Ctrl/Cmd+Z undoes it. The logic is in inlineEdit.ts.
 import * as vscode from 'vscode';
-import { AGENT_FACES, isAgentKey, type AgentKey } from '../shared/model';
+import { agentFace, isAgentKey, type AgentKey } from '../shared/model';
 import type { AgentCore } from './core';
 import type { Span } from './editorPrompt';
 import { applyReplacement, inlinePrompt, runInline, type InlineRun } from './inlineEdit';
@@ -69,7 +69,7 @@ export class InlineEditor implements vscode.Disposable {
     await this.reject();
     const agent = this.agent();
     const instruction = await vscode.window.showInputBox({
-      title: `Inline edit with ${AGENT_FACES[agent].name}`,
+      title: `Inline edit with ${agentFace(agent).name}`,
       placeHolder: editor.selection.isEmpty ? 'What should go at the cursor?' : 'Describe the change to the selection',
       prompt: 'Ctrl/Cmd+Enter accepts the proposal, Esc rejects it.',
       ignoreFocusOut: true,
@@ -98,7 +98,7 @@ export class InlineEditor implements vscode.Disposable {
     const show = async () => {
       if (shown) return;
       shown = true;
-      await vscode.commands.executeCommand('vscode.diff', p.doc.uri, p.preview, `${AGENT_FACES[p.agent].name}: ${p.instruction} (Accept ⌘/Ctrl+Enter · Reject Esc)`, { preview: true });
+      await vscode.commands.executeCommand('vscode.diff', p.doc.uri, p.preview, `${agentFace(p.agent).name}: ${p.instruction} (Accept ⌘/Ctrl+Enter · Reject Esc)`, { preview: true });
     };
     const run = runInline(this.core, p.agent, context, p.instruction, (partial) => {
       if (this.current !== p) return;
@@ -107,7 +107,7 @@ export class InlineEditor implements vscode.Disposable {
     }, this.owned);
     p.run = run;
     void vscode.commands.executeCommand('setContext', RUNNING, true);
-    const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `${AGENT_FACES[p.agent].name} is proposing an edit…` }, () => run.done);
+    const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `${agentFace(p.agent).name} is proposing an edit…` }, () => run.done);
     void vscode.commands.executeCommand('setContext', RUNNING, false);
     if (this.current !== p) return;
     p.run = undefined;

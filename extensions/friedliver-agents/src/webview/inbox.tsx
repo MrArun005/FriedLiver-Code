@@ -17,7 +17,7 @@ import {
   type InboxKind,
 } from '../shared/inbox';
 import type { WebviewMessage } from '../shared/messages';
-import { AGENT_FACES, age, formatDuration, type AppState, type ChatView } from '../shared/model';
+import { agentFace, age, formatDuration, type AppState, type ChatView } from '../shared/model';
 import { oneClickQuestion, recommended } from '../shared/questions';
 import { Glyph, Icon, Markdown, isTyping, send, type IconName } from './common';
 import { ApprovalCard, cardKeys } from './approval';
@@ -233,7 +233,7 @@ function Detail({ entry: e, chat, state, now, same, confirming, reply, onBatch, 
       </header>
       <div class="inbox-meta">
         <Glyph agent={chat.agent} size="sm" />
-        <span title={chatTip(chat)}>{AGENT_FACES[chat.agent].name}</span>
+        <span title={chatTip(chat)}>{agentFace(chat.agent).name}</span>
         <span class="sep">·</span>
         <span class="inbox-meta-topic" title={chat.title}>
           {chat.title}
@@ -294,9 +294,9 @@ function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: {
     setText('');
   };
   return (
-    <aside class="inbox-reply" aria-label={`Or tell ${AGENT_FACES[chat.agent].name} instead`}>
+    <aside class="inbox-reply" aria-label={`Or tell ${agentFace(chat.agent).name} instead`}>
       <label class="inbox-reply-label" for={`reply-${entry.id}`}>
-        Or tell {AGENT_FACES[chat.agent].name} instead
+        Or tell {agentFace(chat.agent).name} instead
       </label>
       <Textarea
         id={`reply-${entry.id}`}
@@ -389,7 +389,7 @@ function Confirm({ entries, state, now, onAnswer, onCancel }: { entries: InboxEn
             <li key={e.id}>
               {chat && <Glyph agent={chat.agent} size="sm" />}
               <span class="inbox-confirm-chat" title={chat ? chatTip(chat) : undefined}>
-                {chat ? `${AGENT_FACES[chat.agent].name} · ${chat.title}` : e.chatId}
+                {chat ? `${agentFace(chat.agent).name} · ${chat.title}` : e.chatId}
               </span>
               {where && <span class="hint mono inbox-confirm-where">{where}</span>}
               {e.at !== undefined && <span class="inbox-age">{age(e.at, now)}</span>}

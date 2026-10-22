@@ -17,9 +17,10 @@ import {
   type AccountRecord,
   type CliWhat,
   type KeySetup,
+  type LineKey,
   type VendorKey,
 } from '../shared/accounts';
-import { AGENT_FACES, type AgentKey } from '../shared/model';
+import { agentFace, type AgentKey } from '../shared/model';
 import { KEY_ENV, VENDOR_AGENTS, messageOf, type AgentCore } from './core';
 import { plainText } from './notify';
 import { cliLineFor, installCommandFor } from './signin';
@@ -162,7 +163,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       return item;
     }
     const s = this.record(node.agent);
-    const item = new vscode.TreeItem(AGENT_FACES[node.agent].name);
+    const item = new vscode.TreeItem(agentFace(node.agent).name);
     const key = isVendor(node.agent) && this.saved.has(node.agent) ? ' · key saved' : '';
     const version = s?.version ? ` · ${s.update ? `${s.version}, update it` : s.version}` : '';
     item.description = (this.checking.has(node.agent) ? 'Checking…' : s ? SIGN_IN_TEXT[s.status] : 'Not checked') + version + key;
@@ -195,7 +196,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     this.fire(agent);
     try {
       const s = await vscode.window.withProgress(
-        { location: { viewId: 'friedliver.accounts' }, title: `Checking ${AGENT_FACES[agent].name}` },
+        { location: { viewId: 'friedliver.accounts' }, title: `Checking ${agentFace(agent).name}` },
         () => this.core().checkAccount(agent),
       );
       this.note(agent, {
@@ -215,7 +216,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
 
   /** One of the agent's own sign-in methods, by id: a browser login through ACP, or its CLI in a terminal. */
   async signIn(agent: AgentKey, methodId: string, after?: () => void): Promise<void> {
-    const label = AGENT_FACES[agent].name;
+    const label = agentFace(agent).name;
     try {
       const method = (await this.core().authMethods(agent)).find((m) => m.id === methodId);
       if (!method) throw new Error('That sign-in method is no longer offered by the agent.');
@@ -248,7 +249,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
 
   /** The agent's own sign-out (ACP logout), after asking. FriedLiver deletes none of its files. */
   async signOut(agent: AgentKey): Promise<void> {
-    const label = AGENT_FACES[agent].name;
+    const label = agentFace(agent).name;
     const ok = await vscode.window.showWarningMessage(
       `Sign out of ${label}?`,
       { modal: true, detail: `${label} signs itself out. Its chats need a sign-in before their next message.` },
@@ -280,7 +281,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       agent ??
       (
         await vscode.window.showQuickPick(
-          VENDOR_AGENTS.filter((a) => KEY_SETUPS[a].length).map((a) => ({ label: AGENT_FACES[a].name, description: KEY_SETUPS[a].map((s) => s.name).join(', '), agent: a })),
+          VENDOR_AGENTS.filter((a) => KEY_SETUPS[a].length).map((a) => ({ label: agentFace(a).name, description: KEY_SETUPS[a].map((s) => s.name).join(', '), agent: a })),
           { title: 'Set an API key' },
         )
       )?.agent;
@@ -290,9 +291,9 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
       keySetup(id, setupId) ??
       (setups.length === 1
         ? setups[0]
-        : (await vscode.window.showQuickPick(setups.map((s) => ({ label: s.name, detail: s.description, setup: s })), { title: `${AGENT_FACES[id].name}: how to sign in` }))?.setup);
+        : (await vscode.window.showQuickPick(setups.map((s) => ({ label: s.name, detail: s.description, setup: s })), { title: `${agentFace(id).name}: how to sign in` }))?.setup);
     if (!setup) return;
-    const name = AGENT_FACES[id].name;
+    const name = agentFace(id).name;
     const prev = this.saved.get(id);
     const values: Record<string, string> = {};
     for (const field of setup.fields) {
@@ -346,12 +347,13 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     await this.core().stopAgent(agent);
     const r = this.record(agent);
     if (r?.identity?.kind === 'api_key' || KEY_SETUPS[agent].some((s) => s.name === r?.via)) this.note(agent, { via: undefined, identity: undefined, status: 'needs-sign-in' });
-    void vscode.window.showInformationMessage(`Removed ${AGENT_FACES[agent].name}'s saved key. Check again to see how it signs in now.`);
+    void vscode.window.showInformationMessage(`Removed ${agentFace(agent).name}'s saved key. Check again to see how it signs in now.`);
   }
 
   /** The line FriedLiver would type for an agent: its install command or its own CLI's sign-in or sign-out. */
-  cliLine(agent: VendorKey, what: CliWhat): string | null {
-    return what === 'install' ? installCommandFor(agent) : (CLI_ACCOUNTS[agent][what] ? cliLineFor(CLI_ACCOUNTS[agent][what]!.command) : null);
+  cliLine(agent: LineKey, what: CliWhat): string | null {
+    if (what === 'install') return installCommandFor(agent);
+    return isVendor(agent) && CLI_ACCOUNTS[agent][what] ? cliLineFor(CLI_ACCOUNTS[agent][what]!.command) : null;
   }
 
   /**
@@ -359,17 +361,17 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
    * sees: the install command, or its CLI's own sign-in or sign-out. Checked
    * again when the terminal closes, since the CLI may have changed the login.
    */
-  runInTerminal(agent: VendorKey, what: CliWhat): void {
+  runInTerminal(agent: LineKey, what: CliWhat): void {
     const line = this.cliLine(agent, what);
     if (!line) return;
-    const name = AGENT_FACES[agent].name;
+    const name = agentFace(agent).name;
     const terminal = vscode.window.createTerminal({
       name: what === 'install' ? `Install ${name}` : `${name} ${what === 'signIn' ? 'sign-in' : 'sign-out'}`,
       cwd: this.cwd(),
     });
     terminal.show();
     terminal.sendText(line, true);
-    const then = what === 'install' ? undefined : CLI_ACCOUNTS[agent][what]?.then;
+    const then = what === 'install' || !isVendor(agent) ? undefined : CLI_ACCOUNTS[agent][what]?.then;
     if (then) void vscode.window.showInformationMessage(`${name}: ${then}`);
     const done = vscode.window.onDidCloseTerminal(async (t) => {
       if (t !== terminal) return;
@@ -385,7 +387,7 @@ export class Accounts implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     const login = await this.core().terminalLogin(agent, methodId);
     if (!login) throw new Error('That sign-in method is no longer offered by the agent.');
     const launch = launchFor(login.command, login.args);
-    const label = AGENT_FACES[agent].name;
+    const label = agentFace(agent).name;
     const terminal = vscode.window.createTerminal({
       name: `${label} sign-in`,
       shellPath: launch.file,

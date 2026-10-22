@@ -2,7 +2,7 @@
 // The data the card shows, how a turn's stance is read, and which transcript items it folds away.
 // The host runs it (host/discuss.ts); this file has no I/O so both sides and the tests share it.
 import { choiceOf, resolveMention, sameModel, scanMentions, withoutMentions, type MentionProblem, type ModelCatalog, type Who } from './discussMentions';
-import { AGENT_FACES, MENTIONS, isAgentKey, type AgentKey, type Item } from './model';
+import { agentFace, isStoredAgentKey, mentioned, type AgentKey, type Item } from './model';
 
 /** Rounds when friedliver.discuss.maxRounds is unset, and its bounds. */
 export const DISCUSS_ROUNDS = { default: 3, min: 1, max: 5 } as const;
@@ -114,7 +114,7 @@ const fromKey = (s: Speaker): Participant => {
 
 /** "Claude · Opus 4.5" for a participant on a model, "Claude" for one on its agent's default. */
 export function participantName(p: Pick<Participant, 'agent' | 'model' | 'modelName'>): string {
-  if (!p.model) return AGENT_FACES[p.agent]?.name ?? p.agent;
+  if (!p.model) return agentFace(p.agent)?.name ?? p.agent;
   return choiceOf({ agent: p.agent, model: p.model }, p.modelName ? { [p.agent]: [{ value: p.model, name: p.modelName }] } : {}).label;
 }
 
@@ -141,14 +141,14 @@ export function speakerResolver(participants: readonly (Participant | Speaker)[]
     if (!r) return undefined;
     const known = keys.find((k) => k.toLowerCase() === r) ?? keys.find((k) => flat(name(k)) === flat(r));
     if (known) return known;
-    const agent = MENTIONS[r];
+    const agent = mentioned(r);
     const of = agent ? keys.filter((k) => agentOf(k) === agent) : [];
     return of.length === 1 ? of[0] : undefined;
   };
 }
 
 /** Without participants to hand: an agent's name, as before models. */
-const byAgentName = (raw: string): Speaker | undefined => MENTIONS[raw.trim().replace(/^@/, '').toLowerCase()];
+const byAgentName = (raw: string): Speaker | undefined => mentioned(raw.trim().replace(/^@/, ''));
 
 // ---- The command ----
 
@@ -435,7 +435,7 @@ export function savedDiscussion(raw: Record<string, unknown>, itemsAfter: number
   const participants: Participant[] = [];
   for (const p of Array.isArray(raw.participants) ? raw.participants : []) {
     const r = (p ?? {}) as Record<string, unknown>;
-    if (!isAgentKey(r.agent)) continue;
+    if (!isStoredAgentKey(r.agent)) continue;
     const model = str(r.model, 128).trim();
     const modelName = model ? str(r.modelName, 80).trim() : '';
     const one: Participant = { agent: r.agent, ...(model ? { model } : {}), ...(modelName ? { modelName } : {}), ...(typeof r.chatId === 'string' ? { chatId: r.chatId } : {}) };

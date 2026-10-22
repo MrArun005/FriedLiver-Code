@@ -2,12 +2,14 @@
 // for (docs/ACCOUNTS.md). Pure, so the host, the page and the tests agree.
 // Secrets never come here: a card says only whether a key is set.
 import type { LinkMode } from './links';
-import { AGENT_FACES, AGENT_KEYS, isAgentKey, type AgentKey } from './model';
+import { parseDraft, type AgentDraft } from './agentForm';
+import { agentFace, allAgentKeys, CUSTOM_AGENT_ID, customAgents, isAgentKey, isBuiltinAgent, type AgentKey, type BuiltinAgentKey, type CustomAgent, type CustomAgentKey } from './model';
 import { isSystemTool, type SystemSettingsView, type SystemTool } from './system';
 import { defaultChoices, offers, optionKey, type AgentDefaults, type SessionOption } from './session';
 
 export type SignInState = 'signed-in' | 'needs-sign-in' | 'not-installed' | 'error';
-export type VendorKey = Exclude<AgentKey, 'demo'>;
+/** A built-in agent from an AI company; custom agents and Demo aren't. */
+export type VendorKey = Exclude<BuiltinAgentKey, 'demo'>;
 
 export const SIGN_IN_TEXT: Record<SignInState, string> = {
   'signed-in': 'Signed in',
@@ -16,7 +18,10 @@ export const SIGN_IN_TEXT: Record<SignInState, string> = {
   error: 'Problem',
 };
 
-export const isVendor = (agent: AgentKey): agent is VendorKey => agent !== 'demo';
+/** An agent with lines for a terminal: a vendor's install and CLI login, or a custom agent's install. */
+export type LineKey = Exclude<AgentKey, 'demo'>;
+
+export const isVendor = (agent: AgentKey): agent is VendorKey => isBuiltinAgent(agent) && agent !== 'demo';
 
 /** An ACP sign-in method as FriedLiver offers it (agent-core signInMethods). */
 export interface MethodView {
@@ -155,6 +160,26 @@ export const KEY_SETUPS: Record<VendorKey, KeySetup[]> = {
   ],
   // agy signs in with Google itself; its API-key mode lives in its own settings.json, which FriedLiver never edits.
   antigravity: [],
+  // Copilot CLI reads GH_TOKEN (then GITHUB_TOKEN): https://github.com/github/copilot-cli#authenticate-with-a-personal-access-token-pat
+  copilot: [
+    {
+      id: 'apiKey',
+      name: 'GitHub token',
+      description: 'A fine-grained personal access token with the Copilot Requests permission, from github.com/settings/personal-access-tokens.',
+      fields: [{ env: 'GH_TOKEN', label: 'Token', secret: true }],
+      acpMethods: [],
+    },
+  ],
+  // OpenCode Zen's key (https://opencode.ai/docs/zen/); the free Zen models need none.
+  opencode: [
+    {
+      id: 'apiKey',
+      name: 'OpenCode Zen API key',
+      description: 'A key from opencode.ai/auth, for OpenCode Zen’s paid models. Its free models work without one.',
+      fields: [{ env: 'OPENCODE_API_KEY', label: 'API key', secret: true }],
+      acpMethods: [],
+    },
+  ],
 };
 
 export function keySetup(agent: AgentKey, id: unknown): KeySetup | undefined {
@@ -247,6 +272,16 @@ export const CLI_ACCOUNTS: Record<VendorKey, CliAccount> = {
     signOut: { command: 'agy', then: 'Type /logout, which signs out and clears its saved tokens.' },
     note: 'Google’s Antigravity CLI. It has no ACP mode, so FriedLiver runs it through its own adapter with the same login. It can’t stop to ask, so Manual, Plan and /discuss are talk only (FriedLiver reads the project for it, in a deny-by-default sandbox); Edit automatically and Auto run it in the project. macOS only for now.',
   },
+  copilot: {
+    signIn: { command: 'copilot login', then: 'Finish on github.com.' },
+    signOut: { command: 'copilot', then: 'Type /logout.' },
+    note: 'GitHub Copilot CLI: the same program FriedLiver runs in ACP mode (copilot --acp). Copilot Free includes it with a monthly allowance.',
+  },
+  opencode: {
+    signIn: { command: 'opencode auth login', then: 'Pick a provider and paste its key, or sign in.' },
+    signOut: { command: 'opencode auth logout' },
+    note: 'OpenCode itself (opencode acp). OpenCode Zen’s free models work without signing in; other providers need their key here or in your environment.',
+  },
 };
 
 // ---- Default model and effort for new chats ----
@@ -294,11 +329,13 @@ export function unavailableOn(agent: AgentKey, platform: string): string | undef
 
 /** The agents pickers and menus offer: not the ones this platform can't run; the fake Demo agent only in tests (FRIEDLIVER_TEST_AGENTS=1). */
 export function shownAgents(showDemo: boolean, platform: string = process.platform): AgentKey[] {
-  return AGENT_KEYS.filter((a) => (showDemo || a !== 'demo') && !unavailableOn(a, platform));
+  return allAgentKeys().filter((a) => (showDemo || a !== 'demo') && !unavailableOn(a, platform));
 }
 
 export interface AgentRoster {
   agents: AgentKey[];
+  /** The user's custom agents (names and hints, never their commands), so webviews can name them. */
+  custom?: CustomAgent[];
   /** The last known sign-in, per agent; absent when never checked. */
   signIn: Partial<Record<AgentKey, SignInState>>;
 }
@@ -307,7 +344,8 @@ export function rosterOf(showDemo: boolean, records: Partial<Record<AgentKey, Ac
   const agents = shownAgents(showDemo, platform);
   const signIn: AgentRoster['signIn'] = {};
   for (const a of agents) if (records[a]) signIn[a] = records[a]!.status;
-  return { agents, signIn };
+  const custom = customAgents().map(({ key, id, name, install, signIn: hint, glyph }) => ({ key, id, name, ...(install ? { install } : {}), ...(hint ? { signIn: hint } : {}), ...(glyph ? { glyph } : {}) }));
+  return { agents, signIn, ...(custom.length ? { custom } : {}) };
 }
 
 /** An agent the Accounts page last found missing: never preselected for a new task. Unchecked agents may be. */
@@ -356,6 +394,10 @@ export interface AccountCard {
   /** A key variable the editor's own environment already gives the agent, by name only. */
   envKey?: string;
   cli?: CliAccount;
+  /** A custom agent's sign-in hint, from the user's own settings. */
+  hint?: string;
+  /** A custom agent's settings as the form edits them (secret values left out). */
+  custom?: AgentDraft;
   /** One sentence: which way of signing in is in use. */
   active?: string;
   model?: SessionOption;
@@ -373,6 +415,10 @@ export interface AccountsView {
   links: LinkMode;
   /** "Mac & Windows control": the system_* tools' settings. */
   system?: SystemSettingsView;
+  /** The custom agents (names and marks only), so the page draws their marks. */
+  custom?: CustomAgent[];
+  /** Grows each time "Add Agent…" opens the page on the form. */
+  form?: number;
 }
 
 /** Which way of signing in is in use, as well as FriedLiver can tell without asking the agent. */
@@ -384,7 +430,7 @@ export function activeMethod(card: Pick<AccountCard, 'record' | 'keys' | 'envKey
   if (card.envKey) return `${card.envKey} from the editor’s environment`;
   if (card.record?.status !== 'signed-in') return undefined;
   if (card.record.via) return `Signed in with ${card.record.via}`;
-  return card.agent === 'demo' ? 'No account needed' : `${AGENT_FACES[card.agent].name}’s own login (its CLI’s saved credentials)`;
+  return card.agent === 'demo' ? 'No account needed' : `${agentFace(card.agent).name}’s own login (its CLI’s saved credentials)`;
 }
 
 // ---- Messages from the page, checked before the host acts on them ----
@@ -404,13 +450,20 @@ export type AccountsMessage =
   | { type: 'clearKey'; agent: VendorKey }
   /** The agent's own sign-out (ACP logout). */
   | { type: 'signOut'; agent: AgentKey }
-  | { type: 'terminal'; agent: VendorKey; what: CliWhat }
-  | { type: 'copy'; agent: VendorKey; what: CliWhat }
+  /** A custom agent has only its install line (from the user's settings). */
+  | { type: 'terminal'; agent: LineKey; what: CliWhat }
+  | { type: 'copy'; agent: LineKey; what: CliWhat }
   | { type: 'setDefault'; agent: AgentKey; key: DefaultKey; value: string }
   /** friedliver.system.enabled, .fullAutoAllowed, or one tool in .tools (the host confirms turning Full auto on). */
   | { type: 'setSystem'; key: 'enabled' | 'fullAutoAllowed' | SystemTool; value: boolean }
   /** Shows the "FriedLiver: System Actions" log. */
-  | { type: 'systemLog' };
+  | { type: 'systemLog' }
+  /** Writes friedliver.agents.custom (user settings) from the form; `editing` is the id it had. */
+  | { type: 'saveAgent'; draft: AgentDraft; editing?: string }
+  /** Asks first; the agent's chats stay. */
+  | { type: 'removeAgent'; agent: CustomAgentKey }
+  /** Starts the program once: ACP initialize and a session, nothing else. */
+  | { type: 'testAgent'; draft: AgentDraft; editing?: string };
 
 const METHOD_ID = /^[\w.:-]{1,128}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -430,6 +483,12 @@ export function parseAccountsMessage(raw: unknown, shown: readonly AgentKey[]): 
     const key = m.key;
     return (key === 'enabled' || key === 'fullAutoAllowed' || isSystemTool(key)) && typeof m.value === 'boolean' ? { type: 'setSystem', key, value: m.value } : null;
   }
+  if (m.type === 'saveAgent' || m.type === 'testAgent') {
+    const draft = parseDraft(m.draft);
+    const editing = m.editing === undefined ? undefined : typeof m.editing === 'string' && CUSTOM_AGENT_ID.test(m.editing) ? m.editing : null;
+    return draft && editing !== null ? { type: m.type, draft, ...(editing ? { editing } : {}) } : null;
+  }
+  if (m.type === 'removeAgent') return isAgentKey(m.agent) && !isBuiltinAgent(m.agent) ? { type: 'removeAgent', agent: m.agent } : null;
   if (!isAgentKey(m.agent) || !shown.includes(m.agent)) return null;
   const agent = m.agent;
   switch (m.type) {
@@ -446,7 +505,7 @@ export function parseAccountsMessage(raw: unknown, shown: readonly AgentKey[]): 
       return isVendor(agent) ? { type: 'clearKey', agent } : null;
     case 'terminal':
     case 'copy':
-      return isVendor(agent) && isWhat(m.what) ? { type: m.type, agent, what: m.what } : null;
+      return agent !== 'demo' && isWhat(m.what) && (isVendor(agent) || m.what === 'install') ? { type: m.type, agent, what: m.what } : null;
     case 'setDefault':
       return (m.key === 'model' || m.key === 'thought_level') && typeof m.value === 'string' && m.value.length > 0 && m.value.length <= 256
         ? { type: 'setDefault', agent, key: m.key, value: m.value }

@@ -3,12 +3,12 @@
 // two chats both changed) as an edge, so you can see how the agents are joined.
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { AGENT_FACES, basename, decisions, type AppState, type ChatView } from '../shared/model';
+import { agentFace, basename, decisions, type AppState, type ChatView } from '../shared/model';
 import type { ClaudeSession } from '../shared/messages';
-import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, turnsText, subagents, tipPlace, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
-import { DOT_LABEL, Dot, Glyph, Icon, memo, send } from './common';
+import { MAP, ago, cardLine, claudeSubagents, linkBadges, mapKey, mapLayout, shortDuration, statusOf, subagentAnswer, turnsText, subagents, tipPlace, type MapChip, type MapEdge, type MapLayout, type MapNode, type MapSub, type ToolItem } from '../shared/view';
+import { DOT_LABEL, Dot, Glyph, Icon, memo, send, usePersisted } from './common';
 import { chatName, chatTip } from '../shared/names';
-import { Button, IconButton, MarkSvg } from './ui';
+import { Button, IconButton, MarkSvg, MenuItem, Popover } from './ui';
 import { parentLine } from '../shared/subagentDetail';
 import { OutsideSubagent } from './subagentDetail';
 
@@ -17,10 +17,12 @@ const TIP_W = 288;
 export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state: AppState; outside?: ClaudeSession[]; now: number; focusId?: string; onFocus(id: string): void }) {
   // Laid out again only when something the map shows changed, not for every streamed chunk.
   const key = mapKey(state, outside, now);
-  // Chats whose done subagents are shown one by one; folded into one node by default.
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const toggleDone = useCallback((parent: string) => setExpanded((e) => (e.has(parent) ? new Set([...e].filter((x) => x !== parent)) : new Set([...e, parent]))), []);
-  const map = useMemo(() => mapLayout(state, outside, now, expanded), [key, expanded]);
+  // The branches you opened or folded, by node id, kept across reloads; the rest follow their work (see mapLayout).
+  // ponytail: ids of closed chats stay until the next Expand all / Collapse all replaces the lot.
+  const [tree, setTree] = usePersisted<Record<string, boolean>>('mapTree', {});
+  const setBranch = useCallback((id: string, open: boolean) => setTree({ ...tree, [id]: open }), [tree]);
+  const map = useMemo(() => mapLayout(state, outside, now, tree), [key, tree]);
+  const setAll = (open: boolean) => setTree(Object.fromEntries(map.branches.map((id) => [id, open])));
   const [tip, setTip] = useState<string | null>(null);
   // A subagent you clicked: highlighted with its chat, its details beside the map. Never a jump to some chat.
   const [sel, setSel] = useState<string | null>(null);
@@ -45,11 +47,21 @@ export function AgentMap({ state, outside = [], now, focusId, onFocus }: { state
 
   return (
     <div class="map-wrap">
-      <Legend still={!map.edges.some((e) => e.flowing)} working={map.nodes.some((n) => n.status === 'working')} />
+      <div class="map-head">
+        <Legend still={!map.edges.some((e) => e.flowing)} working={map.nodes.some((n) => n.status === 'working')} />
+        <Popover label="Map" title="More" align="end" buttonClass="fl-btn fl-btn--quiet fl-btn--icon fl-btn--muted fl-btn--sm" trigger={<Icon name="more" />}>
+          {(close) => (
+            <>
+              <MenuItem icon="chevronDown" label="Expand all" disabled={!map.branches.length} onSelect={() => (close(), setAll(true))} />
+              <MenuItem icon="chevron" label="Collapse all" disabled={!map.branches.length} onSelect={() => (close(), setAll(false))} />
+            </>
+          )}
+        </Popover>
+      </div>
       <div class="map-body">
       <div class="map-scroll">
         <div class="map-canvas" style={{ width: `${map.width}px`, height: `${map.height}px` }}>
-          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={pickSub} onFocus={onFocus} toggleDone={toggleDone} />
+          <MapCanvas map={map} tip={tip ?? sel} sel={sel} roving={roving} waiting={waiting} chats={state.chats} setTip={setTip} setSel={pickSub} onFocus={onFocus} setBranch={setBranch} />
           {tipNode && tipChat && <Tip node={tipNode} chat={tipChat} state={state} now={now} />}
         </div>
       </div>
@@ -72,17 +84,17 @@ interface CanvasProps {
   /** `from`: the node clicked, for focus to go back to. */
   setSel(id: string | null, from?: Element): void;
   onFocus(id: string): void;
-  /** Shows or folds a chat's done subagents. */
-  toggleDone(parent: string): void;
+  /** Opens or folds a node's helpers. */
+  setBranch(id: string, open: boolean): void;
 }
 
 /** The drawing itself: drawn again when the layout, the highlighted chat or the decision count changes. */
 const MapCanvas = memo(
   MapCanvasView,
-  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.sel === b.sel && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus && a.toggleDone === b.toggleDone,
+  (a: CanvasProps, b: CanvasProps) => a.map === b.map && a.tip === b.tip && a.sel === b.sel && a.roving === b.roving && a.waiting === b.waiting && a.setTip === b.setTip && a.onFocus === b.onFocus && a.setBranch === b.setBranch,
 );
 
-function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, onFocus, toggleDone }: CanvasProps) {
+function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, onFocus, setBranch }: CanvasProps) {
   const lit = tip ? new Set([tip, ...map.edges.flatMap((e) => (e.from === tip || e.to === tip ? [e.id, e.from, e.to] : []))]) : null;
   return (
           <svg class="map" width={map.width} height={map.height} viewBox={`0 0 ${map.width} ${map.height}`} role="group" aria-label="Agent map" data-lit={lit ? '' : undefined}>
@@ -92,7 +104,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 <rect x={MAP.laneX} y={lane.y} width={map.width - MAP.pad - MAP.laneX} height={lane.h} rx="12" />
                 <SvgGlyph agent={lane.agent} x={MAP.col0} y={lane.y + 8} size={16} />
                 <text class="lane-head" x={MAP.col0 + 23} y={lane.y + 20}>
-                  <tspan class="lane-name">{lane.outside ? 'Claude Code · outside FriedLiver' : AGENT_FACES[lane.agent].name}</tspan>
+                  <tspan class="lane-name">{lane.outside ? 'Claude Code · outside FriedLiver' : agentFace(lane.agent).name}</tspan>
                   <tspan class="lane-meta" dx="8">
                     {lane.chats}
                     {lane.working > 0 ? ` · ${lane.working} working` : ''}
@@ -181,34 +193,6 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
               </g>
             ))}
             {map.subs.map((n) => {
-              if (n.count) {
-                const toggle = () => toggleDone(n.chatId);
-                return (
-                  <g
-                    key={n.id}
-                    class={`map-node map-sub map-fold ${lit && !lit.has(n.id) ? 'dim' : ''}`}
-                    data-status="done"
-                    transform={`translate(${n.x} ${n.y})`}
-                    tabindex={0}
-                    role="button"
-                    aria-expanded={n.title.endsWith('hide')}
-                    aria-label={`${n.count} done subagents: ${n.title.endsWith('hide') ? 'hide' : 'show'}`}
-                    onClick={toggle}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        toggle();
-                      }
-                    }}
-                  >
-                    <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
-                    <circle class="node-dot" data-state="done" cx="18" cy={MAP.nodeH / 2} r="4" />
-                    <text class="node-label" x="32" y={MAP.nodeH / 2 + 4}>
-                      {n.title}
-                    </text>
-                  </g>
-                );
-              }
               const pick = (e: Event) => setSel(sel === n.id ? null : n.id, e.currentTarget as Element);
               return (
                 <g
@@ -238,12 +222,15 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                     {n.title}
                   </text>
                   <text class="node-title" x="40" y="31">
-                    {AGENT_FACES[n.agent].name}
+                    {agentFace(n.agent).name}
                   </text>
                   <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
                 </g>
               );
             })}
+            {map.chips.map((c) => (
+              <Chip key={`chip:${c.id}`} chip={c} dim={!!lit && !lit.has(c.id)} onToggle={setBranch} />
+            ))}
             {map.conflicts.map((f) => (
               <g
                 key={f.file}
@@ -266,6 +253,36 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
               </g>
             ))}
           </svg>
+  );
+}
+
+/** "▸ N agents" on a node's bottom edge: opens its helpers one level down, or folds them (and theirs) away. */
+function Chip({ chip, dim, onToggle }: { chip: MapChip; dim: boolean; onToggle(id: string, open: boolean): void }) {
+  const text = `${chip.open ? '▾' : '▸'} ${chip.count} agent${chip.count === 1 ? '' : 's'}`;
+  const w = text.length * 6.4 + 14;
+  const toggle = () => onToggle(chip.id, !chip.open);
+  return (
+    <g
+      class={`map-group map-branch ${dim ? 'dim' : ''}`}
+      transform={`translate(${chip.x} ${chip.y})`}
+      tabindex={0}
+      role="button"
+      aria-expanded={chip.open}
+      aria-label={`${chip.count} helper agent${chip.count === 1 ? '' : 's'}`}
+      onClick={toggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      <title>{chip.open ? 'Fold its helper agents' : 'Show its helper agents'}</title>
+      <rect class="group-pill" x={-w} y="-8" width={w} height="16" rx="8" />
+      <text class="group-pill-text" x={-w / 2} y="3.5">
+        {text}
+      </text>
+    </g>
   );
 }
 
@@ -357,7 +374,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
         {node.title}
       </text>
       <text class="node-title" x="40" y="31">
-        {AGENT_FACES[chat.agent].name}
+        {agentFace(chat.agent).name}
       </text>
       <circle class="node-dot" data-state={status} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
       {chat.approval === 'full' && (
@@ -392,7 +409,7 @@ function Tip({ node, chat, state, now }: { node: MapNode; chat: ChatView; state:
     >
       <div class="tip-head">
         <Glyph agent={chat.agent} size="sm" />
-        <b title={chatTip(chat)}>{AGENT_FACES[chat.agent].name}</b>
+        <b title={chatTip(chat)}>{agentFace(chat.agent).name}</b>
         <span class="spacer" />
         <Dot state={status} />
         <span class="hint">{DOT_LABEL[status]}</span>

@@ -1,5 +1,5 @@
 // A Claude chat that launched three subagents (Claude's Agent tool): two still
-// working, one done with its answer, each with the steps it took, shaped the
+// working, one done with its answer and a helper of its own, each with the steps it took, shaped the
 // way FriedLiver's reducer keeps them (`tool: 'Agent'`, inner calls with
 // `parent`). Plus a Claude Code session from outside FriedLiver with
 // subagents, and one without, which the map leaves off. Only the UI harness
@@ -19,6 +19,8 @@ export function subagentsFixture(now = Date.now()) {
       ms: 52_000,
       out: [{ t: 'text', text: 'The refund path makes **one query per line item**. Batching them in `refunds.ts` cuts a 40-line refund from 1.9s to 120ms. No other hot spots.' }],
     }),
+    // A helper the profiler started: nested one level down on the map.
+    agent('a-idx', 'Check the refund query indexes', 'completed', { parent: 'a-perf', startedAt: s(120), ms: 9_000 }),
     step('s1', 'a-sec', 'Read src/payments/charge.ts'),
     step('p1', 'a-perf', 'Read src/payments/refunds.ts'),
     step('t1', 'a-test', 'Find files matching test/payments/**', 'completed', 'search'),

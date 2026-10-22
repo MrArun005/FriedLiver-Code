@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { SCOPES, SCOPE_NAMES, allowMessage, approvalOf, commandLine, nextScope, primaryLabel, scopeRule, type Approvable, type Approval, type Scope } from '../shared/approval';
 import { Hold } from '../shared/hold';
 import type { WebviewMessage } from '../shared/messages';
-import { AGENT_FACES, type AppState, type ChatView } from '../shared/model';
+import { agentFace, type AppState, type ChatView } from '../shared/model';
 import { siteOrigin } from '../shared/permissions';
 import { relativePath } from '../shared/view';
 import { CopyButton, Glyph, Icon, Markdown, Popover, send, useNow, type IconName } from './common';
@@ -141,7 +141,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
   // Routine: one sentence row, with the scope as a token.
   if (a.risk.tone === 'routine' && !compact) {
     return (
-      <section class="fl-card fl-card--ghost fl-card--bare apv apv-row" data-enter="" id={`item-${a.id}`} data-risk="routine" data-focus={on ? '' : undefined} aria-label={`${AGENT_FACES[chat.agent].name}: ${a.verb} ${a.target}`.trim()} {...frame}>
+      <section class="fl-card fl-card--ghost fl-card--bare apv apv-row" data-enter="" id={`item-${a.id}`} data-risk="routine" data-focus={on ? '' : undefined} aria-label={`${agentFace(chat.agent).name}: ${a.verb} ${a.target}`.trim()} {...frame}>
         <div class="apv-hd">
           {what}
           <span class="apv-act">
@@ -230,7 +230,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
       data-tone={a.risk.tone === 'careful' ? 'careful' : undefined}
       data-focus={on ? '' : undefined}
       data-compact={compact ? '' : undefined}
-      aria-label={`${AGENT_FACES[chat.agent].name}: ${a.verb} ${a.target}`.trim()}
+      aria-label={`${agentFace(chat.agent).name}: ${a.verb} ${a.target}`.trim()}
       {...frame}
     >
       <div class="apv-hd">

@@ -1,7 +1,10 @@
 // Pure helpers for the agent views: search, sorting, badges, the agent map's
 // layout and the @-mention picker. No DOM here, so all of it is unit tested.
 import {
-  AGENT_KEYS,
+  agentFace,
+  allAgentKeys,
+  customAgents,
+  isBuiltinAgent,
   age,
   bridgeTitle,
   chatStatus,
@@ -10,6 +13,7 @@ import {
   formatDuration,
   stateLine,
   type AgentKey,
+  type BuiltinAgentKey,
   type AppState,
   type BoardColumn,
   type BridgeItem,
@@ -22,7 +26,7 @@ import {
   type LinkKind,
   type StateLine,
   MAX_ITEMS,
-  MENTIONS,
+  mentioned,
 } from './model';
 import type { ClaudeSession, WebviewMessage } from './messages';
 import type { SlashCommand } from './session';
@@ -165,6 +169,8 @@ export interface Subagent {
   /** When it started running, and how long it took once it ended. */
   startedAt?: number;
   ms?: number;
+  /** The subagent that started this one, when it ran inside another. */
+  parent?: string;
 }
 
 const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
@@ -172,8 +178,9 @@ const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
 /** The subagents in a chat's transcript; one still pending in a chat that stopped reads done. */
 export function subagents(chat: ChatView): Subagent[] {
   const tools = chat.items.filter((i) => i.kind === 'tool');
-  return tools
-    .filter((t) => t.tool && SUBAGENT_TOOLS.has(t.tool))
+  const calls = tools.filter((t) => t.tool && SUBAGENT_TOOLS.has(t.tool));
+  const ids = new Set(calls.map((t) => t.id));
+  return calls
     .map((t) => {
       const own = tools.filter((i) => i.parent === t.id);
       return {
@@ -184,6 +191,7 @@ export function subagents(chat: ChatView): Subagent[] {
         ...(own.length ? { last: own.at(-1)!.title } : {}),
         ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
         ...(t.ms !== undefined ? { ms: t.ms } : {}),
+        ...(t.parent && ids.has(t.parent) ? { parent: t.parent } : {}),
       };
     });
 }
@@ -293,11 +301,13 @@ export function openChats(chats: ChatView[]): ChatView[] {
 // ---- Search and sorting ----
 
 /** Words people use for an agent besides its name. */
-const AGENT_WORDS: Record<AgentKey, string> = {
+const AGENT_WORDS: Record<BuiltinAgentKey, string> = {
   claude: 'claude',
   codex: 'codex gpt chatgpt openai',
   gemini: 'gemini google',
   antigravity: 'antigravity agy google',
+  copilot: 'copilot github',
+  opencode: 'opencode zen',
   demo: 'demo',
 };
 
@@ -305,7 +315,7 @@ const AGENT_WORDS: Record<AgentKey, string> = {
 export function matchesQuery(chat: ChatView, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [chat.title, chat.label, AGENT_WORDS[chat.agent], chat.branch ?? ''].join(' ').toLowerCase();
+  const hay = [chat.title, chat.label, (isBuiltinAgent(chat.agent) ? AGENT_WORDS[chat.agent] : `${agentFace(chat.agent).name} ${chat.agent.slice('custom:'.length)}`), chat.branch ?? ''].join(' ').toLowerCase();
   return words.every((w) => hay.includes(w));
 }
 
@@ -321,7 +331,11 @@ export interface Sort {
 
 /** STATUS_ORDER: waiting on you, working, failed, not started, done. */
 const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, working: 1, error: 2, idle: 3, done: 4 };
-const AGENT_RANK = Object.fromEntries(AGENT_KEYS.map((a, i) => [a, i])) as Record<AgentKey, number>;
+/** Built-in agents in their order, then custom ones; one no longer in the settings last. */
+const agentRank = (agent: AgentKey): number => {
+  const i = allAgentKeys().indexOf(agent);
+  return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+};
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
 /** The direction a header click starts with: the useful end first. */
@@ -337,7 +351,7 @@ export function defaultDir(key: SortKey): Sort['dir'] {
 export function sortChats(chats: ChatView[], sort: Sort): ChatView[] {
   const by: Record<SortKey, (a: ChatView, b: ChatView) => number> = {
     status: (a, b) => STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)],
-    agent: (a, b) => AGENT_RANK[a.agent] - AGENT_RANK[b.agent] || collator.compare(a.label, b.label),
+    agent: (a, b) => agentRank(a.agent) - agentRank(b.agent) || collator.compare(a.label, b.label),
     task: (a, b) => collator.compare(a.title, b.title),
     activity: (a, b) => b.lastActivity - a.lastActivity,
     files: (a, b) => a.files.length - b.files.length,
@@ -571,7 +585,7 @@ export function cardModel(state: Pick<AppState, 'chats' | 'links'>, chat: ChatVi
 export function groupMembers(chats: ChatView[], group: string): ChatView[] {
   return chats
     .filter((c) => c.group === group && !c.archived)
-    .sort((a, b) => a.createdAt - b.createdAt || AGENT_RANK[a.agent] - AGENT_RANK[b.agent] || collator.compare(a.label, b.label));
+    .sort((a, b) => a.createdAt - b.createdAt || agentRank(a.agent) - agentRank(b.agent) || collator.compare(a.label, b.label));
 }
 
 export interface FanoutGroup {
@@ -815,15 +829,22 @@ export const MENTION_OPTIONS: MentionOption[] = [
   { agent: 'codex', name: 'Codex', insert: 'codex', words: ['gpt', 'codex', 'chatgpt', 'openai'] },
   { agent: 'gemini', name: 'Gemini', insert: 'gemini', words: ['gemini', 'google'] },
   { agent: 'antigravity', name: 'Antigravity', insert: 'antigravity', words: ['antigravity', 'agy'] },
+  { agent: 'copilot', name: 'Copilot', insert: 'copilot', words: ['copilot', 'github'] },
+  { agent: 'opencode', name: 'OpenCode', insert: 'opencode', words: ['opencode'] },
   { agent: 'demo', name: 'Demo', insert: 'demo', words: ['demo'] },
 ];
+
+/** The built-in options, then one per custom agent (its id is the only word that picks it). */
+function allMentionOptions(): MentionOption[] {
+  return [...MENTION_OPTIONS, ...customAgents().map((c) => ({ agent: c.key, name: c.name, insert: c.id, words: [c.id] }))];
+}
 
 /**
  * The word typed after an @ at the very start of the message, while the caret
  * is in it; null when the picker should stay shut.
  */
 export function mentionQuery(text: string, caret: number): string | null {
-  const m = text.match(/^(\s*)@([a-z]*)/i);
+  const m = text.match(/^(\s*)@([a-z0-9]*)/i);
   if (!m) return null;
   const start = m[1].length + 1;
   return caret >= start && caret <= m[0].length ? m[2].toLowerCase() : null;
@@ -832,12 +853,12 @@ export function mentionQuery(text: string, caret: number): string | null {
 /** `shown`: the agents pickers offer (Demo only when turned on); typing @demo still works without the picker. */
 export function mentionOptions(query: string, shown?: readonly AgentKey[]): MentionOption[] {
   const q = query.toLowerCase();
-  return MENTION_OPTIONS.filter((o) => (!shown || shown.includes(o.agent)) && (o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q)));
+  return allMentionOptions().filter((o) => (!shown || shown.includes(o.agent)) && (o.words.some((w) => w.startsWith(q)) || o.name.toLowerCase().startsWith(q)));
 }
 
 /** Replaces the leading @word with the option's, followed by one space. */
 export function applyMention(text: string, option: MentionOption): { text: string; caret: number } {
-  const rest = text.replace(/^\s*@[a-z]*[\s,:]*/i, '');
+  const rest = text.replace(/^\s*@[a-z0-9]*[\s,:]*/i, '');
   const head = `@${option.insert} `;
   return { text: head + rest, caret: head.length };
 }
@@ -868,13 +889,13 @@ export const commandLabel = (c: SlashCommand): string => `/${c.name}${c.hint ? `
  * it isn't one (the agent gets it as typed). `catalog`: the models /discuss mentions resolve against.
  */
 export function slashAction(text: string, chat: ChatView, chats: ChatView[], agentCommands: SlashCommand[], catalog: ModelCatalog = {}): WebviewMessage | 'incomplete' | null {
-  const m = /^\/([a-z]+)(?:\s+([a-z]+))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
+  const m = /^\/([a-z]+)(?:\s+([a-z][a-z0-9]*))?[\s,:]*([\s\S]*)$/i.exec(text.trim());
   if (!m || !FRIEDLIVER_COMMANDS.some((c) => c.name === m[1]) || agentCommands.some((c) => c.name === m[1])) return null;
   if (m[1] === 'discuss') {
     const d = parseDiscuss(text, { agent: chat.agent, model: currentModel(chat.session) }, catalog);
     return d && d !== 'incomplete' && !d.problems.length ? { type: 'discuss', chatId: chat.id, participants: d.participants, text: d.question } : 'incomplete';
   }
-  const agent: AgentKey | undefined = m[2] ? MENTIONS[m[2].toLowerCase()] : undefined;
+  const agent: AgentKey | undefined = m[2] ? mentioned(m[2]) : undefined;
   const rest = m[3].trim();
   switch (m[1]) {
     case 'handoff':
@@ -896,10 +917,10 @@ export function slashAction(text: string, chat: ChatView, chats: ChatView[], age
 
 /** The agent a leading @word names, even before the question is typed. */
 export function mentionedAgent(text: string): AgentKey | null {
-  const m = text.match(/^\s*@([a-z]+)(?![a-z])/i);
+  const m = text.match(/^\s*@([a-z][a-z0-9]*)(?![a-z0-9])/i);
   if (!m) return null;
   const word = m[1].toLowerCase();
-  return MENTION_OPTIONS.find((o) => o.words.includes(word))?.agent ?? null;
+  return allMentionOptions().find((o) => o.words.includes(word))?.agent ?? null;
 }
 
 // ---- The agent map ----
@@ -936,11 +957,13 @@ export interface MapNode {
   title: string;
 }
 
-/** A subagent on the map: in its chat's lane, on the row under it, one column right. */
+/** A subagent on the map: in its chat's lane, on the row under its parent, one column right. */
 export interface MapSub {
   /** `chatId:toolCallId`. */
   id: string;
   chatId: string;
+  /** What its edge comes from: the chat (`chatId`) or the subagent that started it. */
+  parent: string;
   item: string;
   agent: AgentKey;
   state: Subagent['state'];
@@ -950,8 +973,18 @@ export interface MapSub {
   cy: number;
   /** Of a Claude Code session from outside FriedLiver: `chatId` is `cc:<session id>`. */
   outside?: boolean;
-  /** The folded done subagents of `chatId` (`item` is "done"): how many; a click opens them. */
-  count?: number;
+}
+
+/** The "▸ N agents" chip on a node with helpers: open, its helpers are on the map; folded, it stands in for them. */
+export interface MapChip {
+  /** The node's id: a chat, `cc:<session id>`, or a subagent's `chatId:toolCallId`. */
+  id: string;
+  /** Its own helpers, one level down. */
+  count: number;
+  open: boolean;
+  /** Its right end and centre line, on the node's bottom edge, below the second line of text. */
+  x: number;
+  y: number;
 }
 
 /** A Claude Code session from outside FriedLiver that has subagents, drawn so they have a parent. */
@@ -1028,6 +1061,10 @@ export interface MapLayout {
   lanes: MapLane[];
   nodes: MapNode[];
   subs: MapSub[];
+  /** One per node with helpers that is on the map. */
+  chips: MapChip[];
+  /** Every node with helpers, on the map or folded away: what Expand all and Collapse all set. */
+  branches: string[];
   outside: MapOutside[];
   edges: MapEdge[];
   groups: MapGroup[];
@@ -1064,8 +1101,11 @@ const COLUMN_TITLES_MAP = ['Started by you', '1 link away', '2 links away', '3 l
 /** Only outside sessions that launched subagents go on the map: the rest are on the board and the list. */
 const mapSessions = (outside: ClaudeSession[]) => outside.filter((s) => s.subagents.length && !s.archived);
 
-/** `expanded`: the chats (and `cc:<session id>`s) whose done subagents are shown one by one, not folded. */
-export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessions: ClaudeSession[] = [], now = 0, expanded: ReadonlySet<string> = new Set()): MapLayout {
+/**
+ * `tree`: the branches you opened (true) or folded (false), by node id (see MapChip). A branch you never
+ * touched opens while a subagent in it is working, and stays folded once they all finished.
+ */
+export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessions: ClaudeSession[] = [], now = 0, tree: Readonly<Record<string, boolean>> = {}): MapLayout {
   const M = MAP;
   const chats = openChats(state.chats);
   const byId = new Map(chats.map((c) => [c.id, c]));
@@ -1103,38 +1143,46 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     return fa - fb || collator.compare(ka, kb) || colOf(a) - colOf(b) || a.createdAt - b.createdAt || collator.compare(a.id, b.id);
   };
 
-  // Running and failed subagents, then the done ones: one by one when opened, else one node with their count.
-  const fold = (parent: string, list: Subagent[]): (Subagent & { count?: number })[] => {
-    const { live, done } = foldSubs(list);
-    if (!done.length) return live;
-    const open = expanded.has(parent);
-    const toggle = { id: 'done', title: `${done.length} done · ${open ? 'hide' : 'show'}`, state: 'done' as const, tools: 0, count: done.length };
-    return open ? [...live, ...done, toggle] : [...live, toggle];
-  };
-  const subsOf = new Map(chats.map((c) => [c.id, fold(c.id, subagents(c))]));
-  const sessions = mapSessions(outsideSessions);
-  const maxCol = chats.reduce((m, c) => Math.max(m, Math.min(colOf(c) + (subsOf.get(c.id)!.length ? 1 : 0), M.maxCol)), sessions.length ? 1 : 0);
   const colX = (col: number) => M.col0 + col * (M.nodeW + M.gutter);
-  const nodesRight = colX(maxCol) + M.nodeW;
+  const sessions = mapSessions(outsideSessions);
+  const subsOf = new Map<string, Subagent[]>([...chats.map((c) => [c.id, subagents(c)] as const), ...sessions.map((s) => [`cc:${s.id}`, claudeSubagents(s, now)] as const)]);
+  const branches = [...subsOf].flatMap(([id, list]) => (list.length ? [id, ...new Set(list.flatMap((x) => (x.parent ? [`${id}:${x.parent}`] : [])))] : []));
+  let maxCol = chats.reduce((m, c) => Math.max(m, colOf(c)), 0);
 
   const lanes: MapLane[] = [];
   const nodes: MapNode[] = [];
   const subs: MapSub[] = [];
+  const chips: MapChip[] = [];
+  const working = (list: Subagent[], s: Subagent): boolean => s.state === 'working' || list.some((k) => k.parent === s.id && working(list, k));
+  // A node's helpers, one level down, each on the next row so its edge drops without crossing a node; then theirs, if open.
+  const grow = (key: string, chatId: string, parent: string | undefined, at: { x: number; y: number; col: number }, next: () => number, extra: { agent: AgentKey; outside?: true }) => {
+    const list = subsOf.get(chatId)!;
+    const kids = list.filter((x) => x.parent === parent);
+    if (!kids.length) return;
+    const open = tree[key] ?? kids.some((k) => working(list, k));
+    chips.push({ id: key, count: kids.length, open, x: at.x + M.nodeW - 12, y: at.y + M.nodeH + 1 });
+    if (!open) return;
+    const col = Math.min(at.col + 1, M.maxCol);
+    maxCol = Math.max(maxCol, col);
+    for (const sub of kids) {
+      const sy = next();
+      const id = `${chatId}:${sub.id}`;
+      subs.push({ id, chatId, parent: key, item: sub.id, ...extra, state: sub.state, title: clip(sub.title, 27), x: colX(col), y: sy, cy: sy + M.nodeH / 2 });
+      grow(id, chatId, sub.id, { x: colX(col), y: sy, col }, next, extra);
+    }
+  };
+
   let y = M.pad + M.youH + 18;
-  for (const agent of AGENT_KEYS) {
+  for (const agent of new Set([...allAgentKeys(), ...chats.map((c) => c.agent)])) {
     const inLane = chats.filter((c) => c.agent === agent).sort(order);
     if (!inLane.length) continue;
     const top = y;
     let row = 0;
+    const next = () => top + M.laneHead + row++ * M.row;
     for (const chat of inLane) {
-      const ny = top + M.laneHead + row++ * M.row;
+      const ny = next();
       nodes.push({ chat, status: statusOf(chat), lane: agent, col: colOf(chat), x: colX(colOf(chat)), y: ny, cy: ny + M.nodeH / 2, title: clip(chat.title, 27) });
-      // Each subagent takes the next row, so its edge drops straight from its chat without crossing a node.
-      for (const sub of subsOf.get(chat.id)!) {
-        const sy = top + M.laneHead + row++ * M.row;
-        const sx = colX(Math.min(colOf(chat) + 1, M.maxCol));
-        subs.push({ id: `${chat.id}:${sub.id}`, chatId: chat.id, item: sub.id, agent, state: sub.state, title: clip(sub.title, 27), x: sx, y: sy, cy: sy + M.nodeH / 2, ...(sub.count ? { count: sub.count } : {}) });
-      }
+      grow(chat.id, chat.id, undefined, { x: colX(colOf(chat)), y: ny, col: colOf(chat) }, next, { agent });
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
     const lane = counts({ chats: inLane });
@@ -1145,20 +1193,19 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
   if (sessions.length) {
     const top = y;
     let row = 0;
+    const next = () => top + M.laneHead + row++ * M.row;
     for (const s of sessions) {
-      const ny = top + M.laneHead + row++ * M.row;
+      const ny = next();
       outside.push({ id: s.id, title: clip(s.title, 27), state: claudeColumn(s, now), x: colX(0), y: ny, cy: ny + M.nodeH / 2 });
-      for (const sub of fold(`cc:${s.id}`, claudeSubagents(s, now))) {
-        const sy = top + M.laneHead + row++ * M.row;
-        subs.push({ id: `cc:${s.id}:${sub.id}`, chatId: `cc:${s.id}`, item: sub.id, agent: 'claude', state: sub.state, title: clip(sub.title, 27), x: colX(1), y: sy, cy: sy + M.nodeH / 2, outside: true, ...(sub.count ? { count: sub.count } : {}) });
-      }
+      grow(`cc:${s.id}`, `cc:${s.id}`, undefined, { x: colX(0), y: ny, col: 0 }, next, { agent: 'claude', outside: true });
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;
     lanes.push({ agent: 'claude', outside: true, y: top, h, chats: sessions.length, working: outside.filter((o) => o.state === 'working').length, needsYou: 0 });
     y = top + h + M.laneGap;
   }
+  const nodesRight = colX(maxCol) + M.nodeW;
   const node = new Map(nodes.map((n) => [n.chat.id, n]));
-  const anchor = new Map<string, { x: number; cy: number }>([...nodes.map((n) => [n.chat.id, n] as const), ...outside.map((o) => [`cc:${o.id}`, o] as const)]);
+  const anchor = new Map<string, { x: number; cy: number }>([...nodes.map((n) => [n.chat.id, n] as const), ...outside.map((o) => [`cc:${o.id}`, o] as const), ...subs.map((n) => [n.id, n] as const)]);
 
   // Links, plus an edge for any origin whose link is gone, so no chat floats.
   const links: ChatLink[] = state.links.filter((l) => node.has(l.from) && node.has(l.to) && l.from !== l.to);
@@ -1254,13 +1301,13 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     };
   });
   for (const sub of subs) {
-    const a = anchor.get(sub.chatId)!;
+    const a = anchor.get(sub.parent)!;
     const xs = a.x + M.nodeW;
     const gx = Math.max(xs, sub.x - M.gutter);
     edges.push({
       id: `sub:${sub.id}`,
       kind: 'subagent',
-      from: sub.chatId,
+      from: sub.parent,
       to: sub.id,
       d: `M ${r(xs)} ${r(a.cy)} ${gx > xs ? `L ${r(gx)} ${r(a.cy)} ` : ''}${curve(gx, a.cy, sub.x, sub.cy)}`,
       label: 'subagent',
@@ -1333,6 +1380,8 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     lanes,
     nodes,
     subs,
+    chips,
+    branches,
     outside,
     edges,
     groups,

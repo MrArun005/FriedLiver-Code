@@ -1,6 +1,6 @@
 // The Images view: every image any agent read, made or was given, by chat.
 // Pure: the host and the webviews both use it, and the tests.
-import { AGENT_FACES, type AgentKey, type AppState, type ChatView, type ImageItem } from './model';
+import { agentFace, type AgentKey, type AppState, type ChatView, type ImageItem } from './model';
 import { stepImage } from './stepImages';
 import { chatName } from './names';
 
@@ -37,11 +37,11 @@ export function bytesText(n: number): string {
 /** At most this many images in one view, the newest. */
 export const MAX_GALLERY = 2000;
 
-/** An image a Claude Code session outside FriedLiver read or took, from its transcript. */
+/** An image a Claude Code session outside FriedLiver read, took or made (wrote, or a command saved), from its transcript. */
 export interface OutsideImage {
   path: string;
   title: string;
-  source: 'read' | 'screenshot';
+  source: 'read' | 'screenshot' | 'created';
   at: number;
 }
 
@@ -164,7 +164,7 @@ export function filterGallery(images: readonly GalleryImage[], chats: readonly G
     if (f.sources.length && !f.sources.includes(img.source)) return false;
     if (!words.length) return true;
     const chat = chatOf.get(img.chatId);
-    const hay = `${img.title} ${img.path?.split(/[\\/]/).pop() ?? ''} ${chat?.title ?? ''} ${chat ? AGENT_FACES[chat.agent].name : ''}`.toLowerCase();
+    const hay = `${img.title} ${img.path?.split(/[\\/]/).pop() ?? ''} ${chat?.title ?? ''} ${chat ? agentFace(chat.agent).name : ''}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   }
 }

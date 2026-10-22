@@ -243,7 +243,8 @@ export function optionGroups(session: ChatSession | undefined): { model?: Sessio
     model: options.find((o) => o.category === 'model'),
     effort: options.find((o) => o.category === 'thought_level'),
     modelConfig: options.filter((o) => o.category === 'model_config'),
-    other: options.filter((o) => !known.has(o.category ?? '') && o !== plan?.option),
+    // A permissions option (Copilot's allow_all) would turn approvals off behind FriedLiver's back: never offered.
+    other: options.filter((o) => !known.has(o.category ?? '') && o.category !== 'permissions' && o !== plan?.option),
   };
 }
 
@@ -282,7 +283,7 @@ export type ModeClass = 'ask' | 'edits' | 'plan' | 'auto' | 'full';
 
 export function modeClass(c: Pick<OptionChoice, 'value' | 'name' | 'description'>): ModeClass | undefined {
   const all = `${c.value} ${c.name} ${c.description ?? ''}`;
-  if (/bypass|full[ -]?access|\byolo\b|danger|never asks|accepts all|auto-approves all|unrestricted/i.test(all)) return 'full';
+  if (/bypass|full[ -]?access|\byolo\b|danger|never asks|accepts all|auto-approves all|allow[ -]?all|unrestricted/i.test(all)) return 'full';
   if (/\bplan\b/i.test(`${c.value} ${c.name}`)) return 'plan';
   if (/auto[ -]?review|handles permission|potentially unsafe|^auto$/i.test(c.value) || /auto[ -]?review|handles permission|potentially unsafe/i.test(all) || /^auto$/i.test(c.name)) return 'auto';
   if (/accept[ -]?edits|auto[ -]?edit|workspace[ -]?(write|access)|edit (workspace )?files without|auto-approves edit/i.test(all)) return 'edits';
@@ -298,6 +299,7 @@ export const MODE_TONE: Record<ModeClass, 'quiet' | 'edits' | 'plan' | 'auto' | 
  * (claude-agent-acp 0.93, codex-acp 2.2, gemini-cli 0.64). Only a tie-breaker:
  * modes are matched by what they say they do (modeClass) when an id is missing.
  */
+const COPILOT_MODE = (m: string) => `https://agentclientprotocol.com/protocol/session-modes#${m}`;
 const KNOWN_MODES: Partial<Record<AgentKey, Partial<Record<ApprovalLevel | 'plan', string[]>>>> = {
   claude: { ask: ['default'], edits: ['acceptEdits'], full: ['bypassPermissions', 'auto'], plan: ['plan'] },
   codex: { ask: ['read-only'], edits: ['workspace-write'], full: ['agent-full-access'] },
@@ -306,6 +308,11 @@ const KNOWN_MODES: Partial<Record<AgentKey, Partial<Record<ApprovalLevel | 'plan
   gemini: { ask: ['autoEdit'], edits: ['autoEdit'], full: ['yolo'], plan: ['plan'] },
   // FriedLiver's agy adapter (agyAcp.ts): headless agy can't ask, so Manual and Plan are its talk-only modes.
   antigravity: { ask: ['read-only'], edits: ['accept-edits'], full: ['full'], plan: ['plan'] },
+  // Copilot's Autopilot turns its own allow-all on, which FriedLiver's approvals and Full auto guards can't see:
+  // every level stays in Agent mode and FriedLiver answers its permission requests.
+  copilot: { ask: [COPILOT_MODE('agent')], edits: [COPILOT_MODE('agent')], full: [COPILOT_MODE('agent')], plan: [COPILOT_MODE('plan')] },
+  // OpenCode asks FriedLiver for everything but reads (OPENCODE_PERMISSIONS), so every level is its Build agent.
+  opencode: { ask: ['build'], edits: ['build'], full: ['build'], plan: ['plan'] },
 };
 
 

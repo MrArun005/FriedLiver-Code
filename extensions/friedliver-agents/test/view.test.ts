@@ -263,9 +263,9 @@ describe('@-mentions', () => {
   });
 
   it('filters agents by any of their names', () => {
-    expect(mentionOptions('').map((o) => o.agent)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'demo']);
-    expect(mentionOptions('g').map((o) => o.agent)).toEqual(['codex', 'gemini']);
-    expect(mentionOptions('open').map((o) => o.agent)).toEqual(['codex']);
+    expect(mentionOptions('').map((o) => o.agent)).toEqual(['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'opencode', 'demo']);
+    expect(mentionOptions('g').map((o) => o.agent)).toEqual(['codex', 'gemini', 'copilot']);
+    expect(mentionOptions('open').map((o) => o.agent)).toEqual(['codex', 'opencode']);
     expect(mentionOptions('xyz')).toEqual([]);
   });
 
@@ -303,27 +303,12 @@ describe('subagents', () => {
     expect(foldSubs(subs)).toEqual({ live: [subs[0], subs[2]], done: [subs[1]] });
   });
 
-  it('folds the done subagents on the map into one node with a count, until it is opened', () => {
-    const many = [said, task('t1', 'in_progress'), ...['a', 'b', 'c', 'd'].map((id) => task(id, 'completed')), task('t3', 'failed')];
-    const s = state([chat('p', { busy: true, items: many })]);
-    expect(mapLayout(s).subs.map((n) => [n.id, n.state, n.count])).toEqual([
-      ['p:t1', 'working', undefined],
-      ['p:t3', 'failed', undefined],
-      ['p:done', 'done', 4],
-    ]);
-    expect(mapLayout(s).subs.at(-1)!.title).toBe('4 done · show');
-    const open = mapLayout(s, [], 0, new Set(['p'])).subs;
-    expect(open.map((n) => n.id)).toEqual(['p:t1', 'p:t3', 'p:a', 'p:b', 'p:c', 'p:d', 'p:done']);
-    expect(open.at(-1)!.title).toBe('4 done · hide');
-  });
-
   it('draws each subagent on the map under its chat, with an edge from the chat', () => {
-    const map = mapLayout(state([chat('p', { busy: true, items }), chat('q', { createdAt: 1 })]), [], 0, new Set(['p']));
+    const map = mapLayout(state([chat('p', { busy: true, items }), chat('q', { createdAt: 1 })]));
     expect(map.subs.map((n) => [n.id, n.chatId, n.state])).toEqual([
       ['p:t1', 'p', 'working'],
-      ['p:t3', 'p', 'failed'],
       ['p:t2', 'p', 'done'],
-      ['p:done', 'p', 'done'],
+      ['p:t3', 'p', 'failed'],
     ]);
     const p = map.nodes.find((n) => n.chat.id === 'p')!;
     const q = map.nodes.find((n) => n.chat.id === 'q')!;
@@ -331,9 +316,8 @@ describe('subagents', () => {
     const e = map.edges.filter((x) => x.kind === 'subagent');
     expect(e.map((x) => [x.from, x.to])).toEqual([
       ['p', 'p:t1'],
-      ['p', 'p:t3'],
       ['p', 'p:t2'],
-      ['p', 'p:done'],
+      ['p', 'p:t3'],
     ]);
     expect(e[0].d.startsWith(`M ${p.x + MAP.nodeW} `)).toBe(true);
     expect(mapKey(state([chat('p', { busy: true, items })]))).not.toBe(mapKey(state([chat('p', { items })])));
@@ -375,17 +359,79 @@ describe('subagents inline', () => {
     ];
     const map = mapLayout(state([chat('p', { items: [said] })]), outside, 20_000);
     expect(map.outside.map((n) => [n.id, n.state])).toEqual([['cc1', 'working']]);
-    expect(map.subs.filter((n) => n.outside).map((n) => [n.id, n.chatId, n.state, n.count])).toEqual([
-      ['cc:cc1:x1', 'cc:cc1', 'working', undefined],
-      ['cc:cc1:done', 'cc:cc1', 'done', 1],
+    expect(map.subs.filter((n) => n.outside).map((n) => [n.id, n.chatId, n.state])).toEqual([
+      ['cc:cc1:x1', 'cc:cc1', 'working'],
+      ['cc:cc1:x2', 'cc:cc1', 'done'],
     ]);
     expect(map.edges.filter((e) => e.kind === 'subagent').map((e) => [e.from, e.to])).toEqual([
       ['cc:cc1', 'cc:cc1:x1'],
-      ['cc:cc1', 'cc:cc1:done'],
+      ['cc:cc1', 'cc:cc1:x2'],
     ]);
-    expect(mapLayout(state([chat('p', { items: [said] })]), outside, 20_000, new Set(['cc:cc1'])).subs.map((n) => n.id)).toEqual(['cc:cc1:x1', 'cc:cc1:x2', 'cc:cc1:done']);
+    expect(mapLayout(state([chat('p', { items: [said] })]), outside, 20_000, { 'cc:cc1': false }).subs).toEqual([]);
     expect(map.lanes.at(-1)).toMatchObject({ agent: 'claude', outside: true, chats: 1 });
     expect(mapKey(state([]), outside, 20_000)).not.toBe(mapKey(state([]), [], 20_000));
+  });
+});
+
+describe('the map as a tree', () => {
+  const task = (id: string, status: string, parent?: string): Item => ({ kind: 'tool', id, title: `Job ${id}`, status, locations: [], tool: 'Task', ...(parent ? { parent } : {}) });
+  // p finished: a started b, b started c; d on its own. q is working: w started x, both running.
+  const p = chat('p', { createdAt: 0, items: [said, task('a', 'completed'), task('b', 'completed', 'a'), task('c', 'completed', 'b'), task('d', 'completed')] });
+  const q = chat('q', { createdAt: 1, busy: true, items: [said, task('w', 'in_progress'), task('x', 'in_progress', 'w')] });
+  const s = state([p, q]);
+  const shown = (m: ReturnType<typeof mapLayout>) => m.subs.map((n) => n.id);
+  const chips = (m: ReturnType<typeof mapLayout>) => m.chips.map((c) => [c.id, c.count, c.open]);
+
+  it('nests a subagent under the subagent that started it', () => {
+    expect(subagents(p).map((x) => [x.id, x.parent])).toEqual([['a', undefined], ['b', 'a'], ['c', 'b'], ['d', undefined]]);
+  });
+
+  it('shows chats only, a chip on each node with helpers; a branch with work running opens itself, a finished one stays folded', () => {
+    const m = mapLayout(s);
+    expect(m.nodes.map((n) => n.chat.id)).toEqual(['p', 'q']);
+    expect(shown(m)).toEqual(['q:w', 'q:x']);
+    expect(chips(m)).toEqual([['p', 2, false], ['q', 1, true], ['q:w', 1, true]]);
+    expect(m.branches).toEqual(['p', 'p:a', 'p:b', 'q', 'q:w']);
+  });
+
+  it('opens one level at a time, each nested helper with its own chip, a column further right', () => {
+    const one = mapLayout(s, [], 0, { p: true });
+    expect(shown(one)).toEqual(['p:a', 'p:d', 'q:w', 'q:x']);
+    expect(chips(one).slice(0, 2)).toEqual([['p', 2, true], ['p:a', 1, false]]);
+    const all = mapLayout(s, [], 0, { p: true, 'p:a': true, 'p:b': true });
+    expect(shown(all)).toEqual(['p:a', 'p:b', 'p:c', 'p:d', 'q:w', 'q:x']);
+    const at = (id: string) => all.subs.find((n) => n.id === id)!;
+    expect(at('p:a').x < at('p:b').x && at('p:b').x < at('p:c').x && at('p:d').x === at('p:a').x).toBe(true);
+    expect(all.subs.every((n, i, l) => i === 0 || n.y > l[i - 1].y)).toBe(true);
+  });
+
+  it('keeps a branch you folded folded, even with work running in it', () => {
+    const m = mapLayout(s, [], 0, { q: false });
+    expect(shown(m)).toEqual([]);
+    expect(chips(m)).toEqual([['p', 2, false], ['q', 1, false]]);
+    expect(shown(mapLayout(s, [], 0, { 'q:w': false }))).toEqual(['q:w']);
+  });
+
+  it('draws edges only between nodes on the map: a folded chip stands in for its subtree', () => {
+    for (const tree of [{}, { p: true }, { p: true, 'p:a': true }, { q: false }] as Record<string, boolean>[]) {
+      const m = mapLayout(s, [], 0, tree);
+      const visible = new Set([...m.nodes.map((n) => n.chat.id), ...m.subs.map((n) => n.id)]);
+      const e = m.edges.filter((x) => x.kind === 'subagent');
+      expect(e.every((x) => visible.has(x.from) && visible.has(x.to))).toBe(true);
+      expect(e.length).toBe(m.subs.length);
+    }
+    const nested = mapLayout(s, [], 0, { p: true, 'p:a': true }).edges.filter((x) => x.kind === 'subagent');
+    expect(nested.map((x) => [x.from, x.to])).toContainEqual(['p:a', 'p:b']);
+  });
+
+  it('lays out the same after a reload: the choices are plain data, kept by node id', () => {
+    const tree = { p: true, 'p:a': true, q: false };
+    expect(mapLayout(s, [], 0, JSON.parse(JSON.stringify(tree)))).toEqual(mapLayout(s, [], 0, tree));
+    // Expand all / Collapse all set every branch, hidden ones included.
+    const all = Object.fromEntries(mapLayout(s).branches.map((id) => [id, true]));
+    expect(shown(mapLayout(s, [], 0, all))).toEqual(['p:a', 'p:b', 'p:c', 'p:d', 'q:w', 'q:x']);
+    const none = Object.fromEntries(mapLayout(s).branches.map((id) => [id, false]));
+    expect(shown(mapLayout(s, [], 0, none))).toEqual([]);
   });
 });
 

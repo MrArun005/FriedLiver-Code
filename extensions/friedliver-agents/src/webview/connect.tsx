@@ -1,9 +1,9 @@
 // Joining chats and agents: hand off, ask, pipe. The chat view and the Agent
 // Manager share these, so a connection reads and works the same in both.
 import { useContext, useState } from 'preact/hooks';
-import { AGENT_FACES, AGENT_KEYS, linkedChat, type AgentKey, type ChatView } from '../shared/model';
+import { agentFace, allAgentKeys, linkedChat, type AgentKey, type ChatView } from '../shared/model';
 import { clip, openChats } from '../shared/view';
-import { Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
+import { AddAgentItem, Glyph, Icon, LiveState, Popover, SignInMark, radioKeys, send, useRoster } from './common';
 import { chatName, chatRef } from '../shared/names';
 import { Button, MenuItem, MenuSep, MenuTitle } from './ui';
 
@@ -45,7 +45,7 @@ export function HandoffTargets({ chat, close, title }: { chat: ChatView; close(r
         <MenuItem
           key={agent}
           lead={<Glyph agent={agent} size="sm" />}
-          label={AGENT_FACES[agent].name}
+          label={agentFace(agent).name}
           desc={to ? `Continues ${clip(chatName(to), 40)}` : undefined}
           end={
             <>
@@ -64,10 +64,12 @@ export function HandoffTargets({ chat, close, title }: { chat: ChatView; close(r
           {before
             .filter((b) => b.to)
             .map(({ agent }) => (
-              <MenuItem key={agent} lead={<Glyph agent={agent} size="sm" />} label={`New ${AGENT_FACES[agent].name} chat`} onSelect={() => go(agent, true)} />
+              <MenuItem key={agent} lead={<Glyph agent={agent} size="sm" />} label={`New ${agentFace(agent).name} chat`} onSelect={() => go(agent, true)} />
             ))}
         </>
       )}
+      <MenuSep />
+      <AddAgentItem close={close} />
     </>
   );
 }
@@ -97,7 +99,7 @@ export function AskMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-
             <div class="fl-seg fl-seg--wrap seg" role="radiogroup" aria-label="Agent" onKeyDown={radioKeys}>
               {agents.map((a) => (
                 <button key={a} type="button" role="radio" aria-checked={a === agent} tabIndex={a === agent ? 0 : -1} class="fl-seg__item seg-item" onClick={() => setAgent(a)}>
-                  <Glyph agent={a} size="sm" /> {AGENT_FACES[a].name}
+                  <Glyph agent={a} size="sm" /> {agentFace(a).name}
                   <SignInMark agent={a} />
                 </button>
               ))}
@@ -105,8 +107,8 @@ export function AskMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-
             <textarea
               rows={2}
               value={text}
-              aria-label={`Question for ${AGENT_FACES[agent].name}`}
-              placeholder={`Question for ${AGENT_FACES[agent].name}`}
+              aria-label={`Question for ${agentFace(agent).name}`}
+              placeholder={`Question for ${agentFace(agent).name}`}
               onInput={(e) => setText(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -120,12 +122,12 @@ export function AskMenu({ chat, compact, buttonClass = 'fl-btn fl-btn--quiet fl-
                 Cancel
               </Button>
               {again && (
-                <Button variant="secondary" size="sm" disabled={!text.trim()} title={`Ask ${AGENT_FACES[agent].name} in a new chat, without what it knows from ${chatName(again)}`} onClick={() => ask(true)}>
+                <Button variant="secondary" size="sm" disabled={!text.trim()} title={`Ask ${agentFace(agent).name} in a new chat, without what it knows from ${chatName(again)}`} onClick={() => ask(true)}>
                   New chat
                 </Button>
               )}
               <Button variant="primary" size="sm" disabled={!text.trim()} onClick={() => ask()}>
-                Ask {AGENT_FACES[agent].name}
+                Ask {agentFace(agent).name}
               </Button>
             </div>
           </div>
@@ -151,7 +153,7 @@ export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: b
   const state = useContext(LiveState);
   const others = openChats(state.chats)
     .filter((c) => c.id !== chat.id)
-    .sort((a, b) => AGENT_KEYS.indexOf(a.agent) - AGENT_KEYS.indexOf(b.agent) || byLabel.compare(chatName(a), chatName(b)));
+    .sort((a, b) => allAgentKeys().indexOf(a.agent) - allAgentKeys().indexOf(b.agent) || byLabel.compare(chatName(a), chatName(b)));
   const pipeTo = (id: string) => state.links.find((l) => l.kind === 'pipe' && l.from === chat.id && l.to === id);
   return (
     <>
@@ -177,7 +179,7 @@ export function PipeTargets({ chat, close }: { chat: ChatView; close(refocus?: b
             >
               <Glyph agent={c.agent} size="sm" />
               <span class="menu-label">{clip(c.title, 40)}</span>
-              <span class="menu-sub">{AGENT_FACES[c.agent].name}</span>
+              <span class="menu-sub">{agentFace(c.agent).name}</span>
               {pipe ? <span class="fl-pill" data-tone="working">{pipe.active ? 'piping' : 'paused'} · stop</span> : null}
             </button>
           );

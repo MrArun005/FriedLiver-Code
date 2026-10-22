@@ -9,7 +9,7 @@ import { ACCOUNTS_PANEL, AccountsPage } from './host/accountsPage';
 import { BrowserPanel } from './host/browser';
 import { ActionBatcher } from './host/batch';
 import { runRewind } from './host/rewindFlow';
-import { encodeCwd, listClaudeImages, listClaudeSessions } from './host/claudeSessions';
+import { encodeCwd, listClaudeImages, listClaudeSessions, outsideRoots, shownFile } from './host/claudeSessions';
 import { SubagentWatch } from './host/subagentDetail';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
 import { isExternal } from './bridge/protocol';
@@ -17,6 +17,7 @@ import { ProjectIndexHost } from './host/projectIndexHost';
 import type { AgentToAgent, BridgeAnswer } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
 import { AgentCore, VENDOR_AGENTS, messageOf } from './host/core';
+import { CustomSecrets, parseCustomAgents, publicCustomAgents, type CustomAgentConfig } from './host/customAgents';
 import { OTHER_AGENTS } from './host/otherAgents';
 import { Dictation, dictationSettings, PRIVACY_PANES, helperArgs, helperPath } from './host/dictation';
 import { EditorAgent } from './host/editor';
@@ -39,7 +40,7 @@ import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Sur
 import { installedOrUnknown, isVendor, preselectAgents, rosterOf, shownAgents } from './shared/accounts';
 import { discussLayoutOf, type DiscussLayout } from './shared/discussView';
 import { LIMITS, parseWebviewMessage, type Attachment, type ClaudeSession, type HostMessage, type TaskChoices, type WebviewMessage } from './shared/messages';
-import { AGENT_FACES, isAgentKey, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
+import { agentFace, customAgent, isAgentKey, isBuiltinAgent, setCustomAgents, type Action, type AgentKey, type AppState, type ChatView, type CodeRef, type Item, type NoticeAction } from './shared/model';
 import { describeRule } from './shared/rules';
 import { appBundle, Permissions, userDataDir } from './host/permissions';
 import { APPROVAL_HINTS, dailyWarning, usageTotals, type AgentDefaults, type ApprovalLevel } from './shared/session';
@@ -162,6 +163,9 @@ export class Controller {
   /** The chat last shown anywhere, so moving between side and center keeps it. */
   private lastSelected?: string;
   private agentConfig = this.readAgentConfig();
+  private customConfig = this.readCustomAgents();
+  /** Custom agents' variables that look like keys (SecretStorage). */
+  private readonly customSecrets: CustomSecrets;
   /** Remembered "Always allow" answers: the user's own storage (global for websites and agent tools, this workspace's for folders and commands). */
   readonly permissions: Permissions;
   private permissionsPanel?: { panel: vscode.WebviewPanel; ready: boolean };
@@ -253,7 +257,13 @@ export class Controller {
       links: () => (vscode.workspace.getConfiguration('friedliver.links').get('openIn') === 'external' ? 'external' : 'builtin'),
       openInBrowser: (url, signal) => this.browser.call({ tool: 'browser_open', url }, signal),
     });
-    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => testAgentsOn(), (line) => this.log.warn(line));
+    this.customSecrets = new CustomSecrets(context.secrets);
+    void this.customSecrets.load(this.customConfig.map((c) => c.id)).catch((err: unknown) => this.log.warn(`Custom agents' variables: ${messageOf(err)}`));
+    this.accountsPage = new AccountsPage(context.extensionUri, this.accounts, () => this.core, () => testAgentsOn(), (line) => this.log.warn(line), {
+      configs: () => this.customConfig,
+      secrets: this.customSecrets,
+      clientVersion: String(context.extension.packageJSON.version ?? '0.0.0'),
+    });
     this.core = new AgentCore({
       folders: () => this.folders(),
       noFolderCwd,
@@ -306,6 +316,11 @@ export class Controller {
         },
       },
       agentCommand: (id) => this.agentConfig[id],
+      // Its settings, plus the variables kept in SecretStorage (customSecrets): those never go in settings.
+      customAgent: (key) => {
+        const c = this.customConfig.find((x) => x.key === key);
+        return c && { ...c, env: { ...c.env, ...this.customSecrets.env(c.id) } };
+      },
       apiKey: (id) => this.accounts.apiKey(id),
       credentialEnv: (id) => this.accounts.credentialEnv(id),
       accountSeen: (agent, patch) => this.accounts.note(agent, patch),
@@ -418,6 +433,8 @@ export class Controller {
     command('friedliver.agents.openChat', (chatId: unknown) => typeof chatId === 'string' && this.core.chat(chatId) && this.showChat(chatId));
 
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
+    // The editor title's chat button (every tab, beside Split Editor): the same "New chat with…" picker.
+    command('friedliver.newChatFromTitle', () => this.newChat());
     command('friedliver.moveToCenter', () => this.moveToCenter());
     command('friedliver.moveToSide', () => this.moveToSide());
     command('friedliver.openBrowser', () => this.browser.show());
@@ -447,6 +464,7 @@ export class Controller {
       if (!this.reviews.reject(typeof reviewId === 'string' ? reviewId : undefined)) void vscode.window.showInformationMessage('No agent edit is waiting here.');
     });
     command('friedliver.accounts', (agent?: unknown) => this.accountsPage.show(isAgentKey(agent) ? agent : undefined));
+    command('friedliver.addAgent', () => this.accountsPage.showForm());
     command('friedliver.accounts.check', (node?: { agent?: unknown }) => {
       if (isAgentKey(node?.agent)) void this.accounts.check(node.agent);
       else this.accountsPage.show();
@@ -711,7 +729,12 @@ export class Controller {
 
   /** The thumbnail or full image (`full`) from FriedLiver's copy, else from the file itself. */
   private async imageFor(file: string, full: boolean): Promise<string | null> {
-    const copy: Copy | null = await this.imageStore.ingest(file, this.imageRoots()).catch(() => null);
+    const roots = this.imageRoots();
+    // An outside session's image may also be under ~/code or that session's folder (see listClaudeImages).
+    const session = this.claudeImages.find((s) => s.images.some((i) => i.path === file));
+    const extra = session ? outsideRoots(os.homedir(), this.folders(), [session.cwd]) : [];
+    if (extra.length && (await shownFile(file, extra, os.homedir()))) roots.push(...extra);
+    const copy: Copy | null = await this.imageStore.ingest(file, roots).catch(() => null);
     const thumb = (f: string, roots: string[]) => {
       const job = this.thumbQueue.then(() => imageThumb(f, roots, path.join(this.context.globalStorageUri.fsPath, 'thumbs'), this.scaler));
       this.thumbQueue = job.catch(() => {});
@@ -721,7 +744,7 @@ export class Controller {
       const src = full ? await imagePreview(copy.file, [this.imageStore.dir]) : await thumb(copy.preview ?? copy.file, [this.imageStore.dir]);
       if (src) return src;
     }
-    return full ? imagePreview(file, this.imageRoots()) : thumb(file, this.imageRoots());
+    return full ? imagePreview(file, roots) : thumb(file, roots);
   }
 
   /** Each chat panel's and the Agents view's title follows the chat it has open: switched, renamed or titled by the agent. */
@@ -798,7 +821,9 @@ export class Controller {
         shown = `${title}\0${agent}`;
         panel.title = title;
         // The agent's mark in its v2 hue: the dark theme's hue, and a deeper one on light themes (scripts/agent-icons.mjs).
-        panel.iconPath = agent ? { dark: icon(`agent-${agent}`), light: icon(`agent-${agent}-light`) } : icon('agents');
+        // A custom agent's tab shows the neutral glyph (media/agent-custom.svg).
+        const file = agent && markFile(agent);
+        panel.iconPath = file ? { dark: icon(`agent-${file}`), light: icon(`agent-${file}-light`) } : icon('agents');
       };
     this.addSurface(surface, panel.title, panel);
     this.retitle();
@@ -1194,6 +1219,9 @@ export class Controller {
         case 'otherAgents':
           await this.otherAgents();
           return;
+        case 'addAgent':
+          this.accountsPage.showForm();
+          return;
         case 'openAccounts':
           this.accountsPage.show(m.agent);
           return;
@@ -1249,7 +1277,7 @@ export class Controller {
     const roots = this.core.roots();
     const folder = (cwd ? insideRoots(cwd, roots) : null) ?? insideRoots(chat.cwd, roots) ?? this.folders()[0];
     // An agent's terminal is its own tab, "<Agent> · <command>", with the agent's mark (COMPONENTS.md v2 §6.7).
-    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${chat.agent}${kind}.svg`);
+    const mark = (kind: string) => vscode.Uri.joinPath(this.context.extensionUri, 'media', `agent-${markFile(chat.agent)}${kind}.svg`);
     const terminal = vscode.window.createTerminal({ name: `${agentName(chat.agent)} · ${clip(command, 40)}`, cwd: folder, iconPath: { light: mark('-light'), dark: mark('') } });
     terminal.show();
     terminal.sendText(command, true);
@@ -1305,14 +1333,21 @@ export class Controller {
   async newChat(agent?: AgentKey, surface?: Surface): Promise<string | undefined> {
     const shown = shownAgents(testAgentsOn());
     const ordered: AgentKey[] = shown.includes('antigravity') ? ['antigravity', ...shown.filter((a) => a !== 'antigravity')] : shown;
-    const chosen =
-      agent ??
-      (
-        await vscode.window.showQuickPick(
-          ordered.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a })),
+    const picked = agent
+      ? { agent }
+      : await vscode.window.showQuickPick<vscode.QuickPickItem & { agent?: AgentKey }>(
+          [
+            ...ordered.map((a) => ({ label: agentFace(a).name, description: this.pickHint(a), agent: a })),
+            { label: '', kind: vscode.QuickPickItemKind.Separator },
+            ADD_AGENT_PICK,
+          ],
           { title: 'New chat with…' },
-        )
-      )?.agent;
+        );
+    if (picked && !picked.agent) {
+      this.accountsPage.showForm();
+      return undefined;
+    }
+    const chosen = picked?.agent;
     if (!chosen) return undefined;
     try {
       const chat = await this.core.createChat(chosen);
@@ -1421,7 +1456,7 @@ export class Controller {
     const agent = await this.pickAgent('Ask which agent?', source.agent);
     if (!agent) return;
     const text = await vscode.window.showInputBox({
-      title: `Ask ${AGENT_FACES[agent].name}`,
+      title: `Ask ${agentFace(agent).name}`,
       prompt: `The answer comes back into ${chatRef(source)}.`,
       validateInput: (v) => (v.trim() ? undefined : 'Type a question.'),
     });
@@ -1437,7 +1472,7 @@ export class Controller {
     const vendors = roster.agents.filter((a) => a !== 'demo' && installedOrUnknown(roster, a));
     const preselected = vendors.length ? vendors : preselectAgents(roster, []);
     const picked = await vscode.window.showQuickPick(
-      roster.agents.map((a) => ({ label: AGENT_FACES[a].name, description: this.pickHint(a), agent: a, picked: preselected.includes(a) })),
+      roster.agents.map((a) => ({ label: agentFace(a).name, description: this.pickHint(a), agent: a, picked: preselected.includes(a) })),
       { title: 'Run a task on which agents?', canPickMany: true },
     );
     if (!picked?.length) return;
@@ -1523,7 +1558,7 @@ export class Controller {
     const order = [...shown.filter((a) => a !== current && a !== 'demo'), ...shown.filter((a) => a === current || a === 'demo')];
     return (
       await vscode.window.showQuickPick(
-        order.map((a) => ({ label: AGENT_FACES[a].name, description: a === current ? 'same agent' : a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
+        order.map((a) => ({ label: agentFace(a).name, description: a === current ? 'same agent' : a === 'demo' ? 'offline, no sign-in' : undefined, agent: a })),
         { title },
       )
     )?.agent;
@@ -1754,7 +1789,7 @@ export class Controller {
   /** A new task's level: Full auto is confirmed once for all its chats, here. Null: the user said no; undefined: the default. */
   private async taskApproval(level: ApprovalLevel | undefined, agents: AgentKey[]): Promise<ApprovalLevel | null | undefined> {
     if (level !== 'full') return level;
-    const who = agents.map((a) => AGENT_FACES[a].name).join(', ');
+    const who = agents.map((a) => agentFace(a).name).join(', ');
     return (await this.confirmFullAuto({ label: agents.length > 1 ? `these ${agents.length} agents (${who})` : who, agent: who })) ? 'full' : null;
   }
 
@@ -1894,7 +1929,7 @@ export class Controller {
   private async offerSignInUrl(agent: AgentKey, url: string): Promise<void> {
     if (this.asked.has(url)) return;
     this.asked.add(url);
-    const open = await vscode.window.showInformationMessage(`${AGENT_FACES[agent].name} printed a sign-in link.`, 'Open sign-in page');
+    const open = await vscode.window.showInformationMessage(`${agentFace(agent).name} printed a sign-in link.`, 'Open sign-in page');
     // Sign-in pages talk back to the agent on this machine: the system browser, never FriedLiver's.
     if (open) await openInSystemBrowser(url);
   }
@@ -1933,7 +1968,20 @@ export class Controller {
         args: Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : [],
       };
     };
-    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity') };
+    return { claude: one('claude'), codex: one('codex'), gemini: one('gemini'), antigravity: one('antigravity'), copilot: one('copilot'), opencode: one('opencode') };
+  }
+
+  /**
+   * friedliver.agents.custom, from the user's own settings only: a repository must never add an agent
+   * or choose its program. Webviews and the shared model get the list without commands or env.
+   */
+  private readCustomAgents(): CustomAgentConfig[] {
+    const { value, ignored } = userSetting(vscode.workspace.getConfiguration('friedliver.agents').inspect<unknown>('custom'));
+    if (ignored) this.log.warn('Ignored friedliver.agents.custom from the workspace settings; only your user settings add agents.');
+    const { agents, problems } = parseCustomAgents(value);
+    for (const p of problems) this.log.warn(p);
+    setCustomAgents(publicCustomAgents(agents));
+    return agents;
   }
 
   /** From the user's own settings only: a repository must never make its agents run without asking. */
@@ -2146,7 +2194,17 @@ export class Controller {
     const before = this.agentConfig;
     this.agentConfig = this.readAgentConfig();
     // A running agent keeps the command it started with; stop it so the next message starts the new one.
-    const restart = VENDOR_AGENTS.filter((id) => JSON.stringify(before[id]) !== JSON.stringify(this.agentConfig[id]));
+    const restart: AgentKey[] = VENDOR_AGENTS.filter((id) => JSON.stringify(before[id]) !== JSON.stringify(this.agentConfig[id]));
+    if (e.affectsConfiguration('friedliver.agents.custom')) {
+      const customBefore = this.customConfig;
+      this.customConfig = this.readCustomAgents();
+      void this.customSecrets.load(this.customConfig.filter((c) => !customBefore.some((b) => b.id === c.id)).map((c) => c.id));
+      // A custom agent that changed or went away stops; the next message starts the new one (or says it's gone).
+      restart.push(...customBefore.filter((c) => JSON.stringify(c) !== JSON.stringify(this.customConfig.find((n) => n.key === c.key))).map((c) => c.key));
+      this.postRoster();
+      this.accounts.refresh();
+      this.accountsPage.refresh();
+    }
     void this.core.reconfigure(restart);
   }
 
@@ -2158,6 +2216,16 @@ export class Controller {
       if (picked) this.log.show(true);
     });
   }
+}
+
+/** The last item of the host's agent pickers: Agents & Accounts on its "Add an agent" form. */
+export const ADD_AGENT_PICK: vscode.QuickPickItem = { label: '$(add) Add an agent…', description: 'any ACP agent' };
+
+/** media/agent-<this>.svg: a built-in agent's own, or a custom agent's glyph (scripts/agent-icons.mjs). */
+function markFile(agent: AgentKey): string {
+  if (isBuiltinAgent(agent)) return agent;
+  const glyph = customAgent(agent)?.glyph;
+  return glyph && glyph !== 'agent' ? `custom-${glyph}` : 'custom';
 }
 
 function clamp(value: number, min: number, max: number): number {

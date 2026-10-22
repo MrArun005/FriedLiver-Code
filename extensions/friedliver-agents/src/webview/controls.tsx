@@ -4,7 +4,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { batchMessages, batchable, inbox } from '../shared/inbox';
 import type { DiffLine } from '../shared/diff';
-import { AGENT_FACES, EXPIRED, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
+import { agentFace, EXPIRED, waitingItems, type AgentKey, type AppState, type ChatView, type Item } from '../shared/model';
 import { approvalOf, type Approvable } from '../shared/approval';
 import { ApprovalCard, cardKeys } from './approval';
 import {
@@ -55,7 +55,7 @@ export function ModeBadge({ session, agent }: { session?: ChatSession; agent: Ag
   const mode = reportedMode(session);
   if (!mode) return null;
   return (
-    <span class="fl-pill mode-badge" data-tone={MODE_TONES[mode.tone] ?? "muted"} title={`${AGENT_FACES[agent].name} reports its mode: ${mode.name}`}>
+    <span class="fl-pill mode-badge" data-tone={MODE_TONES[mode.tone] ?? "muted"} title={`${agentFace(agent).name} reports its mode: ${mode.name}`}>
       {mode.name}
     </span>
   );
@@ -408,7 +408,7 @@ export function TaskOptions({
         const pick = known.filter((o) => (o.category === 'model' || o.category === 'thought_level') && o.type === 'select' && o.choices.length > 0);
         if (!pick.length) return null;
         return (
-          <span key={agent} class="task-options" role="group" aria-label={`${AGENT_FACES[agent].name} settings`}>
+          <span key={agent} class="task-options" role="group" aria-label={`${agentFace(agent).name} settings`}>
             {agents.length > 1 && <Glyph agent={agent} size="sm" />}
             {pick.map((o) => {
               const key = optionKey(o);
@@ -416,8 +416,8 @@ export function TaskOptions({
               return (
                 <Popover
                   key={o.id}
-                  label={`${o.name} for ${AGENT_FACES[agent].name}`}
-                  title={`${AGENT_FACES[agent].name} ${o.name}: ${o.choices.find((c) => c.value === value)?.name ?? value}`}
+                  label={`${o.name} for ${agentFace(agent).name}`}
+                  title={`${agentFace(agent).name} ${o.name}: ${o.choices.find((c) => c.value === value)?.name ?? value}`}
                   buttonClass="fl-select fl-select--sm"
                   trigger={selectTrigger(o.choices.find((c) => c.value === value)?.name ?? value)}
                 >

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AGENT_FACES, EMPTY_STATE, EXPIRED, isAgentKey, MAX_USAGE_LOG, type TurnUsage, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
+import { agentFace, EMPTY_STATE, EXPIRED, isStoredAgentKey, MAX_USAGE_LOG, type TurnUsage, type AppState, type ChatLink, type ChatView, type Item } from '../shared/model';
 import type { ChatSession, SessionOption } from '../shared/session';
 import { savedDiscussion } from '../shared/discuss';
 
@@ -174,7 +174,7 @@ export function parseSaved(raw: unknown): SavedState | null {
   const chats: ChatView[] = [];
   const saved: Record<string, SavedChat> = {};
   for (const c of raw.state.chats as unknown[]) {
-    if (!isObj(c) || !str(c.id) || !ID.test(c.id) || !isAgentKey(c.agent) || !str(c.cwd) || !Array.isArray(c.items)) continue;
+    if (!isObj(c) || !str(c.id) || !ID.test(c.id) || !isStoredAgentKey(c.agent) || !str(c.cwd) || !Array.isArray(c.items)) continue;
     if (chats.some((x) => x.id === c.id)) continue;
     const h = host[c.id];
     if (!isObj(h) || h.agent !== c.agent || h.cwd !== c.cwd) continue;
@@ -183,7 +183,7 @@ export function parseSaved(raw: unknown): SavedState | null {
       id: c.id,
       agent: c.agent,
       // Older versions numbered it ("Claude 9"); a chat is named by its topic now, so only the agent's name stays.
-      label: AGENT_FACES[c.agent].name,
+      label: agentFace(c.agent).name,
       title: str(c.title) ? c.title : 'Untitled task',
       titlePinned: c.titlePinned === true || undefined,
       cwd: c.cwd,
@@ -223,7 +223,7 @@ export function parseSaved(raw: unknown): SavedState | null {
     (l): l is ChatLink => isObj(l) && str(l.id) && (l.kind === 'handoff' || l.kind === 'consult' || l.kind === 'pipe') && ids.has(l.from as string) && ids.has(l.to as string),
   );
   const count: SavedState['chatCount'] = {};
-  if (isObj(raw.chatCount)) for (const [k, v] of Object.entries(raw.chatCount)) if (isAgentKey(k)) count[k] = num(v, 0);
+  if (isObj(raw.chatCount)) for (const [k, v] of Object.entries(raw.chatCount)) if (isStoredAgentKey(k)) count[k] = num(v, 0);
   return { version: 1, state: { ...EMPTY_STATE, chats, links }, chats: saved, nextId: num(raw.nextId, 1), chatCount: count };
 }
 
