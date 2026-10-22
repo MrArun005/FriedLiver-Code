@@ -2,6 +2,8 @@
 
 Date: 2026-10-20. From Phase A (direction + system). Read in this order: `COMPONENTS.md` (v2, §0–§7), this file, `PANEL.md` (what the critics still want), then open the mocks.
 
+**Status (2026-10-21):** Beacon has shipped, so this is a record of the hand-off, not open work. Changes since: no line above the active tab in any theme (so ignore `tab.activeBorderTop` sel-fg and "Tabs (top line)" below), and quick-pick titles start at the left edge. `COMPONENTS.md` is the current spec.
+
 ## What Phase A shipped
 
 | Item | Where |

@@ -17,11 +17,12 @@ FriedLiver is VS Code (Code - OSS) with an Agents extension that runs coding
 agents (Claude, Codex, Gemini, Antigravity) over the Agent Client
 Protocol. Who is trusted:
 
-- **You.** You choose per chat how much an agent may do without asking (Ask,
-  Auto-accept edits, Full auto). In Ask, every edit and command that reaches
+- **You.** You choose per chat how much an agent may do without asking (Manual,
+  Edit automatically, Auto; settings and prompts call Auto "Full auto"). In
+  Manual, every edit and command that reaches
   FriedLiver, or that the agent asks permission for, waits for you.
 - **The editor and the extensions you install.** They run with your rights.
-- **The agent programs you install** (`claude-agent-acp`, `codex-acp`, `gemini`)
+- **The agent programs you install** (`claude-agent-acp`, `codex-acp`, `gemini`, `agy`)
   are trusted code with untrusted input: they act on what they read, and a file
   in a repository can tell them to do things (prompt injection).
 - **Repositories** are untrusted. Until you trust a folder, VS Code's Restricted
@@ -104,16 +105,16 @@ vendors' own permission settings as part of your setup.
 
 ### Approval levels and "Always allow"
 
-- **Ask** (the default): FriedLiver's reviews and Run/Deny cards, and every
+- **Manual** (the default): FriedLiver's reviews and Run/Deny cards, and every
   permission request, wait for you.
-- **Auto-accept edits**: writes through FriedLiver are accepted without a diff
+- **Edit automatically**: writes through FriedLiver are accepted without a diff
   and permission requests for edits get the agent's one-time "yes". Commands
   still wait. Every such edit is recorded for Undo and listed in the turn's
   changes.
-- **Full auto**: edits and commands go through. It is chosen per chat, never
+- **Auto** ("Full auto" in settings and prompts): edits and commands go through. It is chosen per chat, never
   as a default, and confirmed once per chat in a modal. The chat, its tab, its
   Agent Manager card, the map and the status bar show it in red while it is
-  on. A reopened window brings the chat back in Ask (or your default), never
+  on. A reopened window brings the chat back in Manual (or your default), never
   Full auto. FriedLiver still asks for commands in folders outside the
   workspace and for plans (and other mode switches) that reach it, but the
   agent's own full-access mode means the agent itself may not ask at all.
@@ -564,7 +565,8 @@ build of Tailscale.
 ### Review of the bridge
 
 The agent-to-agent bridge was built after the audit below and reviewed when it
-was merged (FL-23). It has been exercised with the offline Demo agent only, not
+was merged (FL-23). It has been exercised with the tests' fake agent only (the Demo agent is no
+longer in the product), not
 yet with the vendors' agents. The tools server speaks MCP itself
 (`src/bridge/mcp.ts`, about 150 lines) rather than through the MCP SDK, which
 cost each session's server about 10 MB. It answers initialize, ping,

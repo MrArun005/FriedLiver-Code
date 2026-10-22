@@ -40,8 +40,8 @@ release job gets a token that can write (`contents: write`).
 1. Run **Actions → Release → Run workflow** on `main` ([RELEASING.md](RELEASING.md)).
    It refuses unless CI passed on main's head, picks the next version (the
    pinned upstream version, then FriedLiver's own build number one higher than
-   the last tag, e.g. `1.142.0-8`) and writes the notes. (By hand still works:
-   `git tag v1.142.0-8 && git push origin v1.142.0-8`.)
+   the last tag, e.g. `1.142.0-15`) and writes the notes. (By hand still works:
+   `git tag v1.142.0-15 && git push origin v1.142.0-15`.)
 2. It calls `build.yml`, which builds all three OSes with `FRIEDLIVER_VERSION` set from the tag
    (stamped into `product.json` as `friedliverVersion`), then the release job
    writes `SHA256SUMS.txt` over every asset (it fails if the macOS arm64 DMG is
@@ -316,8 +316,10 @@ again after changing the artwork.
 
   The look is checked in CI: a manual Build FriedLiver run (`workflow_dispatch`)
   also runs `scripts/workbench-shots.mjs` on its macOS app (the `shots` job,
-  artifact `workbench-shots`): every workbench surface in Black Blue, Light Blue
-  and Dark 2026 at 1440×900, and the approved composer against its baseline.
+  artifact `workbench-shots`): every workbench surface in FriedLiver Dark and
+  FriedLiver Light at 1440×900, and the approved composer against its baseline.
+  **Actions → Workbench shots** (`workbench-shots.yml`, manual only) does the
+  same on a release or an earlier build, with a choice of themes and sizes.
   A clean dev rebuild of `out/` is `npm run transpile-client` in the
   checkout (about 20 s, no type check).
 - **`0200-fast-shell-env.patch`**: the extension host no longer waits for the
@@ -379,7 +381,7 @@ rendering, a fresh profile, `bench/fixture` open. Same container as
 | Copilot extension and `defaultChatAgent` removed | 1392 MB | 1470 MB | 12 (a 75 MB `copilot-runtime` still ran) |
 | Plus `chat.disableAIFeatures` default (agent host stays off) | 1257 MB | 1355 MB | 11 (settles near 1160 MB) |
 | Plus FriedLiver Agents view open (one more webview renderer) | 1238 MB | 1250 MB | 12 |
-| *For comparison:* FriedLiver 0.2 Electron app | 314 MB | 321 MB | 6 |
+| *For comparison:* FriedLiver 0.2 Electron app (retired) | 314 MB | 321 MB | 6 |
 | *For comparison:* VS Code 1.142, packaged, no extensions | 761 MB | 848 MB | 12 |
 
 The dev-build rows show the direction of each change: removing Copilot and
@@ -424,9 +426,13 @@ editor hasn't been checked yet.
 
 ## Screenshots
 
+These were taken before the Beacon redesign, in the earlier default theme
+(Black Blue, now one of the extra themes). For the current look, run the
+`shots` job or **Workbench shots** above and see its artifact.
+
 - [packaged-first-start.png](screenshots/packaged-first-start.png): the
   packaged fork on a fresh profile. The Agents panel opens on the right by
-  itself, in the Black Blue theme, with no Copilot.
+  itself, with no Copilot.
 - [dev-before-copilot-removal.png](screenshots/dev-before-copilot-removal.png):
   the first dev build, an empty window with upstream's Copilot "Sign In" and
   "Build with Agent" chat.
@@ -440,7 +446,7 @@ Packaged build, `bench/fixture`, 1440×900, under xvfb with software rendering
 (so upstream's frosted glass, which needs GPU compositing, is off), in
 [screenshots/workbench/](screenshots/workbench/):
 
-| Black Blue (default) | Light Blue | What it shows |
+| Black Blue | Light Blue | What it shows |
 | --- | --- | --- |
 | `black-blue-editor.png` | `light-blue-editor.png` | explorer, editor and the Agents panel: one chrome tone, the editor a rounded well, no lines between regions, the activity pill |
 | `black-blue-command-palette.png` | `light-blue-command-palette.png` | the palette with its soft shadow and the pill command center |
