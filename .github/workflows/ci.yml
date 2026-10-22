@@ -96,7 +96,7 @@ jobs:
   # The agents extension's tests on Windows too (launchFor, terminals, guards, paths, index, images, updates):
   # on a push to main and a manual run; pull requests stay Linux-only. Packaging stays in the job above.
   extensions-windows:
-    needs: test
+    # Not after `test`: a flake there would skip it, and these results stand on their own.
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
     defaults:
