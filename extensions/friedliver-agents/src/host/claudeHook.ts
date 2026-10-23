@@ -34,7 +34,6 @@ export function hookEntry() {
         type: 'mcp_tool',
         server: SERVER_NAME,
         tool: PERMISSION_HOOK_TOOL,
-        // eslint-disable-next-line no-template-curly-in-string
         input: { tool: '${tool_name}', input: '${tool_input}', cwd: '${cwd}', transcript: '${transcript_path}' },
         timeout: 30,
       },

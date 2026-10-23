@@ -647,13 +647,14 @@ export class Controller {
     // A session asks one thing at a time; a newer ask means the last was answered.
     this.dropClaudeAsk(callerId);
     const id = `claude-hook-${++this.claudeAskCount}`;
-    let stopWatch: (() => void) | undefined;
+    // The transcript is watched only once the card shows; stopping before that has nothing to stop.
+    const watch: { stop?: () => void } = {};
     const timer = setTimeout(() => this.dropClaudeAsk(callerId, id), CLAUDE_ASK_MS);
     this.claudeAsks.set(callerId, {
       id,
       stop: () => {
         clearTimeout(timer);
-        stopWatch?.();
+        watch.stop?.();
       },
     });
     const choices = [
@@ -666,7 +667,7 @@ export class Controller {
       if (choice === 'open') this.openClaudeCode();
     });
     if (!shown) return this.dropClaudeAsk(callerId, id);
-    stopWatch = watchAnswered(call.transcript, os.homedir(), () => this.dropClaudeAsk(callerId, id));
+    watch.stop = watchAnswered(call.transcript, os.homedir(), () => this.dropClaudeAsk(callerId, id));
   }
 
   /** The session's card goes (only `id`'s, when given: a later ask may hold the place). */
