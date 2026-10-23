@@ -110,6 +110,11 @@
         "category": "FriedLiver"
       },
       {
+        "command": "friedliver.companion.showClaudeCode",
+        "title": "Show Claude Code's Asks in the Companion",
+        "category": "FriedLiver"
+      },
+      {
         "command": "friedliver.links.useBuiltin",
         "title": "Open Links in FriedLiver Browser",
         "category": "FriedLiver"
@@ -1029,6 +1034,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show a notification with buttons when an agent waits for you and its chat isn't on screen or the window isn't focused."
+        },
+        "friedliver.companion.claudeCode": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Show the Claude Code extension's (and CLI's) permission asks in the companion too. FriedLiver adds a `PermissionRequest` hook to `~/.claude/settings.json` that reaches it through the `friedliver-browser` server, so it needs `#friedliver.browser.externalClients#` on too (**FriedLiver: Show Claude Code's Asks in the Companion** turns both on), and takes the hook out when FriedLiver stops. The companion only tells: you answer in Claude Code, and its card goes once you have. Plans, mode switches and Claude's questions stay in Claude Code alone. Read from your user settings only."
         },
         "friedliver.companion.enabled": {
           "type": "boolean",

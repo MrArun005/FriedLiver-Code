@@ -10,7 +10,7 @@ import { SYSTEM_LIMITS, SYSTEM_TOOLS, unsupportedOn, type SystemTool } from '../
 import { READ_LIMITS } from '../host/indexReads';
 import { SHOT } from '../host/browserRules';
 import { SNAPSHOT_LIMITS } from '../host/pageText';
-import { BRIDGE_LIMITS, parseCall, type BridgeCall } from './protocol';
+import { BRIDGE_LIMITS, PERMISSION_HOOK_TOOL, parseCall, type BridgeCall } from './protocol';
 
 /** Newest first; a client asking for another version gets the newest. */
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
@@ -433,6 +433,11 @@ export function handle(raw: unknown, external = false, omit: readonly string[] =
       return { reply: result(id, { tools }) };
     case 'tools/call': {
       const name = params.name;
+      // Claude Code's PermissionRequest hook calls this unlisted tool, so the model never sees it.
+      if (external && name === PERMISSION_HOOK_TOOL) {
+        const args = params.arguments;
+        return isObj(args) && parseCall(name, args) ? { call: name, args, id } : { reply: result(id, toolError('Invalid arguments')) };
+      }
       const tool = tools.find((t) => t.name === name);
       if (!tool) return { reply: result(id, toolError(`MCP error -32602: Tool ${String(name)} not found`)) };
       const args = params.arguments === undefined ? {} : params.arguments;

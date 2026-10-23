@@ -43,7 +43,18 @@ export type BridgeCall =
   | { tool: 'browser_screenshot'; selector?: string; maxWidth?: number }
   | { tool: 'browser_console' | 'browser_back' | 'browser_reload' }
   | IndexCall
-  | SystemCall;
+  | SystemCall
+  | PermissionHookCall;
+
+/**
+ * Claude Code's PermissionRequest hook: an `mcp_tool` hook on friedliver-browser (host/claudeHook.ts) that
+ * only tells the companion; the answer stays in Claude Code. Never in a tools list, and only an external
+ * session may call it (mcp.ts, bridgeRequests.ts).
+ */
+export const PERMISSION_HOOK_TOOL = 'friedliver_permission_request';
+
+/** What the hook passes: the tool's name, its input as Claude Code wrote it (JSON), the session's folder and transcript. */
+export type PermissionHookCall = { tool: typeof PERMISSION_HOOK_TOOL; toolName: string; input: string; cwd: string; transcript: string };
 
 /** The OS actions (shared/system.ts): exactly one target for open and focus. */
 export type SystemCall =
@@ -204,6 +215,11 @@ export function parseCall(tool: unknown, args: unknown): BridgeCall | null {
     case 'index_changes':
       if (a.since === undefined) return { tool };
       return typeof a.since === 'string' && /^([0-9a-fA-F]{8,64}|last_turn)$/.test(a.since) ? { tool, since: a.since } : null;
+    case PERMISSION_HOOK_TOOL:
+      // The whole message is capped at BRIDGE_LIMITS.line; a Write's content can be most of it.
+      return typeof a.tool === 'string' && /^[\w.:-]{1,200}$/.test(a.tool) && typeof a.input === 'string' && typeof a.cwd === 'string' && a.cwd.length <= 4096 && typeof a.transcript === 'string' && a.transcript.length <= 4096
+        ? { tool, toolName: a.tool, input: a.input, cwd: a.cwd, transcript: a.transcript }
+        : null;
     default:
       return null;
   }

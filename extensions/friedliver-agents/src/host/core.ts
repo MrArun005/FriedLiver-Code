@@ -16,7 +16,7 @@ import { visibleText, type TerminalListener } from '@friedliver/main/agents/term
 import { TurnLog } from '@friedliver/main/agents/turnLog';
 import { commandGuard, downloadTargets, FileTrail } from './fullAutoGuards';
 import * as git from '@friedliver/main/workspace/git';
-import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall } from '../bridge/protocol';
+import { BRIDGE_ENV, EXTERNAL_CLIENT, TOKEN_ENV, type BridgeCall, type PermissionHookCall } from '../bridge/protocol';
 import { OMIT_ENV, omittedTools } from '../bridge/mcp';
 import type { Attachment } from '../shared/messages';
 import { describeRule, matchesRule } from '../shared/rules';
@@ -157,6 +157,8 @@ export interface CoreUi {
   confirmRemote?(ask: { title: string; detail: string; button: string }): Promise<boolean>;
   /** An agent asks, through the FriedLiver tools, to reach another agent or chat. */
   askBridge?(ask: { chatId: string; requestId: string; title: string; detail?: string; always?: string; careful?: boolean; once?: boolean }): void;
+  /** Claude Code's PermissionRequest hook (claudeHook.ts): shown by the companion; Claude Code's own prompt answers it. */
+  permissionHook?(callerId: string, call: PermissionHookCall): void;
   /** An agent asks a question as a small form, answered in the chat. */
   askQuestion?(ask: { chatId: string; requestId: string; agentLabel: string; message: string }): void;
   signInUrl?(agent: AgentKey, url: string): void;
@@ -459,6 +461,7 @@ export class AgentCore {
       dispatch: (action) => this.dispatch(action),
       id: (prefix) => this.id(prefix),
       notify: (ask) => options.ui.askBridge?.(ask),
+      permissionHook: (callerId, call) => options.ui.permissionHook?.(callerId, call),
       consultation: (chatId, agent) => this.links.consultation(chatId, agent),
       consult: (chatId, agent, text, targetChatId, started) => this.links.consult(chatId, agent, text, 'agent', { chatId: targetChatId, started }),
       message: (chatId, target, text) => void this.links.message(chatId, target, text, 'agent').catch(() => {}),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EXTERNAL_CLIENT } from '../src/bridge/protocol';
+import { EXTERNAL_CLIENT, PERMISSION_HOOK_TOOL } from '../src/bridge/protocol';
 import { BridgeRequests, MAX_WAITING_PER_CHAT, type ToolHost } from '../src/host/bridgeRequests';
 import { EMPTY_STATE, reduce, type Action, type AppState, type ChatView } from '../src/shared/model';
 import { memoryPermissions, memoryStore } from './helpers';
@@ -201,6 +201,17 @@ describe('the external client (Claude Code outside FriedLiver)', () => {
     return { h, done, asks, page, requests: new BridgeRequests(h), signal: new AbortController().signal };
   };
   const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("tells the companion of Claude Code's permission asks and never answers them; a chat can't use that tool", async () => {
+    const { h, requests, signal } = ext();
+    const told: [string, string][] = [];
+    const hook = { tool: PERMISSION_HOOK_TOOL, toolName: 'Bash', input: '{"command":"ls"}', cwd: '/w', transcript: '' } as const;
+    await expect(requests.call(S1, hook, signal)).resolves.toBe('{}');
+    h.permissionHook = (callerId, call) => void told.push([callerId, call.toolName]);
+    await expect(requests.call(S1, hook, signal)).resolves.toBe('{}');
+    expect(told).toEqual([[S1, 'Bash']]);
+    await expect(requests.call('chat-1', hook, signal)).rejects.toThrow(/Only Claude Code/);
+  });
 
   it('reaches only the browser tools: not the chats, not the computer (system_*)', async () => {
     const { requests, signal } = ext(true);
