@@ -779,8 +779,10 @@ function revealIds(i: Item): string[] {
   return ids.filter((x): x is string => typeof x === 'string');
 }
 
-/** Groups shown at first, and added each time you scroll up to the earliest one shown. */
-const WINDOW = 120;
+/** Groups shown at first: a few screens of the newest. */
+const WINDOW = 60;
+/** Groups added each time you scroll up to the earliest one shown: small enough that the scroll doesn't stall drawing them. */
+const STEP = 40;
 
 function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect, rail }: TranscriptProps) {
   // With the context rail, "In this chat" draws in the rail's slot (§2.34) instead of beside the transcript.
@@ -828,7 +830,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       ([e]) => {
         if (!e.isIntersecting || !box.current) return;
         anchor.current = { height: box.current.scrollHeight, top: box.current.scrollTop };
-        setLimit((n) => n + WINDOW);
+        setLimit((n) => n + STEP);
       },
       { root: box.current, rootMargin: '400px 0px 0px 0px' },
     );

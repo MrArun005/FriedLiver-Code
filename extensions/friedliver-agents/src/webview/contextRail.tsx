@@ -1,13 +1,16 @@
 // The context rail (COMPONENTS.md v2 §2.34): the right column of a wide chat page. Who, when, what it
 // cost in money (tokens beneath), how long, the files changed and read, and the Rewind points. Facts come
 // from shared/contextFacts.ts, the one source; rows open the file or rewind to the point.
+import { useMemo } from 'preact/hooks';
 import type { ChatView } from '../shared/model';
 import { chatFacts } from '../shared/contextFacts';
 import { agentFace } from '../shared/model';
-import { basename, send, useNow } from './common';
+import { basename, memo, send, useNow } from './common';
 import { Avatar, Count, Icon, Row } from './ui';
 
-const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+/** One formatter for every time shown: toLocaleTimeString builds a new one on each call. */
+const TIME = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
+const clock = (at: number) => TIME.format(at);
 
 function FileRows({ chat, files }: { chat: ChatView; files: string[] }) {
   return (
@@ -26,9 +29,10 @@ function FileRows({ chat, files }: { chat: ChatView; files: string[] }) {
   );
 }
 
-export function ContextRail({ chat }: { chat: ChatView }) {
+/** Drawn again when its chat changes (or its clock ticks), not for every chunk another chat streams. */
+export const ContextRail = memo(function ContextRail({ chat }: { chat: ChatView }) {
   const now = useNow(chat.busy ? 1000 : 60_000);
-  const f = chatFacts(chat, now);
+  const f = useMemo(() => chatFacts(chat, now), [chat, now]);
   return (
     <aside class="ctx-rail" aria-label="This chat">
       <section>
@@ -91,4 +95,4 @@ export function ContextRail({ chat }: { chat: ChatView }) {
       )}
     </aside>
   );
-}
+});

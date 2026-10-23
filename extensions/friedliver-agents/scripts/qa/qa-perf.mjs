@@ -18,7 +18,7 @@ b.chats[0] = { ...b.chats[0], id: 'chat-long-2', title: 'Second long chat' };
 const state = { chats: [...a.chats, ...b.chats], images: [], links: [] };
 await p.evaluate((s) => window.postMessage({ type: 'snapshot', state: s, selected: 'chat-long', now: Date.now() }, '*'), state);
 // The transcript draws its latest turns (QA F03 windowing); older ones come as you scroll up.
-await p.waitForFunction((n) => document.querySelectorAll('.user-msg').length >= Math.min(n, 25), turns, { timeout: 120000 });
+await p.waitForFunction((n) => document.querySelectorAll('.user-msg').length >= Math.min(n, 15), turns, { timeout: 120000 });
 await p.waitForTimeout(300);
 
 const r = await p.evaluate(async () => {
@@ -47,15 +47,20 @@ const r = await p.evaluate(async () => {
     await frame();
   }
   out.streamChunkMsAvg = +((performance.now() - s) / 50).toFixed(1);
-  // Switching to the other long chat's tab and back.
-  s = performance.now();
-  document.querySelector('.tab[data-chat="chat-long-2"]')?.click();
-  await frame();
-  await frame();
-  out.switchTabMs = +(performance.now() - s).toFixed(1);
   out.domNodes = document.querySelectorAll('*').length;
   return out;
 });
+// Switching to the other long chat. The harness has one tab per window, so it is opened the way the
+// host opens a chat; chat-long then streams in the background below.
+r.switchTabMs = await p.evaluate(async (s) => {
+  const frame = () => new Promise((res) => requestAnimationFrame(() => setTimeout(res, 0)));
+  const t = performance.now();
+  window.postMessage({ type: 'snapshot', state: s, selected: 'chat-long-2', now: Date.now() }, '*');
+  await frame();
+  await frame();
+  return +(performance.now() - t).toFixed(1);
+}, state);
+if (!(await p.evaluate(() => !!document.querySelector('.fl-tab[data-chat="chat-long-2"]')))) throw new Error('chat-long-2 did not open: the background numbers would measure the open chat');
 // Long tasks during a real wheel scroll.
 await p.evaluate(() => {
   window.__long = [];

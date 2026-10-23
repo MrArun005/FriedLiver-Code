@@ -1,7 +1,7 @@
 // The composer's bottom-row menus: Select a model, Modes, the / menu, and the
 // Agent map. Each opens above the composer (the map is a modal); Esc closes.
 import { Fragment, type ComponentChildren } from 'preact';
-import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Attachment } from '../shared/messages';
 import { agentFace, type ChatView } from '../shared/model';
 import { APPROVAL_HINTS, APPROVAL_NAMES, agentOverride, choiceName, formatCost, formatTokens, modeClass, modeOption, optionGroups, planToggle, planning, savedLines, turnsLeft, usageLines, usagePercent, type ApprovalLevel, type SessionOption } from '../shared/session';
@@ -513,7 +513,8 @@ export const ComposerPills = memo(function ComposerPills({
   open: (m: ComposerMenu) => void;
 }) {
   const { model, effort } = optionGroups(chat.session);
-  const subs = subagents(chat);
+  // A scan of the whole transcript: once per change of this chat, not per redraw.
+  const subs = useMemo(() => subagents(chat), [chat]);
   const agents = subs.length + linked.length;
   const running = subs.filter((s) => s.state === 'working').length + linked.filter((c) => c.busy).length;
   return (
