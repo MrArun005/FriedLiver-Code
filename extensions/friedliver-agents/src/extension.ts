@@ -12,7 +12,8 @@ import { runRewind } from './host/rewindFlow';
 import { encodeCwd, listClaudeImages, listClaudeSessions, outsideRoots, shownFile } from './host/claudeSessions';
 import { SubagentWatch } from './host/subagentDetail';
 import { claudeEntry, registerClaude, removeTokenFile, unregisterClaude, writeTokenFile } from './host/externalBrowser';
-import { isExternal } from './bridge/protocol';
+import { isExternal, type PermissionHookCall } from './bridge/protocol';
+import { hookAsk, registerHook, unregisterHook, watchAnswered } from './host/claudeHook';
 import { ProjectIndexHost } from './host/projectIndexHost';
 import type { AgentToAgent, BridgeAnswer } from './host/bridgeRequests';
 import { registerBeforeProvider, viewChanges } from './host/changes';
@@ -71,6 +72,10 @@ let controller: Controller | undefined;
 
 /** Claude Code's user-scope config, where its MCP servers for every project live. */
 const CLAUDE_CONFIG = () => path.join(os.homedir(), '.claude.json');
+/** Claude Code's user settings, where the companion's PermissionRequest hook goes (host/claudeHook.ts). */
+const CLAUDE_SETTINGS = () => path.join(os.homedir(), '.claude', 'settings.json');
+/** A Claude Code ask's card goes after this long even when its transcript can't tell it was answered. */
+const CLAUDE_ASK_MS = 10 * 60_000;
 
 export async function activate(context: vscode.ExtensionContext) {
   controller = new Controller(context);
@@ -338,6 +343,7 @@ export class Controller {
         askCommand: (ask) => !this.inlineChats.has(ask.chatId ?? '') && void this.askCommand(ask),
         askPermission: (ask) => !this.inlineChats.has(ask.chatId) && void this.askPermission(ask),
         askBridge: (ask) => void this.askBridge(ask),
+        permissionHook: (callerId, call) => this.claudeAsk(callerId, call),
         askQuestion: (ask) =>
           this.notifyDecision(ask.requestId, ask.chatId, `${plainText(ask.agentLabel)} asks: ${plainText(ask.message.split('\n')[0].slice(0, 200))}`, [
             { title: 'Show', run: () => void this.showChat(ask.chatId, ask.requestId) },
@@ -431,7 +437,12 @@ export class Controller {
     const pullCharacters = setInterval(() => void this.characterRepo.sync(this.characterRepoUrl()), PULL_EVERY_MS);
     context.subscriptions.push({ dispose: () => clearInterval(pullCharacters) });
     command('friedliver.agents.companionMediaFailed', (key: unknown) => this.companion.videoFailed(key));
-    command('friedliver.agents.openChat', (chatId: unknown) => typeof chatId === 'string' && this.core.chat(chatId) && this.showChat(chatId));
+    command('friedliver.agents.openChat', (chatId: unknown) => {
+      if (typeof chatId !== 'string') return;
+      if (isExternal(chatId)) this.openClaudeCode();
+      else if (this.core.chat(chatId)) void this.showChat(chatId);
+    });
+    command('friedliver.companion.showClaudeCode', () => this.claudeCodeInCompanion());
 
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
     // The editor title's chat button (every tab, beside Split Editor): the same "New chat with…" picker.
@@ -615,9 +626,91 @@ export class Controller {
     }, 50);
   }
 
+  // ---- Claude Code's asks in the companion (host/claudeHook.ts): it tells, Claude Code's prompt answers ----
+
+  /** The card each Claude Code session (external caller) shows, and what stops its watch. */
+  private readonly claudeAsks = new Map<string, { id: string; stop(): void }>();
+  private claudeAskCount = 0;
+  /** This launch put the hook in ~/.claude/settings.json, so it takes it out when it stops. */
+  private claudeHookAdded = false;
+
+  /** friedliver.companion.claudeCode, from your user settings only: a repository must not edit ~/.claude. */
+  private claudeHookOn(): boolean {
+    return userSetting(vscode.workspace.getConfiguration('friedliver.companion').inspect<unknown>('claudeCode')).value === true;
+  }
+
+  /** A Claude Code session waits on its permission prompt: the companion says what, one card per session. */
+  private claudeAsk(callerId: string, call: PermissionHookCall): void {
+    if (!this.claudeHookOn() || !this.companionShows()) return;
+    const words = hookAsk(call.toolName, call.input);
+    if (!words) return;
+    // A session asks one thing at a time; a newer ask means the last was answered.
+    this.dropClaudeAsk(callerId);
+    const id = `claude-hook-${++this.claudeAskCount}`;
+    // The transcript is watched only once the card shows; stopping before that has nothing to stop.
+    const watch: { stop?: () => void } = {};
+    const timer = setTimeout(() => this.dropClaudeAsk(callerId, id), CLAUDE_ASK_MS);
+    this.claudeAsks.set(callerId, {
+      id,
+      stop: () => {
+        clearTimeout(timer);
+        watch.stop?.();
+      },
+    });
+    const choices = [
+      { id: 'open', label: 'Answer in Claude Code', kind: 'primary' as const },
+      { id: 'dismiss', label: 'Dismiss', kind: 'secondary' as const },
+    ];
+    const item = { id, chatId: callerId, agentLabel: 'Claude Code', chatTitle: call.cwd ? path.basename(call.cwd) : '', ...words, choices };
+    const shown = this.companion.show(item, 'claude', (choice) => {
+      this.dropClaudeAsk(callerId, id);
+      if (choice === 'open') this.openClaudeCode();
+    });
+    if (!shown) return this.dropClaudeAsk(callerId, id);
+    watch.stop = watchAnswered(call.transcript, os.homedir(), () => this.dropClaudeAsk(callerId, id));
+  }
+
+  /** The session's card goes (only `id`'s, when given: a later ask may hold the place). */
+  private dropClaudeAsk(callerId: string, id?: string): void {
+    const ask = this.claudeAsks.get(callerId);
+    if (!ask || (id && ask.id !== id)) return;
+    this.claudeAsks.delete(callerId);
+    ask.stop();
+    this.companion.drop(ask.id);
+  }
+
+  /** The Claude Code extension's panel, where its prompt waits; a CLI session's prompt is in its terminal. */
+  private openClaudeCode(): void {
+    void vscode.commands.executeCommand('claude-vscode.focus').then(undefined, () => this.log.info('Companion: no Claude Code panel to open; the ask waits where Claude Code runs.'));
+  }
+
+  /** FriedLiver: Show Claude Code's Asks in the Companion: the opt-in; also connects Claude Code (the hook goes through that server). */
+  private async claudeCodeInCompanion(): Promise<void> {
+    const companion = vscode.workspace.getConfiguration('friedliver.companion');
+    if (!this.claudeHookOn()) await companion.update('claudeCode', true, vscode.ConfigurationTarget.Global);
+    if (!this.browserSetting('externalClients', false)) await vscode.workspace.getConfiguration('friedliver.browser').update('externalClients', true, vscode.ConfigurationTarget.Global);
+    await this.connectClaude(true);
+  }
+
+  /** The hook in ~/.claude/settings.json follows friedliver.companion.claudeCode (and the connection it needs). */
+  private async syncClaudeHook(connected: boolean): Promise<string> {
+    if (connected && this.claudeHookOn()) {
+      const result = await registerHook(CLAUDE_SETTINGS());
+      this.claudeHookAdded = true;
+      return ` Its permission asks show in the companion (hook in ~/.claude/settings.json, ${result}).`;
+    }
+    this.claudeHookAdded = false;
+    // Read at every start while the setting is off: a settings file FriedLiver can't edit is only logged.
+    const removed = await unregisterHook(CLAUDE_SETTINGS()).catch((err: unknown) => void this.log.warn(`Companion: left ~/.claude/settings.json alone: ${messageOf(err)}`));
+    return removed ? ' Removed the companion hook FriedLiver had added to ~/.claude/settings.json.' : '';
+  }
+
   async dispose(): Promise<void> {
     clearTimeout(this.companionTimer);
-    this.companion.clear();
+    for (const callerId of [...this.claudeAsks.keys()]) this.dropClaudeAsk(callerId);
+    this.companion.clear(true);
+    // With FriedLiver gone the hook's server is too, and Claude Code would report a hook error on every ask.
+    if (this.claudeHookAdded) await unregisterHook(CLAUDE_SETTINGS()).catch(() => {});
     // Save before the core shuts down: stopping cancels running turns, and a
     // restored chat should read "stopped when the window closed", not "cancelled".
     await this.stateFile?.flush();
@@ -2068,7 +2161,8 @@ export class Controller {
         await removeTokenFile(this.context.globalStorageUri.fsPath);
         // Only the entry FriedLiver added, and only when there is one: otherwise the file isn't written.
         const removed = await unregisterClaude(CLAUDE_CONFIG());
-        return say(`Claude Code is not connected to the browser: friedliver.browser.externalClients is off${removed ? '; removed the friedliver-browser entry FriedLiver had added to ~/.claude.json' : ''}.`);
+        const hook = await this.syncClaudeHook(false);
+        return say(`Claude Code is not connected to the browser: friedliver.browser.externalClients is off${removed ? '; removed the friedliver-browser entry FriedLiver had added to ~/.claude.json' : ''}.${hook}`);
       }
       const storage = this.context.globalStorageUri.fsPath;
       // First, before anything can fail: an older http entry points at a port another process may hold now.
@@ -2076,13 +2170,15 @@ export class Controller {
       const access = await this.core.externalAccess();
       if (!access) {
         await removeTokenFile(storage);
+        await this.syncClaudeHook(false);
         return say('Claude Code is not connected to the browser: the FriedLiver tools are off or unavailable.', show);
       }
       const tokenFile = await writeTokenFile(storage, access.url, access.token);
       const script = this.context.asAbsolutePath(path.join('dist', 'externalStdio.js'));
       // Replaces an older http entry (token and port in the config) with this secret-free one.
       const result = await registerClaude(CLAUDE_CONFIG(), claudeEntry(process.execPath, script, tokenFile));
-      say(`Claude Code can use FriedLiver's browser (MCP server "friedliver-browser", ${result}). Start a new Claude Code session to pick it up.`);
+      const hook = await this.syncClaudeHook(true);
+      say(`Claude Code can use FriedLiver's browser (MCP server "friedliver-browser", ${result}).${hook} Start a new Claude Code session to pick it up.`);
     } catch (err) {
       say(`Could not connect Claude Code to the browser: ${messageOf(err)}`, true);
     }
@@ -2211,7 +2307,7 @@ export class Controller {
     if (!e.affectsConfiguration('friedliver')) return;
     if (e.affectsConfiguration('friedliver.showClaudeCodeSessions') || e.affectsConfiguration('friedliver.claudeSessions')) this.refreshClaudeSessions();
     if (e.affectsConfiguration('friedliver.connections.agentToAgent') && this.agentToAgent() === 'off') this.core.toolsOff();
-    if (e.affectsConfiguration('friedliver.browser.externalClients')) void this.connectClaude(false);
+    if (e.affectsConfiguration('friedliver.browser.externalClients') || e.affectsConfiguration('friedliver.companion.claudeCode')) void this.connectClaude(false);
     if (e.affectsConfiguration('friedliver.discuss.layout')) {
       const message: HostMessage = { type: 'discussLayout', layout: this.discussLayout() };
       for (const s of this.surfaces) post(s, message);

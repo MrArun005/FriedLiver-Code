@@ -1,4 +1,4 @@
-import { isBrowserCall, isExternal, isIndexCall, isSystemCall, type BridgeCall, type BrowserCall, type SystemCall } from '../bridge/protocol';
+import { isBrowserCall, isExternal, isIndexCall, isSystemCall, PERMISSION_HOOK_TOOL, type BridgeCall, type BrowserCall, type PermissionHookCall, type SystemCall } from '../bridge/protocol';
 import { chatRef } from '../shared/names';
 import type { IndexCall } from './projectIndex';
 import { browserNeedsApproval, checkBrowserUrl } from './browserRules';
@@ -64,6 +64,8 @@ export interface ToolHost {
   permissions?: Pick<Permissions, 'site' | 'tool' | 'add'> & Partial<Pick<Permissions, 'system'>>;
   /** The system_* tools (system.ts, with the user's settings); absent when this editor has none. */
   system?: SystemHost;
+  /** Claude Code's PermissionRequest hook (claudeHook.ts): shown by the companion, never answered here. */
+  permissionHook?(callerId: string, call: PermissionHookCall): void;
 }
 
 /** What the system_* tools need: the user's settings, the checks and actions (system.ts), the audit log and the status bar. */
@@ -78,7 +80,7 @@ export interface SystemHost {
 
 type Always = { grant: Grant; agent: string };
 
-type ChatCall = Exclude<BridgeCall, BrowserCall | IndexCall | SystemCall | { tool: 'list_agents' | 'list_chats' | 'remember' }>;
+type ChatCall = Exclude<BridgeCall, BrowserCall | IndexCall | SystemCall | PermissionHookCall | { tool: 'list_agents' | 'list_chats' | 'remember' }>;
 
 type Answer = 'allowed' | 'denied' | 'timeout';
 
@@ -109,10 +111,16 @@ export class BridgeRequests {
   async call(chatId: string, call: BridgeCall, signal: AbortSignal): Promise<string> {
     if (this.host.policy() === 'off') throw new Error('The user turned off agent-to-agent connections in FriedLiver.');
     if (isExternal(chatId)) {
+      if (call.tool === PERMISSION_HOOK_TOOL) {
+        this.host.permissionHook?.(chatId, call);
+        // No decision: the hook's output, read like a command hook's stdout, leaves the ask to Claude Code's own prompt.
+        return '{}';
+      }
       // The computer itself (system_*) stays with FriedLiver's own chats, where each call is asked for in context.
       if (!isBrowserCall(call)) throw new Error('Only the browser_* tools are open to clients outside FriedLiver.');
       return this.external(chatId, call, signal);
     }
+    if (call.tool === PERMISSION_HOOK_TOOL) throw new Error('Only Claude Code outside FriedLiver uses this.');
     const caller = this.chat(chatId);
     if (!caller) throw new Error('This chat was closed in FriedLiver.');
     if (caller.readOnly) throw new Error('This chat only proposes text: FriedLiver tools are off in it.');

@@ -152,6 +152,61 @@ describe('the companion', () => {
   });
 });
 
+describe('asks no chat holds (Claude Code, through its hook)', () => {
+  const ask = (id = 'claude-hook-1') => ({
+    id,
+    chatId: ':external:abc',
+    agentLabel: 'Claude Code',
+    chatTitle: 'repo',
+    question: 'Run a command?',
+    detail: 'npm test',
+    choices: [
+      { id: 'open', label: 'Answer in Claude Code', kind: 'primary' as const },
+      { id: 'dismiss', label: 'Dismiss', kind: 'secondary' as const },
+    ],
+  });
+
+  it('shows one with its agent\'s character, keeps it through state updates, and a click runs its choice once', () => {
+    const t = setup();
+    const chosen: string[] = [];
+    expect(t.c.show(ask(), 'claude', (c) => chosen.push(c))).toBe(true);
+    expect(t.shown()).toEqual([{ ...ask(), character: 'data:image/svg+xml;base64,AA==' }]);
+    t.set(state(chat('a')));
+    expect(t.hidden()).toEqual([]);
+    expect(t.c.answer('claude-hook-1', 'nope')).toBe(false);
+    expect(t.c.answer('claude-hook-1', 'open')).toBe(true);
+    expect(t.c.answer('claude-hook-1', 'open')).toBe(false);
+    expect(chosen).toEqual(['open']);
+    expect(t.hidden()).toEqual(['claude-hook-1']);
+    expect(t.answers).toEqual([]);
+  });
+
+  it('drop hides it, and shows nothing when turned off or with no character', () => {
+    const t = setup();
+    t.c.show(ask(), 'claude', () => {});
+    t.c.drop('claude-hook-1');
+    t.c.drop('claude-hook-1');
+    expect(t.hidden()).toEqual(['claude-hook-1']);
+    expect(t.c.answer('claude-hook-1', 'open')).toBe(false);
+    expect(setup({ enabled: false }).c.show(ask(), 'claude', () => {})).toBe(false);
+    const none = setup({ character: () => undefined });
+    expect(none.c.show(ask(), 'claude', () => {})).toBe(false);
+    expect(none.calls).toEqual([]);
+  });
+
+  it('a new look shows it again; stopping lets it go', () => {
+    const t = setup();
+    t.c.show(ask(), 'claude', () => {});
+    t.c.clear();
+    t.set(EMPTY_STATE);
+    expect(t.shown().length).toBe(2);
+    t.c.clear(true);
+    t.set(EMPTY_STATE);
+    expect(t.shown().length).toBe(2);
+    expect(t.hidden()).toEqual(['claude-hook-1', 'claude-hook-1']);
+  });
+});
+
 describe('card words', () => {
   const first = (items: Item[]) => {
     const t = setup();

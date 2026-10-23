@@ -435,6 +435,23 @@ checks (`parseCall`, `src/host/bridgeRequests.ts`).
 - **The browser only.** That client reaches the `browser_*` tools and nothing
   else: not the agent-to-agent tools, not the index, not `system_*`. Every
   action asks (docs/CONNECTIONS.md).
+- **Its permission asks in the companion: told, never answered.**
+  `friedliver.companion.claudeCode` (off by default, user settings only; **FriedLiver:
+  Show Claude Code's Asks in the Companion** turns it and the connection on) adds one
+  `PermissionRequest` hook to `~/.claude/settings.json`, written the same way as
+  `~/.claude.json` above. It is an `mcp_tool` hook calling
+  `friedliver_permission_request` on `friedliver-browser`: no program, shell or secret.
+  That tool is never in a tools list, so the model doesn't see it, and only the
+  external session may call it (a chat's call is refused). FriedLiver always answers
+  `{}`, which is no decision, so the ask stays with Claude Code's own prompt. The
+  companion's card shows what is asked (control and direction characters spelled out)
+  and offers only **Answer in Claude Code** and **Dismiss**. Plans, mode switches and
+  Claude's questions aren't shown. To hide the card once you answered, FriedLiver
+  watches the session's transcript, but only a `.jsonl` file under
+  `~/.claude/projects`, and it only looks for a tool result. The hook is taken out
+  when FriedLiver stops or the setting goes off, and only FriedLiver's own group is
+  touched. After a crash it stays until the next start; until then Claude Code
+  reports a hook error on each ask and asks as usual.
 
 ### FriedLiver Remote
 

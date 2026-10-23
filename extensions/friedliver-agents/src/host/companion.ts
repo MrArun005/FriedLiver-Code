@@ -270,11 +270,16 @@ export interface CompanionDeps {
   videoFailed?(file: string): void;
 }
 
+/** An ask no chat holds (Claude Code's, through its hook: claudeHook.ts), as `show` takes it. */
+export type OutsideItem = Omit<CompanionItem, 'character' | 'characterRun' | 'video' | 'videoRun'>;
+
 export class Companion {
-  /** What the workbench shows, by request id, with the message each of its choices sends. */
-  private readonly shown = new Map<string, Map<string, WebviewMessage>>();
+  /** What the workbench shows, by request id, with what each of its choices does. */
+  private readonly shown = new Map<string, Map<string, () => void>>();
   /** Answered here and still waiting in the state (the core hasn't caught up): never shown or answered again. */
   private readonly sent = new Set<string>();
+  /** Asks no chat holds, by id, until dropped or clicked. */
+  private readonly outside = new Map<string, { item: OutsideItem; agent: string; choose(choiceId: string): void }>();
   /** Videos whose bytes the workbench has, by key, with their file. */
   private readonly videos = new Map<string, string>();
   /** Videos that couldn't play (by key: path, size, time), so they aren't tried on every ask. */
@@ -296,15 +301,28 @@ export class Companion {
           continue;
         }
         const e = companionEntry(state, entry);
-        const look = e && this.deps.character(e.agent, (key) => this.failedVideos.has(key));
-        if (!e || !look) continue;
-        live.add(entry.id);
-        this.shown.set(entry.id, e.answers);
-        const { video, videoRun, ...pictures } = look;
-        const v = this.sendVideo(video);
-        const vr = videoRun && videoRun.key === video?.key ? (v && { key: v.key, type: v.type }) : this.sendVideo(videoRun);
-        this.deps.run('_friedliver.companion.show', { ...e.item, ...pictures, ...(v ? { video: v } : {}), ...(vr ? { videoRun: vr } : {}) } satisfies CompanionItem);
+        if (!e) continue;
+        const answers = new Map([...e.answers].map(([choice, message]) => [choice, () => this.deps.answer(message)] as const));
+        if (this.present(e.item, e.agent, answers)) live.add(entry.id);
       }
+      for (const [id, o] of this.outside) {
+        if (this.shown.has(id)) {
+          live.add(id);
+          continue;
+        }
+        const answers = new Map(
+          o.item.choices.map((c) => [
+            c.id,
+            () => {
+              this.outside.delete(id);
+              o.choose(c.id);
+            },
+          ]),
+        );
+        if (this.present(o.item, o.agent, answers)) live.add(id);
+      }
+    } else {
+      this.outside.clear();
     }
     for (const id of [...this.shown.keys()]) {
       if (live.has(id)) continue;
@@ -314,18 +332,48 @@ export class Companion {
   }
 
   /**
+   * Shows an ask no chat holds until `drop` or a click on one of its choices (which runs `choose` with
+   * the choice's id). False when the companion is off or the agent has no character to show it.
+   */
+  show(item: OutsideItem, agent: string, choose: (choiceId: string) => void): boolean {
+    if (!this.deps.enabled()) return false;
+    this.outside.set(item.id, { item, agent, choose });
+    this.update(this.deps.state());
+    if (this.shown.has(item.id)) return true;
+    this.outside.delete(item.id);
+    return false;
+  }
+
+  /** The ask stopped waiting (answered elsewhere, or gone): its card goes. Unknown ids do nothing. */
+  drop(id: string): void {
+    if (this.outside.delete(id)) this.update(this.deps.state());
+  }
+
+  /**
    * A click: answers exactly the request it showed, once. An id that isn't showing (answered, gone, or
    * never shown) or a choice it didn't offer does nothing.
    */
   answer(id: unknown, choiceId: unknown): boolean {
     if (typeof id !== 'string' || typeof choiceId !== 'string') return false;
     this.update(this.deps.state());
-    const message = this.shown.get(id)?.get(choiceId);
-    if (!message) return false;
+    const run = this.shown.get(id)?.get(choiceId);
+    if (!run) return false;
     this.shown.delete(id);
     this.sent.add(id);
     this.deps.run('_friedliver.companion.hide', id);
-    this.deps.answer(message);
+    run();
+    return true;
+  }
+
+  /** Sends one ask to the workbench with its agent's character; false when there is no character to show it. */
+  private present(item: OutsideItem, agent: string, answers: Map<string, () => void>): boolean {
+    const look = this.deps.character(agent, (key) => this.failedVideos.has(key));
+    if (!look) return false;
+    this.shown.set(item.id, answers);
+    const { video, videoRun, ...pictures } = look;
+    const v = this.sendVideo(video);
+    const vr = videoRun && videoRun.key === video?.key ? (v && { key: v.key, type: v.type }) : this.sendVideo(videoRun);
+    this.deps.run('_friedliver.companion.show', { ...item, ...pictures, ...(v ? { video: v } : {}), ...(vr ? { videoRun: vr } : {}) } satisfies CompanionItem);
     return true;
   }
 
@@ -353,8 +401,15 @@ export class Companion {
     return true;
   }
 
-  /** Hides everything (the setting turned off, the extension stopping). */
-  clear(): void {
-    this.update({ chats: [] });
+  /**
+   * Hides everything (the setting turned off, other characters). The next update shows what still waits,
+   * in its new look; `forget` (the extension stopping) also lets go of the asks no chat holds.
+   */
+  clear(forget = false): void {
+    if (forget) this.outside.clear();
+    for (const id of [...this.shown.keys()]) {
+      this.shown.delete(id);
+      this.deps.run('_friedliver.companion.hide', id);
+    }
   }
 }

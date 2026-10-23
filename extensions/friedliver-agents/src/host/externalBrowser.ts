@@ -42,10 +42,10 @@ export function claudeEntry(runtime: string, script: string, tokenFile: string) 
   return { type: 'stdio', command: runtime, args: [script, tokenFile], env: { ELECTRON_RUN_AS_NODE: '1' } };
 }
 
-type Config = Record<string, unknown> & { mcpServers?: Record<string, unknown> };
+export type Config = Record<string, unknown> & { mcpServers?: Record<string, unknown> };
 
-/** Claude Code's config, or {} when there is none yet; throws rather than guess at a file it can't parse. */
-async function readConfig(file: string): Promise<{ config: Config; exists: boolean }> {
+/** Claude Code's config (`key`: the object FriedLiver edits in it), or {} when there is none yet; throws rather than guess at a file it can't parse. */
+export async function readConfig(file: string, key = 'mcpServers'): Promise<{ config: Config; exists: boolean }> {
   let text: string;
   try {
     text = await readFile(file, 'utf8');
@@ -55,13 +55,13 @@ async function readConfig(file: string): Promise<{ config: Config; exists: boole
   }
   const config: unknown = JSON.parse(text);
   if (typeof config !== 'object' || config === null || Array.isArray(config)) throw new Error(`${file} is not a JSON object; left it alone.`);
-  const servers = (config as Config).mcpServers;
-  if (servers !== undefined && (typeof servers !== 'object' || servers === null || Array.isArray(servers))) throw new Error(`mcpServers in ${file} is not an object; left it alone.`);
+  const value = (config as Config)[key];
+  if (value !== undefined && (typeof value !== 'object' || value === null || Array.isArray(value))) throw new Error(`${key} in ${file} is not an object; left it alone.`);
   return { config: config as Config, exists: true };
 }
 
 /** The new file is always 0600 (it holds bearer tokens). Backup of the old file, then a write to a temp file beside it and a rename, so a crash never leaves half a config. */
-async function writeConfig(link: string, config: Config, exists: boolean): Promise<void> {
+export async function writeConfig(link: string, config: Config, exists: boolean): Promise<void> {
   // A dotfile manager's symlink stays a symlink: the file it points at is the one replaced.
   const file = exists ? await realpath(link) : link;
   if (exists) {
