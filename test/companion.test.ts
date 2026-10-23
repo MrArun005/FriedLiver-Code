@@ -8,7 +8,9 @@ const PATCH = '0310-companion.patch';
 type Item = { id: string; choices: { id: string; label: string; kind: string }[]; character: string; characterRun?: string; detail?: string };
 let m: {
   parseCompanionItem(raw: unknown): Item | undefined;
-  CompanionQueue: new () => { current: Item | undefined; more: number; show(i: Item): boolean; hide(id: string): boolean; later(): void; offers(id: string, choice: string): boolean };
+  CompanionQueue: new () => { current: Item | undefined; more: number; show(i: Item): boolean; hide(id: string): boolean; later(): void; offers(id: string, choice: string): boolean; waiting(limit: number): Item[]; front(id: string): boolean };
+  lineupSize(raw: unknown): number;
+  MAX_LINEUP: number;
 };
 
 beforeAll(async () => {
@@ -74,6 +76,36 @@ describe('the companion queue', () => {
     expect(q.offers('a', 'always')).toBe(false);
     q.hide('a');
     expect(q.offers('a', 'allow')).toBe(false);
+  });
+
+  it('the line is the next ones in arrival order, never the one shown, at most the limit', () => {
+    const q = new m.CompanionQueue();
+    for (const id of ['a', 'b', 'c', 'd']) q.show(item(id));
+    expect(q.waiting(7).map((i) => i.id)).toEqual(['b', 'c', 'd']);
+    expect(q.waiting(2).map((i) => i.id)).toEqual(['b', 'c']);
+    expect(q.waiting(0)).toEqual([]);
+    expect(q.waiting(-3)).toEqual([]);
+    q.hide('a');
+    expect(q.waiting(7).map((i) => i.id)).toEqual(['c', 'd']);
+  });
+
+  it('bringing one forward puts it on screen and the one shown right behind it; clicks then count for it', () => {
+    const q = new m.CompanionQueue();
+    for (const id of ['a', 'b', 'c']) q.show(item(id));
+    expect(q.front('c')).toBe(true);
+    expect([q.current?.id, ...q.waiting(7).map((i) => i.id)]).toEqual(['c', 'a', 'b']);
+    expect(q.offers('c', 'allow')).toBe(true);
+    expect(q.offers('a', 'allow')).toBe(false);
+    expect(q.front('c')).toBe(false); // already in front
+    expect(q.front('zz')).toBe(false); // unknown
+    q.later();
+    expect(q.front('c')).toBe(false); // put off: gone from the line too
+  });
+
+  it('the lineup setting is a whole number from 0 to the most, anything else none', () => {
+    expect(m.MAX_LINEUP).toBe(7);
+    expect([0, 3, 7, 12, -1].map(m.lineupSize)).toEqual([0, 3, 7, 7, 0]);
+    for (const bad of [2.5, '5', null, undefined, NaN, {}]) expect(m.lineupSize(bad), String(bad)).toBe(0);
   });
 });
 

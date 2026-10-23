@@ -1624,9 +1624,75 @@
 	box-shadow: var(--fl-focus-halo);
 }
 
+/* The lineup (friedliver.companion.lineup): the next ones wait small at the bottom right, the one that
+   comes next nearest the middle, slightly overlapped. Each is a button: hover or focus lifts it and its
+   title says who and what; a click brings it forward. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line {
+	position: absolute;
+	right: var(--fl-sp-4);
+	display: flex;
+	align-items: flex-end;
+	/* With the shown character (.fl-companion): above notification toasts, below the quick input. */
+	z-index: 2548;
+	pointer-events: none;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who {
+	position: relative;
+	width: calc(1.5 * var(--fl-h-xl));
+	height: calc(1.5 * var(--fl-h-xl));
+	margin: 0 0 0 calc(-0.25 * var(--fl-h-xl));
+	padding: 0;
+	border: none;
+	border-radius: var(--fl-r-ctl);
+	background: transparent;
+	cursor: pointer;
+	pointer-events: auto;
+	animation: fl-companion-fade var(--fl-dur) var(--fl-ease-out) both;
+	transition: transform var(--fl-dur-out) var(--fl-ease-out);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who:first-child {
+	margin-left: 0;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who:hover,
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who:focus-visible {
+	z-index: 1;
+	transform: translateY(calc(-1 * var(--fl-sp-2)));
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who:focus-visible {
+	outline: none;
+	box-shadow: var(--fl-focus-halo);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who > img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	user-select: none;
+}
+
+/* An agent with no picture: its initial on a pill. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__initial {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	border-radius: var(--fl-r-pill);
+	background: var(--fl-pill-bg);
+	color: var(--fl-fg);
+	font-size: var(--fl-t-title);
+	font-weight: var(--fl-w-strong);
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__character,
-	.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble {
+	.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion__bubble,
+	.monaco-workbench:not(.hc-black):not(.hc-light) .fl-companion-line__who {
 		animation: none;
+		transition: none;
 	}
 }

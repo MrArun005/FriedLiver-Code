@@ -1035,6 +1035,13 @@
           "default": true,
           "description": "Show a notification with buttons when an agent waits for you and its chat isn't on screen or the window isn't focused."
         },
+        "friedliver.companion.lineup": {
+          "type": "integer",
+          "default": 7,
+          "minimum": 0,
+          "maximum": 7,
+          "markdownDescription": "How many of the next requests wait in line as small characters at the bottom right while one is shown (0 to 7). Click one to bring it forward; the one shown then waits next. 0: no line, only the \"+N\" count on the card."
+        },
         "friedliver.companion.claudeCode": {
           "type": "boolean",
           "default": false,
