@@ -1,6 +1,6 @@
 # FriedLiver Code
 
-FriedLiver built on VS Code 1.142 (Code - OSS). You get VS Code's editor and
+FriedLiver built on VS Code 1.143 (Code - OSS). You get VS Code's editor and
 extensions from Open VSX, plus Claude, Codex and Gemini coding agents in a
 panel on the right. Under each message box you pick the agent's model, its
 effort, and how much it may do on its own: **Ask** (edits and commands wait for
