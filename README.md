@@ -7,9 +7,9 @@ effort, and how much it may do on its own: **Ask** (edits and commands wait for
 you), **Auto-accept edits**, or **Full auto**. What an agent asks to do shows
 with its diff, its command or its plan, and every turn can be undone.
 
-![FriedLiver with the Beacon design: code, chats as tabs, and the agents panel](docs/screenshots/beacon/workbench.png)
+![A chat in the Mono design: your message at the right, the reply, the steps, a decision waiting on you, the details rail and the prompt, each with its own look](docs/screenshots/mono/01-chat-dark.png)
 
-![A chat: steps, a diff and an approval that says why and how to undo](docs/screenshots/beacon/chat.png)
+![FriedLiver with the Mono design: the editor, and a chat with the Demo agent in the side bar](docs/screenshots/mono/12-app-chat.png)
 
 What changes from stock VS Code:
 
@@ -36,11 +36,15 @@ What changes from stock VS Code:
   most others install as usual. Microsoft-only extensions (Pylance, C/C++, C#,
   Remote - SSH, Copilot) aren't there. Open replacements are listed in the
   benchmarks.
-- **Beacon design.** The whole app is restyled, VS Code's own parts included:
+- **Mono design (v3).** The whole app is restyled, VS Code's own parts included:
   a title bar with one search box ("Go to file, run a command, ask an agent")
   and a "N need you" pill, stroke icons, Geist fonts, and **FriedLiver Dark /
-  Light** as the default themes (Black Blue, Light Blue, Midnight Blue and
-  Graphite stay available). One ember accent marks the next key action; status
+  Light** as the default themes in neutral black and grey (Black Blue, Light
+  Blue, Midnight Blue and Graphite stay available). Every place in a chat has
+  its own look, so the prompt, your messages, the agent's reply, what it did
+  and the details never blur together
+  ([zones](docs/design/COMPONENTS.md#02-v3-mono-zones-2026-11-03)). One white
+  (light: black) accent marks the next key action; status
   has a shape (◉ needs you, ◠ working, ✓ done, ⊗ failed). Every chat is its own
   tab in the top row, each agent shows its real logo, and errors pop up as
   toasts that close by themselves ([design system](docs/design/COMPONENTS.md)).

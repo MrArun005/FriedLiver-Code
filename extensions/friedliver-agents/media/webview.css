@@ -25,6 +25,9 @@ body {
   line-height: 1.5;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: var(--font-features);
+  font-optical-sizing: auto;
 }
 h1,
 h2,
@@ -353,15 +356,18 @@ button.count-item .icon {
 }
 
 /* New task: the composer's material (§2.27): the input tone, a hairline, the rim, r12. */
+/* The board's task box is a prompt zone (v3): the same lifted, edged box as the chat composer. */
 .new-task {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-12);
-  background: var(--input-bg);
+  border: 1px solid var(--zone-prompt-edge);
+  border-radius: var(--r-14);
+  background: var(--zone-prompt-bg);
+  box-shadow: var(--rim), var(--zone-prompt-lift);
 }
 .new-task:focus-within {
-  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
+  border-color: var(--zone-prompt-edge-focus);
+  box-shadow: var(--rim), var(--zone-prompt-lift), var(--zone-prompt-glow);
 }
 .new-task textarea {
   min-height: var(--sp-10);
@@ -2123,25 +2129,37 @@ body[data-surface='chat'] {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  container: chat-col / inline-size;
 }
 .ctx-rail {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
+  gap: var(--sp-6);
   min-width: 0;
   overflow-y: auto;
-  padding: var(--sp-4);
-  border-left: var(--line) solid var(--hairline);
+  padding: var(--sp-5) var(--sp-4);
+  border-left: var(--line) solid var(--border);
+  background: var(--zone-shell);
+  font-size: var(--t-step);
+  contain: layout paint;
 }
+/* Details zone: section names are eyebrows (small caps-style, tracked), so the rail reads as reference,
+   never as conversation. */
 .ctx-rail h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  margin: 0 0 var(--sp-2);
-  color: var(--fg);
-  font-size: var(--t-90);
+  margin: 0 0 var(--sp-3);
+  color: var(--fg-2);
+  font-size: var(--t-eyebrow);
   font-weight: var(--w-strong);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+}
+.ctx-rail section + section {
+  padding-top: var(--sp-5);
+  border-top: var(--line) solid var(--hairline);
 }
 .ctx-rail .fl-row {
   margin: 0 calc(var(--sp-2) * -1);
@@ -2154,7 +2172,7 @@ body[data-surface='chat'] {
 }
 .ctx-l {
   color: var(--fg-2);
-  font-size: var(--t-85);
+  font-size: var(--t-eyebrow);
   font-variant-numeric: tabular-nums;
 }
 .ctx-v {
@@ -2163,6 +2181,8 @@ body[data-surface='chat'] {
   gap: var(--sp-2);
   min-width: 0;
   color: var(--sel-fg);
+  font-size: var(--fs);
+  font-weight: var(--w-medium);
   font-variant-numeric: tabular-nums;
 }
 .ctx-more,
@@ -2192,7 +2212,7 @@ body[data-surface='chat'] {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 20px;
+  height: var(--zone-prompt-fade);
   background: linear-gradient(to bottom, transparent, var(--bg));
   pointer-events: none;
 }
@@ -2228,17 +2248,24 @@ body[data-surface='chat'] {
 .transcript > * + .user-msg {
   margin-top: var(--turn-gap);
 }
-/* Your message's box spans the transcript, however short, like Claude Code's prompt box. */
+/* You zone (v3): your message is a raised bubble at the right that fits its text, with a tighter corner
+   toward you, so who said what reads at a glance and never looks like the agent's reply or a card. */
+.user-msg {
+  justify-content: flex-end;
+}
 .user-msg .bubble {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: var(--w-bubble);
   margin: var(--sp-1) 0;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-box);
-  background: color-mix(in srgb, var(--sel-fg) 5%, var(--input-bg));
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border: 1px solid var(--zone-you-edge);
+  border-radius: var(--r-bubble) var(--r-bubble) var(--r-bubble-tail) var(--r-bubble);
+  background: var(--zone-you-bg);
   color: var(--sel-fg);
+  font-size: var(--t-reply);
+  line-height: var(--lh-reply);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -2274,6 +2301,13 @@ button.msg-more {
 .transcript > * {
   scroll-margin-top: calc(var(--sp-12) * 2);
 }
+/* Speed: in a long chat, items far off screen skip style, layout and paint until they scroll near
+   (content-visibility); the browser remembers each one's real height (auto), so the scrollbar and
+   scroll anchoring stay true. The last items, where the agent is writing, always render. */
+.transcript > :not(:nth-last-child(-n + 8)):not(.sticky-prompt) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--sp-12);
+}
 .sticky-prompt::after {
   content: '';
   position: absolute;
@@ -2287,10 +2321,13 @@ button.msg-more {
 .sticky-prompt .bubble {
   position: relative;
   margin: var(--sp-1) 0;
-  padding: var(--sp-1) 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-6);
-  background: var(--input-bg);
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--zone-ask-bar);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--t-step);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2335,10 +2372,18 @@ button.rewind-btn {
 }
 
 /* The agent's reply: plain text, Claude Code's paragraph rhythm. */
+/* Reply zone (v3): no box; the largest reading type on the page and a long line height. */
 .prose {
   position: relative;
   padding: var(--sp-2) 0;
   color: var(--fg);
+  font-size: var(--t-reply);
+  line-height: var(--lh-reply);
+}
+@container chat-col (min-width: 720px) {
+  .prose {
+    font-size: var(--t-reply-wide);
+  }
 }
 .md > :first-child {
   margin-top: 0;
@@ -2568,15 +2613,19 @@ pre.code code {
 }
 
 /* The timeline: tool lines and thinking, a 7px dot at 9px and a 1px spine at 12px joining a run. */
+/* Steps zone (v3): what the agent did is small and secondary on a hairline spine, so it never competes
+   with the reply you read or the prompt you type. */
 .tl {
   position: relative;
-  padding: var(--sp-2) 0 var(--sp-2) 30px;
+  padding: var(--sp-1) 0 var(--sp-1) 30px;
   min-width: 0;
+  font-size: var(--t-step);
+  color: var(--fg-2);
 }
 .tl::before {
   content: '';
   position: absolute;
-  top: 15px;
+  top: 11px;
   left: 9px;
   width: 7px;
   height: 7px;
@@ -2591,7 +2640,7 @@ pre.code code {
   bottom: 0;
   left: 12px;
   width: 1px;
-  background: var(--border);
+  background: var(--zone-step-spine);
 }
 .tl:not(.tl + .tl)::after {
   top: 18px;
@@ -2647,7 +2696,7 @@ button.step-main:active {
 .step-verb {
   flex: none;
   margin-right: var(--sp-1);
-  font-weight: 700;
+  font-weight: var(--w-medium);
   color: var(--fg);
 }
 .step-text {
@@ -3930,12 +3979,17 @@ code.command-line {
   color: var(--fg-2);
 }
 /* A message waiting for the turn to end: your message's box, dashed. */
+/* A queued message is yours too: the you-zone bubble at the right, dashed until it is sent. */
 .bubble.queued {
   position: relative;
-  margin: var(--sp-2) 0;
-  padding: var(--sp-1) 6px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-6);
+  width: fit-content;
+  max-width: var(--w-bubble);
+  margin: var(--sp-2) 0 var(--sp-2) auto;
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px dashed var(--zone-prompt-edge);
+  border-radius: var(--r-bubble) var(--r-bubble) var(--r-bubble-tail) var(--r-bubble);
+  color: var(--fg);
+  font-size: var(--t-reply);
   white-space: pre-wrap;
 }
 .queued-bar {
@@ -3974,6 +4028,7 @@ code.command-line {
   gap: 2px;
   padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--border);
+  background: var(--zone-shell);
   container: switcher / inline-size;
 }
 /* Narrow (§2.18): the trailing cluster folds so the open tab keeps its title; the count and the
@@ -4138,6 +4193,14 @@ button[aria-pressed='true'] .icon path {
   margin-bottom: var(--sp-2);
   font-weight: var(--w-strong);
   color: var(--fg);
+}
+/* In the context rail its name is a details-zone eyebrow, like the rail's other section names. */
+.ctx-rail .jump-list b {
+  margin-bottom: var(--sp-3);
+  color: var(--fg-2);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
 }
 button.jump-item {
   display: block;

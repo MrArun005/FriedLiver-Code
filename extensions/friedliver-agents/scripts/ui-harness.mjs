@@ -994,8 +994,17 @@ async function shoot() {
       d.remove();
       return c;
     }, v);
-    // Auto (Full auto): the mode's colour is errorForeground, as in Claude Code; Manual's is the orange accent.
-    check(idle !== focused && focused === (await tone('--error')), `focus turns the border the mode's colour (${idle} → ${focused})`);
+    // v2 (COMPONENTS.md §2.27): focus is the neutral ring at 60% in every mode (the mode button says the mode, and
+    // red is kept for errors), so the edge turns --focus at 60%, never the error colour.
+    const ring60 = await p.evaluate(() => {
+      const d = document.createElement('div');
+      d.style.color = 'color-mix(in srgb, var(--focus) 60%, transparent)';
+      document.querySelector('.composer').appendChild(d);
+      const c = window.getComputedStyle(d).color;
+      d.remove();
+      return c;
+    });
+    check(idle !== focused && focused === ring60 && focused !== (await tone('--error')), `focus turns the border the neutral focus ring (${idle} → ${focused})`);
     const ring = await p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
     check(/ 0px 0px 3px/.test(ring) && !ring.includes('rgb(0, 120'), `a 3px halo in the mode's colour, no blue ring [${ring}]`);
     await p.evaluate(() => window.postMessage({ type: 'action', action: { t: 'approval', chatId: 'chat-c6', level: 'ask' } }, '*'));
@@ -1398,8 +1407,13 @@ async function shoot() {
   }
   {
     // Nothing spills out of a card, list row or map node, at any card width: pills shrink, wrap or cut with an ellipsis.
+    // Measured with animations paused: a working status ring spins, and a rotated square's bounding box is up to
+    // 41% wider than the square, which read as a 1-2px spill on some frames and not others.
     const spills = (p, container) =>
       p.evaluate((sel) => {
+        const freeze = document.createElement('style');
+        freeze.textContent = '*, *::before, *::after { animation-play-state: paused !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; animation-duration: 0s !important; }';
+        document.head.appendChild(freeze);
         const out = [];
         for (const box of document.querySelectorAll(sel)) {
           const r = box.getBoundingClientRect();
@@ -1411,6 +1425,7 @@ async function shoot() {
             if (e.left < inner.left - 0.5 || e.right > inner.right + 0.5) out.push(`${el.className || el.tagName} in ${box.getAttribute('data-nav') ?? sel} by ${Math.round(Math.max(inner.left - e.left, e.right - inner.right))}px`);
           }
         }
+        freeze.remove();
         return out;
       }, container);
     for (const width of [280, 360, 480]) {

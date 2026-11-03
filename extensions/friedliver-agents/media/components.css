@@ -135,7 +135,7 @@
   flex: none;
 }
 
-/* ---- Button (§2.1): primary (the ember accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
+/* ---- Button (§2.1): primary (the accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
 
 .fl-btn {
   --btn-h: var(--h-md);
@@ -238,7 +238,7 @@
   display: flex;
   width: 100%;
 }
-/* The one key action on a surface: the ember accent, white ink, a top-edge sheen over a contact shadow.
+/* The one key action on a surface: the accent and its own ink, a top-edge sheen over a contact shadow.
    "brand" was v1's send fill; v2 removes it, so it draws as the primary (the send is the primary's colour). */
 .fl-btn--primary,
 .fl-btn--brand {
@@ -372,7 +372,7 @@
   color: inherit;
   opacity: 0.75;
 }
-/* On the accent the second part keeps full ink (75% of white on ember drops under 4.5:1). */
+/* On the accent the second part keeps full ink (75% of the ink on the accent drops contrast). */
 :is(.fl-btn--primary, .fl-btn--brand) .fl-btn__sub {
   opacity: 1;
   font-weight: var(--w-regular);
@@ -825,7 +825,7 @@ button.fl-pill:focus-visible {
   box-shadow: inset 0 0 0 var(--line) var(--ctl-border-active);
 }
 .fl-toggle[aria-checked='true']::after {
-  background: var(--thumb);
+  background: var(--toggle-thumb);
   box-shadow: var(--shadow-thumb);
   transform: translateX(calc(var(--tg-w) - var(--tg-k) - var(--tg-inset) * 2));
 }
@@ -1535,6 +1535,11 @@ textarea.fl-input {
   border-color: var(--fg-2);
   background: color-mix(in srgb, var(--sel-fg) 7%, var(--input-bg));
 }
+/* v3: a decision waiting on you carries the needs-you bar on its leading edge: the one card in the
+   transcript that is about you, told apart from replies and steps without a second colour. */
+.apv.fl-card[data-focus] {
+  box-shadow: var(--rim), var(--zone-needs-bar);
+}
 .fl-card--ghost[data-focus] {
   background: color-mix(in srgb, var(--sel-fg) 7%, transparent);
 }
@@ -2008,6 +2013,8 @@ textarea.fl-input {
 }
 .fl-discuss__rows {
   display: grid;
+  /* One column that never grows past the card: a long no-wrap row truncates instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-half);
 }
 .fl-discuss__group,
@@ -3403,10 +3410,12 @@ button.fl-row,
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--input-bg);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-12);
-  box-shadow: var(--rim), var(--shadow-composer);
+  /* v3 prompt zone: the brightest surface on the page, with an edge you can see and a lift over the
+     transcript, so the one place you type is never mistaken for a message or a card. */
+  background: var(--zone-prompt-bg);
+  border: 1px solid var(--zone-prompt-edge);
+  border-radius: var(--r-14);
+  box-shadow: var(--rim), var(--zone-prompt-lift);
 }
 /* v2 (§2.27, owner-authorised restyle): the send is the one accent in every mode (the mode button says the
    mode); focus is the neutral ring at 60% with its halo. */
@@ -3416,8 +3425,8 @@ button.fl-row,
   --mode-send-fg: var(--send-fg);
 }
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
-  box-shadow: var(--rim), var(--shadow-composer), var(--focus-halo);
+  border-color: color-mix(in srgb, var(--mode) 60%, transparent);
+  box-shadow: var(--rim), var(--zone-prompt-lift), 0 0 0 3px color-mix(in srgb, var(--mode) 18%, transparent);
 }
 /* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
 .cc-chips {
@@ -3517,17 +3526,18 @@ button.cc-chip-remove:hover {
 }
 .cc-input textarea {
   flex: 1;
-  min-height: calc(1.5em + 20px);
+  /* Two lines at rest: room that says "type here". */
+  min-height: calc(2lh + 20px);
   /* Eight lines, then it scrolls inside; never more than a quarter of the panel. */
   max-height: min(calc(8lh + 20px), 25vh);
   field-sizing: content;
-  padding: 10px 36px 10px 14px;
+  padding: 10px 40px 10px 16px;
   border: 0;
-  border-radius: var(--r-12);
+  border-radius: var(--r-14);
   background: transparent;
   color: var(--sel-fg);
-  caret-color: var(--fg);
-  font-size: var(--t-100);
+  caret-color: var(--sel-fg);
+  font-size: var(--t-prompt);
   line-height: 1.5;
   resize: none;
   outline: none;
@@ -3560,8 +3570,8 @@ button.cc-mic .icon {
   align-items: center;
   gap: 2px;
   min-width: 0;
-  padding: 5px;
-  border-top: 0.5px solid var(--hairline);
+  padding: 6px;
+  border-top: 0;
   color: var(--fg-2);
 }
 button.cc-icon-btn {
@@ -3652,10 +3662,10 @@ button.cc-mode[data-warn] {
 button.send-btn {
   flex: none;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: 2px;
-  border-radius: var(--r-ctl);
+  width: 30px;
+  height: 30px;
+  margin-left: var(--sp-1);
+  border-radius: var(--r-round);
   color: var(--mode-send-fg);
   background: var(--mode-send);
   box-shadow: var(--sheen), var(--elev-1);
@@ -3717,6 +3727,11 @@ button.send-btn:disabled {
 }
 .banners > * {
   pointer-events: auto;
+}
+/* The 8px between the banners and the prompt is page tone, not a window onto the transcript: without it a
+   line of the reply scrolled under the banners showed through, cut in half. */
+.banners:not(:empty) {
+  box-shadow: 0 var(--sp-2) 0 0 var(--bg);
 }
 .banners:empty {
   display: none;
