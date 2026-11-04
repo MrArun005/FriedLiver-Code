@@ -43,7 +43,9 @@ What changes from stock VS Code:
   Blue, Midnight Blue and Graphite stay available). Every place in a chat has
   its own look, so the prompt, your messages, the agent's reply, what it did
   and the details never blur together
-  ([zones](docs/design/COMPONENTS.md#02-v3-mono-zones-2026-11-03)). One white
+  ([zones](docs/design/COMPONENTS.md#02-v3-mono-zones-2026-11-03); see every
+  surface in a browser with `npm run web`, which builds the static site in
+  `extensions/friedliver-agents/web-dist`, the folder `vercel.json` deploys). One white
   (light: black) accent marks the next key action; status
   has a shape (◉ needs you, ◠ working, ✓ done, ⊗ failed). Every chat is its own
   tab in the top row, each agent shows its real logo, and errors pop up as

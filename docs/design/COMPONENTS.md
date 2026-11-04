@@ -79,6 +79,14 @@ Load order is unchanged: `tokens.css` → `webview.css` → `components.css`.
 
 **Gates.** `scripts/ui-v2.mjs`: 68 renders, 0 failures (contrast 4.5:1, accent groups, the 2px grid, nothing outside the window, 24px hit boxes). The light theme's secondary text went from .475 to .455 and `--fg-50` from 62% to 66%, so key hints stay at 4.5:1 with no warm tint.
 
+**Keyboard and assistive tech (2026-11-04).** Found by running every surface as a website (`scripts/web-export.mjs`) through axe-core 4.10 (WCAG 2.2 AA and best practices), a Tab walk, Reflow at 320px, forced colours and reduced motion:
+- *A focused control does what it says.* A waiting decision's keys work from the whole view, so Enter on a focused **Deny** approved the request (chat, approval cards; in the Inbox it started the hold that allows). Enter, Space and Tab on a control now belong to the control (`ownKey`, `src/webview/common.tsx`).
+- *No keyboard trap* (WCAG 2.1.2). In the message box Shift+Tab changes the mode and, while a request waits, Tab its scope, so Tab could not leave it. **Ctrl+M** (macOS **Ctrl+Shift+M**), VS Code's own "Toggle Tab Key Moves Focus", hands Tab back until pressed again; the box says so in its hint and to screen readers (`aria-description`, `aria-keyshortcuts`).
+- *Structure.* The chat's name is the page's `h1`, the transcript column and the Agent Manager are `main`, the tab strip is a `nav`, the rail's section names are `h2`, and a reply's headings sit under the page at levels 2–4 (`aria-level`). The conflict mark is an `img` with its label, the permissions tables' action column has a header, the Inbox's reply box is a `section`, and the `/discuss` jump links are 28px tall (WCAG 2.5.8). axe: 234 violation nodes before, 0 after, on all 31 pages.
+- *Forced colours* (Windows High Contrast). The OS drops shadows and replaces fills, so the selected tab and segment, every switch, the checkbox check, the timeline marks, the plan's progress, the needs-you bar and the composer's focus all vanished. A `@media (forced-colors: active)` layer at the end of `components.css` redraws each in system colours: Highlight for selected and on (an inner outline, never on a keyboard-focused item), a 3px CanvasText ring for focus, CanvasText and GrayText for marks.
+- *Unchanged and fine:* contrast (0 axe findings), Reflow at 320 and 480px (no sideways page on any surface), reduced motion (no animation runs), layout shift (≤ 0.0075 on every page; 0.1 is the limit).
+
+
 ## 1. Tokens
 
 All values are in `tokens.css` (webviews) and generated into the workbench as `--fl-<name>`. "Dark"/"Light" = FriedLiver Dark/Light (v2).

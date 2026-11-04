@@ -3729,9 +3729,17 @@ button.send-btn:disabled {
   pointer-events: auto;
 }
 /* The 8px between the banners and the prompt is page tone, not a window onto the transcript: without it a
-   line of the reply scrolled under the banners showed through, cut in half. */
-.banners:not(:empty) {
-  box-shadow: 0 var(--sp-2) 0 0 var(--bg);
+   line of the reply scrolled under the banners showed through, cut in half. A real box, not a shadow, so it
+   holds in forced colours too (shadows are dropped there; a background becomes Canvas). */
+.banners:not(:empty)::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--sp-2);
+  background: var(--bg);
+  pointer-events: none;
 }
 .banners:empty {
   display: none;
@@ -4136,5 +4144,98 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
 @keyframes mic-pulse {
   50% {
     opacity: 0.35;
+  }
+}
+
+/* ---- Forced colours (Windows High Contrast and other OS contrast themes; WCAG 1.4.1, 1.4.11) ----
+   The OS replaces every colour with its own and drops box-shadows, so anything drawn only with a fill or a
+   shadow vanished: the selected tab and segment, a switch and its knob, a checkbox's check, the timeline's
+   marks, the plan's progress, the needs-you bar and the composer's focus. Each is redrawn here in system
+   colours: Highlight for on, selected and current, CanvasText and GrayText for marks, ButtonText for edges. */
+@media (forced-colors: active) {
+  /* Selected and pressed: an inner Highlight outline. Not while keyboard-focused, so the focus ring (outside,
+     the theme's focus colour) is never replaced by it. */
+  .fl-tab[aria-selected='true']:not(:focus-visible),
+  .fl-seg__item[aria-selected='true']:not(:focus-visible),
+  .fl-seg__item[aria-checked='true']:not(:focus-visible),
+  [aria-pressed='true']:not(:focus-visible),
+  [role='option'][aria-selected='true']:not(:focus-visible),
+  .inbox-row[aria-selected='true']:not(:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .fl-toggle,
+  .fl-toggle::after,
+  .fl-check__box,
+  .fl-check__box::after,
+  .tl::before,
+  .tl::after,
+  .seg-bar i {
+    forced-color-adjust: none;
+  }
+  .fl-toggle {
+    background: Canvas;
+    box-shadow: inset 0 0 0 1px ButtonText;
+  }
+  .fl-toggle::after {
+    background: ButtonText;
+  }
+  .fl-toggle[aria-checked='true'] {
+    background: Highlight;
+    box-shadow: none;
+  }
+  .fl-toggle[aria-checked='true']::after {
+    background: HighlightText;
+    box-shadow: none;
+  }
+  .fl-toggle:disabled {
+    box-shadow: inset 0 0 0 1px GrayText;
+  }
+  .fl-toggle:disabled::after {
+    background: GrayText;
+  }
+  .fl-check__box {
+    border-color: ButtonText;
+    background: Canvas;
+  }
+  .fl-check__box:checked,
+  .fl-check__box:indeterminate {
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .fl-check__box::after {
+    border-color: HighlightText;
+  }
+  .tl::before {
+    background: CanvasText;
+  }
+  .tl::after {
+    background: GrayText;
+  }
+  .seg-bar i {
+    background: GrayText;
+  }
+  .seg-bar i[data-step='done'],
+  .seg-bar i[data-step='working'] {
+    background: Highlight;
+  }
+  .apv.fl-card[data-focus] {
+    border-left: 3px solid Highlight;
+  }
+  .composer:focus-within,
+  .new-task:focus-within {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+  /* Keyboard focus: a thicker CanvasText ring outside the control, unlike the inner Highlight of selection. */
+  .fl-tab:focus-visible,
+  .fl-seg__item:focus-visible,
+  .fl-btn:focus-visible,
+  .fl-toggle:focus-visible,
+  [aria-pressed]:focus-visible,
+  [role='option']:focus-visible,
+  .inbox-row:focus-visible {
+    outline: 3px solid CanvasText;
+    outline-offset: 2px;
   }
 }

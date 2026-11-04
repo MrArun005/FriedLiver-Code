@@ -361,7 +361,7 @@ function Manager() {
   const nav = { focusId, onFocus: setFocusId };
   return (
     <LiveState.Provider value={state}>
-      <div class="manager">
+      <main class="manager">
         <header class="mgr-head">
           <div class="mgr-title">
             <h1>Agent Manager</h1>
@@ -478,7 +478,7 @@ function Manager() {
         </div>
 
         {view !== 'images' && view !== 'inbox' && <History chats={own.filter((c) => c.archived)} outside={oldOutside} now={now} open={historyOpen} setOpen={setHistoryOpen} />}
-      </div>
+      </main>
     </LiveState.Provider>
   );
 }
@@ -1018,7 +1018,7 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
       <td class="c-files num">
         {c.files.length || '–'}
         {conflicts.length > 0 && (
-          <span class="conflict-mark" title={conflicts.map(conflictText).join('\n')} aria-label={`${conflicts.length} shared with other chats`}>
+          <span class="conflict-mark" role="img" title={conflicts.map(conflictText).join('\n')} aria-label={`${conflicts.length} shared with other chats`}>
             <Icon name="diff" />
           </span>
         )}

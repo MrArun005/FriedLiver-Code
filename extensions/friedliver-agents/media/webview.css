@@ -2145,7 +2145,7 @@ body[data-surface='chat'] {
 }
 /* Details zone: section names are eyebrows (small caps-style, tracked), so the rail reads as reference,
    never as conversation. */
-.ctx-rail h3 {
+.ctx-rail h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2410,7 +2410,7 @@ button.rewind-btn {
   font-size: var(--t-100);
   font-weight: 600;
 }
-.md h5.md-label {
+.md .md-label {
   margin: 0.6em 0 0.2em;
   font-size: var(--t-85);
   font-weight: 600;
@@ -4078,6 +4078,13 @@ button.all-btn {
   min-width: 0;
 }
 /* The chat's name (§2.34): 13/600 in a side bar; on a wide page the page title, 20/600, tracked in. */
+/* The chat's name is the page's heading; the h1 only carries the semantics, the button inside draws it. */
+.chat-head-h {
+  display: flex;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
 button.chat-head-title {
   display: block;
   min-width: 0;
@@ -4205,7 +4212,7 @@ button[aria-pressed='true'] .icon path {
 button.jump-item {
   display: block;
   width: 100%;
-  padding: var(--sp-half) var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
   border-left: 2px solid var(--hairline);
   color: var(--fg-2);
   overflow: hidden;
