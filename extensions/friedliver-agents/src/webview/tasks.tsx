@@ -68,13 +68,14 @@ const VIEWS: { id: View; title: string; icon: 'tasks' | 'list' | 'map' | 'grid' 
   { id: 'inbox', title: 'Inbox', icon: 'inbox' },
 ];
 
-/** Problem and Idle show only when a chat is in them. */
+/** Problem and Idle show only when a chat is in them. Needs you is last: with agents on auto it is rarely
+ *  anything, so the work in progress leads (the owner's call, 2026-11-04). */
 const COLUMNS: { id: ChatStatus; empty?: string }[] = [
-  { id: 'needs-you', empty: 'Nothing waits for you.' },
   { id: 'working', empty: 'No agent is working.' },
   { id: 'error' },
   { id: 'idle' },
   { id: 'done', empty: 'Finished tasks land here.' },
+  { id: 'needs-you', empty: 'Nothing waits for you.' },
 ];
 
 const open = (chatId: string) => send({ type: 'openChat', chatId });
@@ -367,9 +368,6 @@ function Manager() {
             <h1>Agent Manager</h1>
             <div class="mgr-counts" aria-label="Tasks by status">
               <span class="count-item">
-                <Dot state="needs-you" /> {tally.needsYou} need{tally.needsYou === 1 ? 's' : ''} you
-              </span>
-              <span class="count-item">
                 <Dot state="working" still={tally.working === 0} /> {tally.working} working
               </span>
               {tally.problem > 0 && (
@@ -379,6 +377,10 @@ function Manager() {
               )}
               <span class="count-item">
                 <Dot state="done" /> {tally.done} done
+              </span>
+              {/* Last, as on the board: with agents on auto it is rarely anything. */}
+              <span class="count-item">
+                <Dot state="needs-you" /> {tally.needsYou} need{tally.needsYou === 1 ? 's' : ''} you
               </span>
               {saved > 0 && (
                 <span

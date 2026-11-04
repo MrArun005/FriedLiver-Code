@@ -89,8 +89,9 @@ describe('search and sorting', () => {
 
   it('sorts by status, agent (numbered labels in order), task, activity, files and age', () => {
     const ids = (key: Parameters<typeof sortChats>[1]['key'], dir: 'asc' | 'desc' = 'asc') => sortChats(chats, { key, dir }).map((c) => c.id);
-    expect(ids('status')[0]).toBe('d');
-    expect(ids('status')[1]).toBe('c');
+    // Working first, Needs you last.
+    expect(ids('status')[0]).toBe('c');
+    expect(ids('status').at(-1)).toBe('d');
     expect(ids('agent')).toEqual(['a', 'e', 'd', 'b', 'c']);
     expect(ids('task')).toEqual(['b', 'c', 'a', 'd', 'e']);
     expect(ids('activity')).toEqual(['b', 'c', 'a', 'e', 'd']);
@@ -243,12 +244,12 @@ describe('the chat switcher', () => {
 
   it('groups chats by where they stand, most recent first', () => {
     const groups = switcherGroups(chats, '');
-    expect(groups.map((g) => g.title)).toEqual(['Needs you', 'Working', 'Done']);
-    expect(groups.map((g) => g.chats.length)).toEqual([3, 3, 2]);
-    expect(groups[0].chats.map((c) => c.id)).toEqual(['c6', 'c3', 'c0']);
+    expect(groups.map((g) => g.title)).toEqual(['Working', 'Done', 'Needs you']);
+    expect(groups.map((g) => g.chats.length)).toEqual([3, 2, 3]);
+    expect(groups[2].chats.map((c) => c.id)).toEqual(['c6', 'c3', 'c0']);
     expect(switcherGroups(chats, 'nothing')).toEqual([]);
     const starred = switcherGroups(chats.map((c) => (c.id === 'c2' ? { ...c, starred: true } : c)), '');
-    expect(starred.map((g) => [g.title, g.chats.length])).toEqual([['Starred', 1], ['Needs you', 3], ['Working', 3], ['Done', 1]]);
+    expect(starred.map((g) => [g.title, g.chats.length])).toEqual([['Starred', 1], ['Working', 3], ['Done', 1], ['Needs you', 3]]);
   });
 });
 
@@ -645,20 +646,20 @@ describe('status groups', () => {
     chat('work', { items: [said], busy: true, lastActivity: 2 }),
     chat('wait', { items: [said, waiting], lastActivity: 4 }),
   ];
-  it('orders Needs you, Working, Problem, Idle, Done, most recent first within each', () => {
+  it('orders Working, Problem, Idle, Done, Needs you, most recent first within each', () => {
     const groups = statusGroups(chats);
     expect(groups.map((g) => [g.title, g.chats.length])).toEqual([
-      ['Needs you', 1],
       ['Working', 1],
       ['Problem', 1],
       ['Idle', 1],
       ['Done', 2],
+      ['Needs you', 1],
     ]);
-    expect(groups[4].chats.map((c) => c.id)).toEqual(['done-new', 'done-old']);
+    expect(groups[3].chats.map((c) => c.id)).toEqual(['done-new', 'done-old']);
   });
   it('leaves out empty groups unless asked to keep them', () => {
     expect(statusGroups([chats[0]]).map((g) => g.status)).toEqual(['done']);
-    expect(statusGroups([chats[0]], true).map((g) => g.status)).toEqual(['needs-you', 'working', 'error', 'idle', 'done']);
+    expect(statusGroups([chats[0]], true).map((g) => g.status)).toEqual(['working', 'error', 'idle', 'done', 'needs-you']);
   });
 });
 

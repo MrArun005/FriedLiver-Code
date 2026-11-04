@@ -329,8 +329,8 @@ export interface Sort {
   dir: 'asc' | 'desc';
 }
 
-/** STATUS_ORDER: waiting on you, working, failed, not started, done. */
-const STATUS_RANK: Record<ChatStatus, number> = { 'needs-you': 0, working: 1, error: 2, idle: 3, done: 4 };
+/** STATUS_ORDER: working, failed, not started, done, waiting on you. */
+const STATUS_RANK: Record<ChatStatus, number> = { working: 0, error: 1, idle: 2, done: 3, 'needs-you': 4 };
 /** Built-in agents in their order, then custom ones; one no longer in the settings last. */
 const agentRank = (agent: AgentKey): number => {
   const i = allAgentKeys().indexOf(agent);
@@ -705,7 +705,8 @@ export function tabAfterClose(strip: readonly string[], closing: string, active:
 export const COLUMN_TITLES: Record<BoardColumn, string> = { 'needs-you': 'Needs you', working: 'Working', done: 'Done' };
 
 /** The order chats are grouped in: what waits on you first, finished work last. */
-export const STATUS_ORDER: ChatStatus[] = ['needs-you', 'working', 'error', 'idle', 'done'];
+/** Needs you last: with agents on auto it is rarely anything (the board's columns go the same way). */
+export const STATUS_ORDER: ChatStatus[] = ['working', 'error', 'idle', 'done', 'needs-you'];
 export const STATUS_TITLES: Record<ChatStatus, string> = { 'needs-you': 'Needs you', working: 'Working', error: 'Problem', idle: 'Idle', done: 'Done' };
 
 export interface StatusGroup {
