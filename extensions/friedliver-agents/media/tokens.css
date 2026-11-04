@@ -66,6 +66,15 @@
   --hover-outline: none;
   --line: 1px;
   --line-half: 0.5px;
+  /* The five families read apart at a glance (COMPONENTS.md §0.1): a button is a rectangle with a visible
+     edge (--btn-edge, 3:1-ish on the page); a tab, view switch or segment is bare text whose selection is a
+     2px underline (--nav-line); a count is a ring around a number (--count-edge); a pill (status only) is a
+     round tint with no edge; a label or a relation is plain --fg-2 text. */
+  --btn-edge: color-mix(in srgb, var(--fg) 24%, transparent);
+  --btn-edge-hover: color-mix(in srgb, var(--fg) 40%, transparent);
+  --nav-line: inset 0 -2px 0 var(--sel-fg);
+  --nav-rule: inset 0 calc(var(--line) * -1) 0 var(--hairline);
+  --count-edge: color-mix(in srgb, var(--fg-2) 60%, transparent);
 
   /* Text: five colours. OKLCH (dark) .975 / .925 / .735 / .62 */
   --sel-fg: var(--vscode-list-activeSelectionForeground, #fbfbfb);
@@ -380,6 +389,8 @@ body.vscode-high-contrast-light {
   --glass-alpha: 84%;
   --tone-ink: 40%;
   --seg-on: #ffffff;
+  --btn-edge: color-mix(in srgb, var(--fg) 26%, transparent);
+  --btn-edge-hover: color-mix(in srgb, var(--fg) 45%, transparent);
   --zone-shell: var(--vscode-sideBar-background, #f5f5f5);
   --zone-prompt-bg: #ffffff;
   --zone-prompt-edge: color-mix(in srgb, var(--sel-fg) 18%, transparent);
@@ -413,6 +424,10 @@ body.vscode-high-contrast-light {
   --ctl-border: var(--border);
   --field-border: var(--border);
   --ctl-border-active: var(--vscode-contrastActiveBorder, #f38518);
+  --btn-edge: var(--border);
+  --btn-edge-hover: var(--ctl-border-active);
+  --count-edge: var(--border);
+  --nav-rule: inset 0 calc(var(--line) * -1) 0 var(--border);
   --focus: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder, #f38518));
   --focus-halo: 0 0 0 0 transparent;
   /* Selection is the contrast border; only keyboard focus is the active (orange) border, 2px. */

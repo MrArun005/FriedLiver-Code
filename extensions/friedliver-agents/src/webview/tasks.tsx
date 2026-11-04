@@ -44,7 +44,7 @@ import {
   type Subagent,
 } from '../shared/view';
 import type { ClaudeSession, TaskChoices } from '../shared/messages';
-import { Avatar, BrandMark, Button, Count, FilterPill, IconButton, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
+import { Avatar, BrandMark, Button, Count, FilterPill, IconButton, Meta, MetaItem, MetaLink, MenuItem, MenuSep, Pill, Row as UiRow } from './ui';
 import { APPROVAL_HINTS, APPROVAL_LEVELS, APPROVAL_NAMES, formatTokens, reportedMode, totalSaved, usageTotalLines, usageTotals, type AgentDefaults, type ApprovalLevel } from '../shared/session';
 import { DOT_LABEL, Dot, Glyph, Icon, Kbd, LiveState, Popover, SignInMark, isTyping, memo, radioKeys, scrollBehavior, send, useHost, useNow, usePersisted, useRoster, useSettledOrder } from './common';
 import { AskMenu, HandoffMenu, HandoffTargets, PipeMenu, PipeTargets } from './connect';
@@ -199,9 +199,9 @@ function ClaudeCard({ session: s, now }: { session: ClaudeSession; now: number }
       <article class="fl-card task-card cc-card" data-status={col} aria-label={`Claude Code session: ${s.title}. ${DOT_LABEL[col]}`}>
         <div class="card-top">
           <Glyph agent="claude" />
-          <span class="fl-pill" data-tone="muted" title={OUTSIDE_TIP}>
-            {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
-          </span>
+          <Meta>
+            <MetaItem title={OUTSIDE_TIP}>{s.project ? `Claude Code · ${s.project}` : 'Claude Code'}</MetaItem>
+          </Meta>
           <span class="sep">·</span>
           <span title="Last activity">{ago(s.lastActivity, now)}</span>
         </div>
@@ -241,9 +241,9 @@ function ClaudeRows({ session: s, now }: { session: ClaudeSession; now: number }
           </span>
         </td>
         <td class="c-agent">
-          <span class="fl-pill" data-tone="muted" title={OUTSIDE_TIP}>
-            {s.project ? `Claude Code · ${s.project}` : 'Claude Code'}
-          </span>
+          <Meta>
+            <MetaItem title={OUTSIDE_TIP}>{s.project ? `Claude Code · ${s.project}` : 'Claude Code'}</MetaItem>
+          </Meta>
         </td>
         <td class="c-task">
           <div class="cell-title">
@@ -453,7 +453,7 @@ function Manager() {
                 }}
               >
                 <Icon name={v.icon} /> {v.title}
-                {v.id === 'inbox' && inboxCount > 0 && <span class="seg-count"> · {inboxCount}</span>}
+                {v.id === 'inbox' && inboxCount > 0 && <Count n={inboxCount} label={`${inboxCount} waiting`} />}
               </button>
             ))}
           </div>
@@ -537,7 +537,7 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
       <div class="new-bar">
         <div class="agent-pick" role="group" aria-label="Agents">
           {shown.map((a) => (
-            <button key={a} type="button" class="agent-option" aria-pressed={agents.includes(a)} onClick={() => toggle(a)}>
+            <button key={a} type="button" class="fl-btn fl-btn--quiet agent-option" aria-pressed={agents.includes(a)} onClick={() => toggle(a)}>
               <Glyph agent={a} size="sm" /> {agentFace(a).name}
               <SignInMark agent={a} />
             </button>
@@ -678,9 +678,9 @@ function BadgeView({ badge }: { badge: Badge }) {
     else if (badge.group) document.getElementById(`group-${badge.group}`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   };
   return (
-    <FilterPill icon={BADGE_ICON[badge.kind]} class="badge" onPress={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
+    <MetaLink icon={BADGE_ICON[badge.kind]} class="badge" onPress={go} title={`${badge.tip ?? badge.text}: ${badge.chatId ? 'open that chat' : 'compare them'}`}>
       {badge.text}
-    </FilterPill>
+    </MetaLink>
   );
 }
 
@@ -775,23 +775,25 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
       <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${turnsText(chat)} · started ${model.age} ago`}>
         {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, turnsOf(chat) > 0 ? turnsText(chat) : undefined, model.age].filter(Boolean).join(' · ')}
       </div>
-      {(chat.branch || badges.length > 0 || conflicts.length > 0) && (
+      {/* Relations are plain meta text (links where they open something); only state below is a pill. */}
+      <Meta class="fl-meta--stack card-rel">
+        {chat.branch && (
+          <MetaItem icon="branch" mono title={`${chat.branch}\n${chat.cwd}`}>
+            {chat.branch}
+          </MetaItem>
+        )}
+        {badges.map((b) => (
+          <BadgeView key={b.text} badge={b} />
+        ))}
+      </Meta>
+      {conflicts.length > 0 && (
         <div class="card-pills">
-          {chat.branch && (
-            <span class="fl-pill" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
-              <Icon name="branch" />
-              <span class="fl-pill__text">{chat.branch}</span>
-            </span>
-          )}
           {conflicts.slice(0, 2).map((c) => (
             <Pill key={c.file} tone="warn" icon="diff" class="badge conflict" title={`${conflictText(c)}\nChanged here and in ${c.others.map((o) => `${o.title} (${agentName(o.agent)})`).join(', ')}: they clash when merged`}>
               {conflictText(c)}
             </Pill>
           ))}
           {conflicts.length > 2 && <span class="fl-pill" data-tone="warn">+{conflicts.length - 2} more shared</span>}
-          {badges.map((b) => (
-            <BadgeView key={b.text} badge={b} />
-          ))}
         </div>
       )}
       {/* The one primary action, when there is one: Stop while it runs, Merge when its branch is ready. */}
@@ -1018,20 +1020,23 @@ function RowView({ chat: c, model, activity, tabbable, onFocus }: RowProps) {
           <span class="cell-title-text" title={c.title}>
             {c.title}
           </span>
-          {c.branch && (
-            <span class="fl-pill" data-tone="muted" title={c.branch}>
-              <Icon name="branch" />
-              <span class="fl-pill__text">{c.branch}</span>
-            </span>
+          {(c.branch || badges.length > 0) && (
+            <Meta class="fl-meta--line cell-rel">
+              {c.branch && (
+                <MetaItem icon="branch" mono title={c.branch}>
+                  {c.branch}
+                </MetaItem>
+              )}
+              {badges.map((b) => (
+                <MetaItem key={b.text} icon={BADGE_ICON[b.kind]} title={b.tip ?? b.text}>
+                  {b.text}
+                </MetaItem>
+              ))}
+            </Meta>
           )}
         </div>
         <div class="cell-line" data-decision={line.decision ? '' : undefined}>
           <span class="cell-line-text">{line.code ? `${line.text}: ${line.code}` : line.text}</span>
-          {badges.map((b) => (
-            <span key={b.text} class="mini-badge" data-kind={b.kind} title={b.text}>
-              {b.text}
-            </span>
-          ))}
         </div>
       </td>
       <td class="c-activity num">{activity}</td>
@@ -1133,7 +1138,7 @@ function History({ chats, outside, now, open: isOpen, setOpen }: { chats: ChatVi
           {outside.map((s) => (
             <li key={s.id} class="history-row">
               <Glyph agent="claude" size="sm" />
-              <span class="fl-pill history-label" data-tone="muted" title={OUTSIDE_TIP}>
+              <span class="history-label" title={OUTSIDE_TIP}>
                 Claude Code
               </span>
               <button class="title-btn history-title" title={s.title} onClick={() => openClaude(s.id)}>

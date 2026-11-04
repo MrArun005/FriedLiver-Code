@@ -76,7 +76,7 @@ import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
+import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, Count, FileRef, IconButton, MenuItem, Meta, MetaItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
 import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, type NoticeItem } from '../shared/toasts';
 import { agentOverride } from '../shared/session';
 
@@ -363,9 +363,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
             <Icon name="grid" />
             <span class="all-count">{open.length}</span>
             {needs > 0 && (
-              <span class="count loud" aria-label={`${needs} need you`}>
-                {needs}
-              </span>
+              <Count n={needs} loud label={`${needs} need you`} />
             )}
           </>
         }
@@ -551,10 +549,11 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
               </button>
             </h1>
             {chat.branch && (
-              <span class="fl-pill branch-chip" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
-                <Icon name="branch" />
-                <span class="fl-pill__text">{chat.branch}</span>
-              </span>
+              <Meta class="branch-chip">
+                <MetaItem icon="branch" mono title={`${chat.branch}\n${chat.cwd}`}>
+                  {chat.branch}
+                </MetaItem>
+              </Meta>
             )}
             {chat.merged && <span class="fl-pill" data-tone="muted">merged</span>}
             {chat.session?.rules?.length ? (
@@ -639,7 +638,11 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
             {agentName(parent.agent)}
           </ChipButton>
           <span class="origin-title">{parent.title}</span>
-          {chat.origin.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
+          {chat.origin.by === 'agent' && (
+            <Meta>
+              <MetaItem>by agent</MetaItem>
+            </Meta>
+          )}
         </div>
       )}
       {(chips.length > 0 || chat.archived) && (
@@ -1195,8 +1198,11 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
         <span class="link-title" title={other ? chatTip(other) : agentName(item.agent)}>
           {head}
         </span>
-        {item.role.startsWith('piped') && <span class="fl-pill" data-tone="muted">pipe</span>}
-        {item.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
+        {/* How it came about is metadata, so plain text, not pills (§0.1). */}
+        <Meta>
+          {item.role.startsWith('piped') && <MetaItem>pipe</MetaItem>}
+          {item.by === 'agent' && <MetaItem>by agent</MetaItem>}
+        </Meta>
         <span class="spacer" />
         <Timestamp stamp={messageStamp(item)} />
         {other && other.id !== chat.id && (

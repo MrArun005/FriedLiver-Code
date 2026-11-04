@@ -120,6 +120,40 @@ export function ChipButton({
   );
 }
 
+/**
+ * A line of relations (§2.5b): plain --fg-2 text, each item a small icon and its words, joined by ·. Pills are
+ * for state only; a branch, a pipe, an "asked by" or a compare group is metadata, so it is never a capsule.
+ */
+export function Meta({ children, class: className }: { children: ComponentChildren; class?: string }) {
+  const items = (Array.isArray(children) ? children.flat(Infinity) : [children]).filter((c) => c !== null && c !== undefined && c !== false && c !== '');
+  if (!items.length) return null;
+  return (
+    <div class={cx('fl-meta', className)}>
+      {items.flatMap((c, i) => (i ? [<span key={`s${i}`} class="fl-meta__sep" aria-hidden="true">·</span>, c] : [c]))}
+    </div>
+  );
+}
+
+/** One relation in a Meta line: an icon and plain text. `mono` for a branch or a path. */
+export function MetaItem({ icon, mono, title, children }: { icon?: IconName; mono?: boolean; title?: string; children: ComponentChildren }) {
+  return (
+    <span class={cx('fl-meta__item', mono && 'fl-meta__item--mono')} title={title}>
+      {icon && <Icon name={icon} />}
+      <span class="fl-meta__text">{children}</span>
+    </span>
+  );
+}
+
+/** A relation that opens something (the chat it pipes to, the compare group): Meta text drawn as a link. */
+export function MetaLink({ icon, mono, title, onPress, children, class: className }: { icon?: IconName; mono?: boolean; title?: string; onPress(): void; children: ComponentChildren; class?: string }) {
+  return (
+    <button type="button" class={cx('fl-meta__item fl-meta__link', mono && 'fl-meta__item--mono', className)} title={title} onClick={onPress}>
+      {icon && <Icon name={icon} />}
+      <span class="fl-meta__text">{children}</span>
+    </button>
+  );
+}
+
 export function Count({ n, loud, label }: { n: number | string; loud?: boolean; label?: string }) {
   return (
     // Keyed by its value: a new number mounts afresh and bumps once (§2.6).

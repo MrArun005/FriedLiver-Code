@@ -149,6 +149,10 @@
   --btn-fg: var(--fg);
   --btn-fg-hover: var(--btn-fg);
   --btn-shadow: none;
+  /* The edge that makes a button a button (§0.1): a visible rectangle on every surface, so it never reads as a
+     pill (round, no edge) or a tab (bare text). Variants with their own fill or none drop it. */
+  --btn-border: var(--btn-edge);
+  --btn-border-hover: var(--btn-edge-hover);
   position: relative;
   flex: none;
   display: inline-flex;
@@ -158,7 +162,7 @@
   height: var(--btn-h);
   min-width: calc(var(--btn-h) * 2);
   padding: 0 var(--btn-px);
-  border: var(--line) solid var(--ctl-border);
+  border: var(--line) solid var(--btn-border);
   border-radius: var(--r-ctl);
   background: var(--btn-bg);
   box-shadow: var(--btn-shadow);
@@ -184,6 +188,7 @@
 }
 .fl-btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-hover);
+  border-color: var(--btn-border-hover);
   color: var(--btn-fg-hover);
   outline: var(--hover-outline);
   outline-offset: -1px;
@@ -221,6 +226,8 @@
   --btn-bg-hover: var(--sel-bg);
   --btn-fg: var(--sel-fg);
   --btn-fg-hover: var(--sel-fg);
+  --btn-border: var(--fg-2);
+  --btn-border-hover: var(--fg-2);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -255,6 +262,8 @@
   --btn-bg-active: var(--accent-press);
   --btn-fg: var(--primary-fg);
   --btn-shadow: var(--sheen), var(--elev-1);
+  --btn-border: transparent;
+  --btn-border-hover: transparent;
 }
 .fl-btn--secondary {
   --btn-bg: var(--pill-bg);
@@ -264,17 +273,23 @@
   --btn-bg-hover: var(--ghost-hover);
   --btn-fg: var(--fg-2);
   --btn-fg-hover: var(--fg);
-  font-weight: var(--w-regular);
+  /* Quiet: no fill and no edge at rest, but still the button's weight and an icon or hover fill, so it reads
+     as an action next to plain meta text. */
+  --btn-border: transparent;
+  --btn-border-hover: transparent;
 }
 .fl-btn--danger {
   --btn-bg: color-mix(in srgb, var(--error) var(--tint), transparent);
   --btn-bg-hover: color-mix(in srgb, var(--error) var(--tint-hover), transparent);
   --btn-bg-active: color-mix(in srgb, var(--error) 30%, transparent);
   --btn-fg: color-mix(in srgb, var(--error) var(--tone-ink), var(--fg));
+  --btn-border: color-mix(in srgb, var(--error) 45%, transparent);
+  --btn-border-hover: color-mix(in srgb, var(--error) 70%, transparent);
 }
 .fl-btn--quiet.fl-btn--danger {
   --btn-bg: transparent;
-  font-weight: var(--w-regular);
+  --btn-border: transparent;
+  --btn-border-hover: transparent;
 }
 .fl-btn--link {
   --btn-bg: transparent;
@@ -497,6 +512,8 @@
   border-radius: var(--r-pill);
   background: var(--pill-fill);
   color: var(--pill-c);
+  /* A status, not a control (§0.1): the arrow cursor, no hover. */
+  cursor: default;
   font: inherit;
   font-size: var(--pill-fs);
   font-weight: var(--w-medium);
@@ -620,13 +637,33 @@
   --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
 }
-/* A pill you can press: the composer's agents and model pills, filter chips. */
+/* A pill you can press (FilterPill, FileRef, a picker trigger, ChipButton) is a button, so it takes the
+   button's shape (§0.1): the control radius and the button edge, no resting fill; a tone keeps its ink and
+   tints the edge. Only status pills are round. */
 button.fl-pill,
-.fl-pill--interactive {
+.fl-pill--interactive,
+.fl-pill:has(> .fl-pill__main) {
+  --pill-fill: transparent;
+  --pill-fill-hover: var(--ghost-hover);
+  border-color: var(--btn-edge);
+  border-radius: var(--r-ctl);
   cursor: pointer;
   transition:
     background-color var(--dur-out) var(--ease-out),
+    border-color var(--dur-out) var(--ease-out),
     transform var(--dur-pop) var(--spring-pop);
+}
+button.fl-pill[data-tone],
+.fl-pill--interactive[data-tone],
+.fl-pill[data-tone]:has(> .fl-pill__main) {
+  --pill-fill: transparent;
+  --pill-fill-hover: color-mix(in srgb, var(--tone) var(--tint), transparent);
+  border-color: color-mix(in srgb, var(--tone) 50%, transparent);
+}
+button.fl-pill[data-tone='muted'],
+button.fl-pill[data-tone='done'],
+button.fl-pill[data-tone='routine'] {
+  border-color: var(--btn-edge);
 }
 button.fl-pill:active:not(:disabled) {
   transform: scale(var(--press-scale));
@@ -634,6 +671,7 @@ button.fl-pill:active:not(:disabled) {
 button.fl-pill:hover:not(:disabled),
 .fl-pill--interactive:hover {
   background: var(--pill-fill-hover);
+  border-color: var(--btn-edge-hover);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
@@ -641,13 +679,14 @@ button.fl-pill:focus-visible {
   outline: var(--focus-w) solid var(--focus);
   outline-offset: var(--focus-off);
 }
-.fl-pill[aria-pressed='true'],
-.fl-pill[aria-selected='true'],
-.fl-pill[aria-checked='true'] {
+.fl-pill.fl-pill[aria-pressed='true'],
+.fl-pill.fl-pill[aria-selected='true'],
+.fl-pill.fl-pill[aria-checked='true'] {
   /* On: the selection fill (a selection, not a status), the strong text colour. */
   --pill-c: var(--sel-fg);
   --pill-fill: var(--sel-bg);
   --pill-fill-hover: color-mix(in srgb, var(--sel-fg) 15%, transparent);
+  border-color: var(--fg-2);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -672,6 +711,7 @@ button.fl-pill:focus-visible {
 }
 .fl-pill:has(> .fl-pill__main:hover) {
   background: var(--pill-fill-hover);
+  border-color: var(--btn-edge-hover);
 }
 .fl-pill__main:focus-visible {
   outline: var(--focus-w) solid var(--focus);
@@ -696,6 +736,93 @@ button.fl-pill:focus-visible {
   background: var(--pill-hover);
 }
 
+/* ---- Meta (§2.5b): a card's or a row's relations (branch, pipes to, asked by, also in, compare) as plain
+   --fg-2 text, a small icon before each, joined by ·. Never a capsule: pills are for state only (§0.1). One
+   that opens something is a link (MetaLink): the same text with a hairline underline that firms on hover. ---- */
+
+.fl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-1);
+  row-gap: var(--sp-half);
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  line-height: var(--lh);
+}
+/* Stacked (a narrow card): one relation a line, so a wrapped line never starts or ends on a stray ·. */
+.fl-meta--stack {
+  flex-direction: column;
+  align-items: flex-start;
+  row-gap: var(--sp-half);
+}
+.fl-meta--stack > .fl-meta__sep {
+  display: none;
+}
+/* One line (a list row's title line): no wrap; the last relation that doesn't fit ends in an ellipsis. */
+.fl-meta--line {
+  /* Gives way before the title beside it does. */
+  flex: 0 1000 auto;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  font-weight: var(--w-regular);
+}
+.fl-meta--line > .fl-meta__item {
+  flex: 0 1 auto;
+}
+.fl-meta__sep {
+  flex: none;
+  color: var(--fg-50);
+}
+.fl-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+  color: inherit;
+}
+.fl-meta__item > .icon {
+  flex: none;
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-meta__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fl-meta__item--mono > .fl-meta__text {
+  font-family: var(--mono);
+}
+.fl-meta__link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fl-meta__link > .fl-meta__text {
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 3px;
+}
+.fl-meta__link:hover {
+  color: var(--fg);
+}
+.fl-meta__link:hover > .fl-meta__text {
+  text-decoration-color: currentColor;
+}
+.fl-meta__link:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--sp-half);
+  border-radius: var(--r-3);
+}
+
 /* The agent map's pill (svg, webview.css .map-group): pressed as a node's "▸ N agents" branch toggle. */
 .map-branch:hover .group-pill {
   stroke: var(--fg);
@@ -705,7 +832,8 @@ button.fl-pill:focus-visible {
   stroke-width: 2;
 }
 
-/* ---- Count (§2.6): 16 tall, pill, 600 tabular; loud is needs-you only; it bumps once when it changes ---- */
+/* ---- Count (§2.6): 16 tall, a ring around a tabular number (no fill, so it never reads as a pill or a
+   button); loud (needs-you only) fills with the decision blue; it bumps once when it changes ---- */
 
 .fl-count {
   display: inline-block;
@@ -714,20 +842,21 @@ button.fl-pill:focus-visible {
   height: var(--h-2xs);
   padding: 0 var(--sp-1);
   border-radius: var(--r-pill);
-  background: var(--pill-bg);
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--line) var(--count-edge);
   color: var(--fg);
-  font-size: var(--t-85);
+  font-size: var(--t-xs);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);
   text-align: center;
-  outline: var(--line) solid var(--ctl-border);
-  outline-offset: -1px;
+  cursor: default;
   /* The Count component keys itself by its value, so a new number mounts and bumps once (1.15 → 1). */
   animation: fl-bump var(--dur-pop) var(--spring-pop);
 }
 .fl-count--loud {
   background: var(--decision);
+  box-shadow: none;
   color: var(--decision-fg);
 }
 @keyframes fl-bump {
@@ -736,18 +865,20 @@ button.fl-pill:focus-visible {
   }
 }
 
-/* ---- Segmented (§2.7): track 26, r8 on the pill fill; segments 22, --r-ctl; selected raised with a 3:1 edge ---- */
+/* ---- Segmented (§2.7): navigation, not buttons (§0.1). No track fill and no fill on an unselected segment:
+   bare --fg-2 labels over a hairline rule; the selected one takes the strong text and a 2px --sel-fg underline,
+   the same mark as the view switch and the chat tabs. ---- */
 
 .fl-seg {
   --seg-h: var(--h-md);
   display: inline-flex;
   flex: none;
-  gap: var(--sp-half);
+  gap: var(--sp-1);
   height: var(--seg-h);
-  padding: var(--sp-half);
-  border-radius: var(--r-8);
-  background: var(--pill-bg);
-  box-shadow: inset 0 0 0 var(--line) var(--ctl-border);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: var(--nav-rule);
 }
 .fl-seg__item {
   display: inline-flex;
@@ -758,9 +889,9 @@ button.fl-pill:focus-visible {
   min-width: 0;
   padding: 0 var(--sp-2);
   border: 0;
-  border-radius: var(--r-ctl);
+  border-radius: 0;
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-2);
   font: inherit;
   font-size: var(--t-90);
   font-weight: var(--w-medium);
@@ -768,16 +899,17 @@ button.fl-pill:focus-visible {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color var(--dur-pop) var(--spring-pop),
+    color var(--dur-out) var(--ease-out),
     box-shadow var(--dur-pop) var(--spring-pop);
 }
 .fl-seg__item > .icon {
   width: var(--i-sm);
   height: var(--i-sm);
 }
-/* Segments read --fg on the track (--fg-2 is 3.9:1 on --pill-bg); hover shows as a fill. */
+/* Hover: the text brightens and a hairline underline hints where the selection would go (never a fill). */
 .fl-seg__item:hover:not(:disabled, [aria-checked='true'], [aria-selected='true'], [aria-pressed='true']) {
-  background: var(--hover-bg);
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--hairline);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
@@ -786,9 +918,8 @@ button.fl-pill:focus-visible {
 .fl-seg__item[aria-pressed='true'] {
   color: var(--sel-fg);
   font-weight: var(--w-strong);
-  background: var(--seg-on);
-  /* The raised chip plus an inset --fg-2 edge: 3:1 against the track (WCAG 1.4.11). */
-  box-shadow: var(--elev-1), inset 0 0 0 var(--line) var(--fg-2);
+  background: transparent;
+  box-shadow: var(--nav-line);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -2585,35 +2716,36 @@ body[data-platform='windows'] .fl-dialog__foot {
   height: var(--h-md);
   padding: 0 var(--sp-2);
   border: var(--line) solid var(--ctl-border);
-  border-radius: var(--r-ctl);
+  border-radius: 0;
   background: transparent;
   color: var(--fg-2);
   font: inherit;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-out) var(--ease-out);
+  transition: color var(--dur-out) var(--ease-out);
 }
+/* Navigation, not a button (§0.1): no fill at rest or on hover, only the text brightening. */
 .fl-tab:hover {
   color: var(--fg);
-  background: var(--hover-bg);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
 .fl-tab[aria-selected='true'] {
   color: var(--sel-fg);
-  background: var(--sel-bg);
+  background: transparent;
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
-/* No line over the selected tab (owner, 2026-10-21). */
+/* The open tab: a 2px --sel-fg underline along its bottom edge, the same mark as the view switch and the
+   segmented controls (no line over the top: owner, 2026-10-21). */
 .fl-tab[aria-selected='true']::after {
-  content: none;
+  content: '';
   position: absolute;
-  top: 0;
-  left: var(--sp-2);
-  right: var(--sp-2);
+  bottom: 0;
+  left: var(--sp-1);
+  right: var(--sp-1);
   height: 2px;
-  border-radius: 0 0 var(--r-1) var(--r-1);
+  border-radius: var(--r-1) var(--r-1) 0 0;
   background: var(--sel-fg);
   animation: fl-tab-line var(--dur-spring) var(--spring-snap);
 }
@@ -3621,22 +3753,25 @@ button.cc-icon-btn:hover:not(:disabled),
 button.cc-icon-btn[aria-expanded='true'] {
   background: var(--ghost-hover);
 }
+/* The composer's pickers (agents, model): buttons, so the button's shape and edge (§0.1), not a status pill. */
 button.cc-pill {
   flex: 0 1 auto;
   min-width: 0;
-  height: 18px;
+  height: var(--h-sm);
   margin-left: 6px;
   padding: 0 var(--sp-2);
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
+  border: var(--line) solid var(--btn-edge);
+  border-radius: var(--r-ctl);
+  background: transparent;
   color: var(--fg);
   font-size: var(--t-85);
   font-weight: var(--w-medium);
-  line-height: 18px;
+  line-height: 1;
   white-space: nowrap;
 }
 button.cc-pill:hover {
-  background: var(--pill-hover);
+  background: var(--ghost-hover);
+  border-color: var(--btn-edge-hover);
 }
 button.cc-agents {
   flex: none;

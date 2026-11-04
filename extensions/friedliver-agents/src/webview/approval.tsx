@@ -21,7 +21,7 @@ import { relativePath } from '../shared/view';
 import { CopyButton, Glyph, Icon, Markdown, Popover, send, useNow, type IconName } from './common';
 import { DiffView } from './controls';
 import { chatTip } from '../shared/names';
-import { Button, Countdown as Drain, FileRef, Kbd, MenuItem, MenuSep, MenuTitle, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
+import { Button, Countdown as Drain, FileRef, Kbd, MenuItem, MenuSep, MenuTitle, Meta, MetaItem, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
 
 /** What the decision keys do to a request on screen, by its id: set while it is shown. */
 export interface CardKeys {
@@ -608,9 +608,12 @@ function BridgePreview({ item, a, state }: { item: Extract<Approvable, { kind: '
       {a.shares && (
         <div class="apv-shares">
           {item.tool === 'read_chat' ? 'Reads' : 'Shares'}
-          {a.shares.map((s) => (
-            <Pill key={s}>{s}</Pill>
-          ))}
+          {/* What it shares is a relation, so plain meta text, not pills (§0.1). */}
+          <Meta>
+            {a.shares.map((s) => (
+              <MetaItem key={s}>{s}</MetaItem>
+            ))}
+          </Meta>
         </div>
       )}
     </div>

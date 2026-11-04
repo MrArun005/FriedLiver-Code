@@ -88,24 +88,6 @@ h3 {
   width: var(--i-xs);
   height: var(--i-xs);
 }
-.count {
-  display: inline-block;
-  min-width: var(--h-2xs);
-  height: var(--h-2xs);
-  padding: 0 var(--sp-1);
-  border-radius: var(--r-pill);
-  font-size: var(--t-85);
-  font-weight: var(--w-strong);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--h-2xs);
-  text-align: center;
-  color: var(--fg);
-  background: var(--pill-bg);
-}
-.count.loud {
-  color: var(--decision-fg);
-  background: var(--decision);
-}
 .col-count {
   font-size: var(--t-85);
   font-weight: var(--w-regular);
@@ -391,19 +373,6 @@ button.count-item .icon {
   flex-wrap: wrap;
   gap: var(--sp-1);
 }
-.agent-option {
-  height: var(--h-md);
-  padding: 0 var(--sp-3) 0 var(--sp-1);
-  border-radius: var(--r-pill);
-  border-color: transparent;
-  background: transparent;
-  color: var(--fg-2);
-  font-weight: var(--w-medium);
-}
-.agent-option[aria-pressed='true'] {
-  color: var(--sel-fg);
-  background: var(--sel-bg);
-}
 .check {
   display: inline-flex;
   align-items: center;
@@ -611,7 +580,7 @@ button.count-item .icon {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* Branch, links and shared files: one row of pills that wraps. */
+/* Shared files (a state: they clash when merged): one row of pills that wraps. Relations sit above, as meta text. */
 .card-pills {
   display: flex;
   flex-wrap: wrap;
@@ -923,19 +892,6 @@ td.c-act > * + * {
 }
 .cell-line[data-decision] .cell-line-text {
   color: var(--decision);
-}
-.mini-badge {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--pill-bg);
-  color: var(--fg-2);
-  font-size: var(--t-85);
-  white-space: nowrap;
 }
 td.num {
   font-family: var(--mono);
@@ -4486,10 +4442,6 @@ button.new-chat kbd {
   font-size: var(--t-lg);
   font-weight: 600;
 }
-.perms h2 .count {
-  color: var(--fg-2);
-  font-weight: normal;
-}
 .perms .hint {
   margin: 0;
 }
@@ -5147,13 +5099,6 @@ button.inbox-history-row:hover:not(:disabled) {
   color: var(--fg-50);
 }
 
-/* The count beside Inbox, in the view switch and the chat list: the decision colour while something waits. */
-.seg-count {
-  color: inherit;
-}
-button.seg-item[aria-selected='true'] .seg-count {
-  color: inherit;
-}
 button.inbox-entry[data-waiting] {
   color: var(--decision);
 }

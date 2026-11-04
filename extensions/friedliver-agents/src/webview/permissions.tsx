@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { useState } from 'preact/hooks';
 import { describeGrant, type Remembered } from '../shared/permissions';
 import { send, useHost } from './common';
-import { Button, HoldButton } from './ui';
+import { Button, Count, HoldButton } from './ui';
 
 const GROUPS: { title: string; hint: string; kinds: Remembered['grant']['kind'][] }[] = [
   { title: 'Websites', hint: 'Agents open, click and type on these sites in FriedLiver’s browser without asking. Exact origin only.', kinds: ['site'] },
@@ -43,7 +43,7 @@ function Permissions() {
         return (
           <section key={g.title} class="perms-group" aria-label={g.title}>
             <h2>
-              {g.title} <span class="count">{list.length}</span>
+              {g.title} <Count n={list.length} />
             </h2>
             <p class="hint">{g.hint}</p>
             <table>

@@ -2343,7 +2343,7 @@ async function inboxChecks({ open, check }) {
     for (const [width, height] of [[1200, 800], [640, 900]]) {
       const p = await open(`surface=tasks&theme=${theme}&view=board&fixture=inbox`, width, height, 2);
       const tab = p.locator('.views button.seg-item').nth(4);
-      check((await tab.innerText()).replace(/\s+/g, ' ').trim() === 'Inbox · 10', `${width} ${tone}: the view switch says Inbox · 10`);
+      check(/^Inbox\s*10$/.test((await tab.innerText()).replace(/\s+/g, ' ').trim()), `${width} ${tone}: the view switch says Inbox and its count, 10`);
       await p.keyboard.press('5');
       await p.waitForSelector('.inbox-row');
       await grace(p);
@@ -2390,7 +2390,7 @@ async function inboxChecks({ open, check }) {
   await host(p, { t: 'items', chatId: 'chat-c', items: [{ kind: 'permission', requestId: 'perm-new', title: 'Read .env', toolKind: 'read', options: [{ optionId: 'y', name: 'Yes', kind: 'allow_once' }, { optionId: 'n', name: 'No', kind: 'reject_once' }] }], at: Date.now() - 3_600_000 });
   await p.waitForSelector('.inbox-row[data-id="perm-new"]');
   check((await sel(p)) === ids.edit, 'a new arrival never takes the selection');
-  check((await tabText(p)) === 'Inbox · 11', 'the count follows live');
+  check(/^Inbox\s*11$/.test(await tabText(p)), 'the count follows live');
 
   // Answered: the row folds away, and the selection goes to the first still waiting, with a fresh grace period.
   await clear(p);

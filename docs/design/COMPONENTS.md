@@ -50,6 +50,20 @@ Load order is unchanged: `tokens.css` → `webview.css` → `components.css`.
 
 ---
 
+### 0.1b The five families (owner, 2026-11-04)
+
+**Owner's brief.** "Clear differentiation between chat labels, tabs, buttons, pills and each detail for better usability." Before this, most relations and states were the same grey rounded capsule ("pill confetti": a board card carried 2–4 of them for branch, pipe, also-in, asked-by, compare), and segmented controls, tabs and buttons shared one fill, so nothing said what could be pressed. Each family now has one shape that no other family uses:
+
+| Family | What it is | Shape | Rest | Selected / on | Tokens |
+|---|---|---|---|---|---|
+| **Button** (§2.1) | an action | `--r-ctl` rectangle, 22–26 tall, 500 | a fill (secondary) or none (quiet), **and a visible 1px edge** (`--btn-edge`, firmer on hover); the primary is the accent fill without an edge | `aria-pressed`: `--sel-bg` and an `--fg-2` edge | `--btn-edge`, `--btn-edge-hover` |
+| **Tab / view switch / segmented** (§2.7, §2.18) | navigation or a mode | bare text, no container, no fill at rest or on hover | `--fg-2`, 500; hover brightens to `--fg` (segments also show a hairline underline) | `--sel-fg`, 600, a **2px `--sel-fg` underline** along the bottom (never the top) | `--nav-line`, `--nav-rule` |
+| **Pill** (§2.5) | state only: needs-you, risk, warn, conflict, secrets, merged, queued, once-only | fully round, 18 tall, a tint with no edge | arrow cursor, no hover | never selected | `--pill-bg`, tones |
+| **Meta / label** (§2.5b) | relations (branch, pipes to, asked by, also in, compare, shares, by agent) and eyebrows | plain text, no container | `--fg-2`, 11–12px, a 12px icon before each, joined by `·` (a narrow card stacks them one a line) | a relation that opens something is a **link**: the same text with a hairline underline that firms on hover | — |
+| **Count** (§2.6) | a number | 16 tall, a ring around a tabular 11/600 number, no fill | `--count-edge` ring | loud (needs-you): solid `--decision` | `--count-edge` |
+
+Anything pressable that used to be a pill (FilterPill, FileRef, ChipButton, the chat head's Rules and Images triggers, the composer's agents and model pickers, the board's agent picker) takes the button's shape: `--r-ctl`, the button edge, no resting fill. A toned one keeps its ink and tints its edge.
+
 ### 0.2 v3 Mono zones (2026-11-03)
 
 **Owner's brief (2026-11-03).** "All the places look the same and equal, no difference between a place to prompt and the details." Black and grey by default, rich type, the best rules from the design world.
@@ -303,8 +317,8 @@ Headings keep v1's numbers so code references stay valid. Each entry: purpose ·
 | Variant | Fill rest / hover / active | Text | Weight | Use |
 |---|---|---|---|---|
 | `--primary` | `--accent-bg` / `--accent-hover` / `--accent-press`; `--sheen` + `--elev-1` | `--accent-fg` | 500 | the one key action on a surface ("Allow once", "Carry out with Codex", "New chat", "Start") |
-| `--secondary` (default) | `--pill-bg` / `--pill-hover` / `--pill-active` | `--fg` | 500 | every other action ("Deny", "Keep discussing", "Retry") |
-| `--quiet` | transparent / `--ghost-hover` / `--pill-active` | `--fg-2` → `--fg` | 400 | minor and toolbar actions ("Edit command", "Clear", "Open folder") |
+| `--secondary` (default) | `--pill-bg` / `--pill-hover` / `--pill-active`, **edge `--btn-edge` → `--btn-edge-hover`** | `--fg` | 500 | every other action ("Allow once" beside a primary, "Keep discussing", "Retry") |
+| `--quiet` | transparent / `--ghost-hover` / `--pill-active`, no edge | `--fg-2` → `--fg` | 500 | minor and toolbar actions ("Deny", "Edit command", "Clear", "Open folder") |
 | `--danger` | `--error` 14 / 22 / 30% | error mixed toward `--fg` by `--tone-ink` | 500 | destructive |
 | `--link` | none; underline in `--hairline`, offset 3 | `--fg-2` (default) or `--link` | 400 | "Agents & Accounts", "All" |
 | `--brand` | **removed**: the send is the primary's colour (§2.27) | | | |
@@ -316,7 +330,7 @@ Headings keep v1's numbers so code references stay valid. Each entry: purpose ·
 | `--lg` | 32 | 64 | 16 | 8 | 16 | 13px |
 | `--touch` | 44 | 88 | 16 | 8 | 20 | 15px |
 
-Radius `--r-ctl`; border 1px `--ctl-border` (visible only in HC); no glass. **Keycap in a button** (`.fl-btn__k`): a Keycap (§2.25) at 11px; on a primary it is outlined in currentColor 45%; elsewhere a 16% currentColor fill. **Only the primary shows its key**; other buttons put the key in the tooltip.
+Radius `--r-ctl`; border 1px `--btn-border`: `--btn-edge` on secondary, the error at 45% on danger, none on primary, quiet, link and text (HC: the contrast border); no glass. **Keycap in a button** (`.fl-btn__k`): a Keycap (§2.25) at 11px; on a primary it is outlined in currentColor 45%; elsewhere a 16% currentColor fill. **Only the primary shows its key**; other buttons put the key in the tooltip.
 
 | State | Look |
 |---|---|
@@ -328,7 +342,7 @@ Radius `--r-ctl`; border 1px `--ctl-border` (visible only in HC); no glass. **Ke
 | disabled | .4, no hover |
 | loading (`aria-busy`) | label transparent (width kept), a 14px working arc in currentColor |
 
-Do: one primary per surface; verb labels. Don't: a primary for something destructive; two primaries; bordered buttons.
+Do: one primary per surface; verb labels. Don't: a primary for something destructive; two primaries; a round button (round is a pill, and pills are status).
 
 ### 2.2 IconButton `.fl-btn--icon`
 
@@ -350,15 +364,19 @@ As v1 §2.4 (hold 600ms; early release drains over 200ms; double-press fallback;
 | `--md` | 22 | 8 | 12px / 500 | 12 | 4 |
 | `--touch` | 32 | 12 | 13px / 500 | 12 | 4 |
 
-Pill radius; `--pill-bg`; text `--fg` (never `--fg-2` on a fill). Tones (`data-tone`): working, waiting, failed, warn, done (neutral): the tone at 14% (hover 22%) with text mixed toward `--fg` by `--tone-ink`. `--mono` for branches and files (FileRef). Remove × 14 circle. Width `fit-content`, ellipsis when squeezed. Pressable pills: hover `--pill-hover`, on `--sel-bg`. Don't: a pill as the only status signal (pair with §2.23); rectangular chips.
+Pill radius; `--pill-bg`; text `--fg` (never `--fg-2` on a fill). Tones (`data-tone`): working, waiting, failed, warn, done (neutral): the tone at 14% (hover 22%) with text mixed toward `--fg` by `--tone-ink`. `--mono` for files (FileRef). Remove × 14 circle. Width `fit-content`, ellipsis when squeezed. **Status only (§0.1b)**: a pill never has a hover or a pointer. A pressable one (`button.fl-pill`, ChipButton) draws as a button: `--r-ctl`, the `--btn-edge`, no resting fill, `--ghost-hover`; on `--sel-bg` with an `--fg-2` edge. Don't: a pill as the only status signal (pair with §2.23); a pill for a relation (a branch, a pipe, an "asked by": that is Meta, §2.5b).
+
+### 2.5b Meta `.fl-meta` (Meta · MetaItem · MetaLink)
+
+A card's or a row's relations as plain `--fg-2` text at `--t-85`: each a 12px icon and its words (`--mono` for a branch), joined by a `--fg-50` `·`. `--stack` (a board card): one a line, no dots. `--line` (a list row's title line): one line that gives way before the title. MetaLink: the same text as a button, a hairline underline offset 3 that turns `currentColor` on hover, text `--fg`; focus §1.12.
 
 ### 2.6 Count `.fl-count`
 
-16 tall, min 16, padding 0 4, pill, 11px/600 tabular. Neutral: `--fg` on `--pill-bg`. `--loud` (needs-you only): `--decision-fg` on `--decision`, with a 2px ring in its surface colour when it sits on an icon. Bumps once when it changes (§1.11). Shows 0 only in a column header.
+16 tall, min 16, padding 0 4, pill, 11px/600 tabular. Neutral: `--fg` in a 1px `--count-edge` ring with no fill (a fill would read as a pill). The Inbox count in the view switch is a Count. `--loud` (needs-you only): `--decision-fg` on `--decision`, with a 2px ring in its surface colour when it sits on an icon. Bumps once when it changes (§1.11). Shows 0 only in a column header.
 
 ### 2.7 Segmented `.fl-seg`
 
-Track 26 (touch 44), padding 2, gap 2, `--r-8`, `--pill-bg`. Segment 22, padding 0 8, `--r-ctl`, 12px/500 `--fg`, 14 icon. **Selected:** `--seg-on` (float tone dark / white light) + `--elev-1` + an inset 1px `--fg-2` edge (3:1, WCAG 1.4.11) + 600 `--sel-fg`; it slides between options on `--spring-pop`. Hover `--hover-bg`. Focus §1.12. Disabled .4. Keyboard: roving tabindex, arrows select. 2–4 options; more → Select.
+Navigation, not buttons (§0.1b). No track fill: the segments sit on a 1px `--hairline` rule (`--nav-rule`), 26 tall (touch 44), gap 4. Segment padding 0 8, no radius, 12px/500 `--fg-2`, 14 icon, no fill. **Selected:** 600 `--sel-fg` and a 2px `--sel-fg` underline (`--nav-line`), the same mark as the view switch and the chat tabs. Hover: `--fg` and a 2px `--hairline` underline, never a fill. Focus §1.12. Disabled .4. Keyboard: roving tabindex, arrows select. 2–4 options; more → Select.
 
 ### 2.8 Switch `.fl-toggle`
 
@@ -434,7 +452,7 @@ Dialog: `--w-dialog` (wide 880), padding 16, gap 12, `--r-dialog` 14, glass (dia
 
 ### 2.18 Tabs `.fl-tab`
 
-Strip 32 (`--tab-h`), padding 0 8, gap 2. Tab 26, padding 0 4 0 8, `--r-ctl`, gap 8; 16 icon `--fg-2` (neutral file icons; a chat tab leads with its agent mark); label 13 `--fg-2`; close × 22 square (24 hit box) shown on hover and when active; Delete closes the focused tab. **Active:** the raised tab fill + `--sel-fg` text + a 2px `--sel-fg` line along the top edge inset 8 (slides on `--spring-snap`). Hover: `--fg` on `--hover-bg`. Preview tab: italic label (a dirty tab is never a preview). Chat tabs end with a status mark (§2.23). Overflow: a quiet "N more chats" button that opens the All-chats popover; the v1 Fit rules (§2.18 Fit, `tabFit()`) still decide how many whole tabs show. Panel tabs (Terminal, Problems…) are Tabs at sm 22.
+Strip 32 (`--tab-h`), padding 0 8, gap 2. Tab 26, padding 0 4 0 8, `--r-ctl`, gap 8; 16 icon `--fg-2` (neutral file icons; a chat tab leads with its agent mark); label 13 `--fg-2`; close × 22 square (24 hit box) shown on hover and when active; Delete closes the focused tab. **Active:** `--sel-fg` text and a 2px `--sel-fg` underline along the bottom edge inset 4 (slides on `--spring-snap`); no fill, no line over the top (owner, 2026-10-21). Hover: `--fg`, no fill (§0.1b: tabs never look like buttons). Preview tab: italic label (a dirty tab is never a preview). Chat tabs end with a status mark (§2.23). Overflow: a quiet "N more chats" button that opens the All-chats popover; the v1 Fit rules (§2.18 Fit, `tabFit()`) still decide how many whole tabs show. Panel tabs (Terminal, Problems…) are Tabs at sm 22.
 
 ### 2.19 Row / Tree row `.fl-row`
 
