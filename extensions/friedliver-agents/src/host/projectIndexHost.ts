@@ -17,6 +17,10 @@ import { answerIndex, docsFileOf, INDEX_DEFAULTS, partialIndex, ProjectIndex, pr
 const HEAD_MOVED = /[/\\]\.git[/\\](HEAD|ORIG_HEAD|FETCH_HEAD)$/;
 const SAVE_DELAY_MS = 30_000;
 const CHANGE_DELAY_MS = 1_000;
+/** The first build waits out the editor's own startup (git status, extensions, the restored views): it starts
+ *  this long after activation, or at once when something needs the index (an index_* call, a new session's
+ *  project map). On Windows, its git runs and per-file stats cost the most right when the window opens. */
+const START_DELAY_MS = 20_000;
 
 export class ProjectIndexHost implements vscode.Disposable {
   private indexes: ProjectIndex[] = [];
@@ -32,6 +36,9 @@ export class ProjectIndexHost implements vscode.Disposable {
   private readonly changed = new Set<string>();
   private changeTimer?: NodeJS.Timeout;
   private saveTimer?: NodeJS.Timeout;
+  /** The first build has been started (START_DELAY_MS, or a first use); until then config and folder changes wait for it. */
+  private started = false;
+  private startTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly storage: string,
@@ -44,13 +51,25 @@ export class ProjectIndexHost implements vscode.Disposable {
     this.item.command = 'friedliver.index.rebuild';
     this.disposables.push(
       // A full rebuild: the saved index and its kept roots are dropped and every file is read again.
-      vscode.commands.registerCommand('friedliver.index.rebuild', () => this.rebuild(true)),
-      vscode.workspace.onDidGrantWorkspaceTrust(() => this.rebuild(false)),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.rebuild(false)),
+      vscode.commands.registerCommand('friedliver.index.rebuild', () => {
+        this.started = true;
+        clearTimeout(this.startTimer);
+        this.rebuild(true);
+      }),
+      vscode.workspace.onDidGrantWorkspaceTrust(() => this.started && this.rebuild(false)),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.started && this.rebuild(false)),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('friedliver.index') || e.affectsConfiguration('files.exclude')) this.rebuild(false);
+        if (this.started && (e.affectsConfiguration('friedliver.index') || e.affectsConfiguration('files.exclude'))) this.rebuild(false);
       }),
     );
+    this.startTimer = setTimeout(() => this.start(), START_DELAY_MS);
+  }
+
+  /** Starts the first build now, if it hasn't started: on first use, or when START_DELAY_MS is up. */
+  private start(): void {
+    if (this.started) return;
+    this.started = true;
+    clearTimeout(this.startTimer);
     this.rebuild(false);
   }
 
@@ -61,6 +80,7 @@ export class ProjectIndexHost implements vscode.Disposable {
   onSaved?: (chatId: string, naive: number, sent: number) => void;
 
   answer(call: IndexCall, chatId?: string): Promise<string> {
+    this.start();
     const saved = (naive: number, sent: number) => chatId && this.onSaved?.(chatId, naive, sent);
     return answerIndex(this.indexes, call, this.building, chatId ? { chatId, seen: this.seen, saved } : undefined);
   }
@@ -76,6 +96,7 @@ export class ProjectIndexHost implements vscode.Disposable {
   /** The project map for a new session's first message; none when friedliver.index.primer is off or nothing is indexed. */
   async primer(text: string, maxTokens: number): Promise<string | undefined> {
     if (!vscode.workspace.getConfiguration('friedliver.index').get<boolean>('primer', true)) return undefined;
+    this.start();
     return projectPrimer(this.indexes, text, maxTokens);
   }
 
@@ -120,6 +141,8 @@ export class ProjectIndexHost implements vscode.Disposable {
     this.watcher.onDidCreate(queue);
     this.watcher.onDidChange(queue);
     this.watcher.onDidDelete(queue);
+    // Building from this moment: an index_* call that started it is told so, never "nothing indexed".
+    this.building = true;
     void this.build(gen, fresh);
   }
 
@@ -241,6 +264,7 @@ export class ProjectIndexHost implements vscode.Disposable {
     this.generation++;
     clearTimeout(this.changeTimer);
     clearTimeout(this.saveTimer);
+    clearTimeout(this.startTimer);
     void this.save();
     this.watcher?.dispose();
     for (const d of this.disposables) d.dispose();

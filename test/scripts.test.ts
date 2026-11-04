@@ -255,6 +255,7 @@ describe('Chromium locale packs in the packaged app', () => {
 
 describe('workbench harness', () => {
   const good = {
+    id: 42,
     repository: { full_name: 'MrArun005/FriedLiver-Code' },
     head_repository: { full_name: 'MrArun005/FriedLiver-Code' },
     path: '.github/workflows/build.yml',
@@ -280,6 +281,14 @@ describe('workbench harness', () => {
     expect(() => checkRun({ ...good, head_branch: 'feat/x' })).toThrow(/branch/);
     expect(() => checkRun({ ...good, head_branch: 'ui/../main' })).toThrow(/branch/);
     expect(() => checkRun({ ...good, conclusion: 'failure' })).toThrow(/conclusion/);
+    // A run that failed elsewhere (the downloads probe) qualifies only by the very job that built the artifact.
+    const failed = { ...good, conclusion: 'failure', status: 'completed' };
+    const job = { run_id: good.id, status: 'completed', conclusion: 'success' };
+    expect(() => checkRun(failed, job)).not.toThrow();
+    expect(() => checkRun(failed, { ...job, conclusion: 'failure' })).toThrow(/conclusion/);
+    expect(() => checkRun(failed, { ...job, run_id: 1 })).toThrow(/conclusion/);
+    expect(() => checkRun({ ...failed, status: 'in_progress' }, job)).toThrow(/conclusion/);
+    expect(() => checkRun({ ...failed, head_branch: 'feat/x' }, job)).toThrow(/branch/);
   });
 
   it('sums the design gates over every shot of a run', () => {

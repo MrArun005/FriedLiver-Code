@@ -67,6 +67,9 @@ export interface CheckpointOptions {
   now?: () => number;
   /** Turns whose checkpoints went (rewound, pruned, forgotten). */
   onGone?: (chatId: string, turnIds: string[]) => void;
+  /** load() prunes this long after loading instead of at once: out of the editor's startup (it stats every
+   *  snapshot blob, may run git per expired turn, and rewrites the index). */
+  pruneDelayMs?: number;
 }
 
 const KEEP = 100;
@@ -99,7 +102,10 @@ export class Checkpoints {
     } catch {
       // None yet.
     }
-    await this.prune();
+    const delay = this.opts.pruneDelayMs;
+    if (!delay) return this.prune();
+    const timer = setTimeout(() => void this.prune().catch((err: unknown) => this.log?.(`Couldn't prune checkpoints: ${err instanceof Error ? err.message : String(err)}`)), delay);
+    timer.unref?.();
   }
 
   /** Snapshots the chat's folder before a turn. Resolves either way: true when the turn has a checkpoint. */

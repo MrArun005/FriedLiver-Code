@@ -213,8 +213,10 @@ export class Controller {
       scale: this.scaler,
       onChange: () => this.postImageStore(),
     });
+    // The image list loads now; sweeping old screenshots (a stat per file) waits out the window's startup.
     void this.imageStore
       .load()
+      .then(() => new Promise<void>((r) => setTimeout(r, 60_000).unref()))
       .then(() => this.tidyImages())
       .catch((err: unknown) => this.log.warn(`Image copies: ${messageOf(err)}`));
     this.browser = new BrowserPanel(context, (line) => this.log.info(line));
@@ -1959,7 +1961,12 @@ export class Controller {
         this.core.revokeExternal();
         await removeTokenFile(this.context.globalStorageUri.fsPath);
         // Only the entry FriedLiver added, and only when there is one: otherwise the file isn't written.
+        // ~/.claude.json can be megabytes: read only when FriedLiver may have added the entry (it said so when it
+        // did, or this install never recorded it either way: once, for installs from before this was kept).
+        const KEY = 'friedliver.claudeEntryAdded';
+        if (this.context.globalState.get<boolean>(KEY) === false) return say('Claude Code is not connected to the browser: friedliver.browser.externalClients is off.');
         const removed = await unregisterClaude(CLAUDE_CONFIG());
+        await this.context.globalState.update(KEY, false);
         return say(`Claude Code is not connected to the browser: friedliver.browser.externalClients is off${removed ? '; removed the friedliver-browser entry FriedLiver had added to ~/.claude.json' : ''}.`);
       }
       const storage = this.context.globalStorageUri.fsPath;
@@ -1973,6 +1980,7 @@ export class Controller {
       const tokenFile = await writeTokenFile(storage, access.url, access.token);
       const script = this.context.asAbsolutePath(path.join('dist', 'externalStdio.js'));
       // Replaces an older http entry (token and port in the config) with this secret-free one.
+      await this.context.globalState.update('friedliver.claudeEntryAdded', true);
       const result = await registerClaude(CLAUDE_CONFIG(), claudeEntry(process.execPath, script, tokenFile));
       say(`Claude Code can use FriedLiver's browser (MCP server "friedliver-browser", ${result}). Start a new Claude Code session to pick it up.`);
     } catch (err) {
