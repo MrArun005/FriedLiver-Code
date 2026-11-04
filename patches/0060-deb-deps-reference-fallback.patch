@@ -1,0 +1,22 @@
+diff --git a/build/linux/dependencies-generator.ts b/build/linux/dependencies-generator.ts
+index a193dfd..fd2970e 100644
+--- a/build/linux/dependencies-generator.ts
++++ b/build/linux/dependencies-generator.ts
+@@ -74,7 +74,16 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
+ 	if (packageType === 'deb') {
+ 		const chromiumSysroot = await getChromiumSysroot(arch as DebianArchString);
+ 		const vscodeSysroot = await getVSCodeSysroot(arch as DebianArchString);
+-		dependencies = generatePackageDepsDebian(files, arch as DebianArchString, chromiumSysroot, vscodeSysroot);
++		try {
++			dependencies = generatePackageDepsDebian(files, arch as DebianArchString, chromiumSysroot, vscodeSysroot);
++		} catch (err) {
++			// FriedLiver: Chromium's dpkg-shlibdeps.pl runs on the build host's own Perl Dpkg modules, and a newer
++			// libdpkg-perl (GitHub's ubuntu-latest, 2026-11) crashes it ("Can't use an undefined value as a HASH
++			// reference"). When the tool itself fails, the .deb takes the reference list below instead: upstream's own
++			// computed list for this Electron and sysroot (patch 0030 only logs how a fork's list differs). Loudly.
++			console.warn(`dpkg-shlibdeps failed on this host; using the reference dependency list for ${arch}.\n${err}`);
++			dependencies = [new Set(debianGeneratedDeps[arch as DebianArchString])];
++		}
+ 	} else {
+ 		dependencies = generatePackageDepsRpm(files);
+ 	}
