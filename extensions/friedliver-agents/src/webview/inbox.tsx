@@ -132,7 +132,7 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
     .filter((l) => l.rows.length);
   return (
     <div class="inbox">
-      <div class="inbox-list" ref={list} role="listbox" aria-label="Waiting for you" aria-activedescendant={selected ? `inbox-${selected.id}` : undefined} tabIndex={0}>
+      <div class="inbox-list" ref={list} role="listbox" aria-label="Waiting for you" aria-describedby="inbox-keys" aria-activedescendant={selected ? `inbox-${selected.id}` : undefined} tabIndex={0}>
         {lanes.map((lane) => {
           const waiting = lane.rows.filter((r) => !leaving.includes(r)).length;
           return (
@@ -431,7 +431,7 @@ function Keys({ entry, confirming, batch }: { entry: InboxEntry; confirming: boo
         [['O'], 'open in chat'],
       ];
   return (
-    <div class="inbox-keys" aria-hidden="true">
+    <div class="inbox-keys" id="inbox-keys" aria-hidden="true">
       {parts.map(([keys, what], x) => (
         <span key={x} class="inbox-key">
           {keys.map((k) => (

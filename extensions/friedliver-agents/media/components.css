@@ -203,6 +203,14 @@
   opacity: 0.4;
   cursor: default;
 }
+/* A disabled primary steps down to the neutral fill instead of a 40% accent slab, so it stops being the
+   loudest shape on the surface while it can't be pressed. */
+:is(.fl-btn--primary, .fl-btn--brand):is(:disabled, [aria-disabled='true']) {
+  --btn-bg: var(--pill-bg);
+  --btn-fg: var(--fg-2);
+  --btn-shadow: none;
+  opacity: 1;
+}
 /* The trigger of an open menu keeps its pressed fill (a disclosure's aria-expanded doesn't). */
 .fl-btn[aria-haspopup][aria-expanded='true'] {
   background: var(--btn-bg-active);
@@ -408,6 +416,13 @@
 :is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-kbds.fl-btn__k {
   box-shadow: none;
 }
+/* A bare keycap dropped into a primary (not wrapped as .fl-btn__k) takes the button's ink too: the pill
+   fill with --fg text read as an empty white box on the accent. */
+:is(.fl-btn--primary, .fl-btn--brand) .fl-kbd {
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--line) color-mix(in srgb, currentColor 45%, transparent);
+  color: inherit;
+}
 
 /* Split button (§2.3): two buttons of one variant; outer corners --r-ctl, inner 0; the chevron half is
    square, with a currentColor 28% divider drawn as an inset shadow (the primary keeps its sheen). */
@@ -501,6 +516,22 @@
 }
 /* fit: in a card narrower than 360px (an approval in a side bar) the pill takes its own line and wraps its words rather than cut them. */
 @container (max-width: 360px) {
+  .fl-pill--fit {
+    flex: none;
+    max-width: 100%;
+    height: auto;
+    min-height: var(--pill-h);
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .fl-pill--fit > .fl-pill__text {
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+}
+/* The same in a side bar (a webview up to 480px wide), where the card itself is just over 360px: a risk
+   reads in full ("Rewrites shared history"), never "Rewrites shar…". */
+@media (max-width: 480px) {
   .fl-pill--fit {
     flex: none;
     max-width: 100%;
@@ -1490,10 +1521,10 @@ textarea.fl-input {
   gap: var(--sp-3);
   min-width: 0;
   padding: var(--card-pad);
-  border: var(--line) solid var(--hairline);
+  border: var(--line) solid var(--card-edge, var(--hairline));
   border-radius: var(--r-box);
   background: var(--input-bg);
-  box-shadow: var(--rim);
+  box-shadow: var(--rim), var(--card-lift, 0 0 0 0 transparent);
   color: var(--fg);
   transition: border-color var(--dur-out) var(--ease-out);
 }
@@ -1538,7 +1569,7 @@ textarea.fl-input {
 /* v3: a decision waiting on you carries the needs-you bar on its leading edge: the one card in the
    transcript that is about you, told apart from replies and steps without a second colour. */
 .apv.fl-card[data-focus] {
-  box-shadow: var(--rim), var(--zone-needs-bar);
+  box-shadow: var(--rim), var(--card-lift, 0 0 0 0 transparent), var(--zone-needs-bar);
 }
 .fl-card--ghost[data-focus] {
   background: color-mix(in srgb, var(--sel-fg) 7%, transparent);
@@ -4238,4 +4269,20 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
     outline: 3px solid CanvasText;
     outline-offset: 2px;
   }
+}
+
+/* Hit area (WCAG 2.5.8): dense buttons and segment tabs are drawn 18–22px tall, but a pointer gets at least
+   24px of height around their centre; the drawn size and the layout don't change. Height only: a wider box
+   would reach past the transcript's gutter beside a button at its edge. */
+:is(.fl-btn, .fl-seg__item)::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: max(100%, 24px);
+  transform: translateY(-50%);
+}
+.fl-seg__item {
+  position: relative;
 }

@@ -14,7 +14,7 @@
     },
     "webview.css": {
       "colour": 8,
-      "px": 71,
+      "px": 69,
       "effect": 4,
       "restyle": [
         ".acct-tag",
@@ -115,7 +115,7 @@
   },
   "totals": {
     "colour": 9,
-    "px": 147,
+    "px": 145,
     "effect": 5,
     "restyle": 82,
     "rawControls": 57

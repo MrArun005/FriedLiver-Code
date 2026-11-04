@@ -69,7 +69,7 @@ import { ContextRail } from './contextRail';
 const RAIL_MIN = 1100;
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
-import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
+import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp, decisionTarget } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -1435,7 +1435,10 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
+  // While a request waits, Tab answers it (the scope), so say how to get past the box with the keyboard:
+  // otherwise the cards above are a trap for anyone not using a mouse.
+  const waitingHere = !tabMoves && !text.trim() && decisionTarget(chat) !== undefined;
+  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : waitingHere ? `${TAB_FOCUS_KEY} lets Tab move focus to the request` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
 
   const reset = () => {
     setText('');

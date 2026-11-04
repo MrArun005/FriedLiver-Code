@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { useState } from 'preact/hooks';
 import { describeGrant, type Remembered } from '../shared/permissions';
 import { send, useHost } from './common';
-import { Button } from './ui';
+import { Button, HoldButton } from './ui';
 
 const GROUPS: { title: string; hint: string; kinds: Remembered['grant']['kind'][] }[] = [
   { title: 'Websites', hint: 'Agents open, click and type on these sites in FriedLiver’s browser without asking. Exact origin only.', kinds: ['site'] },
@@ -31,9 +31,10 @@ function Permissions() {
             read-only chats and inline edits work as before; keys, credentials and system folders are never always allowed.
           </p>
         </div>
-        <Button variant="quiet-danger" size="sm" disabled={!rules.length} onClick={() => send({ type: 'revokeAllPermissions' })}>
-          Revoke all
-        </Button>
+        {/* Every rule at once, with no undo: hold (or press twice) like any other destructive action. */}
+        <HoldButton variant="quiet-danger" size="sm" disabled={!rules.length} title="Hold, or press twice, to revoke every rule" onConfirm={() => send({ type: 'revokeAllPermissions' })}>
+          {rules.length ? `Revoke all ${rules.length}` : 'Revoke all'}
+        </HoldButton>
       </header>
       {!rules.length && <div class="empty">Nothing is always allowed. Choose “Always allow” on an approval to stop it asking again.</div>}
       {GROUPS.map((g) => {

@@ -189,7 +189,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 <text class="node-title" x="40" y="31">
                   Claude Code · outside
                 </text>
-                <circle class="node-dot" data-state={o.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                <NodeMark state={o.state} />
               </g>
             ))}
             {map.subs.map((n) => {
@@ -224,7 +224,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                   <text class="node-title" x="40" y="31">
                     {agentFace(n.agent).name}
                   </text>
-                  <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                  <NodeMark state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} />
                 </g>
               );
             })}
@@ -366,7 +366,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       onFocus={onFocus}
       onBlur={() => onTip(null)}
     >
-      {(status === 'working' || status === 'needs-you') && <rect class="ring" x="-3.5" y="-3.5" width={MAP.nodeW + 7} height={MAP.nodeH + 7} rx="11" />}
+      {status === 'working' && <rect class="ring" x="-3.5" y="-3.5" width={MAP.nodeW + 7} height={MAP.nodeH + 7} rx="11" />}
       <rect class="box" width={MAP.nodeW} height={MAP.nodeH} rx="8" />
       <SvgGlyph agent={chat.agent} x={10} y={10} size={20} />
       <title>{chatTip(chat)}</title>
@@ -376,7 +376,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       <text class="node-title" x="40" y="31">
         {agentFace(chat.agent).name}
       </text>
-      <circle class="node-dot" data-state={status} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+      <NodeMark state={status} />
       {chat.approval === 'full' && (
         <g class="node-auto" transform={`translate(${MAP.nodeW - 30} 4)`} aria-label="Auto">
           <title>Auto: edits and commands go through without asking</title>
@@ -384,6 +384,19 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
           <path d="M12.2 2.2 8.6 6.8h2.6L10.4 9.8l3.6-4.6h-2.6z" />
         </g>
       )}
+    </g>
+  );
+}
+
+/** A node's status, by shape as well as colour (the legend's marks): a check when done, a cross on an error,
+ *  a bullseye when it needs you, a filled dot while working, a hollow one when idle. */
+function NodeMark({ state }: { state: string }) {
+  return (
+    <g class="node-dot" data-state={state} transform={`translate(${MAP.nodeW - 14} ${MAP.nodeH / 2})`} aria-hidden="true">
+      {state === 'needs-you' && <circle class="node-dot__halo" r="7" />}
+      <circle r="4.5" />
+      {state === 'done' && <path class="node-dot__ink" d="M-2.2 0.1 -0.6 1.7 2.3 -1.5" />}
+      {state === 'error' && <path class="node-dot__ink" d="M-1.6 -1.6 1.6 1.6 M1.6 -1.6 -1.6 1.6" />}
     </g>
   );
 }

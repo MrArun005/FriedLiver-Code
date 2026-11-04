@@ -691,6 +691,25 @@ interface CardProps {
   onFocus(id: string): void;
 }
 
+/** A card in Problem offers the fix its error came with (Sign in, Install, Retry…), so the board isn't a dead end. */
+function ProblemFix({ chat }: { chat: ChatView }) {
+  let notice: Extract<ChatView['items'][number], { kind: 'notice' }> | undefined;
+  for (let i = chat.items.length - 1; i >= 0 && !notice; i--) {
+    const it = chat.items[i];
+    if (it.kind === 'notice' && it.tone === 'error' && it.actions?.length) notice = it;
+  }
+  if (!notice) return null;
+  return (
+    <div class="card-fix">
+      {notice.actions!.slice(0, 2).map((a, x) => (
+        <Button key={a.label} size="sm" variant={x === 0 ? 'primary' : 'secondary'} onClick={() => send({ type: 'notice', chatId: chat.id, action: a })}>
+          {a.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 /** A card draws again only when what it shows changed, not on every chunk its agent streams. */
 const Card = memo(CardView, (a: CardProps, b: CardProps) => a.model.key === b.model.key && a.tabbable === b.tabbable && a.onFocus === b.onFocus);
 
@@ -751,6 +770,7 @@ function CardView({ chat, model, tabbable, onFocus }: CardProps) {
           </code>
         ))}
       <Decide chat={chat} line={line} />
+      {status === 'error' && <ProblemFix chat={chat} />}
       {progress && <Steps progress={progress} />}
       <div class="card-meta" title={`${files} file${files === 1 ? '' : 's'} · ${turnsText(chat)} · started ${model.age} ago`}>
         {[files > 0 ? `${files} file${files === 1 ? '' : 's'}` : undefined, turnsOf(chat) > 0 ? turnsText(chat) : undefined, model.age].filter(Boolean).join(' · ')}

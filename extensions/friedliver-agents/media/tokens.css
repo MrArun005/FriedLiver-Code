@@ -161,11 +161,13 @@
   --fl-font-size: var(--vscode-chat-font-size, 13px);
   --fs: var(--fl-font-size);
   --fs-mono: var(--vscode-editor-font-size, 12px);
+  /* The steps are fractions of the base size, not of the parent's (em compounded: 0.85em inside 0.9em
+     was 9.9px), and never under the 11px floor, so nested meta, pills and counts stay legible. */
   --t-100: 1em;
-  --t-90: 0.9em;
-  --t-85: 0.85em;
-  --t-80: 0.8em;
-  --t-75: 0.75em;
+  --t-90: max(var(--t-xs), calc(var(--fs) * 0.9));
+  --t-85: max(var(--t-xs), calc(var(--fs) * 0.85));
+  --t-80: max(var(--t-xs), calc(var(--fs) * 0.8));
+  --t-75: max(var(--t-xs), calc(var(--fs) * 0.75));
   --t-xs: 11px;
   --t-sm: 12px;
   --t-md: 13px;
@@ -365,6 +367,10 @@ body.vscode-high-contrast-light {
   /* Neutral text at 62% lands at 4.48:1 on the light page; 66% keeps menu titles and key hints at 4.5:1+. */
   --fg-50: color-mix(in srgb, var(--fg) 66%, transparent);
   --rim: inset 0 0 0 0 transparent;
+  /* A white card on a near-white page is 1.01:1: a firmer edge and a contact shadow, so the zones that
+     read at a glance in dark still read in light. */
+  --card-edge: color-mix(in srgb, var(--fg) 13%, transparent);
+  --card-lift: 0 1px 2px #0000000d, 0 2px 8px -4px #00000014;
   --elev-1: 0 0 0 1px #0000000f, 0 1px 2px #0000000f;
   --elev-2: 0 0 0 1px #00000014, 0 4px 12px -2px #0000001f;
   --elev-3: 0 0 0 1px #00000014, 0 2px 6px #0000000f, 0 16px 40px -8px #00000033;

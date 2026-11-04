@@ -19,7 +19,7 @@ import { questionGroups, recommended, type QuestionField } from '../shared/quest
 import { denyOption, primaryOption, type PermissionDetail, type ProposedFile } from '../shared/tools';
 import { ClampedText, LiveState, Glyph, Icon, Markdown, Popover, StepLabel, basename, longTitle, send } from './common';
 import { agentName } from '../shared/names';
-import { Button, Checkbox, ChoiceRow, FileRef, IconButton, Input, MenuItem, Pill, selectTrigger } from './ui';
+import { Button, Checkbox, ChoiceRow, FileRef, HoldButton, IconButton, Input, MenuItem, Pill, selectTrigger } from './ui';
 
 type Permission = Extract<Item, { kind: 'permission' }>;
 
@@ -218,17 +218,28 @@ export function QueueList({ chat }: { chat: ChatView }) {
 /** Edits waiting in a busy chat: decide them, and the rest of the turn's, at once. */
 export function EditsBar({ chat }: { chat: ChatView }) {
   if (!chat.busy) return null;
-  const waiting = waitingItems(chat.items).filter((i) => i.kind === 'review' || (i.kind === 'permission' && (i.toolKind === 'edit' || !!i.detail?.files?.length))).length;
+  const edits = waitingItems(chat.items).filter((i) => i.kind === 'review' || (i.kind === 'permission' && (i.toolKind === 'edit' || !!i.detail?.files?.length)));
+  const waiting = edits.length;
   if (!waiting || !chat.busy) return null;
+  // An edit that asks to be held on its own card (secrets, a careful file) keeps that friction in bulk:
+  // one click must never accept what its card won't allow with one click.
+  const careful = edits.filter((i) => approvalOf(i as Approvable, chat).hold).length;
+  const acceptAll = () => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' });
   return (
     <div class="banner edits-bar" role="group" aria-label="Edits waiting">
       <span class="banner-text">
         {waiting} edit{waiting === 1 ? '' : 's'} waiting
       </span>
       <span class="spacer" />
-      <Button size="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' })}>
-        Accept all
-      </Button>
+      {careful ? (
+        <HoldButton size="sm" title={`Includes ${careful} that need${careful === 1 ? 's' : ''} care. Hold, or press twice, to accept these and the rest of this turn's edits`} onConfirm={acceptAll}>
+          Accept all · {careful} careful
+        </HoldButton>
+      ) : (
+        <Button size="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={acceptAll}>
+          Accept all
+        </Button>
+      )}
       <Button size="sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
         Reject all
       </Button>
