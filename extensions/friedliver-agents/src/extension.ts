@@ -33,7 +33,7 @@ import { ReviewUi, type ReviewPlacement } from './host/review';
 import { RemoteControl } from './remote/host';
 import { testAgentsOn, userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
-import { actionsFor, showsChat, stateFor } from './host/surfaceState';
+import { actionsFor, showsChat, slimActions, slimFor, stateFor } from './host/surfaceState';
 import { ChatTabs, restoredChats, tabTitle } from './host/chatTabs';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
@@ -130,7 +130,9 @@ export class Controller {
   private agentsView?: vscode.WebviewView;
   /** Chats in the editor area: each its own editor tab. */
   private readonly chatTabs = new ChatTabs<vscode.WebviewPanel>((chatId, column, preserveFocus) => {
-    const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', { viewColumn: column ?? vscode.ViewColumn.Active, preserveFocus }, { retainContextWhenHidden: false });
+    // Kept alive while another tab is in front: switching back is instant instead of rebuilding the page, reloading
+    // the script and redrawing the transcript (5-10 s with long auto-mode chats). Costs memory per open chat tab only.
+    const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', { viewColumn: column ?? vscode.ViewColumn.Active, preserveFocus }, { retainContextWhenHidden: true });
     this.adoptPanel(panel, 'chat', chatId);
   });
   private tasksPanel?: vscode.WebviewPanel;
@@ -213,8 +215,10 @@ export class Controller {
       scale: this.scaler,
       onChange: () => this.postImageStore(),
     });
+    // The image list loads now; sweeping old screenshots (a stat per file) waits out the window's startup.
     void this.imageStore
       .load()
+      .then(() => new Promise<void>((r) => setTimeout(r, 60_000).unref()))
       .then(() => this.tidyImages())
       .catch((err: unknown) => this.log.warn(`Image copies: ${messageOf(err)}`));
     this.browser = new BrowserPanel(context, (line) => this.log.info(line));
@@ -583,7 +587,8 @@ export class Controller {
     for (const s of this.surfaces) {
       let mine = byKind.get(s.kind);
       if (!mine) byKind.set(s.kind, (mine = actionsFor(s.kind, actions)));
-      if (mine.length) post(s, mine.length === 1 ? { type: 'action', action: mine[0] } : { type: 'actions', actions: mine });
+      const own = s.single && s.selected ? slimActions(mine, s.selected) : mine;
+      if (own.length) post(s, own.length === 1 ? { type: 'action', action: own[0] } : { type: 'actions', actions: own });
     }
     this.updateDecisions();
     this.closeAnswered();
@@ -829,7 +834,8 @@ export class Controller {
           surface.ready = true;
           post(surface, {
             type: 'snapshot',
-            state: stateFor(surface.kind, this.core.snapshot),
+            // A chat's own tab gets the other chats trimmed (slimFor): it draws one chat, not every transcript.
+            state: surface.single && surface.selected ? slimFor(stateFor(surface.kind, this.core.snapshot), surface.selected) : stateFor(surface.kind, this.core.snapshot),
             selected: surface.selected ?? this.lastSelected,
             now: Date.now(),
             defaults: this.core.agentDefaults(),
@@ -1959,7 +1965,12 @@ export class Controller {
         this.core.revokeExternal();
         await removeTokenFile(this.context.globalStorageUri.fsPath);
         // Only the entry FriedLiver added, and only when there is one: otherwise the file isn't written.
+        // ~/.claude.json can be megabytes: read only when FriedLiver may have added the entry (it said so when it
+        // did, or this install never recorded it either way: once, for installs from before this was kept).
+        const KEY = 'friedliver.claudeEntryAdded';
+        if (this.context.globalState.get<boolean>(KEY) === false) return say('Claude Code is not connected to the browser: friedliver.browser.externalClients is off.');
         const removed = await unregisterClaude(CLAUDE_CONFIG());
+        await this.context.globalState.update(KEY, false);
         return say(`Claude Code is not connected to the browser: friedliver.browser.externalClients is off${removed ? '; removed the friedliver-browser entry FriedLiver had added to ~/.claude.json' : ''}.`);
       }
       const storage = this.context.globalStorageUri.fsPath;
@@ -1973,6 +1984,7 @@ export class Controller {
       const tokenFile = await writeTokenFile(storage, access.url, access.token);
       const script = this.context.asAbsolutePath(path.join('dist', 'externalStdio.js'));
       // Replaces an older http entry (token and port in the config) with this secret-free one.
+      await this.context.globalState.update('friedliver.claudeEntryAdded', true);
       const result = await registerClaude(CLAUDE_CONFIG(), claudeEntry(process.execPath, script, tokenFile));
       say(`Claude Code can use FriedLiver's browser (MCP server "friedliver-browser", ${result}). Start a new Claude Code session to pick it up.`);
     } catch (err) {

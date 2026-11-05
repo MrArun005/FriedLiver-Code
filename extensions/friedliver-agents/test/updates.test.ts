@@ -25,6 +25,9 @@ import {
   parseRelease,
   pickInstaller,
   sumFor,
+  windowsInstallDir,
+  windowsInstallScript,
+  windowsLaunchCommand,
   type Release,
 } from '../src/host/updateCheck';
 
@@ -103,10 +106,12 @@ describe('download URL allowlist', () => {
 
 describe('installer per platform', () => {
   const r = parseRelease(release('v1.143.0'))!;
-  it('picks the arm64 DMG on Apple silicon only', () => {
+  it('picks the arm64 DMG on Apple silicon and the x64 user installer on Windows', () => {
     expect(pickInstaller(r, 'darwin', 'arm64')?.name).toBe('FriedLiver-darwin-arm64-1.143.0.dmg');
     expect(pickInstaller(r, 'darwin', 'x64')).toBeNull();
-    expect(pickInstaller(r, 'win32', 'x64')).toBeNull();
+    expect(pickInstaller(r, 'win32', 'x64')?.name).toBe('FriedLiverUserSetup-x64-1.143.0.exe');
+    expect(pickInstaller(r, 'win32', 'arm64')).toBeNull();
+    expect(pickInstaller({ ...r, assets: r.assets.filter((a) => !a.name.endsWith('.exe')) }, 'win32', 'x64')).toBeNull();
     expect(pickInstaller(r, 'linux', 'x64')).toBeNull();
     expect(pickInstaller({ ...r, assets: r.assets.filter((a) => !a.name.endsWith('.dmg')) }, 'darwin', 'arm64')).toBeNull();
   });
@@ -413,3 +418,59 @@ function spawnDead(): number {
   const r = spawnSync('/usr/bin/true');
   return r.pid;
 }
+
+describe('Windows self-install', () => {
+  const root = 'C:\\Users\\a\\AppData\\Local\\Programs\\FriedLiver\\resources\\app';
+  const dir = 'C:\\Users\\a\\AppData\\Local\\Programs\\FriedLiver';
+
+  it('updates only a copy the installer put there, never a portable one', () => {
+    const has = (files: string[]) => (f: string) => files.includes(f);
+    expect(windowsInstallDir(root, has([`${dir}\\unins000.exe`, `${dir}\\FriedLiver.exe`]))).toBe(dir);
+    expect(windowsInstallDir(root, has([`${dir}\\FriedLiver.exe`]))).toBeNull();
+    expect(windowsInstallDir('D:\\tools\\friedliver\\resources\\app', has([]))).toBeNull();
+  });
+
+  const params = {
+    pid: 4242,
+    setup: 'C:\\Users\\a\\AppData\\Local\\Temp\\friedliver-update-x1\\FriedLiverUserSetup.exe',
+    dir: "C:\\Users\\o'brien\\AppData\\Local\\Temp\\friedliver-update-x1",
+    log: 'C:\\Users\\a\\AppData\\Local\\Temp\\friedliver-update.log',
+    version: '1.142.0-18',
+    page: `${RELEASES_PAGE}/tag/v1.142.0-18`,
+  };
+
+  it('waits for the app, installs silently, reopens it, and logs a RESULT the next start reads', () => {
+    const ps = windowsInstallScript(params);
+    expect(ps).toContain('$AppPid = 4242');
+    expect(ps).toContain("$Dir = 'C:\\Users\\o''brien\\AppData\\Local\\Temp\\friedliver-update-x1'");
+    expect(ps).toContain('WaitForExit(300000)');
+    expect(ps).toContain("'/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MERGETASKS=runcode,!desktopicon,!quicklaunchicon'");
+    expect(ps).toContain(`Set-Content -LiteralPath $Log -Value 'PAGE ${RELEASES_PAGE}/tag/v1.142.0-18'`);
+    expect(ps).toContain("Done ('ok ' + $Version)");
+    // The same log format as the macOS script, so the start-up report reads it.
+    expect(readInstallResult(`PAGE x\nRESULT ok ${params.version}`)).toEqual({ ok: true, detail: params.version });
+    expect(() => windowsInstallScript({ ...params, pid: 1 })).toThrow(/pid/);
+    expect(() => windowsInstallScript({ ...params, setup: 'C:\\Temp\\evil.exe' })).toThrow(/installer/);
+  });
+
+  it('starts the script through WMI, hidden, and refuses quotes or line breaks in its paths', () => {
+    const ps = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    const cmd = windowsLaunchCommand(ps, 'C:\\Temp\\x\\install.ps1');
+    expect(cmd).toContain('Invoke-CimMethod -ClassName Win32_Process -MethodName Create');
+    expect(cmd).toContain('ShowWindow = [uint16]0');
+    expect(cmd).toContain('-File "C:\\Temp\\x\\install.ps1"');
+    expect(() => windowsLaunchCommand(ps, 'C:\\Temp\\"x\\install.ps1')).toThrow();
+  });
+
+  // The real PowerShell parser, on Windows (CI's extensions-windows job): both scripts must parse.
+  it.runIf(process.platform === 'win32')('parses as PowerShell', () => {
+    const check = (code: string) => {
+      const file = path.join(mkdtempSync(path.join(tmpdir(), 'fl-ps-')), 'check.ps1');
+      writeFileSync(file, code, 'utf8');
+      const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file}', [ref]$null, [ref]$e); $e.Count`], { encoding: 'utf8' });
+      expect(out.trim()).toBe('0');
+    };
+    check(windowsInstallScript(params));
+    check(windowsLaunchCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'C:\\Temp\\x\\install.ps1'));
+  });
+});

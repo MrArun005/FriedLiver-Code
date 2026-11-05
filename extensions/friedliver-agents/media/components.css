@@ -135,7 +135,7 @@
   flex: none;
 }
 
-/* ---- Button (§2.1): primary (the ember accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
+/* ---- Button (§2.1): primary (the accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
 
 .fl-btn {
   --btn-h: var(--h-md);
@@ -149,6 +149,10 @@
   --btn-fg: var(--fg);
   --btn-fg-hover: var(--btn-fg);
   --btn-shadow: none;
+  /* The edge that makes a button a button (§0.1): a visible rectangle on every surface, so it never reads as a
+     pill (round, no edge) or a tab (bare text). Variants with their own fill or none drop it. */
+  --btn-border: var(--btn-edge);
+  --btn-border-hover: var(--btn-edge-hover);
   position: relative;
   flex: none;
   display: inline-flex;
@@ -158,7 +162,7 @@
   height: var(--btn-h);
   min-width: calc(var(--btn-h) * 2);
   padding: 0 var(--btn-px);
-  border: var(--line) solid var(--ctl-border);
+  border: var(--line) solid var(--btn-border);
   border-radius: var(--r-ctl);
   background: var(--btn-bg);
   box-shadow: var(--btn-shadow);
@@ -184,6 +188,7 @@
 }
 .fl-btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-hover);
+  border-color: var(--btn-border-hover);
   color: var(--btn-fg-hover);
   outline: var(--hover-outline);
   outline-offset: -1px;
@@ -203,6 +208,14 @@
   opacity: 0.4;
   cursor: default;
 }
+/* A disabled primary steps down to the neutral fill instead of a 40% accent slab, so it stops being the
+   loudest shape on the surface while it can't be pressed. */
+:is(.fl-btn--primary, .fl-btn--brand):is(:disabled, [aria-disabled='true']) {
+  --btn-bg: var(--pill-bg);
+  --btn-fg: var(--fg-2);
+  --btn-shadow: none;
+  opacity: 1;
+}
 /* The trigger of an open menu keeps its pressed fill (a disclosure's aria-expanded doesn't). */
 .fl-btn[aria-haspopup][aria-expanded='true'] {
   background: var(--btn-bg-active);
@@ -213,6 +226,8 @@
   --btn-bg-hover: var(--sel-bg);
   --btn-fg: var(--sel-fg);
   --btn-fg-hover: var(--sel-fg);
+  --btn-border: var(--fg-2);
+  --btn-border-hover: var(--fg-2);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -238,7 +253,7 @@
   display: flex;
   width: 100%;
 }
-/* The one key action on a surface: the ember accent, white ink, a top-edge sheen over a contact shadow.
+/* The one key action on a surface: the accent and its own ink, a top-edge sheen over a contact shadow.
    "brand" was v1's send fill; v2 removes it, so it draws as the primary (the send is the primary's colour). */
 .fl-btn--primary,
 .fl-btn--brand {
@@ -247,6 +262,8 @@
   --btn-bg-active: var(--accent-press);
   --btn-fg: var(--primary-fg);
   --btn-shadow: var(--sheen), var(--elev-1);
+  --btn-border: transparent;
+  --btn-border-hover: transparent;
 }
 .fl-btn--secondary {
   --btn-bg: var(--pill-bg);
@@ -256,17 +273,23 @@
   --btn-bg-hover: var(--ghost-hover);
   --btn-fg: var(--fg-2);
   --btn-fg-hover: var(--fg);
-  font-weight: var(--w-regular);
+  /* Quiet: no fill and no edge at rest, but still the button's weight and an icon or hover fill, so it reads
+     as an action next to plain meta text. */
+  --btn-border: transparent;
+  --btn-border-hover: transparent;
 }
 .fl-btn--danger {
   --btn-bg: color-mix(in srgb, var(--error) var(--tint), transparent);
   --btn-bg-hover: color-mix(in srgb, var(--error) var(--tint-hover), transparent);
   --btn-bg-active: color-mix(in srgb, var(--error) 30%, transparent);
   --btn-fg: color-mix(in srgb, var(--error) var(--tone-ink), var(--fg));
+  --btn-border: color-mix(in srgb, var(--error) 45%, transparent);
+  --btn-border-hover: color-mix(in srgb, var(--error) 70%, transparent);
 }
 .fl-btn--quiet.fl-btn--danger {
   --btn-bg: transparent;
-  font-weight: var(--w-regular);
+  --btn-border: transparent;
+  --btn-border-hover: transparent;
 }
 .fl-btn--link {
   --btn-bg: transparent;
@@ -372,7 +395,7 @@
   color: inherit;
   opacity: 0.75;
 }
-/* On the accent the second part keeps full ink (75% of white on ember drops under 4.5:1). */
+/* On the accent the second part keeps full ink (75% of the ink on the accent drops contrast). */
 :is(.fl-btn--primary, .fl-btn--brand) .fl-btn__sub {
   opacity: 1;
   font-weight: var(--w-regular);
@@ -407,6 +430,13 @@
 }
 :is(.fl-btn--primary, .fl-btn--brand, .fl-btn--quiet) .fl-kbds.fl-btn__k {
   box-shadow: none;
+}
+/* A bare keycap dropped into a primary (not wrapped as .fl-btn__k) takes the button's ink too: the pill
+   fill with --fg text read as an empty white box on the accent. */
+:is(.fl-btn--primary, .fl-btn--brand) .fl-kbd {
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--line) color-mix(in srgb, currentColor 45%, transparent);
+  color: inherit;
 }
 
 /* Split button (§2.3): two buttons of one variant; outer corners --r-ctl, inner 0; the chevron half is
@@ -482,6 +512,8 @@
   border-radius: var(--r-pill);
   background: var(--pill-fill);
   color: var(--pill-c);
+  /* A status, not a control (§0.1): the arrow cursor, no hover. */
+  cursor: default;
   font: inherit;
   font-size: var(--pill-fs);
   font-weight: var(--w-medium);
@@ -501,6 +533,22 @@
 }
 /* fit: in a card narrower than 360px (an approval in a side bar) the pill takes its own line and wraps its words rather than cut them. */
 @container (max-width: 360px) {
+  .fl-pill--fit {
+    flex: none;
+    max-width: 100%;
+    height: auto;
+    min-height: var(--pill-h);
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .fl-pill--fit > .fl-pill__text {
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+}
+/* The same in a side bar (a webview up to 480px wide), where the card itself is just over 360px: a risk
+   reads in full ("Rewrites shared history"), never "Rewrites shar…". */
+@media (max-width: 480px) {
   .fl-pill--fit {
     flex: none;
     max-width: 100%;
@@ -589,13 +637,33 @@
   --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
 }
-/* A pill you can press: the composer's agents and model pills, filter chips. */
+/* A pill you can press (FilterPill, FileRef, a picker trigger, ChipButton) is a button, so it takes the
+   button's shape (§0.1): the control radius and the button edge, no resting fill; a tone keeps its ink and
+   tints the edge. Only status pills are round. */
 button.fl-pill,
-.fl-pill--interactive {
+.fl-pill--interactive,
+.fl-pill:has(> .fl-pill__main) {
+  --pill-fill: transparent;
+  --pill-fill-hover: var(--ghost-hover);
+  border-color: var(--btn-edge);
+  border-radius: var(--r-ctl);
   cursor: pointer;
   transition:
     background-color var(--dur-out) var(--ease-out),
+    border-color var(--dur-out) var(--ease-out),
     transform var(--dur-pop) var(--spring-pop);
+}
+button.fl-pill[data-tone],
+.fl-pill--interactive[data-tone],
+.fl-pill[data-tone]:has(> .fl-pill__main) {
+  --pill-fill: transparent;
+  --pill-fill-hover: color-mix(in srgb, var(--tone) var(--tint), transparent);
+  border-color: color-mix(in srgb, var(--tone) 50%, transparent);
+}
+button.fl-pill[data-tone='muted'],
+button.fl-pill[data-tone='done'],
+button.fl-pill[data-tone='routine'] {
+  border-color: var(--btn-edge);
 }
 button.fl-pill:active:not(:disabled) {
   transform: scale(var(--press-scale));
@@ -603,6 +671,7 @@ button.fl-pill:active:not(:disabled) {
 button.fl-pill:hover:not(:disabled),
 .fl-pill--interactive:hover {
   background: var(--pill-fill-hover);
+  border-color: var(--btn-edge-hover);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
@@ -610,13 +679,14 @@ button.fl-pill:focus-visible {
   outline: var(--focus-w) solid var(--focus);
   outline-offset: var(--focus-off);
 }
-.fl-pill[aria-pressed='true'],
-.fl-pill[aria-selected='true'],
-.fl-pill[aria-checked='true'] {
+.fl-pill.fl-pill[aria-pressed='true'],
+.fl-pill.fl-pill[aria-selected='true'],
+.fl-pill.fl-pill[aria-checked='true'] {
   /* On: the selection fill (a selection, not a status), the strong text colour. */
   --pill-c: var(--sel-fg);
   --pill-fill: var(--sel-bg);
   --pill-fill-hover: color-mix(in srgb, var(--sel-fg) 15%, transparent);
+  border-color: var(--fg-2);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -641,6 +711,7 @@ button.fl-pill:focus-visible {
 }
 .fl-pill:has(> .fl-pill__main:hover) {
   background: var(--pill-fill-hover);
+  border-color: var(--btn-edge-hover);
 }
 .fl-pill__main:focus-visible {
   outline: var(--focus-w) solid var(--focus);
@@ -665,6 +736,93 @@ button.fl-pill:focus-visible {
   background: var(--pill-hover);
 }
 
+/* ---- Meta (§2.5b): a card's or a row's relations (branch, pipes to, asked by, also in, compare) as plain
+   --fg-2 text, a small icon before each, joined by ·. Never a capsule: pills are for state only (§0.1). One
+   that opens something is a link (MetaLink): the same text with a hairline underline that firms on hover. ---- */
+
+.fl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-1);
+  row-gap: var(--sp-half);
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--t-85);
+  line-height: var(--lh);
+}
+/* Stacked (a narrow card): one relation a line, so a wrapped line never starts or ends on a stray ·. */
+.fl-meta--stack {
+  flex-direction: column;
+  align-items: flex-start;
+  row-gap: var(--sp-half);
+}
+.fl-meta--stack > .fl-meta__sep {
+  display: none;
+}
+/* One line (a list row's title line): no wrap; the last relation that doesn't fit ends in an ellipsis. */
+.fl-meta--line {
+  /* Gives way before the title beside it does. */
+  flex: 0 1000 auto;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  font-weight: var(--w-regular);
+}
+.fl-meta--line > .fl-meta__item {
+  flex: 0 1 auto;
+}
+.fl-meta__sep {
+  flex: none;
+  color: var(--fg-50);
+}
+.fl-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+  color: inherit;
+}
+.fl-meta__item > .icon {
+  flex: none;
+  width: var(--i-xs);
+  height: var(--i-xs);
+}
+.fl-meta__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fl-meta__item--mono > .fl-meta__text {
+  font-family: var(--mono);
+}
+.fl-meta__link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fl-meta__link > .fl-meta__text {
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 3px;
+}
+.fl-meta__link:hover {
+  color: var(--fg);
+}
+.fl-meta__link:hover > .fl-meta__text {
+  text-decoration-color: currentColor;
+}
+.fl-meta__link:focus-visible {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--sp-half);
+  border-radius: var(--r-3);
+}
+
 /* The agent map's pill (svg, webview.css .map-group): pressed as a node's "▸ N agents" branch toggle. */
 .map-branch:hover .group-pill {
   stroke: var(--fg);
@@ -674,7 +832,8 @@ button.fl-pill:focus-visible {
   stroke-width: 2;
 }
 
-/* ---- Count (§2.6): 16 tall, pill, 600 tabular; loud is needs-you only; it bumps once when it changes ---- */
+/* ---- Count (§2.6): 16 tall, a ring around a tabular number (no fill, so it never reads as a pill or a
+   button); loud (needs-you only) fills with the decision blue; it bumps once when it changes ---- */
 
 .fl-count {
   display: inline-block;
@@ -683,20 +842,21 @@ button.fl-pill:focus-visible {
   height: var(--h-2xs);
   padding: 0 var(--sp-1);
   border-radius: var(--r-pill);
-  background: var(--pill-bg);
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--line) var(--count-edge);
   color: var(--fg);
-  font-size: var(--t-85);
+  font-size: var(--t-xs);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);
   text-align: center;
-  outline: var(--line) solid var(--ctl-border);
-  outline-offset: -1px;
+  cursor: default;
   /* The Count component keys itself by its value, so a new number mounts and bumps once (1.15 → 1). */
   animation: fl-bump var(--dur-pop) var(--spring-pop);
 }
 .fl-count--loud {
   background: var(--decision);
+  box-shadow: none;
   color: var(--decision-fg);
 }
 @keyframes fl-bump {
@@ -705,18 +865,20 @@ button.fl-pill:focus-visible {
   }
 }
 
-/* ---- Segmented (§2.7): track 26, r8 on the pill fill; segments 22, --r-ctl; selected raised with a 3:1 edge ---- */
+/* ---- Segmented (§2.7): navigation, not buttons (§0.1). No track fill and no fill on an unselected segment:
+   bare --fg-2 labels over a hairline rule; the selected one takes the strong text and a 2px --sel-fg underline,
+   the same mark as the view switch and the chat tabs. ---- */
 
 .fl-seg {
   --seg-h: var(--h-md);
   display: inline-flex;
   flex: none;
-  gap: var(--sp-half);
+  gap: var(--sp-1);
   height: var(--seg-h);
-  padding: var(--sp-half);
-  border-radius: var(--r-8);
-  background: var(--pill-bg);
-  box-shadow: inset 0 0 0 var(--line) var(--ctl-border);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: var(--nav-rule);
 }
 .fl-seg__item {
   display: inline-flex;
@@ -727,9 +889,9 @@ button.fl-pill:focus-visible {
   min-width: 0;
   padding: 0 var(--sp-2);
   border: 0;
-  border-radius: var(--r-ctl);
+  border-radius: 0;
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-2);
   font: inherit;
   font-size: var(--t-90);
   font-weight: var(--w-medium);
@@ -737,16 +899,17 @@ button.fl-pill:focus-visible {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background-color var(--dur-pop) var(--spring-pop),
+    color var(--dur-out) var(--ease-out),
     box-shadow var(--dur-pop) var(--spring-pop);
 }
 .fl-seg__item > .icon {
   width: var(--i-sm);
   height: var(--i-sm);
 }
-/* Segments read --fg on the track (--fg-2 is 3.9:1 on --pill-bg); hover shows as a fill. */
+/* Hover: the text brightens and a hairline underline hints where the selection would go (never a fill). */
 .fl-seg__item:hover:not(:disabled, [aria-checked='true'], [aria-selected='true'], [aria-pressed='true']) {
-  background: var(--hover-bg);
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--hairline);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
@@ -755,9 +918,8 @@ button.fl-pill:focus-visible {
 .fl-seg__item[aria-pressed='true'] {
   color: var(--sel-fg);
   font-weight: var(--w-strong);
-  background: var(--seg-on);
-  /* The raised chip plus an inset --fg-2 edge: 3:1 against the track (WCAG 1.4.11). */
-  box-shadow: var(--elev-1), inset 0 0 0 var(--line) var(--fg-2);
+  background: transparent;
+  box-shadow: var(--nav-line);
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -825,7 +987,7 @@ button.fl-pill:focus-visible {
   box-shadow: inset 0 0 0 var(--line) var(--ctl-border-active);
 }
 .fl-toggle[aria-checked='true']::after {
-  background: var(--thumb);
+  background: var(--toggle-thumb);
   box-shadow: var(--shadow-thumb);
   transform: translateX(calc(var(--tg-w) - var(--tg-k) - var(--tg-inset) * 2));
 }
@@ -1490,10 +1652,10 @@ textarea.fl-input {
   gap: var(--sp-3);
   min-width: 0;
   padding: var(--card-pad);
-  border: var(--line) solid var(--hairline);
+  border: var(--line) solid var(--card-edge, var(--hairline));
   border-radius: var(--r-box);
   background: var(--input-bg);
-  box-shadow: var(--rim);
+  box-shadow: var(--rim), var(--card-lift, 0 0 0 0 transparent);
   color: var(--fg);
   transition: border-color var(--dur-out) var(--ease-out);
 }
@@ -1534,6 +1696,11 @@ textarea.fl-input {
 .fl-card[data-focus] {
   border-color: var(--fg-2);
   background: color-mix(in srgb, var(--sel-fg) 7%, var(--input-bg));
+}
+/* v3: a decision waiting on you carries the needs-you bar on its leading edge: the one card in the
+   transcript that is about you, told apart from replies and steps without a second colour. */
+.apv.fl-card[data-focus] {
+  box-shadow: var(--rim), var(--card-lift, 0 0 0 0 transparent), var(--zone-needs-bar);
 }
 .fl-card--ghost[data-focus] {
   background: color-mix(in srgb, var(--sel-fg) 7%, transparent);
@@ -2008,6 +2175,8 @@ textarea.fl-input {
 }
 .fl-discuss__rows {
   display: grid;
+  /* One column that never grows past the card: a long no-wrap row truncates instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-half);
 }
 .fl-discuss__group,
@@ -2547,35 +2716,36 @@ body[data-platform='windows'] .fl-dialog__foot {
   height: var(--h-md);
   padding: 0 var(--sp-2);
   border: var(--line) solid var(--ctl-border);
-  border-radius: var(--r-ctl);
+  border-radius: 0;
   background: transparent;
   color: var(--fg-2);
   font: inherit;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-out) var(--ease-out);
+  transition: color var(--dur-out) var(--ease-out);
 }
+/* Navigation, not a button (§0.1): no fill at rest or on hover, only the text brightening. */
 .fl-tab:hover {
   color: var(--fg);
-  background: var(--hover-bg);
   outline: var(--hover-outline);
   outline-offset: -1px;
 }
 .fl-tab[aria-selected='true'] {
   color: var(--sel-fg);
-  background: var(--sel-bg);
+  background: transparent;
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
-/* No line over the selected tab (owner, 2026-10-21). */
+/* The open tab: a 2px --sel-fg underline along its bottom edge, the same mark as the view switch and the
+   segmented controls (no line over the top: owner, 2026-10-21). */
 .fl-tab[aria-selected='true']::after {
-  content: none;
+  content: '';
   position: absolute;
-  top: 0;
-  left: var(--sp-2);
-  right: var(--sp-2);
+  bottom: 0;
+  left: var(--sp-1);
+  right: var(--sp-1);
   height: 2px;
-  border-radius: 0 0 var(--r-1) var(--r-1);
+  border-radius: var(--r-1) var(--r-1) 0 0;
   background: var(--sel-fg);
   animation: fl-tab-line var(--dur-spring) var(--spring-snap);
 }
@@ -3403,10 +3573,12 @@ button.fl-row,
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--input-bg);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-12);
-  box-shadow: var(--rim), var(--shadow-composer);
+  /* v3 prompt zone: the brightest surface on the page, with an edge you can see and a lift over the
+     transcript, so the one place you type is never mistaken for a message or a card. */
+  background: var(--zone-prompt-bg);
+  border: 1px solid var(--zone-prompt-edge);
+  border-radius: var(--r-14);
+  box-shadow: var(--rim), var(--zone-prompt-lift);
 }
 /* v2 (§2.27, owner-authorised restyle): the send is the one accent in every mode (the mode button says the
    mode); focus is the neutral ring at 60% with its halo. */
@@ -3416,8 +3588,8 @@ button.fl-row,
   --mode-send-fg: var(--send-fg);
 }
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
-  box-shadow: var(--rim), var(--shadow-composer), var(--focus-halo);
+  border-color: color-mix(in srgb, var(--mode) 60%, transparent);
+  box-shadow: var(--rim), var(--zone-prompt-lift), 0 0 0 3px color-mix(in srgb, var(--mode) 18%, transparent);
 }
 /* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
 .cc-chips {
@@ -3517,17 +3689,18 @@ button.cc-chip-remove:hover {
 }
 .cc-input textarea {
   flex: 1;
-  min-height: calc(1.5em + 20px);
+  /* Two lines at rest: room that says "type here". */
+  min-height: calc(2lh + 20px);
   /* Eight lines, then it scrolls inside; never more than a quarter of the panel. */
   max-height: min(calc(8lh + 20px), 25vh);
   field-sizing: content;
-  padding: 10px 36px 10px 14px;
+  padding: 10px 40px 10px 16px;
   border: 0;
-  border-radius: var(--r-12);
+  border-radius: var(--r-14);
   background: transparent;
   color: var(--sel-fg);
-  caret-color: var(--fg);
-  font-size: var(--t-100);
+  caret-color: var(--sel-fg);
+  font-size: var(--t-prompt);
   line-height: 1.5;
   resize: none;
   outline: none;
@@ -3560,8 +3733,8 @@ button.cc-mic .icon {
   align-items: center;
   gap: 2px;
   min-width: 0;
-  padding: 5px;
-  border-top: 0.5px solid var(--hairline);
+  padding: 6px;
+  border-top: 0;
   color: var(--fg-2);
 }
 button.cc-icon-btn {
@@ -3652,10 +3825,10 @@ button.cc-mode[data-warn] {
 button.send-btn {
   flex: none;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: 2px;
-  border-radius: var(--r-ctl);
+  width: 30px;
+  height: 30px;
+  margin-left: var(--sp-1);
+  border-radius: var(--r-round);
   color: var(--mode-send-fg);
   background: var(--mode-send);
   box-shadow: var(--sheen), var(--elev-1);
@@ -3717,6 +3890,19 @@ button.send-btn:disabled {
 }
 .banners > * {
   pointer-events: auto;
+}
+/* The 8px between the banners and the prompt is page tone, not a window onto the transcript: without it a
+   line of the reply scrolled under the banners showed through, cut in half. A real box, not a shadow, so it
+   holds in forced colours too (shadows are dropped there; a background becomes Canvas). */
+.banners:not(:empty)::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--sp-2);
+  background: var(--bg);
+  pointer-events: none;
 }
 .banners:empty {
   display: none;
@@ -4122,4 +4308,113 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
   50% {
     opacity: 0.35;
   }
+}
+
+/* ---- Forced colours (Windows High Contrast and other OS contrast themes; WCAG 1.4.1, 1.4.11) ----
+   The OS replaces every colour with its own and drops box-shadows, so anything drawn only with a fill or a
+   shadow vanished: the selected tab and segment, a switch and its knob, a checkbox's check, the timeline's
+   marks, the plan's progress, the needs-you bar and the composer's focus. Each is redrawn here in system
+   colours: Highlight for on, selected and current, CanvasText and GrayText for marks, ButtonText for edges. */
+@media (forced-colors: active) {
+  /* Selected and pressed: an inner Highlight outline. Not while keyboard-focused, so the focus ring (outside,
+     the theme's focus colour) is never replaced by it. */
+  .fl-tab[aria-selected='true']:not(:focus-visible),
+  .fl-seg__item[aria-selected='true']:not(:focus-visible),
+  .fl-seg__item[aria-checked='true']:not(:focus-visible),
+  [aria-pressed='true']:not(:focus-visible),
+  [role='option'][aria-selected='true']:not(:focus-visible),
+  .inbox-row[aria-selected='true']:not(:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .fl-toggle,
+  .fl-toggle::after,
+  .fl-check__box,
+  .fl-check__box::after,
+  .tl::before,
+  .tl::after,
+  .seg-bar i {
+    forced-color-adjust: none;
+  }
+  .fl-toggle {
+    background: Canvas;
+    box-shadow: inset 0 0 0 1px ButtonText;
+  }
+  .fl-toggle::after {
+    background: ButtonText;
+  }
+  .fl-toggle[aria-checked='true'] {
+    background: Highlight;
+    box-shadow: none;
+  }
+  .fl-toggle[aria-checked='true']::after {
+    background: HighlightText;
+    box-shadow: none;
+  }
+  .fl-toggle:disabled {
+    box-shadow: inset 0 0 0 1px GrayText;
+  }
+  .fl-toggle:disabled::after {
+    background: GrayText;
+  }
+  .fl-check__box {
+    border-color: ButtonText;
+    background: Canvas;
+  }
+  .fl-check__box:checked,
+  .fl-check__box:indeterminate {
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .fl-check__box::after {
+    border-color: HighlightText;
+  }
+  .tl::before {
+    background: CanvasText;
+  }
+  .tl::after {
+    background: GrayText;
+  }
+  .seg-bar i {
+    background: GrayText;
+  }
+  .seg-bar i[data-step='done'],
+  .seg-bar i[data-step='working'] {
+    background: Highlight;
+  }
+  .apv.fl-card[data-focus] {
+    border-left: 3px solid Highlight;
+  }
+  .composer:focus-within,
+  .new-task:focus-within {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+  /* Keyboard focus: a thicker CanvasText ring outside the control, unlike the inner Highlight of selection. */
+  .fl-tab:focus-visible,
+  .fl-seg__item:focus-visible,
+  .fl-btn:focus-visible,
+  .fl-toggle:focus-visible,
+  [aria-pressed]:focus-visible,
+  [role='option']:focus-visible,
+  .inbox-row:focus-visible {
+    outline: 3px solid CanvasText;
+    outline-offset: 2px;
+  }
+}
+
+/* Hit area (WCAG 2.5.8): dense buttons and segment tabs are drawn 18–22px tall, but a pointer gets at least
+   24px of height around their centre; the drawn size and the layout don't change. Height only: a wider box
+   would reach past the transcript's gutter beside a button at its edge. */
+:is(.fl-btn, .fl-seg__item)::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: max(100%, 24px);
+  transform: translateY(-50%);
+}
+.fl-seg__item {
+  position: relative;
 }

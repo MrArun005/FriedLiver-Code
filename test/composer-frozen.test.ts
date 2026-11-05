@@ -17,7 +17,9 @@ const END = '/* ---- Banners above the composer';
 // owner's later order ("use the whole screen"), the composer spans the chat's width on the transcript's gutters
 // instead of a 680px centred column; and Stop (the send while an agent works) is the pill fill, so the accent
 // marks only sending. DOM and controls unchanged.
-const APPROVED = 'ce8a49b27092bdf28eb632454748fe14768457b858c255d4703b3b5fdc14e260';
+// 2026-11-03: owner-authorised v3 "Mono" restyle (the prompt must look unlike every other place): the prompt-zone
+// tone, edge, lift and focus glow, a two-line resting height, a round send; focus snaps (no animated shadow). DOM and controls unchanged.
+const APPROVED = '871042f844b320843be41ac8d96ea25498c18161d6e19c4f031118c64f72c2b6';
 
 describe('approved composer', () => {
   it('keeps its styles', () => {

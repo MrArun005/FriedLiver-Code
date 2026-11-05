@@ -9,3 +9,7 @@ vscode/
 VSCode-*/
 installers/
 extensions/friedliver-agents/bin/
+
+# The static UI site (extensions/friedliver-agents/scripts/web-export.mjs, deployed by vercel.json)
+extensions/friedliver-agents/web-dist/
+.vercel/

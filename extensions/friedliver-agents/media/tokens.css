@@ -18,21 +18,21 @@
 
 /* tokens:start */
 :root {
-  /* Surfaces: 60% page, 30% raised content, floating layers above. Warm graphite, OKLCH (dark, C .006
-     h 60): page .205, input .235, float .265, code .15, shell .168 (the workbench chrome; webviews sit on
-     the page). */
-  --bg: var(--vscode-editor-background, #191714);
-  --input-bg: var(--vscode-input-background, #201d1b);
+  /* Surfaces: 60% page, 30% raised content, floating layers above. v3 "Mono": neutral black and grey, OKLCH
+     with zero chroma (dark): page .195, input .235, float .245, code .155, shell .15 (the workbench chrome
+     and the details zones; webviews sit on the page). */
+  --bg: var(--vscode-editor-background, #151515);
+  --input-bg: var(--vscode-input-background, #1e1e1e);
   /* A field's edge reads 3:1 on the page (WCAG 1.4.11). */
   --field-border: color-mix(in srgb, var(--fg-2) 55%, transparent);
   --thumb: #ffffff;
-  --menu-bg: var(--vscode-menu-background, #252220);
-  --dialog-bg: var(--vscode-editorWidget-background, #252220);
-  --code-bg: var(--vscode-textCodeBlock-background, #100e0c);
-  --inline-code-bg: var(--vscode-textPreformat-background, #23201e);
+  --menu-bg: var(--vscode-menu-background, #232323);
+  --dialog-bg: var(--vscode-editorWidget-background, #232323);
+  --code-bg: var(--vscode-textCodeBlock-background, #0f0f0f);
+  --inline-code-bg: var(--vscode-textPreformat-background, #202020);
   --tool-bg: var(--bg);
   /* State fills are the strong text colour at a low alpha, so they read on every surface they land on. */
-  --sel-bg: var(--vscode-list-activeSelectionBackground, #faf6f31c);
+  --sel-bg: var(--vscode-list-activeSelectionBackground, #fbfbfb1c);
   --hover-bg: color-mix(in srgb, var(--sel-fg) 6%, transparent);
   --ghost-hover: color-mix(in srgb, var(--sel-fg) 8%, transparent);
   --pill-bg: color-mix(in srgb, var(--fg) 9%, transparent);
@@ -41,7 +41,7 @@
   /* A selected segment: a raised chip in both themes (dark: the float tone; light: white). */
   --seg-on: var(--menu-bg);
   --chip-bg: color-mix(in srgb, var(--input-bg) 85%, var(--fg-2));
-  --overlay: #0a0908b3;
+  --overlay: #000000b3;
   /* Glass: floating surfaces only (menus, popovers, palette, toasts, sheets, dialogs). Off in High
      Contrast and under prefers-reduced-transparency, where the alpha goes to 100%. */
   --glass-alpha: 78%;
@@ -52,7 +52,7 @@
   --rim: inset 0 1px 0 0 #ffffff12;
 
   /* Lines: one hairline weight; containers 10% of the text colour, rows 6%. */
-  --border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, #24211f)));
+  --border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, #262626)));
   --hairline: color-mix(in srgb, var(--border) 60%, transparent);
   --dialog-border: color-mix(in srgb, var(--sel-fg) 12%, transparent);
   --option-ring: #ffffff1a;
@@ -66,36 +66,47 @@
   --hover-outline: none;
   --line: 1px;
   --line-half: 0.5px;
+  /* The five families read apart at a glance (COMPONENTS.md §0.1): a button is a rectangle with a visible
+     edge (--btn-edge, 3:1-ish on the page); a tab, view switch or segment is bare text whose selection is a
+     2px underline (--nav-line); a count is a ring around a number (--count-edge); a pill (status only) is a
+     round tint with no edge; a label or a relation is plain --fg-2 text. */
+  --btn-edge: color-mix(in srgb, var(--fg) 24%, transparent);
+  --btn-edge-hover: color-mix(in srgb, var(--fg) 40%, transparent);
+  --nav-line: inset 0 -2px 0 var(--sel-fg);
+  --nav-rule: inset 0 calc(var(--line) * -1) 0 var(--hairline);
+  --count-edge: color-mix(in srgb, var(--fg-2) 60%, transparent);
 
   /* Text: five colours. OKLCH (dark) .975 / .925 / .735 / .62 */
-  --sel-fg: var(--vscode-list-activeSelectionForeground, #faf6f3);
-  --fg: var(--vscode-foreground, #e9e5e2);
-  --fg-2: var(--vscode-descriptionForeground, #aca8a5);
+  --sel-fg: var(--vscode-list-activeSelectionForeground, #fbfbfb);
+  --fg: var(--vscode-foreground, #e9e9e9);
+  --fg-2: var(--vscode-descriptionForeground, #adadad);
   --fg-50: color-mix(in srgb, var(--fg) 62%, transparent);
-  --placeholder: var(--vscode-input-placeholderForeground, #898583);
-  --disabled: var(--vscode-disabledForeground, #898583);
+  --placeholder: var(--vscode-input-placeholderForeground, #888888);
+  --disabled: var(--vscode-disabledForeground, #888888);
   --link: var(--vscode-textLink-foreground, #67b0f9);
-  --inline-code-fg: var(--vscode-textPreformat-foreground, #c7c3c0);
+  --inline-code-fg: var(--vscode-textPreformat-foreground, #c7c7c7);
 
-  /* The one accent ("the beacon"): ember, oklch(.56 .15 42) with white ink (5:1), the same in dark and
-     light, taken from the FriedLiver mark. It marks the next key action on a surface (the one primary,
-     the composer's send when there is something to send) and the "on" of a switch or checkbox. Nothing
-     else is ember: status, focus and links never are. */
-  --accent-bg: var(--vscode-button-background, #ba4f1f);
-  --accent-fg: var(--vscode-button-foreground, #ffffff);
-  --accent-hover: var(--vscode-button-hoverBackground, #c05621);
+  /* The one accent (v3 "Mono"): white with black ink in dark (oklch .94, 16:1), black with white ink in light
+     (oklch .2, 18:1). It marks the next key action on a surface (the one primary, the composer's send when
+     there is something to send) and the "on" of a switch or checkbox. Status, focus and links never take
+     it; the FriedLiver mark keeps its own --brand orange and is never a control. */
+  --accent-bg: var(--vscode-button-background, #ebebeb);
+  --accent-fg: var(--vscode-button-foreground, #0a0a0a);
+  --accent-hover: var(--vscode-button-hoverBackground, #ffffff);
   --accent-press: color-mix(in srgb, var(--accent-bg) 88%, var(--bg));
   --accent: var(--fl-accent, var(--accent-bg));
   --send-bg: var(--fl-accent, var(--accent-bg));
   --send-fg: var(--accent-fg);
-  --focus-border: var(--vscode-focusBorder, #dad7d4);
+  --focus-border: var(--vscode-focusBorder, #e4e4e4);
   /* Switches, checkboxes and radios take the accent when on, with a white knob or check (every platform's convention). */
   --button-bg: var(--accent-bg);
   --button-fg: var(--accent-fg);
   --error: var(--vscode-errorForeground, #f86970);
   --warn: var(--vscode-editorWarning-foreground, #f1bf5b);
   --toggle-on: var(--button-bg);
-  --effort-fill: var(--vscode-inputOption-activeBorder, #353230);
+  /* A switch's knob when on: the accent's own ink (black on the white accent in dark, white on black in light). */
+  --toggle-thumb: var(--accent-fg);
+  --effort-fill: var(--vscode-inputOption-activeBorder, #353535);
   /* The one primary per surface is the accent. */
   --primary-bg: var(--accent-bg);
   --primary-fg: var(--accent-fg);
@@ -123,7 +134,7 @@
   --focus-off: 2px;
   --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus) 24%, transparent);
 
-  /* Status (COMPONENTS.md v2 §2.23; owner, 2026-10-20): working is the warm neutral --fg-2 on an open arc that
+  /* Status (COMPONENTS.md v2 §2.23; owner, 2026-10-20): working is the neutral --fg-2 on an open arc that
      turns; green is kept for done and success; needs-you blue; failed
      red. Each also has its own shape: needs-you a bullseye, working an open arc, done a check, failed ⊗,
      idle a hollow ring, so colour is never the only signal (WCAG 1.4.1). */
@@ -159,11 +170,13 @@
   --fl-font-size: var(--vscode-chat-font-size, 13px);
   --fs: var(--fl-font-size);
   --fs-mono: var(--vscode-editor-font-size, 12px);
+  /* The steps are fractions of the base size, not of the parent's (em compounded: 0.85em inside 0.9em
+     was 9.9px), and never under the 11px floor, so nested meta, pills and counts stay legible. */
   --t-100: 1em;
-  --t-90: 0.9em;
-  --t-85: 0.85em;
-  --t-80: 0.8em;
-  --t-75: 0.75em;
+  --t-90: max(var(--t-xs), calc(var(--fs) * 0.9));
+  --t-85: max(var(--t-xs), calc(var(--fs) * 0.85));
+  --t-80: max(var(--t-xs), calc(var(--fs) * 0.8));
+  --t-75: max(var(--t-xs), calc(var(--fs) * 0.75));
   --t-xs: 11px;
   --t-sm: 12px;
   --t-md: 13px;
@@ -254,6 +267,41 @@
   --w-dialog-wide: 880px;
   --w-palette: 640px;
 
+  /* v3 "Mono" zones (COMPONENTS.md §0.2). Every kind of place has its own tone, edge and type, so where
+     you type, what you read, what the agent did and the details around it never look alike:
+       prompt   the brightest, lifted box with a visible edge and a glow on focus: the one place you type;
+       you      your messages: a raised bubble at the right, like every conversation you know;
+       reply    the agent's words: no box, larger type and a longer line height, the thing you read;
+       steps    what the agent did: small, secondary, on a hairline spine, out of reading's way;
+       details  the context rail and the tab strip: recessed to the shell tone, eyebrow labels. */
+  --zone-shell: var(--vscode-sideBar-background, #0b0b0b);
+  --zone-prompt-bg: color-mix(in srgb, var(--sel-fg) 5%, var(--input-bg));
+  --zone-prompt-edge: color-mix(in srgb, var(--sel-fg) 16%, transparent);
+  --zone-prompt-edge-focus: color-mix(in srgb, var(--sel-fg) 42%, transparent);
+  --zone-prompt-glow: 0 0 0 4px color-mix(in srgb, var(--sel-fg) 8%, transparent);
+  --zone-prompt-lift: 0 -12px 32px -8px #000000cc, 0 2px 6px #00000066;
+  --zone-prompt-fade: 40px;
+  --zone-you-bg: color-mix(in srgb, var(--sel-fg) 10%, var(--bg));
+  --zone-you-edge: color-mix(in srgb, var(--sel-fg) 8%, transparent);
+  --zone-step-spine: color-mix(in srgb, var(--fg-2) 22%, transparent);
+  --zone-needs-bar: inset 3px 0 0 var(--decision);
+  --zone-ask-bar: inset 2px 0 0 var(--zone-prompt-edge-focus);
+  --w-bubble: 80%;
+  --r-bubble: 16px;
+  --r-bubble-tail: 6px;
+  /* Type per zone, all relative to the chat's base size (--fs, which Cmd/Ctrl + = - 0 scales): the prompt at
+     the base, the reply one step up (two on a wide page), steps and details one step down, the details'
+     section labels two steps down as eyebrows. */
+  --t-prompt: var(--fs);
+  --t-reply: calc(var(--fs) + 1px);
+  --t-reply-wide: calc(var(--fs) + 2px);
+  --lh-reply: 1.65;
+  --t-step: calc(var(--fs) - 1px);
+  --t-eyebrow: calc(var(--fs) - 2px);
+  --track-eyebrow: 0.07em;
+  --font-features: 'ss01', 'ss02', 'cv01', 'calt', 'kern';
+  --font-features-mono: 'calt', 'liga', 'zero';
+
   /* Elevation: inline things are flat; floating surfaces lift, with a short contact shadow under a
      long ambient one. */
   --elev-0: none;
@@ -325,16 +373,32 @@ body.vscode-high-contrast-light {
   --shadow-thumb: 0 0 0 1px #00000026, 0 1px 2px #00000029;
   --mic-idle: var(--fg);
   --brand: #c4622a;
+  /* Neutral text at 62% lands at 4.48:1 on the light page; 66% keeps menu titles and key hints at 4.5:1+. */
+  --fg-50: color-mix(in srgb, var(--fg) 66%, transparent);
   --rim: inset 0 0 0 0 transparent;
-  --elev-1: 0 0 0 1px #1a14100f, 0 1px 2px #1a14100f;
-  --elev-2: 0 0 0 1px #1a141014, 0 4px 12px -2px #1a14101f;
-  --elev-3: 0 0 0 1px #1a141014, 0 2px 6px #1a14100f, 0 16px 40px -8px #1a141033;
-  --elev-4: 0 0 0 1px #1a141014, 0 4px 12px #1a141014, 0 32px 80px -16px #1a14103d;
-  --shadow-tip: 0 0 0 1px #1a141014, 0 2px 8px #1a14101f;
-  --overlay: #1a141047;
+  /* A white card on a near-white page is 1.01:1: a firmer edge and a contact shadow, so the zones that
+     read at a glance in dark still read in light. */
+  --card-edge: color-mix(in srgb, var(--fg) 13%, transparent);
+  --card-lift: 0 1px 2px #0000000d, 0 2px 8px -4px #00000014;
+  --elev-1: 0 0 0 1px #0000000f, 0 1px 2px #0000000f;
+  --elev-2: 0 0 0 1px #00000014, 0 4px 12px -2px #0000001f;
+  --elev-3: 0 0 0 1px #00000014, 0 2px 6px #0000000f, 0 16px 40px -8px #00000033;
+  --elev-4: 0 0 0 1px #00000014, 0 4px 12px #00000014, 0 32px 80px -16px #0000003d;
+  --shadow-tip: 0 0 0 1px #00000014, 0 2px 8px #0000001f;
+  --overlay: #00000047;
   --glass-alpha: 84%;
   --tone-ink: 40%;
   --seg-on: #ffffff;
+  --btn-edge: color-mix(in srgb, var(--fg) 26%, transparent);
+  --btn-edge-hover: color-mix(in srgb, var(--fg) 45%, transparent);
+  --zone-shell: var(--vscode-sideBar-background, #f5f5f5);
+  --zone-prompt-bg: #ffffff;
+  --zone-prompt-edge: color-mix(in srgb, var(--sel-fg) 18%, transparent);
+  --zone-prompt-edge-focus: color-mix(in srgb, var(--sel-fg) 55%, transparent);
+  --zone-prompt-glow: 0 0 0 4px color-mix(in srgb, var(--sel-fg) 7%, transparent);
+  --zone-prompt-lift: 0 -8px 24px -10px #00000026, 0 1px 3px #0000001a;
+  --zone-you-bg: color-mix(in srgb, var(--sel-fg) 6%, var(--bg));
+  --zone-ask-bar: inset 2px 0 0 var(--zone-prompt-edge-focus);
   /* Derived tokens resolve where they are declared: restated here so they take this block's values. */
   --glass-bg: color-mix(in srgb, var(--menu-bg) var(--glass-alpha), transparent);
   --glass-dialog-bg: color-mix(in srgb, var(--dialog-bg) var(--glass-alpha), transparent);
@@ -360,6 +424,10 @@ body.vscode-high-contrast-light {
   --ctl-border: var(--border);
   --field-border: var(--border);
   --ctl-border-active: var(--vscode-contrastActiveBorder, #f38518);
+  --btn-edge: var(--border);
+  --btn-edge-hover: var(--ctl-border-active);
+  --count-edge: var(--border);
+  --nav-rule: inset 0 calc(var(--line) * -1) 0 var(--border);
   --focus: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder, #f38518));
   --focus-halo: 0 0 0 0 transparent;
   /* Selection is the contrast border; only keyboard focus is the active (orange) border, 2px. */
@@ -379,6 +447,15 @@ body.vscode-high-contrast-light {
   --elev-4: none;
   --primary-bg: var(--fg);
   --primary-fg: var(--bg);
+  --zone-prompt-edge: var(--border);
+  --zone-prompt-edge-focus: var(--ctl-border-active);
+  --zone-prompt-lift: none;
+  --zone-prompt-glow: 0 0 0 0 transparent;
+  --zone-you-edge: var(--border);
+  --zone-you-bg: transparent;
+  --zone-prompt-bg: var(--input-bg);
+  --zone-shell: var(--bg);
+  --zone-ask-bar: inset 2px 0 0 var(--zone-prompt-edge-focus);
   --seg-on: transparent;
   --ghost-hover: transparent;
   --press-scale: 1;

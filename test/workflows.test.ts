@@ -92,7 +92,8 @@ describe('GitHub workflows', () => {
 
   it('builds only from a release, a manual run or a v* tag, never a branch push', () => {
     const on = triggers('build.yml');
-    expect(on).toMatch(/^ {2}push:\n {4}tags: \['v\*'\]\n {2}workflow_dispatch:\n {2}workflow_call:\n/);
+    // A manual run may take inputs (bench_against), indented under it; nothing else triggers it.
+    expect(on).toMatch(/^ {2}push:\n {4}tags: \['v\*'\]\n {2}workflow_dispatch:\n(?: {4,}.*\n)* {2}workflow_call:\n/);
     expect(on).not.toMatch(/branches|pull_request/);
   });
 

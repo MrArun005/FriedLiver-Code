@@ -816,6 +816,42 @@ async function shoot() {
     await linux.close();
   }
   {
+    // A focused control does what it says. While a decision waits its keys work from the whole view, and Enter on a
+    // focused Deny used to approve the request (in the chat, on an approval card and in the Inbox, where it started
+    // the hold that allows). And Tab, which changes the request's scope, made the message box a keyboard trap.
+    const answer = (p) => p.evaluate(() => window.__posted.filter((m) => m && (m.type === 'bridge' || m.type === 'permission')).map((m) => m.answer ?? m.optionId));
+    for (const [query, sel, want] of [
+      ['surface=chat&theme=dark&select=chat-c1', '.apv .apv-act button.fl-btn--quiet', 'deny'],
+      ['surface=chat&theme=dark&fixture=approvals', '.apv-act button.fl-btn--quiet', 'reject'],
+      ['surface=tasks&theme=dark&fixture=inbox&view=inbox', 'button:has-text("Deny")', 'deny'],
+    ]) {
+      const p = await open(query, 1440, 900);
+      await p.waitForTimeout(300);
+      await p.locator(sel).first().focus();
+      await p.evaluate(() => (window.__posted.length = 0));
+      await p.keyboard.press('Enter');
+      await p.waitForTimeout(200);
+      const got = await answer(p);
+      check(got.length === 1 && got[0] === want, `${query.split('&').filter((q) => /surface|fixture/.test(q)).join(' ')}: Enter on a focused Deny answers ${want} [${got}]`);
+      await p.close();
+    }
+    const p = await open('surface=chat&theme=dark&select=chat-c1', 1440, 900);
+    await p.waitForTimeout(300);
+    const at = () => p.evaluate(() => document.activeElement?.tagName);
+    await p.click('.composer textarea');
+    await p.keyboard.press('Tab');
+    check((await at()) === 'TEXTAREA', 'while a request waits, Tab in the message box changes its scope');
+    await p.keyboard.press('Control+Shift+M');
+    const hint = await p.locator('.composer-hint').allInnerTexts();
+    await p.keyboard.press('Tab');
+    const out = await at();
+    await p.keyboard.press('Tab');
+    check(hint.some((h) => h.startsWith('Tab moves focus')) && out === 'BUTTON' && (await at()) === 'BUTTON', `Ctrl+Shift+M (Ctrl+M off macOS) makes Tab move focus out of the message box and on [${hint} · ${out}]`);
+    const described = await p.locator('.composer textarea').getAttribute('aria-description');
+    check(!!described && described.includes('Tab move focus'), 'the message box tells a screen reader how to make Tab move focus');
+    await p.close();
+  }
+  {
     // Text size: Cmd/Ctrl + = - 0 in a tab, that tab only, kept in its own webview state, and never reaching the window's zoom.
     const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
     await p.evaluate(() => {
@@ -994,8 +1030,17 @@ async function shoot() {
       d.remove();
       return c;
     }, v);
-    // Auto (Full auto): the mode's colour is errorForeground, as in Claude Code; Manual's is the orange accent.
-    check(idle !== focused && focused === (await tone('--error')), `focus turns the border the mode's colour (${idle} → ${focused})`);
+    // v2 (COMPONENTS.md §2.27): focus is the neutral ring at 60% in every mode (the mode button says the mode, and
+    // red is kept for errors), so the edge turns --focus at 60%, never the error colour.
+    const ring60 = await p.evaluate(() => {
+      const d = document.createElement('div');
+      d.style.color = 'color-mix(in srgb, var(--focus) 60%, transparent)';
+      document.querySelector('.composer').appendChild(d);
+      const c = window.getComputedStyle(d).color;
+      d.remove();
+      return c;
+    });
+    check(idle !== focused && focused === ring60 && focused !== (await tone('--error')), `focus turns the border the neutral focus ring (${idle} → ${focused})`);
     const ring = await p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
     check(/ 0px 0px 3px/.test(ring) && !ring.includes('rgb(0, 120'), `a 3px halo in the mode's colour, no blue ring [${ring}]`);
     await p.evaluate(() => window.postMessage({ type: 'action', action: { t: 'approval', chatId: 'chat-c6', level: 'ask' } }, '*'));
@@ -1398,8 +1443,13 @@ async function shoot() {
   }
   {
     // Nothing spills out of a card, list row or map node, at any card width: pills shrink, wrap or cut with an ellipsis.
+    // Measured with animations paused: a working status ring spins, and a rotated square's bounding box is up to
+    // 41% wider than the square, which read as a 1-2px spill on some frames and not others.
     const spills = (p, container) =>
       p.evaluate((sel) => {
+        const freeze = document.createElement('style');
+        freeze.textContent = '*, *::before, *::after { animation-play-state: paused !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; animation-duration: 0s !important; }';
+        document.head.appendChild(freeze);
         const out = [];
         for (const box of document.querySelectorAll(sel)) {
           const r = box.getBoundingClientRect();
@@ -1411,6 +1461,7 @@ async function shoot() {
             if (e.left < inner.left - 0.5 || e.right > inner.right + 0.5) out.push(`${el.className || el.tagName} in ${box.getAttribute('data-nav') ?? sel} by ${Math.round(Math.max(inner.left - e.left, e.right - inner.right))}px`);
           }
         }
+        freeze.remove();
         return out;
       }, container);
     for (const width of [280, 360, 480]) {
@@ -2084,6 +2135,10 @@ function overflowFixture(now) {
 /** Run in the page: what escapes its box inside each element `sel` matches, and whether the page scrolls sideways.
     A box may scroll sideways only when that is its job (the map's canvas, code blocks, diffs, tables). */
 function overflowProbe(sel) {
+  // Animations paused while measuring: a spinning status ring's box is up to 41% wider than the ring.
+  const freeze = document.createElement('style');
+  freeze.textContent = '*, *::before, *::after { animation-play-state: paused !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; animation-duration: 0s !important; }';
+  document.head.appendChild(freeze);
   const SCROLLERS = '.map-scroll, pre, .diff, table';
   const vw = window.innerWidth;
   const name = (el) => el.tagName.toLowerCase() + [...el.classList].slice(0, 2).map((c) => `.${c}`).join('');
@@ -2117,6 +2172,7 @@ function overflowProbe(sel) {
       }
     }
   }
+  freeze.remove();
   return { page, bad: [...new Set(bad)] };
 }
 
@@ -2287,7 +2343,7 @@ async function inboxChecks({ open, check }) {
     for (const [width, height] of [[1200, 800], [640, 900]]) {
       const p = await open(`surface=tasks&theme=${theme}&view=board&fixture=inbox`, width, height, 2);
       const tab = p.locator('.views button.seg-item').nth(4);
-      check((await tab.innerText()).replace(/\s+/g, ' ').trim() === 'Inbox · 10', `${width} ${tone}: the view switch says Inbox · 10`);
+      check(/^Inbox\s*10$/.test((await tab.innerText()).replace(/\s+/g, ' ').trim()), `${width} ${tone}: the view switch says Inbox and its count, 10`);
       await p.keyboard.press('5');
       await p.waitForSelector('.inbox-row');
       await grace(p);
@@ -2334,7 +2390,7 @@ async function inboxChecks({ open, check }) {
   await host(p, { t: 'items', chatId: 'chat-c', items: [{ kind: 'permission', requestId: 'perm-new', title: 'Read .env', toolKind: 'read', options: [{ optionId: 'y', name: 'Yes', kind: 'allow_once' }, { optionId: 'n', name: 'No', kind: 'reject_once' }] }], at: Date.now() - 3_600_000 });
   await p.waitForSelector('.inbox-row[data-id="perm-new"]');
   check((await sel(p)) === ids.edit, 'a new arrival never takes the selection');
-  check((await tabText(p)) === 'Inbox · 11', 'the count follows live');
+  check(/^Inbox\s*11$/.test(await tabText(p)), 'the count follows live');
 
   // Answered: the row folds away, and the selection goes to the first still waiting, with a fresh grace period.
   await clear(p);

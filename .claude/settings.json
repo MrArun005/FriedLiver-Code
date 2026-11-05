@@ -1,0 +1,1 @@
+{"permissions":{"allow":["Bash(npx --yes vercel@latest deploy:*)","Bash(npx vercel@latest deploy:*)","Bash(npx vercel deploy:*)"]}}

@@ -12,6 +12,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      bench_against:
+        description: 'Windows startup bench: compare this build with these builds, comma separated ("latest", a v* tag or a Build FriedLiver run id); empty = no bench'
+        required: false
+        default: ''
   workflow_call:
     inputs:
       version:
@@ -277,6 +282,75 @@ jobs:
         with:
           name: workbench-shots
           path: shots/
+          if-no-files-found: warn
+
+  # The proof for a speed change, on manual builds that name a baseline: this run's portable Windows app against
+  # each build in bench_against, alternating launches on one runner, opening a real repository (this one,
+  # cloned), 8 runs per build (scripts/startup-bench.mjs). The table goes to the run's summary; results.json and
+  # every launch's own Startup Performance report to the startup-bench artifact.
+  bench:
+    needs: build
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.bench_against != '' }}
+    runs-on: windows-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Inputs reach scripts only as environment variables.
+      BENCH_AGAINST: ${{ inputs.bench_against }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      # Playwright comes from the Agents extension's lockfile; only its library is used (no browsers).
+      - name: Playwright
+        working-directory: extensions/friedliver-agents
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: friedliver-fork-windows-x64
+          path: build
+      - name: Unpack this run's app
+        shell: pwsh
+        run: |
+          Expand-Archive -Path build/friedliver-fork-windows-x64.zip -DestinationPath "$env:RUNNER_TEMP/candidate"
+          "CANDIDATE=$env:RUNNER_TEMP/candidate/FriedLiver.exe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      # The token is exposed to this step only: the next one runs the downloaded apps.
+      - name: Download and verify the baselines
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          : > "$RUNNER_TEMP/baselines.txt"
+          i=0
+          IFS=',' read -ra refs <<< "$BENCH_AGAINST"
+          for ref in "${refs[@]}"; do
+            ref=$(echo "$ref" | tr -d '[:space:]')
+            [ -n "$ref" ] || continue
+            i=$((i + 1))
+            app=$(node scripts/fetch-build.mjs "$ref" "$RUNNER_TEMP/base$i" windows)
+            echo "$ref|$app" >> "$RUNNER_TEMP/baselines.txt"
+          done
+      - name: Bench
+        run: |
+          git clone -q "file://$GITHUB_WORKSPACE" "$RUNNER_TEMP/ws"
+          while IFS='|' read -r ref app; do
+            out="bench/vs-$(echo "$ref" | tr -c 'A-Za-z0-9.-' '_')"
+            node scripts/startup-bench.mjs --a "$app" --b "$CANDIDATE" --label-a "$ref" --label-b "this build" \
+              --runs 8 --workspace "$RUNNER_TEMP/ws" --out "$out"
+            cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          done < "$RUNNER_TEMP/baselines.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: startup-bench
+          path: bench/
           if-no-files-found: warn
 
   release:

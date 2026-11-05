@@ -61,7 +61,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { AddAgentItem, ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
+import { AddAgentItem, ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, ownKey, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
 import { Viewer } from './viewer';
 import { ContextRail } from './contextRail';
 
@@ -69,14 +69,14 @@ import { ContextRail } from './contextRail';
 const RAIL_MIN = 1100;
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
-import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
+import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp, decisionTarget } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
 import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
-import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
+import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, Count, FileRef, IconButton, MenuItem, Meta, MetaItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
 import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, type NoticeItem } from '../shared/toasts';
 import { agentOverride } from '../shared/session';
 
@@ -85,6 +85,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** The mic button: dictation through the app's macOS speech helper (host/dictation.ts). */
 const MAC = document.body.dataset.platform === 'mac';
 /** The OS's own dictation keys, for the mic's fallback hint; none on Linux, where the hint isn't shown. */
+const TAB_FOCUS_KEY = MAC ? 'Ctrl+Shift+M' : 'Ctrl+M';
 const DICTATE_HINT = MAC ? 'Press Fn twice to dictate' : document.body.dataset.platform === 'windows' ? 'Press Win+H to dictate' : undefined;
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
@@ -221,7 +222,7 @@ function App() {
           <>
             <ChatHeader chat={chat} state={state} onSelect={select} onShowErrors={toasts.reopen} />
             <div class="chat-body" data-rail={rail ? '' : undefined}>
-            <div class="chat-col">
+            <main class="chat-col">
             <Transcript
               chat={chat}
               state={state}
@@ -243,7 +244,7 @@ function App() {
               found={found?.chatId === chat.id ? found : null}
               linked={state.chats.filter((c) => c.origin?.chatId === chat.id && !c.archived)}
             />
-            </div>
+            </main>
             {rail && <ContextRail chat={chat} />}
             </div>
           </>
@@ -327,7 +328,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
   const open = openChats(state.chats);
   const needs = open.filter(needsYou).length;
   return (
-    <div class="switcher">
+    <nav class="switcher" aria-label="Chats">
       <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-fit={fit} data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
         {strip.map((c) => (
           <Tab
@@ -362,9 +363,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
             <Icon name="grid" />
             <span class="all-count">{open.length}</span>
             {needs > 0 && (
-              <span class="count loud" aria-label={`${needs} need you`}>
-                {needs}
-              </span>
+              <Count n={needs} loud label={`${needs} need you`} />
             )}
           </>
         }
@@ -409,7 +408,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
         }}
       </Popover>
       <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" class="manager-btn" onClick={() => send({ type: 'openTasks' })} />
-    </div>
+    </nav>
   );
 }
 
@@ -544,14 +543,17 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
         <div class="chat-head-text">
           <div class="chat-head-row">
             <Avatar agent={chat.agent} working={chat.busy} />
-            <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
-              {chat.title}
-            </button>
+            <h1 class="chat-head-h">
+              <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
+                {chat.title}
+              </button>
+            </h1>
             {chat.branch && (
-              <span class="fl-pill branch-chip" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
-                <Icon name="branch" />
-                <span class="fl-pill__text">{chat.branch}</span>
-              </span>
+              <Meta class="branch-chip">
+                <MetaItem icon="branch" mono title={`${chat.branch}\n${chat.cwd}`}>
+                  {chat.branch}
+                </MetaItem>
+              </Meta>
             )}
             {chat.merged && <span class="fl-pill" data-tone="muted">merged</span>}
             {chat.session?.rules?.length ? (
@@ -636,7 +638,11 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
             {agentName(parent.agent)}
           </ChipButton>
           <span class="origin-title">{parent.title}</span>
-          {chat.origin.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
+          {chat.origin.by === 'agent' && (
+            <Meta>
+              <MetaItem>by agent</MetaItem>
+            </Meta>
+          )}
         </div>
       )}
       {(chips.length > 0 || chat.archived) && (
@@ -1192,8 +1198,11 @@ function LinkView({ item, chat, state, onSelect }: { item: LinkItem; chat: ChatV
         <span class="link-title" title={other ? chatTip(other) : agentName(item.agent)}>
           {head}
         </span>
-        {item.role.startsWith('piped') && <span class="fl-pill" data-tone="muted">pipe</span>}
-        {item.by === 'agent' && <span class="fl-pill" data-tone="muted">by agent</span>}
+        {/* How it came about is metadata, so plain text, not pills (§0.1). */}
+        <Meta>
+          {item.role.startsWith('piped') && <MetaItem>pipe</MetaItem>}
+          {item.by === 'agent' && <MetaItem>by agent</MetaItem>}
+        </Meta>
         <span class="spacer" />
         <Timestamp stamp={messageStamp(item)} />
         {other && other.id !== chat.id && (
@@ -1359,6 +1368,12 @@ function Composer({
   const [shut, setShut] = useState(false);
   /** The /discuss mention the picker is settling (its chip pressed, or Send pressed while it was unsettled). */
   const [fixing, setFixing] = useState(false);
+  // Tab and Shift+Tab are the decision's scope and the mode while you type (as in Claude Code), so the box would be a
+  // keyboard trap (WCAG 2.1.2). Ctrl+M (macOS: Ctrl+Shift+M), VS Code's own "Toggle Tab Key Moves Focus", hands
+  // Tab back to the browser until pressed again.
+  const [tabMoves, setTabMoves] = useState(false);
+  const tabMovesNow = useRef(false);
+  tabMovesNow.current = tabMoves;
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
   useEffect(() => area.current?.focus(), [chat.id, focusTick]);
@@ -1426,7 +1441,10 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
+  // While a request waits, Tab answers it (the scope), so say how to get past the box with the keyboard:
+  // otherwise the cards above are a trap for anyone not using a mouse.
+  const waitingHere = !tabMoves && !text.trim() && decisionTarget(chat) !== undefined;
+  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : waitingHere ? `${TAB_FOCUS_KEY} lets Tab move focus to the request` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
 
   const reset = () => {
     setText('');
@@ -1487,6 +1505,10 @@ function Composer({
     const onKey = (e: KeyboardEvent) => {
       // The box handles its own keys; other fields keep theirs.
       if (e.defaultPrevented || isTyping(e.target)) return;
+      // A focused control does what it says: Enter or Space on Deny denies (it used to approve), and Tab moves
+      // on from it (it used to change the scope, so the view was a keyboard trap). The keys still work from
+      // the page itself, and Tab never once Ctrl+M has handed it back.
+      if ((e.key === 'Tab' && tabMovesNow.current) || ownKey(e)) return;
       decisionKey(e, live.current, true);
     };
     // Enter let go anywhere (the message box included) ends a hold that hasn't finished.
@@ -1744,6 +1766,8 @@ function Composer({
               value={text}
               rows={1}
               aria-label={`Message ${agentName(chat.agent)}`}
+              aria-description={`Shift+Tab changes the mode; while a request waits, Tab changes its scope. ${TAB_FOCUS_KEY} makes Tab move focus.`}
+              aria-keyshortcuts={TAB_FOCUS_KEY.replace('Ctrl', 'Control')}
               aria-autocomplete="list"
               aria-controls={picking ? listId : undefined}
               aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
@@ -1792,6 +1816,13 @@ function Composer({
                     return;
                   }
                 }
+                if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'm' && e.shiftKey === MAC) {
+                  e.preventDefault();
+                  setTabMoves((on) => !on);
+                  return;
+                }
+                // Tab moves focus: the browser's own Tab, before any shortcut can take it.
+                if (tabMoves && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) return;
                 if (decisionKey(e, chat, !text.trim())) return;
                 if (e.key === 'Tab' && e.shiftKey) {
                   // Shift+Tab, as in Claude Code: Ask → Auto-accept edits → Plan.

@@ -351,6 +351,8 @@ export class AgentCore {
     this.checkpoints = new Checkpoints({
       log: options.log,
       dir: options.checkpointDir,
+      // Pruning waits out the window's startup; restoring the saved checkpoints doesn't.
+      pruneDelayMs: 60_000,
       onGone: (chatId, turnIds) => {
         // A rewind says itself what went, after it has used the messages' checkpoints.
         if (this.chat(chatId) && !this.rewinding.has(chatId)) this.dispatch({ t: 'checkpointsGone', chatId, turnIds });

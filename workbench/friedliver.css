@@ -55,7 +55,7 @@
 	}
 }
 
-/* ---- Button §2.1: md 26 / sm 22; primary = the ember accent with its sheen, secondary = pill --- */
+/* ---- Button §2.1: md 26 / sm 22; primary = the accent with its sheen, secondary = pill --- */
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-button {
 	--vscode-button-background: var(--fl-accent-bg);
@@ -280,7 +280,7 @@
 }
 
 .monaco-workbench.monaco-workbench:not(.hc-black):not(.hc-light) .settings-editor .monaco-custom-toggle.setting-value-checkbox.checked::after {
-	background-color: var(--fl-thumb);
+	background-color: var(--fl-toggle-thumb);
 	box-shadow: var(--fl-shadow-thumb);
 	transform: translate(var(--switch-travel), -50%);
 }
@@ -337,7 +337,7 @@
 	text-align: center;
 }
 
-/* ---- Progress §2.24: a warm neutral (working is never green; owner, 2026-10-20) --------------- */
+/* ---- Progress §2.24: a neutral grey (working is never green; owner, 2026-10-20) --------------- */
 
 .monaco-workbench:not(.hc-black):not(.hc-light) .monaco-progress-container {
 	--vscode-progressBar-background: var(--fl-fg-2);

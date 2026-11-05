@@ -7,7 +7,8 @@
     "test": "vitest run",
     "fetch-upstream": "node scripts/fetch.mjs",
     "prepare-upstream": "node scripts/prepare.mjs",
-    "package-app": "node scripts/build.mjs --package --installer"
+    "package-app": "node scripts/build.mjs --package --installer",
+    "web": "cd extensions/friedliver-agents && node esbuild.mjs && node scripts/web-export.mjs"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.8.0",

@@ -23,6 +23,8 @@ const ownPackages = {
 const shared = {
   bundle: true,
   minify: production,
+  // Minified, functions and classes keep their names: stack traces and logs stay readable.
+  keepNames: production,
   sourcemap: !production,
   logLevel: 'warning',
   absWorkingDir: here,

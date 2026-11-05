@@ -1,6 +1,6 @@
 # FriedLiver components: the spec (Design System v2, "Beacon")
 
-Date: 2026-10-20. Status: **law** (owner's rule), v2. v1 (2026-10-18) is kept unchanged as `COMPONENTS.v1.md`; where an entry below says "as v1 §x", that v1 text still applies word for word. Every surface draws only these components: the stock workbench (§6), the chat, the Agent Manager, the inbox, images, the permissions and accounts pages, the welcome page, the phone app. No button, pill, field or menu with its own radius, height, border, fill, glass or motion.
+Date: 2026-10-20. Status: **law** (owner's rule), v2, with the v3 "Mono" amendment of 2026-11-03 (§0.2: neutral palette, zones), which wins where the two differ. v1 (2026-10-18) is kept unchanged as `COMPONENTS.v1.md`; where an entry below says "as v1 §x", that v1 text still applies word for word. Every surface draws only these components: the stock workbench (§6), the chat, the Agent Manager, the inbox, images, the permissions and accounts pages, the welcome page, the phone app. No button, pill, field or menu with its own radius, height, border, fill, glass or motion.
 
 **Where it lives.** Repo `~/code/FriedLiver-Code`, branch `design/v2-system` (draft PR "Design System v2"); a mirror of this file is `docs/design/COMPONENTS.md`.
 
@@ -49,6 +49,57 @@ Load order is unchanged: `tokens.css` → `webview.css` → `components.css`.
 | Warp, Notion, Claude/ChatGPT desktop, Things 3, Arc | Steps as first-class units; warm neutrals; delight in empty states and small motion | Steps as rows with durations; warm graphite; voiced empty states; steam on the mark |
 
 ---
+
+### 0.1b The five families (owner, 2026-11-04)
+
+**Owner's brief.** "Clear differentiation between chat labels, tabs, buttons, pills and each detail for better usability." Before this, most relations and states were the same grey rounded capsule ("pill confetti": a board card carried 2–4 of them for branch, pipe, also-in, asked-by, compare), and segmented controls, tabs and buttons shared one fill, so nothing said what could be pressed. Each family now has one shape that no other family uses:
+
+| Family | What it is | Shape | Rest | Selected / on | Tokens |
+|---|---|---|---|---|---|
+| **Button** (§2.1) | an action | `--r-ctl` rectangle, 22–26 tall, 500 | a fill (secondary) or none (quiet), **and a visible 1px edge** (`--btn-edge`, firmer on hover); the primary is the accent fill without an edge | `aria-pressed`: `--sel-bg` and an `--fg-2` edge | `--btn-edge`, `--btn-edge-hover` |
+| **Tab / view switch / segmented** (§2.7, §2.18) | navigation or a mode | bare text, no container, no fill at rest or on hover | `--fg-2`, 500; hover brightens to `--fg` (segments also show a hairline underline) | `--sel-fg`, 600, a **2px `--sel-fg` underline** along the bottom (never the top) | `--nav-line`, `--nav-rule` |
+| **Pill** (§2.5) | state only: needs-you, risk, warn, conflict, secrets, merged, queued, once-only | fully round, 18 tall, a tint with no edge | arrow cursor, no hover | never selected | `--pill-bg`, tones |
+| **Meta / label** (§2.5b) | relations (branch, pipes to, asked by, also in, compare, shares, by agent) and eyebrows | plain text, no container | `--fg-2`, 11–12px, a 12px icon before each, joined by `·` (a narrow card stacks them one a line) | a relation that opens something is a **link**: the same text with a hairline underline that firms on hover | — |
+| **Count** (§2.6) | a number | 16 tall, a ring around a tabular 11/600 number, no fill | `--count-edge` ring | loud (needs-you): solid `--decision` | `--count-edge` |
+
+Anything pressable that used to be a pill (FilterPill, FileRef, ChipButton, the chat head's Rules and Images triggers, the composer's agents and model pickers, the board's agent picker) takes the button's shape: `--r-ctl`, the button edge, no resting fill. A toned one keeps its ink and tints its edge.
+
+### 0.2 v3 Mono zones (2026-11-03)
+
+**Owner's brief (2026-11-03).** "All the places look the same and equal, no difference between a place to prompt and the details." Black and grey by default, rich type, the best rules from the design world.
+
+**What changed.** The palette loses its warm tint (FriedLiver Dark and Light are zero-chroma OKLCH; the four older themes are untouched), and the ember accent becomes white with black ink in dark (16.6:1) and black with white ink in light (18.1:1), as Vercel and Linear do on neutral greys. The FriedLiver mark keeps its orange `--brand`; needs-you keeps its blue. Then every place in a chat gets its own look: its own tone, edge and type size, so no two kinds of place share a style.
+
+| Zone | What it is | How it looks | Tokens |
+|---|---|---|---|
+| **Prompt** | the composer, the board's task box | the brightest surface on the page (.235 + 5% ink), a visible 16% edge, a lift shadow over the transcript, a 40px fade above it, 14px radius, two lines tall at rest, a round send; focus brings the edge to the focus ring at 60% with a 3px halo | `--zone-prompt-*` |
+| **You** | your messages, queued ones dashed | a bubble at the right, fitted to its text (max 80%), 16px corners with a 6px corner toward you, one step up in type | `--zone-you-*`, `--w-bubble`, `--r-bubble*` |
+| **Reply** | the agent's words | no box; the base size + 1px (+2px on a page 720px or wider), line height 1.65 | `--t-reply*`, `--lh-reply` |
+| **Steps** | what the agent did | the base size − 1px in the secondary colour, medium-weight verbs, a 22% hairline spine | `--t-step`, `--zone-step-spine` |
+| **Needs you** | a decision waiting on you | the focused card gets a 3px decision-blue bar on its leading edge | `--zone-needs-bar` |
+| **Details** | the context rail, the chat tab strip | recessed to the shell tone (.15), uppercase eyebrow labels tracked +0.07em, hairlines between sections, values at the base size, weight 500 | `--zone-shell`, `--t-eyebrow`, `--track-eyebrow` |
+
+**The rules it applies** (each one comes from a source the design world agrees on):
+1. *Figure and ground* (Gestalt): a region stands out by tone and edge, so the prompt is the one lifted, edged surface and the details recede.
+2. *Common region and alignment* (Gestalt): your words on the right, the agent's on the left, as every messaging app does, so who said what reads before the words do.
+3. *Typographic hierarchy* (Bringhurst; Material type scale): three sizes a step apart (reply > prompt and you > steps and details) and one weight for labels; eyebrows only for reference labels.
+4. *Hierarchy by contrast, not colour* (Refactoring UI): secondary means grey, not smaller and lighter and coloured at once; colour is kept for state (needs-you blue, done green, failed red).
+5. *60/30/10* stays: one accent per surface.
+6. *User-scalable type* (WCAG 1.4.4): every zone size is relative to `--fs`, so Cmd/Ctrl + = - 0 scales them all.
+
+**Type.** Geist and Geist Mono stay (bundled, OFL). Body text turns on kerning and contextual alternates (`font-feature-settings: var(--font-features)`), optical sizing and `text-rendering: optimizeLegibility`; numbers stay tabular.
+
+**Speed.** Transcript items far off screen skip style, layout and paint (`content-visibility: auto` with remembered intrinsic sizes; the last eight items always render), the context rail is a layout and paint containment boundary, and the composer's focus snaps without animating its large shadow, which would repaint on every frame.
+
+**Gates.** `scripts/ui-v2.mjs`: 68 renders, 0 failures (contrast 4.5:1, accent groups, the 2px grid, nothing outside the window, 24px hit boxes). The light theme's secondary text went from .475 to .455 and `--fg-50` from 62% to 66%, so key hints stay at 4.5:1 with no warm tint.
+
+**Keyboard and assistive tech (2026-11-04).** Found by running every surface as a website (`scripts/web-export.mjs`) through axe-core 4.10 (WCAG 2.2 AA and best practices), a Tab walk, Reflow at 320px, forced colours and reduced motion:
+- *A focused control does what it says.* A waiting decision's keys work from the whole view, so Enter on a focused **Deny** approved the request (chat, approval cards; in the Inbox it started the hold that allows). Enter, Space and Tab on a control now belong to the control (`ownKey`, `src/webview/common.tsx`).
+- *No keyboard trap* (WCAG 2.1.2). In the message box Shift+Tab changes the mode and, while a request waits, Tab its scope, so Tab could not leave it. **Ctrl+M** (macOS **Ctrl+Shift+M**), VS Code's own "Toggle Tab Key Moves Focus", hands Tab back until pressed again; the box says so in its hint and to screen readers (`aria-description`, `aria-keyshortcuts`).
+- *Structure.* The chat's name is the page's `h1`, the transcript column and the Agent Manager are `main`, the tab strip is a `nav`, the rail's section names are `h2`, and a reply's headings sit under the page at levels 2–4 (`aria-level`). The conflict mark is an `img` with its label, the permissions tables' action column has a header, the Inbox's reply box is a `section`, and the `/discuss` jump links are 28px tall (WCAG 2.5.8). axe: 234 violation nodes before, 0 after, on all 31 pages.
+- *Forced colours* (Windows High Contrast). The OS drops shadows and replaces fills, so the selected tab and segment, every switch, the checkbox check, the timeline marks, the plan's progress, the needs-you bar and the composer's focus all vanished. A `@media (forced-colors: active)` layer at the end of `components.css` redraws each in system colours: Highlight for selected and on (an inner outline, never on a keyboard-focused item), a 3px CanvasText ring for focus, CanvasText and GrayText for marks.
+- *Unchanged and fine:* contrast (0 axe findings), Reflow at 320 and 480px (no sideways page on any surface), reduced motion (no animation runs), layout shift (≤ 0.0075 on every page; 0.1 is the limit).
+
 
 ## 1. Tokens
 
@@ -266,8 +317,8 @@ Headings keep v1's numbers so code references stay valid. Each entry: purpose ·
 | Variant | Fill rest / hover / active | Text | Weight | Use |
 |---|---|---|---|---|
 | `--primary` | `--accent-bg` / `--accent-hover` / `--accent-press`; `--sheen` + `--elev-1` | `--accent-fg` | 500 | the one key action on a surface ("Allow once", "Carry out with Codex", "New chat", "Start") |
-| `--secondary` (default) | `--pill-bg` / `--pill-hover` / `--pill-active` | `--fg` | 500 | every other action ("Deny", "Keep discussing", "Retry") |
-| `--quiet` | transparent / `--ghost-hover` / `--pill-active` | `--fg-2` → `--fg` | 400 | minor and toolbar actions ("Edit command", "Clear", "Open folder") |
+| `--secondary` (default) | `--pill-bg` / `--pill-hover` / `--pill-active`, **edge `--btn-edge` → `--btn-edge-hover`** | `--fg` | 500 | every other action ("Allow once" beside a primary, "Keep discussing", "Retry") |
+| `--quiet` | transparent / `--ghost-hover` / `--pill-active`, no edge | `--fg-2` → `--fg` | 500 | minor and toolbar actions ("Deny", "Edit command", "Clear", "Open folder") |
 | `--danger` | `--error` 14 / 22 / 30% | error mixed toward `--fg` by `--tone-ink` | 500 | destructive |
 | `--link` | none; underline in `--hairline`, offset 3 | `--fg-2` (default) or `--link` | 400 | "Agents & Accounts", "All" |
 | `--brand` | **removed**: the send is the primary's colour (§2.27) | | | |
@@ -279,7 +330,7 @@ Headings keep v1's numbers so code references stay valid. Each entry: purpose ·
 | `--lg` | 32 | 64 | 16 | 8 | 16 | 13px |
 | `--touch` | 44 | 88 | 16 | 8 | 20 | 15px |
 
-Radius `--r-ctl`; border 1px `--ctl-border` (visible only in HC); no glass. **Keycap in a button** (`.fl-btn__k`): a Keycap (§2.25) at 11px; on a primary it is outlined in currentColor 45%; elsewhere a 16% currentColor fill. **Only the primary shows its key**; other buttons put the key in the tooltip.
+Radius `--r-ctl`; border 1px `--btn-border`: `--btn-edge` on secondary, the error at 45% on danger, none on primary, quiet, link and text (HC: the contrast border); no glass. **Keycap in a button** (`.fl-btn__k`): a Keycap (§2.25) at 11px; on a primary it is outlined in currentColor 45%; elsewhere a 16% currentColor fill. **Only the primary shows its key**; other buttons put the key in the tooltip.
 
 | State | Look |
 |---|---|
@@ -291,7 +342,7 @@ Radius `--r-ctl`; border 1px `--ctl-border` (visible only in HC); no glass. **Ke
 | disabled | .4, no hover |
 | loading (`aria-busy`) | label transparent (width kept), a 14px working arc in currentColor |
 
-Do: one primary per surface; verb labels. Don't: a primary for something destructive; two primaries; bordered buttons.
+Do: one primary per surface; verb labels. Don't: a primary for something destructive; two primaries; a round button (round is a pill, and pills are status).
 
 ### 2.2 IconButton `.fl-btn--icon`
 
@@ -313,15 +364,19 @@ As v1 §2.4 (hold 600ms; early release drains over 200ms; double-press fallback;
 | `--md` | 22 | 8 | 12px / 500 | 12 | 4 |
 | `--touch` | 32 | 12 | 13px / 500 | 12 | 4 |
 
-Pill radius; `--pill-bg`; text `--fg` (never `--fg-2` on a fill). Tones (`data-tone`): working, waiting, failed, warn, done (neutral): the tone at 14% (hover 22%) with text mixed toward `--fg` by `--tone-ink`. `--mono` for branches and files (FileRef). Remove × 14 circle. Width `fit-content`, ellipsis when squeezed. Pressable pills: hover `--pill-hover`, on `--sel-bg`. Don't: a pill as the only status signal (pair with §2.23); rectangular chips.
+Pill radius; `--pill-bg`; text `--fg` (never `--fg-2` on a fill). Tones (`data-tone`): working, waiting, failed, warn, done (neutral): the tone at 14% (hover 22%) with text mixed toward `--fg` by `--tone-ink`. `--mono` for files (FileRef). Remove × 14 circle. Width `fit-content`, ellipsis when squeezed. **Status only (§0.1b)**: a pill never has a hover or a pointer. A pressable one (`button.fl-pill`, ChipButton) draws as a button: `--r-ctl`, the `--btn-edge`, no resting fill, `--ghost-hover`; on `--sel-bg` with an `--fg-2` edge. Don't: a pill as the only status signal (pair with §2.23); a pill for a relation (a branch, a pipe, an "asked by": that is Meta, §2.5b).
+
+### 2.5b Meta `.fl-meta` (Meta · MetaItem · MetaLink)
+
+A card's or a row's relations as plain `--fg-2` text at `--t-85`: each a 12px icon and its words (`--mono` for a branch), joined by a `--fg-50` `·`. `--stack` (a board card): one a line, no dots. `--line` (a list row's title line): one line that gives way before the title. MetaLink: the same text as a button, a hairline underline offset 3 that turns `currentColor` on hover, text `--fg`; focus §1.12.
 
 ### 2.6 Count `.fl-count`
 
-16 tall, min 16, padding 0 4, pill, 11px/600 tabular. Neutral: `--fg` on `--pill-bg`. `--loud` (needs-you only): `--decision-fg` on `--decision`, with a 2px ring in its surface colour when it sits on an icon. Bumps once when it changes (§1.11). Shows 0 only in a column header.
+16 tall, min 16, padding 0 4, pill, 11px/600 tabular. Neutral: `--fg` in a 1px `--count-edge` ring with no fill (a fill would read as a pill). The Inbox count in the view switch is a Count. `--loud` (needs-you only): `--decision-fg` on `--decision`, with a 2px ring in its surface colour when it sits on an icon. Bumps once when it changes (§1.11). Shows 0 only in a column header.
 
 ### 2.7 Segmented `.fl-seg`
 
-Track 26 (touch 44), padding 2, gap 2, `--r-8`, `--pill-bg`. Segment 22, padding 0 8, `--r-ctl`, 12px/500 `--fg`, 14 icon. **Selected:** `--seg-on` (float tone dark / white light) + `--elev-1` + an inset 1px `--fg-2` edge (3:1, WCAG 1.4.11) + 600 `--sel-fg`; it slides between options on `--spring-pop`. Hover `--hover-bg`. Focus §1.12. Disabled .4. Keyboard: roving tabindex, arrows select. 2–4 options; more → Select.
+Navigation, not buttons (§0.1b). No track fill: the segments sit on a 1px `--hairline` rule (`--nav-rule`), 26 tall (touch 44), gap 4. Segment padding 0 8, no radius, 12px/500 `--fg-2`, 14 icon, no fill. **Selected:** 600 `--sel-fg` and a 2px `--sel-fg` underline (`--nav-line`), the same mark as the view switch and the chat tabs. Hover: `--fg` and a 2px `--hairline` underline, never a fill. Focus §1.12. Disabled .4. Keyboard: roving tabindex, arrows select. 2–4 options; more → Select.
 
 ### 2.8 Switch `.fl-toggle`
 
@@ -397,7 +452,7 @@ Dialog: `--w-dialog` (wide 880), padding 16, gap 12, `--r-dialog` 14, glass (dia
 
 ### 2.18 Tabs `.fl-tab`
 
-Strip 32 (`--tab-h`), padding 0 8, gap 2. Tab 26, padding 0 4 0 8, `--r-ctl`, gap 8; 16 icon `--fg-2` (neutral file icons; a chat tab leads with its agent mark); label 13 `--fg-2`; close × 22 square (24 hit box) shown on hover and when active; Delete closes the focused tab. **Active:** the raised tab fill + `--sel-fg` text + a 2px `--sel-fg` line along the top edge inset 8 (slides on `--spring-snap`). Hover: `--fg` on `--hover-bg`. Preview tab: italic label (a dirty tab is never a preview). Chat tabs end with a status mark (§2.23). Overflow: a quiet "N more chats" button that opens the All-chats popover; the v1 Fit rules (§2.18 Fit, `tabFit()`) still decide how many whole tabs show. Panel tabs (Terminal, Problems…) are Tabs at sm 22.
+Strip 32 (`--tab-h`), padding 0 8, gap 2. Tab 26, padding 0 4 0 8, `--r-ctl`, gap 8; 16 icon `--fg-2` (neutral file icons; a chat tab leads with its agent mark); label 13 `--fg-2`; close × 22 square (24 hit box) shown on hover and when active; Delete closes the focused tab. **Active:** `--sel-fg` text and a 2px `--sel-fg` underline along the bottom edge inset 4 (slides on `--spring-snap`); no fill, no line over the top (owner, 2026-10-21). Hover: `--fg`, no fill (§0.1b: tabs never look like buttons). Preview tab: italic label (a dirty tab is never a preview). Chat tabs end with a status mark (§2.23). Overflow: a quiet "N more chats" button that opens the All-chats popover; the v1 Fit rules (§2.18 Fit, `tabFit()`) still decide how many whole tabs show. Panel tabs (Terminal, Problems…) are Tabs at sm 22.
 
 ### 2.19 Row / Tree row `.fl-row`
 

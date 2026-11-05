@@ -14,7 +14,7 @@
     },
     "webview.css": {
       "colour": 8,
-      "px": 74,
+      "px": 68,
       "effect": 4,
       "restyle": [
         ".acct-tag",
@@ -25,9 +25,7 @@
         ".ask-form textarea",
         ".code-ref button.ref",
         ".col-count",
-        ".count",
         ".count-item",
-        ".count.loud",
         ".fl-card.question",
         ".fl-menu:has(.all-chats)",
         ".history-toggle",
@@ -35,16 +33,13 @@
         ".map-group .group-pill",
         ".map-group .group-pill-text",
         ".map-you .you-badge-text",
-        ".mini-badge",
         ".new-task textarea",
-        ".perms h2 .count",
         ".reopen .fl-menu__title",
         ".rewind-btn:focus-visible",
         ".search",
         ".search input",
         ".search:focus-within",
         ".seg-bar",
-        ".seg-count",
         ".th-btn",
         ".th-btn:hover:not(:disabled)",
         ".title-btn",
@@ -84,7 +79,6 @@
         "button.sa-head",
         "button.sa-head:hover",
         "button.sa-manager",
-        "button.seg-item[aria-selected='true'] .seg-count",
         "button.starter",
         "button.starter:hover",
         "button.step-main:active",
@@ -115,9 +109,9 @@
   },
   "totals": {
     "colour": 9,
-    "px": 150,
+    "px": 144,
     "effect": 5,
-    "restyle": 82,
+    "restyle": 76,
     "rawControls": 57
   }
 }

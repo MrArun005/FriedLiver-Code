@@ -21,7 +21,7 @@ import { relativePath } from '../shared/view';
 import { CopyButton, Glyph, Icon, Markdown, Popover, send, useNow, type IconName } from './common';
 import { DiffView } from './controls';
 import { chatTip } from '../shared/names';
-import { Button, Countdown as Drain, FileRef, Kbd, MenuItem, MenuSep, MenuTitle, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
+import { Button, Countdown as Drain, FileRef, Kbd, MenuItem, MenuSep, MenuTitle, Meta, MetaItem, Pill, Segmented, SplitButton, cx, type Variant } from './ui';
 
 /** What the decision keys do to a request on screen, by its id: set while it is shown. */
 export interface CardKeys {
@@ -102,6 +102,24 @@ export function ApprovalCard(props: ApprovalCardProps) {
     setHolding(false);
   };
   useEffect(() => () => hold.current?.release(), []);
+  // Assistive tech (a screen reader's activate, voice control, a switch) sends a bare click with no press to
+  // hold, so a careful request could never be allowed that way. A bare click arms instead, and a second one
+  // within 3s allows: the same deliberate two steps HoldButton offers, never a single click.
+  const [armed, setArmed] = useState(false);
+  const disarm = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const keyed = useRef(0);
+  useEffect(() => () => clearTimeout(disarm.current), []);
+  const bareClick = (e: MouseEvent) => {
+    if (e.detail !== 0 || holding || Date.now() - keyed.current < 1000) return;
+    clearTimeout(disarm.current);
+    if (armed) {
+      setArmed(false);
+      allowRef.current('once');
+    } else {
+      setArmed(true);
+      disarm.current = setTimeout(() => setArmed(false), 3000);
+    }
+  };
   const autoAt = (item.kind === 'permission' || item.kind === 'command') && !a.hold && a.risk.tone === 'routine' ? item.autoAt : undefined;
   const stopAuto = () => send({ type: 'stopAuto', id: a.id });
 
@@ -193,7 +211,9 @@ export function ApprovalCard(props: ApprovalCardProps) {
               variant="danger"
               class="fl-btn--hold"
               data-holding={holding ? '' : undefined}
-              aria-label={`Press and hold to ${a.yes.toLowerCase()}`}
+              data-armed={armed ? '' : undefined}
+              aria-label={armed ? `Press again to ${a.yes.toLowerCase()}` : `Press and hold to ${a.yes.toLowerCase()}`}
+              aria-description="Or press twice"
               onPointerDown={(e) => e.button === 0 && start()}
               onPointerUp={release}
               onPointerLeave={release}
@@ -202,13 +222,23 @@ export function ApprovalCard(props: ApprovalCardProps) {
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 e.preventDefault();
                 e.stopPropagation();
+                keyed.current = Date.now();
                 if (!e.repeat) start();
               }}
-              onKeyUp={(e) => (e.key === 'Enter' || e.key === ' ') && release()}
+              onKeyUp={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                keyed.current = Date.now();
+                release();
+              }}
+              onClick={bareClick}
             >
-              <span>
-                Hold <Kbd inline>⏎</Kbd> to {a.yes.toLowerCase()}
-              </span>
+              {armed ? (
+                <span>Press again to {a.yes.toLowerCase()}</span>
+              ) : (
+                <span>
+                  Hold <Kbd inline>⏎</Kbd> to {a.yes.toLowerCase()}
+                </span>
+              )}
             </Button>
           )
         : a.allow.once &&
@@ -578,9 +608,12 @@ function BridgePreview({ item, a, state }: { item: Extract<Approvable, { kind: '
       {a.shares && (
         <div class="apv-shares">
           {item.tool === 'read_chat' ? 'Reads' : 'Shares'}
-          {a.shares.map((s) => (
-            <Pill key={s}>{s}</Pill>
-          ))}
+          {/* What it shares is a relation, so plain meta text, not pills (§0.1). */}
+          <Meta>
+            {a.shares.map((s) => (
+              <MetaItem key={s}>{s}</MetaItem>
+            ))}
+          </Meta>
         </div>
       )}
     </div>

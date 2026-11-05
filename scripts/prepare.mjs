@@ -160,7 +160,9 @@ for (const name of extensions) {
 	if (pkg.scripts?.build) {
 		const hasLock = fs.existsSync(path.join(src, 'package-lock.json'));
 		run('npm', [hasLock ? 'ci' : 'install', '--no-audit', '--no-fund'], { cwd: src });
-		run('npm', ['run', 'build'], { cwd: src });
+		// --production: minified, no source maps. The app loads extension.js (2 MB unminified) on every start,
+		// and each webview its bundle; esbuild.mjs reads the flag (other build scripts ignore extra args).
+		run('npm', ['run', 'build', '--', '--production'], { cwd: src });
 	}
 	const dest = path.join(VSCODE_DIR, 'extensions', name);
 	fs.rmSync(dest, { recursive: true, force: true });

@@ -86,7 +86,22 @@ export function findProgram(command: string, env: NodeJS.ProcessEnv = process.en
   return null;
 }
 
+/** Where each command was last found, per PATH and PATHEXT. A hit is re-checked with one stat (not one per PATH
+ *  entry and extension: ~360 on a typical Windows PATH, on every git call and agent launch); misses aren't kept,
+ *  so a tool installed meanwhile is found at once. */
+const windowsPathHits = new Map<string, string>();
+
 export function findOnWindowsPath(command: string, env: NodeJS.ProcessEnv = process.env, delimiter = path.delimiter): string | null {
+  const key = [command, env.PATH ?? env.Path ?? '', env.PATHEXT ?? '', delimiter].join('\0');
+  const known = windowsPathHits.get(key);
+  if (known && existsSync(known)) return known;
+  const hit = searchWindowsPath(command, env, delimiter);
+  if (hit) windowsPathHits.set(key, hit);
+  else windowsPathHits.delete(key);
+  return hit;
+}
+
+function searchWindowsPath(command: string, env: NodeJS.ProcessEnv, delimiter: string): string | null {
   const exts = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
   const hasExt = exts.some((e) => command.toLowerCase().endsWith(e.toLowerCase()));
   // Extensionless files next to npm's wrappers are for Git Bash; Windows can't run them.

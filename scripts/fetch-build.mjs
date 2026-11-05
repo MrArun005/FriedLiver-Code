@@ -32,13 +32,16 @@ export function parseRef(ref) {
  * dispatch on this repository itself (never a fork), from a trusted branch or a v* tag, qualify.
  * `run` is the GET /repos/{REPO}/actions/runs/{id} payload. Throws with every problem found.
  */
-export function checkRun(run) {
+export function checkRun(run, builtBy) {
 	const branch = run.head_branch ?? '';
 	const head = run.head_repository?.full_name;
+	// `builtBy`: the job that built the artifact (GET .../runs/{id}/jobs). A finished run whose only failures are
+	// in other jobs (the downloads probe, the screenshots) still qualifies when that job succeeded.
+	const built = run.status === 'completed' && builtBy?.run_id === run.id && builtBy.conclusion === 'success' && builtBy.status === 'completed';
 	const problems = [
 		[run.repository?.full_name === REPO, `run is not in ${REPO}`],
 		[run.path === '.github/workflows/build.yml', `workflow ${JSON.stringify(run.path)} is not build.yml`],
-		[run.conclusion === 'success', `run conclusion ${JSON.stringify(run.conclusion)} is not success`],
+		[run.conclusion === 'success' || built, `run conclusion ${JSON.stringify(run.conclusion)} is not success`],
 		[['push', 'workflow_dispatch'].includes(run.event), `event ${JSON.stringify(run.event)} is not push/workflow_dispatch`],
 		[head === REPO, `head repository ${JSON.stringify(head)} is not ${REPO} (fork runs are refused)`],
 		[TRUSTED_BRANCH.test(branch) && !branch.includes('..'), `branch ${JSON.stringify(branch)} is not main, perf/*, release/*, ui/*, design/* or a v* tag`],
@@ -89,7 +92,9 @@ function fromRelease(tag, out, platform) {
 function fromRun(id, out, platform) {
 	const ASSET = ASSETS[platform];
 	const run = JSON.parse(gh(['api', `repos/${REPO}/actions/runs/${id}`]));
-	checkRun(run);
+	// Its build job for this platform, by the artifact name in the matrix job's name: build (os, target, artifact).
+	const jobs = run.conclusion === 'success' ? [] : JSON.parse(gh(['api', `repos/${REPO}/actions/runs/${id}/jobs?per_page=100`])).jobs ?? [];
+	checkRun(run, jobs.find((j) => j.name.startsWith('build (') && j.name.endsWith(`, ${ASSET})`)));
 	const arts = JSON.parse(gh(['api', `repos/${REPO}/actions/runs/${id}/artifacts?per_page=100`])).artifacts;
 	const art = arts.find((a) => a.name === ASSET);
 	if (!art || art.expired || !String(art.digest ?? '').startsWith('sha256:')) throw new Error(`artifact ${ASSET} of run ${id} is missing, expired or has no digest`);
