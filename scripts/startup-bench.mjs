@@ -1,3 +1,4 @@
+/* global performance -- used inside the app's page (win.evaluate), not in Node */
 // Startup and footprint bench: two FriedLiver builds, the same machine, alternating launches, so
 // drift on a shared CI runner falls on both alike. The proof for a speed change: the numbers in the
 // run's summary, and every launch's raw Startup Performance report in the artifact.

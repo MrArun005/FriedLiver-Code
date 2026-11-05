@@ -3753,25 +3753,22 @@ button.cc-icon-btn:hover:not(:disabled),
 button.cc-icon-btn[aria-expanded='true'] {
   background: var(--ghost-hover);
 }
-/* The composer's pickers (agents, model): buttons, so the button's shape and edge (§0.1), not a status pill. */
 button.cc-pill {
   flex: 0 1 auto;
   min-width: 0;
-  height: var(--h-sm);
+  height: 18px;
   margin-left: 6px;
   padding: 0 var(--sp-2);
-  border: var(--line) solid var(--btn-edge);
-  border-radius: var(--r-ctl);
-  background: transparent;
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
   color: var(--fg);
   font-size: var(--t-85);
   font-weight: var(--w-medium);
-  line-height: 1;
+  line-height: 18px;
   white-space: nowrap;
 }
 button.cc-pill:hover {
-  background: var(--ghost-hover);
-  border-color: var(--btn-edge-hover);
+  background: var(--pill-hover);
 }
 button.cc-agents {
   flex: none;
