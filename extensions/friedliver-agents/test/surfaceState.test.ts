@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { actionsFor, showsChat, stateFor, type SurfaceKind } from '../src/host/surfaceState';
-import { EMPTY_STATE, reduce, type Action, type AppState, type ImageItem } from '../src/shared/model';
+import { actionsFor, OTHER_CHAT_ITEMS, showsChat, slimActions, slimFor, stateFor, type SurfaceKind } from '../src/host/surfaceState';
+import { chatStatus, EMPTY_STATE, reduce, type Action, type AppState, type ChatView, type ImageItem, type Item } from '../src/shared/model';
 
 const image = (id: string, from: ImageItem['from']): ImageItem => ({ id, src: `data:image/png;base64,${id}`, title: id, from });
 const start: AppState = { ...EMPTY_STATE, images: [image('a1', 'agent'), image('y1', 'you')] };
@@ -52,5 +52,42 @@ describe('whether a chat is on screen', () => {
   it('never counts the side bar chat list, which shows no chat (it hid the "finished" notification)', () => {
     expect(showsChat(surface('chat', { list: true, selected: 'chat-1' }), 'chat-1')).toBe(false);
     expect(showsChat(surface('chat', { list: true }), 'chat-1', 'chat-1')).toBe(false);
+  });
+});
+
+describe("a chat's own tab", () => {
+  const chat = (id: string, items: Item[], over: Partial<ChatView> = {}): ChatView =>
+    ({ id, agent: 'claude', label: 'Claude', title: id, cwd: '/w', createdAt: 0, busy: false, changedFiles: 0, items, depth: 0, files: [], lastActivity: 0, turns: 1, ...over }) as ChatView;
+  const said = (n: number): Item => ({ kind: 'user', text: `m${n}`, images: [] });
+  const many = (n: number) => Array.from({ length: n }, (_, i) => said(i));
+  const waiting: Item = { kind: 'command', commandId: 'cmd-1', commandLine: 'npm test', cwd: '/w', outside: false, state: 'awaiting', output: '' };
+  const error: Item = { kind: 'notice', tone: 'error', text: 'sign-in expired' };
+  const full: AppState = {
+    ...EMPTY_STATE,
+    chats: [chat('mine', many(500)), chat('waits', [waiting, ...many(400)]), chat('failed', [...many(300), error]), chat('short', many(3))],
+  };
+
+  it('keeps its own chat whole and trims the others to their tail and every decision waiting', () => {
+    const slim = slimFor(full, 'mine');
+    const of = (id: string) => slim.chats.find((c) => c.id === id)!;
+    expect(of('mine').items).toBe(full.chats[0].items);
+    expect(of('waits').items).toHaveLength(OTHER_CHAT_ITEMS + 1);
+    expect(of('waits').items[0]).toBe(waiting);
+    expect(of('failed').items).toHaveLength(OTHER_CHAT_ITEMS);
+    expect(of('failed').items.at(-1)).toBe(error);
+    expect(of('short')).toBe(full.chats[3]);
+    // Every chat reads the same status from what it is sent.
+    for (const c of full.chats) expect(chatStatus(of(c.id))).toBe(chatStatus(c));
+    const others = (st: AppState) => JSON.stringify(st.chats.filter((c) => c.id !== 'mine')).length;
+    expect(others(slim)).toBeLessThan(others(full) / 5);
+  });
+
+  it('sends the same state when nothing is long, and trims a full restore like the snapshot', () => {
+    const small: AppState = { ...EMPTY_STATE, chats: [chat('mine', many(500)), chat('short', many(3))] };
+    expect(slimFor(small, 'mine')).toBe(small);
+    const plain: Action[] = [{ t: 'busy', chatId: 'waits', busy: true }];
+    expect(slimActions(plain, 'mine')).toBe(plain);
+    const [restore] = slimActions([{ t: 'restore', state: full } as Action], 'mine') as Extract<Action, { t: 'restore' }>[];
+    expect(restore.state.chats.find((c) => c.id === 'waits')!.items).toHaveLength(OTHER_CHAT_ITEMS + 1);
   });
 });

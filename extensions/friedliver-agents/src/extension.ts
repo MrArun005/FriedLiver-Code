@@ -33,7 +33,7 @@ import { ReviewUi, type ReviewPlacement } from './host/review';
 import { RemoteControl } from './remote/host';
 import { testAgentsOn, userSetting } from './host/settings';
 import { installCommandFor } from './host/signin';
-import { actionsFor, showsChat, stateFor } from './host/surfaceState';
+import { actionsFor, showsChat, slimActions, slimFor, stateFor } from './host/surfaceState';
 import { ChatTabs, restoredChats, tabTitle } from './host/chatTabs';
 import { startUpdateChecks } from './host/updates';
 import { attachSurface, post, webviewHtml, webviewOptions, type Script, type Surface } from './host/webviews';
@@ -130,7 +130,9 @@ export class Controller {
   private agentsView?: vscode.WebviewView;
   /** Chats in the editor area: each its own editor tab. */
   private readonly chatTabs = new ChatTabs<vscode.WebviewPanel>((chatId, column, preserveFocus) => {
-    const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', { viewColumn: column ?? vscode.ViewColumn.Active, preserveFocus }, { retainContextWhenHidden: false });
+    // Kept alive while another tab is in front: switching back is instant instead of rebuilding the page, reloading
+    // the script and redrawing the transcript (5-10 s with long auto-mode chats). Costs memory per open chat tab only.
+    const panel = vscode.window.createWebviewPanel('friedliver.chatPanel', 'Agents', { viewColumn: column ?? vscode.ViewColumn.Active, preserveFocus }, { retainContextWhenHidden: true });
     this.adoptPanel(panel, 'chat', chatId);
   });
   private tasksPanel?: vscode.WebviewPanel;
@@ -585,7 +587,8 @@ export class Controller {
     for (const s of this.surfaces) {
       let mine = byKind.get(s.kind);
       if (!mine) byKind.set(s.kind, (mine = actionsFor(s.kind, actions)));
-      if (mine.length) post(s, mine.length === 1 ? { type: 'action', action: mine[0] } : { type: 'actions', actions: mine });
+      const own = s.single && s.selected ? slimActions(mine, s.selected) : mine;
+      if (own.length) post(s, own.length === 1 ? { type: 'action', action: own[0] } : { type: 'actions', actions: own });
     }
     this.updateDecisions();
     this.closeAnswered();
@@ -831,7 +834,8 @@ export class Controller {
           surface.ready = true;
           post(surface, {
             type: 'snapshot',
-            state: stateFor(surface.kind, this.core.snapshot),
+            // A chat's own tab gets the other chats trimmed (slimFor): it draws one chat, not every transcript.
+            state: surface.single && surface.selected ? slimFor(stateFor(surface.kind, this.core.snapshot), surface.selected) : stateFor(surface.kind, this.core.snapshot),
             selected: surface.selected ?? this.lastSelected,
             now: Date.now(),
             defaults: this.core.agentDefaults(),
