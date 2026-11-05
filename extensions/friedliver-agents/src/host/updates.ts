@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
-import { UPDATER_APP, UPDATER_INFO_PLIST, appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, releasePageFrom, resolveRealApp, sumFor, versionLabel, type Release } from './updateCheck';
+import { UPDATER_APP, UPDATER_INFO_PLIST, appBundleFor, checkForUpdate, downloadVerified, fetchSums, installScript, manualCheckMessage, pickInstaller, readInstallResult, releasePageFrom, resolveRealApp, sumFor, versionLabel, windowsInstallDir, windowsInstallScript, windowsLaunchCommand, type Asset, type Release } from './updateCheck';
 
 const FIRST_CHECK_DELAY_MS = 30_000;
 const RECHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -124,6 +124,7 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
   if (choice === 'Release notes') return void (await openPage(release));
   if (choice !== 'Install') return;
   const asset = pickInstaller(release, process.platform, process.arch);
+  if (process.platform === 'win32') return installWindows(release, asset, log);
   const running = appBundleFor(vscode.env.appRoot);
   const app = running && realApp(running);
   log.info(`Install ${release.version}: asset ${asset?.name ?? 'none'}, running from ${running ?? '?'}, installing into ${app ?? 'none found'}`);
@@ -134,30 +135,7 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
 
   const dir = mkdtempSync(path.join(tmpdir(), 'friedliver-update-'));
   const dmg = path.join(dir, 'FriedLiver.dmg');
-  try {
-    await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `Downloading FriedLiver ${release.version}` },
-      async (progress) => {
-        const sha256 = sumFor(await fetchSums(fetch, release), asset.name);
-        if (!sha256) throw new Error(`SHA256SUMS has no entry for ${asset.name}`);
-        log.info(`Downloading ${asset.url} (${asset.size} bytes, sha256 ${sha256})`);
-        let shown = 0;
-        await downloadVerified(fetch, asset.url, dmg, { size: asset.size, sha256 }, (bytes) => {
-          const pct = Math.floor((bytes / asset.size) * 100);
-          if (pct > shown) progress.report({ increment: pct - shown, message: `${pct}%` });
-          if (pct >= shown + 25) log.info(`Downloaded ${pct}%`);
-          shown = Math.max(shown, pct);
-        });
-        log.info('Download verified');
-      },
-    );
-  } catch (err) {
-    rmSync(dir, { recursive: true, force: true });
-    log.error(`Update download failed: ${String(err)}`);
-    const again = await vscode.window.showErrorMessage(`FriedLiver ${release.version} could not be installed: ${err instanceof Error ? err.message : String(err)}`, 'Release notes');
-    if (again) await openPage(release);
-    return;
-  }
+  if (!(await download(release, asset, dmg, dir, log))) return;
 
   if (!writable(app)) {
     // Can't replace the app in place (e.g. /Applications owned by another user): hand over the verified DMG.
@@ -182,6 +160,73 @@ async function offer(release: Release, log: vscode.LogOutputChannel): Promise<vo
     // Still installs; only a Force Quit of FriedLiver during the install could stop it.
     log.warn(`open ${updater} failed (${(err as { stderr?: Buffer }).stderr?.toString().trim() || String(err)}); running the script directly`);
     spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' }).unref();
+  }
+  await vscode.commands.executeCommand('workbench.action.quit');
+}
+
+/** Downloads `asset` to `file`, checked against its size and its SHA-256 in SHA256SUMS; on failure removes `dir`, says why and returns false. */
+async function download(release: Release, asset: Asset, file: string, dir: string, log: vscode.LogOutputChannel): Promise<boolean> {
+  try {
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Downloading FriedLiver ${release.version}` },
+      async (progress) => {
+        const sha256 = sumFor(await fetchSums(fetch, release), asset.name);
+        if (!sha256) throw new Error(`SHA256SUMS has no entry for ${asset.name}`);
+        log.info(`Downloading ${asset.url} (${asset.size} bytes, sha256 ${sha256})`);
+        let shown = 0;
+        await downloadVerified(fetch, asset.url, file, { size: asset.size, sha256 }, (bytes) => {
+          const pct = Math.floor((bytes / asset.size) * 100);
+          if (pct > shown) progress.report({ increment: pct - shown, message: `${pct}%` });
+          if (pct >= shown + 25) log.info(`Downloaded ${pct}%`);
+          shown = Math.max(shown, pct);
+        });
+        log.info('Download verified');
+      },
+    );
+    return true;
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    log.error(`Update download failed: ${String(err)}`);
+    const again = await vscode.window.showErrorMessage(`FriedLiver ${release.version} could not be installed: ${err instanceof Error ? err.message : String(err)}`, 'Release notes');
+    if (again) await openPage(release);
+    return false;
+  }
+}
+
+/**
+ * Windows: download the user installer (verified like the DMG), and on Restart to update hand it to a hidden
+ * PowerShell script that waits for FriedLiver to quit, installs silently over the per-user install and opens
+ * it again (windowsInstallScript). A portable copy, or a release without the installer, gets the page.
+ */
+async function installWindows(release: Release, asset: Asset | null, log: vscode.LogOutputChannel): Promise<void> {
+  const installed = windowsInstallDir(vscode.env.appRoot, existsSync);
+  log.info(`Install ${release.version}: asset ${asset?.name ?? 'none'}, installed at ${installed ?? 'none (portable copy)'}`);
+  if (!asset || !installed) {
+    if (asset && !installed) void vscode.window.showInformationMessage('This FriedLiver is a portable copy, so it opened the release page: download the new zip, or the installer to update by itself from now on.');
+    return void (await openPage(release));
+  }
+  const dir = mkdtempSync(path.join(tmpdir(), 'friedliver-update-'));
+  const setup = path.join(dir, 'FriedLiverUserSetup.exe');
+  if (!(await download(release, asset, setup, dir, log))) return;
+  const restart = await vscode.window.showInformationMessage(`FriedLiver ${release.version} is ready.`, 'Restart to update');
+  if (restart !== 'Restart to update') return void rmSync(dir, { recursive: true, force: true }); // The next check offers it again.
+  const script = path.join(dir, 'install.ps1');
+  // The extension host's parent is the app's main process: when it exits, every window and helper has gone.
+  writeFileSync(script, windowsInstallScript({ pid: process.ppid, setup, dir, log: INSTALL_LOG(), version: release.version, page: release.url }), 'utf8');
+  const powershell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  try {
+    // Through WMI, so it isn't one of FriedLiver's processes when FriedLiver quits (windowsLaunchCommand).
+    execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsLaunchCommand(powershell, script)], { timeout: 30_000, windowsHide: true, stdio: 'ignore' });
+    log.info(`Started ${script} through WMI (log: ${INSTALL_LOG()})`);
+  } catch (err) {
+    log.warn(`Starting ${script} through WMI failed (${String(err)}); starting it directly`);
+    try {
+      spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    } catch (err2) {
+      log.error(`Could not start the installer script: ${String(err2)}`);
+      rmSync(dir, { recursive: true, force: true });
+      return void (await openPage(release));
+    }
   }
   await vscode.commands.executeCommand('workbench.action.quit');
 }

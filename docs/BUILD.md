@@ -67,7 +67,15 @@ release job gets a token that can write (`contents: write`).
      (the release page) and **Show log** (`$TMPDIR/friedliver-update.log`,
      with the mount's exit codes). If the `.app` or its folder isn't
      writable, the verified DMG is opened instead.
-   - On Windows and Linux, Install opens the release page.
+   - **Install** on Windows x64, in a copy the installer put there (it has `unins000.exe`
+     beside `FriedLiver.exe`), downloads `FriedLiverUserSetup-x64-*.exe` with the same
+     allowlist, size and SHA-256 checks, then offers **Restart to update**: a hidden
+     PowerShell script, started through WMI so it outlives the app, waits for FriedLiver to
+     quit, runs the installer with `/VERYSILENT` (it updates the per-user install in place
+     and opens FriedLiver again) and logs to `%TEMP%\friedliver-update.log` in the same
+     format, which the next start reports. A portable copy (the unzipped app) gets the
+     release page.
+   - On Linux, Install opens the release page.
    - `friedliver.update.mode: "off"` (or `update.mode: "none"`) turns this off.
 
 Drafts and pre-releases are ignored.

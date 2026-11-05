@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { once } from 'node:events';
+import path from 'node:path';
 
 const REPO = 'MrArun005/FriedLiver-Code';
 export const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -79,8 +80,20 @@ export function parseRelease(json: unknown): Release | null {
 
 /** The installer this machine can install itself: the arm64 DMG on Apple silicon. Elsewhere null (people get the release page). */
 export function pickInstaller(release: Release, platform: string, arch: string): Asset | null {
+  if (platform === 'win32' && arch === 'x64') return release.assets.find((a) => a.name.startsWith('FriedLiverUserSetup-x64-') && a.name.endsWith('.exe')) ?? null;
   if (platform !== 'darwin' || arch !== 'arm64') return null;
   return release.assets.find((a) => a.name.startsWith('FriedLiver-darwin-arm64-') && a.name.endsWith('.dmg')) ?? null;
+}
+
+/**
+ * The folder of a FriedLiver that its Windows installer put there, from vscode.env.appRoot
+ * (<install>\resources\app): the one with the uninstaller Inno Setup leaves beside FriedLiver.exe. A
+ * portable copy (the unzipped app) has none: the user installer would install a second copy elsewhere,
+ * so it gets the release page instead.
+ */
+export function windowsInstallDir(appRoot: string, exists: (file: string) => boolean): string | null {
+  const dir = path.win32.resolve(appRoot, '..', '..');
+  return exists(path.win32.join(dir, 'unins000.exe')) && exists(path.win32.join(dir, 'FriedLiver.exe')) ? dir : null;
 }
 
 /** /X/FriedLiver.app from vscode.env.appRoot (/X/FriedLiver.app/Contents/Resources/app), else null. */
@@ -370,4 +383,66 @@ say "installed; relaunching $APP"
 echo "RESULT ok $VERSION" >> "$LOG"
 open -a "$APP"
 `;
+}
+
+const psq = (s: string) => `'${s.replace(/'/g, "''")}'`;
+
+/**
+ * Windows: the PowerShell script that installs a verified FriedLiverUserSetup after the app quits. It waits
+ * for the app's main process, runs the installer silently (it updates the per-user install in place and,
+ * with the runcode task, opens FriedLiver again), and writes the same LOG as the macOS script: a
+ * `PAGE <release page>` line, its steps, and last `RESULT ok <version>` or `RESULT failed <reason>`, which
+ * the next start reports. It always removes its own folder (the installer and itself). On failure the
+ * installed app is whatever the installer left: Inno Setup rolls back a failed install.
+ */
+export function windowsInstallScript(p: { pid: number; setup: string; dir: string; log: string; version: string; page: string }): string {
+  if (!Number.isSafeInteger(p.pid) || p.pid <= 4) throw new Error('bad pid');
+  if (!/\\FriedLiverUserSetup-x64-[^\\]+\.exe$/i.test(p.setup) && !/[\\/]FriedLiverUserSetup\.exe$/i.test(p.setup)) throw new Error('not a FriedLiver installer');
+  return `# FriedLiver update: written by the Agents extension, runs once, removes its folder.
+$ErrorActionPreference = 'Continue'
+$AppPid = ${p.pid}
+$Setup = ${psq(p.setup)}
+$Dir = ${psq(p.dir)}
+$Log = ${psq(p.log)}
+$Version = ${psq(p.version)}
+function Say([string]$m) { Add-Content -LiteralPath $Log -Value ((Get-Date -Format s) + ' ' + $m) }
+function Done([string]$result) {
+  Add-Content -LiteralPath $Log -Value ('RESULT ' + $result)
+  Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction SilentlyContinue
+  exit 0
+}
+Set-Content -LiteralPath $Log -Value ${psq(`PAGE ${releasePageFrom(`PAGE ${p.page}`)}`)}
+Say ('install script started: ' + $Version + ' (waiting for pid ' + $AppPid + ')')
+$app = Get-Process -Id $AppPid -ErrorAction SilentlyContinue
+if ($app -and -not $app.WaitForExit(300000)) { Say 'the app did not quit within 300 s'; Done 'failed the app did not quit within 300 s' }
+# Its other processes (extension hosts, the GPU, the shared process) go with it; a moment for their files.
+Start-Sleep -Seconds 2
+Say 'the app quit; running the installer'
+try {
+  $run = Start-Process -FilePath $Setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MERGETASKS=runcode,!desktopicon,!quicklaunchicon', ('/LOG="' + (Join-Path $Dir 'setup.log') + '"')) -PassThru -Wait
+} catch {
+  Say ('could not start the installer: ' + $_.Exception.Message); Done 'failed could not start the installer'
+}
+if ($run.ExitCode -ne 0) {
+  Get-Content -LiteralPath (Join-Path $Dir 'setup.log') -Tail 20 -ErrorAction SilentlyContinue | Add-Content -LiteralPath $Log
+  Say ('the installer exited ' + $run.ExitCode); Done ('failed the installer exited ' + $run.ExitCode)
+}
+Say 'installed; the installer opens FriedLiver again'
+Done ('ok ' + $Version)
+`;
+}
+
+/**
+ * The -Command that starts the install script through WMI (Win32_Process.Create, hidden window): the
+ * process WMI creates belongs to the WMI service, not to FriedLiver, so it outlives the app even when the
+ * app's processes run in a job that closes its children with it. Exits with Create's ReturnValue (0 = started).
+ */
+export function windowsLaunchCommand(powershell: string, script: string): string {
+  if (/["\r\n]/.test(powershell + script)) throw new Error('unexpected characters in a path');
+  const inner = `"${powershell}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${script}"`;
+  return [
+    '$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }',
+    `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${psq(inner)}; ProcessStartupInformation = $si }`,
+    'exit [int]$r.ReturnValue',
+  ].join('; ');
 }
