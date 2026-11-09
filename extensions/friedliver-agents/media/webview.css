@@ -779,7 +779,7 @@ button.count-item .icon {
   padding: 0 var(--sp-3);
   background: var(--menu-bg);
   color: var(--fg-2);
-  font-size: var(--t-85);
+  font-size: var(--t-xs);
   font-weight: 500;
   text-align: left;
   box-shadow: inset 0 -1px var(--border);
@@ -1340,7 +1340,10 @@ svg[data-lit] .map-file-line:not(.lit) {
   opacity: 0.85;
 }
 .chat-table .group-row th {
-  padding: var(--sp-3) var(--sp-2) var(--sp-1);
+  /* A group's name is the list's heading: the rows' own size and the text colour, with room above it. */
+  padding: var(--sp-4) var(--sp-2) var(--sp-1);
+  color: var(--fg);
+  font-size: calc(var(--fs) * 0.9);
   text-align: left;
   font-weight: 600;
   display: table-cell;
@@ -2181,6 +2184,8 @@ body[data-surface='chat'] {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  /* Room for a working agent's ring under the label. */
+  margin-top: var(--sp-1);
   color: var(--sel-fg);
   font-size: var(--fs);
   font-weight: var(--w-medium);
@@ -4475,6 +4480,10 @@ button.new-chat kbd {
 .perms .hint {
   margin: 0;
 }
+.perms p.hint {
+  max-width: var(--w-prose);
+  text-wrap: pretty;
+}
 .perms table {
   width: 100%;
   margin-top: 8px;
@@ -4582,6 +4591,8 @@ button.new-chat kbd {
 }
 .acct-head p {
   margin: var(--sp-1) 0 var(--sp-4);
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .acct-card {
   margin-bottom: var(--sp-3);
@@ -4606,6 +4617,8 @@ button.new-chat kbd {
 }
 .acct-links .hint {
   margin: 2px 0 0;
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .acct-card[data-focused] {
   border-color: var(--focus);
@@ -4663,6 +4676,8 @@ button.new-chat kbd {
 }
 .acct-block p {
   margin: var(--sp-1) 0 0;
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .acct-kind {
   font-size: var(--t-85);
@@ -4799,7 +4814,8 @@ button.new-chat kbd {
   gap: 6px;
   padding: var(--sp-1) var(--sp-3);
   font-size: var(--t-85);
-  color: var(--fg-50);
+  font-weight: var(--w-strong);
+  color: var(--fg-2);
 }
 .inbox-lane-dot {
   width: 6px;

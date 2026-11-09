@@ -279,6 +279,8 @@
   --zone-needs-bar: inset 3px 0 0 var(--decision);
   --zone-ask-bar: inset 2px 0 0 var(--zone-prompt-edge-focus);
   --w-bubble: 80%;
+  /* The longest line of running text on a full-width page: the page keeps its width, a paragraph stays readable. */
+  --w-prose: 96ch;
   --r-bubble: 16px;
   --r-bubble-tail: 6px;
   /* Type per zone, all relative to the chat's base size (--fs, which Cmd/Ctrl + = - 0 scales): the prompt at
