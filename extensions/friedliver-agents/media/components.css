@@ -2707,10 +2707,12 @@ body[data-platform='windows'] .fl-dialog__foot {
 [data-fit='icon'] > .fl-tab-wrap:not([data-active]) > .fl-tab__x {
   display: none;
 }
-/* The status as a badge on the mark's bottom-right corner, ringed in the page colour. */
+/* The status as a badge on the mark's bottom-right corner, ringed in the page colour: the small status shape,
+   its bottom and right edges --sp-half past the mark's, whatever the shape's size, so the mark stays readable. */
 [data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-dot {
+  --dot: 10px;
   position: absolute;
-  top: calc(50% + var(--sp-half));
+  top: calc(50% + var(--i-md) / 2 + var(--sp-half) - var(--dot));
   left: calc(var(--sp-1) + var(--i-md) - var(--dot) + var(--sp-half));
   box-shadow: 0 0 0 var(--sp-half) var(--bg);
 }
