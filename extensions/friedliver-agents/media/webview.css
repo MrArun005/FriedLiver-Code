@@ -94,7 +94,8 @@ h3 {
   height: var(--h-2xs);
   padding: 0 var(--sp-1);
   border-radius: var(--r-pill);
-  font-size: var(--t-85);
+  /* --t-85 of the base size, not of the text around it: one badge size in a heading, a tab and a rail. */
+  font-size: calc(var(--fs) * 0.85);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);
@@ -4470,10 +4471,6 @@ button.new-chat kbd {
   font-size: var(--t-100);
   font-weight: var(--w-strong);
   color: var(--sel-fg);
-}
-.perms h2 .count {
-  color: var(--fg-2);
-  font-weight: normal;
 }
 .perms .hint {
   margin: 0;

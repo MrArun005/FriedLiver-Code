@@ -687,7 +687,8 @@ button.fl-pill:focus-visible {
   border-radius: var(--r-pill);
   background: var(--pill-bg);
   color: var(--fg);
-  font-size: var(--t-85);
+  /* --t-85 of the base size, not of the text around it: one badge size in a heading, a tab and a rail. */
+  font-size: calc(var(--fs) * 0.85);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);

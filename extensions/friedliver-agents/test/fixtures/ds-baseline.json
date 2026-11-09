@@ -37,7 +37,6 @@
         ".map-you .you-badge-text",
         ".mini-badge",
         ".new-task textarea",
-        ".perms h2 .count",
         ".reopen .fl-menu__title",
         ".rewind-btn:focus-visible",
         ".search",
@@ -117,7 +116,7 @@
     "colour": 9,
     "px": 144,
     "effect": 5,
-    "restyle": 82,
+    "restyle": 81,
     "rawControls": 57
   }
 }
