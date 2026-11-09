@@ -2508,7 +2508,11 @@ button.rewind-btn {
   text-underline-offset: 3px;
   cursor: copy;
 }
+/* On the code well the link colour sits a shade under AA in a light theme: a little of the text's ink carries it over. */
 .path-link code {
+  color: color-mix(in srgb, var(--link) 85%, var(--fg));
+}
+.path-link.outside code {
   color: inherit;
 }
 /* The reply's time and Copy (§2.32): over the first line's end, on the page tone, only while the reply is

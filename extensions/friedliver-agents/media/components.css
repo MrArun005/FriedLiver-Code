@@ -280,6 +280,12 @@
   border: 0;
   font-weight: var(--w-regular);
 }
+/* A link is as tall as its letters: the pointer gets the line around it, with nothing moved on the page. */
+.fl-btn--link::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-half));
+}
 .fl-btn--link:hover:not(:disabled) {
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -2634,6 +2640,12 @@ body[data-platform='windows'] .fl-dialog__foot {
   opacity: 0;
   cursor: pointer;
 }
+/* The × draws at icon size; the pointer gets the tab's height around it, so a close is not a near miss. */
+.fl-tab__x::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1));
+}
 .fl-tab-wrap:hover > .fl-tab__x,
 .fl-tab-wrap[data-active] > .fl-tab__x,
 .fl-tab-wrap:focus-within > .fl-tab__x {
@@ -3607,6 +3619,15 @@ button.cc-pill {
   font-weight: var(--w-medium);
   line-height: 18px;
   white-space: nowrap;
+}
+/* The pill stays slim; the pointer gets the footer row's height. */
+button.cc-pill {
+  position: relative;
+}
+button.cc-pill::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1)) 0;
 }
 button.cc-pill:hover {
   background: var(--pill-hover);
