@@ -3295,8 +3295,10 @@ button.cc-map-node:hover {
   font-weight: var(--w-strong);
   color: var(--sel-fg);
 }
+/* Short of room, the target is cut before the risk pill beside it: the card below shows the target whole, and
+   the pill is the one place the risk is named. */
 .apv-tg {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
