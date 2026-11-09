@@ -4446,8 +4446,9 @@ button.new-chat kbd {
   }
 }
 /* Manage Permissions (permissions.tsx): the whole width, one table per kind. */
+/* The page's own inset and title are the Agent Manager's and Agents & Accounts' (§2.35). */
 .perms {
-  padding: 20px 24px 32px;
+  padding: var(--sp-5) var(--gutter) var(--sp-8);
 }
 .perms-head {
   display: flex;
@@ -4457,15 +4458,18 @@ button.new-chat kbd {
   margin-bottom: 8px;
 }
 .perms h1 {
-  margin: 0 0 4px;
-  font-size: 1.4em;
-  font-weight: 600;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--t-hero);
+  font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
+  line-height: var(--lh-tight);
   color: var(--sel-fg);
 }
 .perms h2 {
-  margin: 24px 0 2px;
-  font-size: 1.05em;
-  font-weight: 600;
+  margin: var(--sp-6) 0 2px;
+  font-size: var(--t-100);
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
 }
 .perms h2 .count {
   color: var(--fg-2);
