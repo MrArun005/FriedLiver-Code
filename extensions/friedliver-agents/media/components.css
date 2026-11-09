@@ -2616,6 +2616,11 @@ body[data-platform='windows'] .fl-dialog__foot {
 .fl-tab > .fl-dot {
   flex: none;
 }
+/* The status sits --sp-1 from what it follows (the title or a pill), not the tab's full gap: the title keeps
+   the difference, and the open tab its 110px at --tab-open-min. */
+.fl-tab > .fl-dot {
+  margin-left: calc(-1 * var(--sp-1));
+}
 /* A closable tab: the × sits inside its end, shown on hover, on the open tab and on keyboard focus. */
 .fl-tab-wrap {
   position: relative;
@@ -2713,6 +2718,7 @@ body[data-platform='windows'] .fl-dialog__foot {
 [data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-dot {
   --dot: 10px;
   position: absolute;
+  margin-left: 0;
   top: calc(50% + var(--i-md) / 2 + var(--sp-half) - var(--dot));
   left: calc(var(--sp-1) + var(--i-md) - var(--dot) + var(--sp-half));
   box-shadow: 0 0 0 var(--sp-half) var(--bg);
@@ -2722,6 +2728,7 @@ body[data-platform='windows'] .fl-dialog__foot {
 [data-fit='icon'] > .fl-tab-wrap[data-active] .fl-dot {
   --dot: 10px;
   position: absolute;
+  margin-left: 0;
   top: calc(50% + var(--i-md) / 2 + var(--sp-half) - var(--dot));
   left: calc(var(--sp-2) + var(--i-md) - var(--dot) + var(--sp-half));
   box-shadow: 0 0 0 var(--sp-half) var(--bg);
