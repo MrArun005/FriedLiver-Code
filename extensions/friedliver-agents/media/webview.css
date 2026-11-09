@@ -4390,7 +4390,7 @@ button.new-chat {
   justify-content: space-between;
   height: 28px;
   padding: 0 var(--sp-2);
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   background: none;
   color: var(--fg);
 }

@@ -3552,7 +3552,7 @@ button.cc-mic {
   width: 26px;
   height: 26px;
   margin-right: 5px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   color: var(--mic-fg);
   background: var(--mic-bg);
 }
