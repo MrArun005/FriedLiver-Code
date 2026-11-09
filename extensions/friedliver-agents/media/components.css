@@ -220,7 +220,8 @@
   --btn-h: var(--h-sm);
   --btn-px: var(--sp-2);
   --btn-i: var(--i-sm);
-  --btn-fs: var(--t-90);
+  /* --t-90 of the base size, not of the text around it: one small-button size under a reply, in a step row and in a table. */
+  --btn-fs: calc(var(--fs) * 0.9);
 }
 .fl-btn--lg {
   --btn-h: var(--h-lg);
