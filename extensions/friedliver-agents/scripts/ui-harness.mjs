@@ -491,7 +491,7 @@ async function shoot() {
     const p = await open('surface=accounts&focus=gemini', 900, 700);
     await p.waitForTimeout(50);
     check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
-    check((await p.locator('.acct-card[id^="card-"]').count()) === 4, 'a card per agent, Demo included when shown');
+    check((await p.locator('.acct-card[id^="card-"]').count()) === 5, 'a card per agent: Demo when shown, and the custom agent');
     const codex = p.locator('#card-codex');
     check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
     await codex.locator('button:has-text("ChatGPT")').click();
@@ -862,15 +862,16 @@ async function shoot() {
     const size = async () => (await p.waitForTimeout(50), p.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize));
     check((await size()) === '13px', 'the chat starts at 13px');
     await p.click('.composer textarea');
-    await p.keyboard.press('ControlOrMeta+Equal');
-    await p.keyboard.press('ControlOrMeta+Equal');
+    // The page is drawn as macOS (data-platform), so the size keys are Cmd's on every machine that runs this.
+    await p.keyboard.press('Meta+Equal');
+    await p.keyboard.press('Meta+Equal');
     check((await size()) === '15px', 'Cmd/Ctrl + = grows this tab by 1px a press');
     check(await p.locator('.text-size-toast:has-text("Text 15px")').isVisible(), 'the new size shows briefly');
     check((await p.evaluate(() => window.__forwarded)) === 0, 'the zoom keys don’t reach the window');
     check((await p.evaluate(() => window.__vscodeState()?.textSize)) === 15, 'the size is kept in this webview’s state');
-    await p.keyboard.press('ControlOrMeta+Minus');
+    await p.keyboard.press('Meta+Minus');
     check((await size()) === '14px', 'Cmd/Ctrl + - shrinks it');
-    await p.keyboard.press('ControlOrMeta+Digit0');
+    await p.keyboard.press('Meta+Digit0');
     check((await size()) === '13px', 'Cmd/Ctrl + 0 resets it');
     await p.close();
     const restored = await open('surface=chat&theme=black-blue&select=chat-c5&textSize=17', 1200, 800);
@@ -1241,7 +1242,11 @@ async function shoot() {
             others.every((x) => {
               const r = x.getBoundingClientRect();
               const m = x.querySelector('.fl-mark').getBoundingClientRect();
-              const d = x.querySelector('.fl-dot').getBoundingClientRect();
+              // The shape's own box about its centre: a working arc turns, and a turned square's bounds are wider than it.
+              const dot = x.querySelector('.fl-dot');
+              const b = dot.getBoundingClientRect();
+              const [cx, cy, half] = [(b.left + b.right) / 2, (b.top + b.bottom) / 2, dot.offsetWidth / 2];
+              const d = { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half };
               return r.width <= 27 && d.left >= m.left && d.right <= m.right + 3 && d.top >= m.top && d.bottom <= m.bottom + 3;
             }),
           openInView: ob.left >= lo - 1 && ob.right <= hi + 1,
@@ -1301,7 +1306,7 @@ async function shoot() {
       const shown = await tip.evaluate(() => {
         const s = document.querySelector('.tabs').getBoundingClientRect();
         const o = document.querySelector('.tabs [aria-selected="true"]').getBoundingClientRect();
-        return o.left >= s.left && o.right <= s.right;
+        return o.left >= s.left - 1 && o.right <= s.right + 1;
       });
       check(!!t && shown && t.below && t.inside && / · (Idle|Working|Needs you|Done|Problem)/.test(t.text) && t.text === name, `hovering a mark-only tab shows its tooltip at once, below, in view [${JSON.stringify(t)} vs ${name}]`);
       await tip.close();

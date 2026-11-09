@@ -2716,6 +2716,15 @@ body[data-platform='windows'] .fl-dialog__foot {
   left: calc(var(--sp-1) + var(--i-md) - var(--dot) + var(--sp-half));
   box-shadow: 0 0 0 var(--sp-half) var(--bg);
 }
+/* The open tab's status is a badge on its mark too: every tab in the strip reads the same way, and the title
+   gets the room (a side bar leaves it little). */
+[data-fit='icon'] > .fl-tab-wrap[data-active] .fl-dot {
+  --dot: 10px;
+  position: absolute;
+  top: calc(50% + var(--i-md) / 2 + var(--sp-half) - var(--dot));
+  left: calc(var(--sp-2) + var(--i-md) - var(--dot) + var(--sp-half));
+  box-shadow: 0 0 0 var(--sp-half) var(--bg);
+}
 /* The open tab keeps its title: at least --tab-open-min; with marks only it takes all the room the others leave. */
 [data-fit] > .fl-tab-wrap[data-active] {
   min-width: var(--tab-open-min);
