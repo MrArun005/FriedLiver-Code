@@ -3011,7 +3011,8 @@ button.fl-row,
   /* A neutral tile: the agent's logo brings its own colour (owner, 2026-10-21). */
   background: var(--pill-bg);
   color: var(--hue);
-  font-size: var(--t-85);
+  /* Of the base size, not of the text around it: a puck is a fixed size, so its initial is too. */
+  font-size: calc(var(--fs) * 0.85);
   font-weight: var(--w-strong);
   line-height: 1;
   outline: var(--line) solid var(--ctl-border);
@@ -3019,15 +3020,15 @@ button.fl-row,
 }
 .fl-avatar--xs {
   --av: var(--i-sm);
-  font-size: var(--t-75);
+  font-size: max(var(--t-min), calc(var(--fs) * 0.75));
 }
 .fl-avatar--sm {
   --av: var(--i-md);
-  font-size: var(--t-75);
+  font-size: max(var(--t-min), calc(var(--fs) * 0.75));
 }
 .fl-avatar--lg {
   --av: 32px;
-  font-size: var(--t-100);
+  font-size: var(--fs);
 }
 /* The /discuss meter's marker (§2.30): 28, between md and lg. */
 .fl-avatar--marker {
