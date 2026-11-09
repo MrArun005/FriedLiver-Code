@@ -464,7 +464,8 @@
 .fl-pill {
   --pill-h: var(--h-xs);
   --pill-px: var(--sp-2);
-  --pill-fs: var(--t-85);
+  /* --t-85 of the base size, not of the text around it: one pill size in a card head, a step row and a reply. */
+  --pill-fs: calc(var(--fs) * 0.85);
   --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
   --pill-fill-hover: var(--pill-hover);
@@ -527,7 +528,7 @@
 }
 .fl-pill--md {
   --pill-h: var(--h-sm);
-  --pill-fs: var(--t-90);
+  --pill-fs: calc(var(--fs) * 0.9);
 }
 .fl-pill--mono {
   font-family: var(--mono);
