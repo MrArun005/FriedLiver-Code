@@ -1181,7 +1181,8 @@ export function mapLayout(state: Pick<AppState, 'chats' | 'links'>, outsideSessi
     const next = () => top + M.laneHead + row++ * M.row;
     for (const chat of inLane) {
       const ny = next();
-      nodes.push({ chat, status: statusOf(chat), lane: agent, col: colOf(chat), x: colX(colOf(chat)), y: ny, cy: ny + M.nodeH / 2, title: clip(chat.title, 27) });
+      // An Auto chat's badge sits in the title's corner, so its title stops short of it.
+      nodes.push({ chat, status: statusOf(chat), lane: agent, col: colOf(chat), x: colX(colOf(chat)), y: ny, cy: ny + M.nodeH / 2, title: clip(chat.title, chat.approval === 'full' ? 23 : 27) });
       grow(chat.id, chat.id, undefined, { x: colX(colOf(chat)), y: ny, col: colOf(chat) }, next, { agent });
     }
     const h = M.laneHead + (row - 1) * M.row + M.nodeH + M.lanePad;

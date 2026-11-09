@@ -342,7 +342,8 @@ button.ref:hover:not(:disabled) {
 }
 button.count-item {
   color: var(--fg-2);
-  font-size: var(--t-90);
+  /* The row's size, not a step below it: "archived" reads as one of the counts. */
+  font-size: inherit;
 }
 button.count-item .icon {
   width: var(--i-sm);
@@ -4079,7 +4080,8 @@ button.all-btn {
 .chat-head-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  /* Room for a working agent's ring between its puck and the chat's name. */
+  gap: var(--sp-3);
   min-width: 0;
 }
 /* The chat's name (§2.34): 13/600 in a side bar; on a wide page the page title, 20/600, tracked in. */
