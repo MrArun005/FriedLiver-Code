@@ -185,9 +185,12 @@
 .fl-btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-hover);
   color: var(--btn-fg-hover);
+  transition-duration: 0ms, 0ms, var(--dur-pop);
+}
+/* The hover outline (high contrast only) never replaces the focus ring. */
+.fl-btn:hover:not(:disabled, [aria-disabled='true'], :focus-visible) {
   outline: var(--hover-outline);
   outline-offset: -1px;
-  transition-duration: 0ms, 0ms, var(--dur-pop);
 }
 .fl-btn:active:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-active);
@@ -213,6 +216,9 @@
   --btn-bg-hover: var(--sel-bg);
   --btn-fg: var(--sel-fg);
   --btn-fg-hover: var(--sel-fg);
+}
+/* Its selection outline gives way to the focus ring: a pressed toggle shows keyboard focus like any button. */
+:is(.fl-btn--secondary, .fl-btn--quiet)[aria-pressed='true']:not(:focus-visible) {
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
