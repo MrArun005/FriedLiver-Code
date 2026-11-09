@@ -15,6 +15,15 @@ const BLOCKING = new Set(['signIn', 'apiKey', 'accounts']);
 /** An error or warning notice that toasts instead of sitting in the transcript. */
 export const isToastNotice = (i: Item): i is NoticeItem => i.kind === 'notice' && i.tone === 'error' && !i.actions?.some((a) => BLOCKING.has(a.do));
 
+/**
+ * The error a chat stands on: its last item, with nothing after it. That one stays in the transcript with its
+ * actions instead of toasting, so a chat marked Problem says why when it is opened, not only while it is watched.
+ */
+export function standingError(items: readonly Item[]): NoticeItem | undefined {
+  const last = items.at(-1);
+  return last && isToastNotice(last) ? last : undefined;
+}
+
 /** The toasts after `incoming` arrive: newest last, each once, at most MAX_TOASTS. */
 export function addToasts<T>(shown: T[], incoming: T[]): T[] {
   return [...shown.filter((t) => !incoming.includes(t)), ...incoming].slice(-MAX_TOASTS);

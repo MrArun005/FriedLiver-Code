@@ -77,7 +77,7 @@ import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
 import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
-import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, type NoticeItem } from '../shared/toasts';
+import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, standingError, type NoticeItem } from '../shared/toasts';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -292,7 +292,10 @@ function useErrorToasts(chat: ChatView | undefined, resync: { current: boolean }
     }
     const fresh = errors.filter((e) => !known.current.keys.has(itemKey(e)));
     for (const e of fresh) known.current.keys.add(itemKey(e));
-    if (fresh.length) setShown((s) => addToasts(s, fresh));
+    // The one the chat stands on is in the transcript (standingError): no toast beside it.
+    const standing = chat && standingError(chat.items);
+    const pop = fresh.filter((e) => e !== standing);
+    if (pop.length) setShown((s) => addToasts(s, pop));
   }, [chat?.id, errors]);
   return {
     shown,
@@ -799,7 +802,10 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     stick.current = true;
     setLimit(WINDOW);
   }, [chat.id]);
-  const { items, approvals } = useMemo(() => foldApprovals(withoutDiscussionTurns(chat.items).filter((i) => !isToastNotice(i))), [chat.items]);
+  const { items, approvals } = useMemo(() => {
+    const standing = standingError(chat.items);
+    return foldApprovals(withoutDiscussionTurns(chat.items).filter((i) => !isToastNotice(i) || i === standing));
+  }, [chat.items]);
   // The marked decision card moves on when it is answered: its hint and outline follow.
   useEffect(() => syncDecisionTarget(chat), [chat.items]);
   const groups = useMemo(() => {

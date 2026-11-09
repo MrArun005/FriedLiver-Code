@@ -2687,7 +2687,10 @@ async function agentErrorsChecks({ open, check }) {
       await gemini.close();
       if (width !== 900) continue;
       const main = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-main`, width, 700, 2);
-      const install = main.locator('.notice code.notice-detail');
+      // An error with something after it is not in the transcript (it toasted): the chat's menu reopens it.
+      await main.getByRole('button', { name: 'More' }).first().click();
+      await main.getByRole('menuitem', { name: '2 errors' }).click();
+      const install = main.locator('.fl-toast code.notice-detail');
       check((await install.innerText()) === 'npm install -g @google/gemini-cli' && /mono|courier|menlo/i.test(await install.evaluate((e) => e.ownerDocument.defaultView.getComputedStyle(e).fontFamily)), `${tone}: an install command stays code, in the editor's font`);
       await main.getByRole('button', { name: 'More' }).first().click();
       await main.waitForSelector('[role="menuitem"]');
@@ -2744,7 +2747,7 @@ async function approvalsChecks({ open, check }) {
   check((await p.locator('#item-perm-edit .fl-split').count()) === 1 && (await p.locator('#item-perm-edit[data-focus]').count()) === 1, 'the edit is a card with the split Allow, ringed as the one the keys act on');
   for (const id of ['perm-push', 'perm-env', 'bridge-click'])
     check((await p.locator(`#item-${id}[data-risk="careful"] .fl-btn--hold`).count()) === 1 && (await p.locator(`#item-${id} .fl-split`).count()) === 0, `${id}: careful, hold to allow, no scope menu`);
-  check((await p.locator('.fl-btn--brand:not(.fl-split-caret)').count()) === 1, 'one brand primary on screen (its split caret aside)');
+  check((await p.locator('.fl-btn--primary:not(.fl-split-caret)').count()) === 1, 'one primary on screen (its split caret aside)');
   check((await p.locator('#item-perm-push .apv-commit').count()) === 3 && (await p.locator('#item-perm-push').innerText()).includes('Safer:'), 'the force push lists the commits it would drop and the safer way');
 
   // The Allow menu names each rule; picking one allows with it.

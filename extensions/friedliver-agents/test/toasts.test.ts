@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Item } from '../src/shared/model';
-import { MAX_TOASTS, addToasts, dismissTimer, isToastNotice } from '../src/shared/toasts';
+import { MAX_TOASTS, addToasts, dismissTimer, isToastNotice, standingError } from '../src/shared/toasts';
 
 afterEach(() => void vi.useRealTimers());
 
 describe('error notices as toasts', () => {
+  it('the error a chat ends on stands in the transcript; one with something after it does not', () => {
+    const error: Item = { kind: 'notice', tone: 'error', text: "Codex can't use the model old-mini with this account." };
+    const said: Item = { kind: 'agent', text: 'hi' };
+    expect(standingError([said, error])).toBe(error);
+    expect(standingError([error, said])).toBeUndefined();
+    expect(standingError([said, { kind: 'notice', tone: 'info', text: 'Stopped.' }])).toBeUndefined();
+    // Sign-in is not a toast in the first place: it is in the transcript by its own rule.
+    expect(standingError([{ kind: 'notice', tone: 'error', text: 'Sign in', actions: [{ label: 'Sign in to Claude', do: 'accounts', agent: 'claude' }] }])).toBeUndefined();
+    expect(standingError([])).toBeUndefined();
+  });
   it('toasts errors with their actions, keeps info notices and sign-in in the transcript', () => {
     const useModel: Item = { kind: 'notice', tone: 'error', text: "Claude can't use the model x", actions: [{ label: 'Use Sonnet', do: 'setOption', optionId: 'model', value: 'sonnet' }] };
     expect(isToastNotice(useModel)).toBe(true);
