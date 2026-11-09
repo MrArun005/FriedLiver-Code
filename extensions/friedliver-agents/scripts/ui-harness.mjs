@@ -253,8 +253,9 @@ function page(params) {
             window.postMessage({ type: m.type, path: m.path, ...(src ? { src } : {}) }, '*');
           });
         }
-        // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none).
-        if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && !location.search.includes('firstRun=1')) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
+        // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none). Decided here, not from the
+        // page's address: an exported page has no query string.
+        if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && ${params.get('firstRun') !== '1'}) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
         if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
         // Agents & Accounts' Test connection, answered as the host would for a Qwen Code install not signed in.
         if (m && m.type === 'testAgent') setTimeout(() => window.postMessage({ type: 'agentTest', result: { ok: true, agent: 'Qwen Code 0.12.0', signIn: ['Qwen OAuth', 'API key'], needsSignIn: false, models: ['Qwen3 Coder Plus', 'Qwen3 Coder Flash'], modelCount: 2, modes: ['Default', 'Auto edit', 'Plan', 'YOLO'] } }, '*'), 300);
