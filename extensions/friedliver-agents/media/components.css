@@ -286,11 +286,12 @@
   border: 0;
   font-weight: var(--w-regular);
 }
-/* A link is as tall as its letters: the pointer gets the line around it, with nothing moved on the page. */
+/* A link is as tall as its letters: the pointer gets the line above and below it, with nothing moved on the
+   page. Not past its ends: a link at a box's edge would widen what that box scrolls. */
 .fl-btn--link::after {
   content: '';
   position: absolute;
-  inset: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-half));
+  inset: calc(-1 * var(--sp-1)) 0;
 }
 .fl-btn--link:hover:not(:disabled) {
   text-decoration: underline;

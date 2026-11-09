@@ -2048,7 +2048,8 @@ async function subagentDetailChecks({ open, check, posted }) {
       const p = await open('surface=tasks&theme=dark-2026&view=map', width, height, 2);
       await p.evaluate((s) => window.postMessage({ type: 'claudeSessions', sessions: [s] }, '*'), fx.session);
       // The outside session's lane is the last: its fold of done agents.
-      if (state === 'done') await p.locator('.map-fold').last().click();
+      // The map is a tree now: a done agent shows without unfolding (a fold, where one is drawn, is opened).
+      if (state === 'done' && (await p.locator('.map-fold').count())) await p.locator('.map-fold').last().click();
       const node = p.locator(`.map-sub[aria-label="Subagent: ${title}"]`);
       await node.waitFor();
       await node.click();
@@ -2173,6 +2174,8 @@ function overflowProbe(sel) {
       if (cs.display !== 'inline' && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && !el.matches(SCROLLERS)) {
         const ox = cs.overflowX;
         if (ox === 'auto' || ox === 'scroll') bad.push(`${name(el)} scrolls sideways ${el.scrollWidth - el.clientWidth}px`);
+        // A working avatar's ring is drawn around it on purpose (§ avatar): not content that ran out of its box.
+        else if (ox === 'visible' && el.matches('.fl-avatar[data-working]')) continue;
         else if (ox === 'visible') bad.push(`${name(el)} spills ${el.scrollWidth - el.clientWidth}px`);
         else if (cs.textOverflow !== 'ellipsis' && cs.webkitLineClamp === 'none') bad.push(`${name(el)} cut ${el.scrollWidth - el.clientWidth}px`);
       }
@@ -2265,7 +2268,7 @@ async function managerOverflowChecks({ open, check }) {
           ['outside-done', p.locator(`.map-sub[aria-label^="Subagent: ${done.title.slice(0, 20)}"]`)],
         ];
         for (const [kind, node] of sheets) {
-          if (kind === 'outside-done') await p.locator('.map-fold').last().click();
+          if (kind === 'outside-done' && (await p.locator('.map-fold').count())) await p.locator('.map-fold').last().click();
           await node.click();
           await p.waitForSelector('.map-detail');
           if (kind !== 'chat-subagent') await p.waitForSelector('.sd-timeline .tl-step');
