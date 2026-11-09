@@ -883,6 +883,10 @@ td.c-act {
   .chat-table .c-agent > * {
     display: none;
   }
+  /* The task's name before its branch: the chip was taking half of a title that no longer fits. */
+  .chat-table .cell-title > .fl-pill {
+    display: none;
+  }
 }
 td.c-act > * + * {
   margin-left: 4px;
@@ -4493,11 +4497,12 @@ button.new-chat kbd {
   /* The same columns in every group, so the tables line up. */
   table-layout: fixed;
 }
+/* "Asked by" takes what is left: enough for an agent's name on one line at half an editor's width. */
 .perms th:nth-child(1) {
-  width: 26%;
+  width: 24%;
 }
 .perms th:nth-child(2) {
-  width: 36%;
+  width: 33%;
 }
 .perms th:nth-child(3) {
   width: 17%;
@@ -4508,6 +4513,7 @@ button.new-chat kbd {
 .perms th {
   text-align: left;
   font-weight: normal;
+  white-space: nowrap;
   color: var(--fg-2);
   padding: 4px 12px 4px 0;
   border-bottom: 1px solid var(--border);
@@ -4529,6 +4535,42 @@ button.new-chat kbd {
 }
 .perms td.scope .hint {
   font-family: var(--font);
+  /* A path may break anywhere; the words after it may not. */
+  word-break: normal;
+}
+/* Too narrow for five columns: each rule is a block (what it allows, where, then when and who asked) with Revoke beside it. */
+@media (max-width: 640px) {
+  .perms thead {
+    display: none;
+  }
+  .perms table,
+  .perms tbody {
+    display: block;
+  }
+  .perms tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--sp-half) var(--sp-2);
+    padding: var(--sp-2) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .perms td {
+    grid-column: 1 / 3;
+    padding: 0;
+    border: 0;
+  }
+  .perms td:nth-child(3) {
+    grid-column: 1;
+  }
+  .perms td:nth-child(4) {
+    grid-column: 2;
+    color: var(--fg-2);
+  }
+  .perms td.act {
+    grid-column: 3;
+    grid-row: 1 / 4;
+    align-self: center;
+  }
 }
 .perms .empty {
   margin-top: 24px;
