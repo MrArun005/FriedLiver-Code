@@ -69,7 +69,7 @@ import { ContextRail } from './contextRail';
 const RAIL_MIN = 1100;
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
-import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
+import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp, decisionTarget } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -86,6 +86,8 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAC = document.body.dataset.platform === 'mac';
 /** The OS's own dictation keys, for the mic's fallback hint; none on Linux, where the hint isn't shown. */
 const TAB_FOCUS_KEY = MAC ? 'Ctrl+Shift+M' : 'Ctrl+M';
+/** A waiting request whose Allow has a scope (once, this chat, always), which Tab changes from the message box. */
+const scopedRequest = (i: Item | undefined): boolean => i?.kind === 'permission' || (i?.kind === 'bridge' && !i.once);
 const DICTATE_HINT = MAC ? 'Press Fn twice to dictate' : document.body.dataset.platform === 'windows' ? 'Press Win+H to dictate' : undefined;
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
@@ -1435,7 +1437,7 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
+  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined) ?? (!text.trim() && scopedRequest(decisionTarget(chat)) ? `Tab: once, this chat or always · ${TAB_FOCUS_KEY}: Tab moves focus` : undefined);
 
   const reset = () => {
     setText('');
