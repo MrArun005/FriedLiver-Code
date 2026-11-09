@@ -1293,25 +1293,32 @@ svg[data-lit] .map-file-line:not(.lit) {
   font-size: var(--t-85);
 }
 .node-dot {
-  fill: transparent;
-  stroke: var(--fg-2);
+  --nd: var(--fg-2);
+}
+.node-dot .nd-line {
+  fill: none;
+  stroke: var(--nd);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.node-dot .nd-idle {
   stroke-width: 1.5;
 }
+.node-dot .nd-fill {
+  fill: var(--nd);
+}
 .node-dot[data-state='working'] {
-  fill: var(--status-working);
-  stroke: none;
+  --nd: var(--status-working);
 }
 .node-dot[data-state='needs-you'] {
-  fill: var(--status-waiting);
-  stroke: none;
+  --nd: var(--status-waiting);
 }
 .node-dot[data-state='done'] {
-  fill: var(--status-done);
-  stroke: none;
+  --nd: var(--status-done);
 }
 .node-dot[data-state='error'] {
-  fill: var(--status-failed);
-  stroke: none;
+  --nd: var(--status-failed);
 }
 .map-file {
   outline: none;
