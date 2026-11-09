@@ -1443,7 +1443,11 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined) ?? (!text.trim() && scopedRequest(decisionTarget(chat)) ? `Tab: once, this chat or always · ${TAB_FOCUS_KEY}: Tab moves focus` : undefined);
+  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined) ?? (!text.trim() && scopedRequest(decisionTarget(chat)) ? (
+      <>
+        Tab: once, this chat or always<span class="composer-hint-more">· {TAB_FOCUS_KEY}: Tab moves focus</span>
+      </>
+    ) : undefined);
 
   const reset = () => {
     setText('');

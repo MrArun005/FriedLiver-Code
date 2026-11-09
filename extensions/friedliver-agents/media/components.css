@@ -3677,6 +3677,8 @@ button.cc-agents .dot {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+  /* Short of room, the hint gives way first: the agent and model pills beside it keep their names. */
+  flex: 0 1000 auto;
   min-width: 0;
   margin-left: 6px;
   overflow: hidden;
@@ -3742,6 +3744,12 @@ button.send-btn:disabled {
   background: var(--pill-bg);
   color: var(--fg-2);
   box-shadow: none;
+}
+/* The hint's second half goes whole before the first is cut. */
+@container (max-width: 640px) {
+  .composer-hint-more {
+    display: none;
+  }
 }
 /* Narrow: labels go before anything overlaps (the controls keep their tooltips). */
 @container (max-width: 420px) {
