@@ -2741,7 +2741,7 @@ button.step-main:active {
 .step-image {
   padding-top: var(--sp-1);
 }
-/* A folded run's heading: the label at half strength. */
+/* A folded run's heading: the label at half strength (--fg-50, which still reads at 4.5:1). */
 .tl-group-btn {
   gap: 0;
   font-weight: 700;
@@ -2756,13 +2756,13 @@ button.step-main:active {
 }
 .tl-group-label {
   margin-left: 0.5em;
-  opacity: 0.5;
+  color: var(--fg-50);
 }
 .tl-group-btn:hover .tl-group-label {
-  opacity: 0.8;
+  color: var(--fg-2);
 }
 .tl-group-btn:active .tl-group-label {
-  opacity: 0.65;
+  opacity: 0.8;
 }
 /* A tool's body: IN/OUT rows in a .5px r5 box; each row clipped at 60px until asked. */
 .step-about {
@@ -2792,8 +2792,7 @@ button.step-main:active {
   padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-1);
   font-family: var(--mono);
   font-size: var(--t-85);
-  color: var(--fg-2);
-  opacity: 0.5;
+  color: var(--fg-50);
 }
 .tool-cell {
   position: relative;

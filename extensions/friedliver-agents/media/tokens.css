@@ -161,11 +161,14 @@
   --fl-font-size: var(--vscode-chat-font-size, 13px);
   --fs: var(--fl-font-size);
   --fs-mono: var(--vscode-editor-font-size, 12px);
+  /* The em steps compound when components nest (a pill in a small button in a step row); the floor keeps
+     the smallest text at 10px instead of letting it fall to 8.5. */
+  --t-min: 10px;
   --t-100: 1em;
-  --t-90: 0.9em;
-  --t-85: 0.85em;
-  --t-80: 0.8em;
-  --t-75: 0.75em;
+  --t-90: max(0.9em, var(--t-min));
+  --t-85: max(0.85em, var(--t-min));
+  --t-80: max(0.8em, var(--t-min));
+  --t-75: max(0.75em, var(--t-min));
   --t-xs: 11px;
   --t-sm: 12px;
   --t-md: 13px;

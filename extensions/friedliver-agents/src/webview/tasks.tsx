@@ -570,8 +570,8 @@ function NewTask({ defaults }: { defaults: Partial<Record<AgentKey, AgentDefault
         <label class="check" title="A separate git checkout on its own branch, so agents can't clash">
           <input type="checkbox" checked={own} onChange={(e) => setWorktree(e.currentTarget.checked)} /> Own worktree
         </label>
-        <Button variant="primary" disabled={!prompt.trim()} onClick={start}>
-          Start <Kbd>⏎</Kbd>
+        <Button variant="primary" kbd="⏎" disabled={!prompt.trim()} onClick={start}>
+          Start
         </Button>
       </div>
     </section>
