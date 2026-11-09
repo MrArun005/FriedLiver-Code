@@ -3379,6 +3379,8 @@ button.fl-row,
   font: inherit;
   font-size: var(--t-lg);
   outline: none;
+  /* A placeholder longer than a narrow box ends in an ellipsis, not mid-word. */
+  text-overflow: ellipsis;
 }
 .fl-ask > input::placeholder {
   color: var(--placeholder);
