@@ -45,7 +45,9 @@ jobs:
         include:
           - { os: windows-latest, target: win32-x64, artifact: friedliver-fork-windows-x64 }
           - { os: macos-latest, target: darwin-arm64, artifact: friedliver-fork-macos-arm64 }
-          - { os: ubuntu-latest, target: linux-x64, artifact: friedliver-fork-linux-x64 }
+          # 24.04, not ubuntu-latest: on 26.04 (dpkg 1.23) upstream's bundled dpkg-shlibdeps.pl dies in the .deb step
+          # ("Can't use an undefined value as a HASH reference at Dpkg/Shlibs/SymbolFile.pm"). Lift when upstream's copy works there.
+          - { os: ubuntu-24.04, target: linux-x64, artifact: friedliver-fork-linux-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
     env:
