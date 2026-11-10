@@ -598,7 +598,9 @@ export function ClampedText({ text, onMore }: { text: string; onMore?: () => voi
     const el = box.current;
     if (!el) return;
     const measure = () => setOver(open || el.scrollHeight > el.clientHeight + 1);
-    measure();
+    // Measured by the observer alone: it reports once on observing, after the page's own layout and before paint.
+    // Measuring here as well forced a layout per message as each mounted, and laid out messages far off screen
+    // that the transcript otherwise skips (content-visibility).
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     const expand = () => setOpen(true);

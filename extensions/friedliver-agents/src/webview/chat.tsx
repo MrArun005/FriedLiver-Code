@@ -788,8 +788,32 @@ function revealIds(i: Item): string[] {
   return ids.filter((x): x is string => typeof x === 'string');
 }
 
-/** Groups shown at first, and added each time you scroll up to the earliest one shown. */
+/**
+ * "In this chat": every message of yours, to jump to. A long chat has a thousand; it is drawn again only when
+ * that list or the message in view changes, not on every word the agent writes or every lot of earlier
+ * messages scrolled in.
+ */
+const JumpList = memo(function JumpList({ asks, current, rail, onShow }: { asks: { key: string; text: string; label: string }[]; current: string; rail: boolean; onShow(key: string): void }) {
+  return (
+    <nav class="jump-list" aria-label="In this chat" data-rail={rail ? '' : undefined}>
+      <b>In this chat</b>
+      {asks.map((a) => (
+        <button key={a.key} class="jump-item" title={a.text} aria-current={current === `msg-${a.key}` ? 'true' : undefined} onClick={() => onShow(a.key)}>
+          {a.label}
+        </button>
+      ))}
+    </nav>
+  );
+});
+
+/** Groups shown at first. */
 const WINDOW = 120;
+/**
+ * Groups added each time you scroll up to the earliest one shown. Fewer than the first window: 120 at once held
+ * the page for 60 to 100ms (445ms on a four-times-slower machine) in the middle of a scroll; a third of that is
+ * under two frames, and the next lot is asked for as soon as this one is in.
+ */
+const EARLIER = 40;
 
 function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect, rail }: TranscriptProps) {
   // With the context rail, "In this chat" draws in the rail's slot (§2.34) instead of beside the transcript.
@@ -840,7 +864,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       ([e]) => {
         if (!e.isIntersecting || !box.current) return;
         anchor.current = { height: box.current.scrollHeight, top: box.current.scrollTop };
-        setLimit((n) => n + WINDOW);
+        setLimit((n) => n + EARLIER);
       },
       { root: box.current, rootMargin: '400px 0px 0px 0px' },
     );
@@ -863,7 +887,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   const waitingKey = [...waiting].join('\n');
   const waitingNow = waitingItems(chat.items).length > 0;
 
-  const asks = groups.flatMap((g) => (g.kind === 'one' && g.item.kind === 'user' && g.item.text.trim() ? [{ key: g.key, text: g.item.text, at: g.at }] : []));
+  const asks = useMemo(() => groups.flatMap((g) => (g.kind === 'one' && g.item.kind === 'user' && g.item.text.trim() ? [{ key: g.key, text: g.item.text, at: g.at, label: clip(g.item.text, 60) }] : [])), [groups]);
   const jump = asks.length >= 2;
   // The message whose turn you are reading, once it has scrolled out of view: its copy sticks at the top.
   // An IntersectionObserver tells which messages have gone above the view; nothing reads boxes on scroll.
@@ -885,6 +909,9 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   }, [asks.length, shownFrom, chat.id]);
   const pastText = past === undefined ? undefined : asks.find((a) => a.key === past)?.text;
   const seen = useInView(box, jump ? asks.filter((a) => a.at >= (groups[shownFrom]?.at ?? 0)).map((a) => `msg-${a.key}`) : []);
+  // The jump list keeps one handler for the chat's life, so it redraws only when its messages or the one in view change.
+  const showNow = useRef<(key: string) => void>(() => {});
+  const jumpTo = useCallback((key: string) => showNow.current(key), []);
   const show = (key: string, expand?: boolean) => {
     const go = () => (expand ? openMessage(key) : scrollToMessage(key));
     if (document.getElementById(`msg-${key}`)) go();
@@ -893,6 +920,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       requestAnimationFrame(go);
     }
   };
+  showNow.current = show;
   return (
     <div class="transcript-wrap" data-jump={jump && !rail ? "" : undefined}>
     <div
@@ -945,16 +973,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       )}
       {jump &&
         (() => {
-          const nav = (
-            <nav class="jump-list" aria-label="In this chat" data-rail={railSlot ? '' : undefined}>
-              <b>In this chat</b>
-              {asks.map((a) => (
-                <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
-                  {clip(a.text, 60)}
-                </button>
-              ))}
-            </nav>
-          );
+          const nav = <JumpList asks={asks} current={seen ?? `msg-${asks[0].key}`} rail={!!railSlot} onShow={jumpTo} />;
           return railSlot ? createPortal(nav, railSlot) : rail ? null : nav;
         })()}
     </div>

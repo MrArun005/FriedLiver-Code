@@ -69,14 +69,23 @@ export function messageStamp(item: Item): MessageStamp | undefined {
 const isTime = (v: unknown): v is number => typeof v === 'number' && !Number.isNaN(new Date(v).getTime());
 
 /** "2:41 PM" today, "Oct 18, 2:41 PM" before, "Oct 18, 2025, 2:41 PM" in another year. */
+/** One formatter per locale and shape (today, this year, another year): making one costs far more than using it. */
+const timeFormats = new Map<string, Intl.DateTimeFormat>();
 export function messageTime(at: number, now: number, locale?: string): string {
   const d = new Date(at);
   const n = new Date(now);
-  const today = d.toDateString() === n.toDateString();
-  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-  if (!today) Object.assign(opts, { month: 'short', day: 'numeric' }, d.getFullYear() === n.getFullYear() ? {} : { year: 'numeric' });
+  const today = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  const shape = today ? 'time' : d.getFullYear() === n.getFullYear() ? 'day' : 'year';
+  const key = `${locale ?? ''}|${shape}`;
+  let format = timeFormats.get(key);
+  if (!format) {
+    const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+    if (shape !== 'time') Object.assign(opts, { month: 'short', day: 'numeric' }, shape === 'year' ? { year: 'numeric' } : {});
+    format = new Intl.DateTimeFormat(locale, opts);
+    timeFormats.set(key, format);
+  }
   // ICU puts a narrow no-break space before AM/PM; the element never wraps, so a plain space reads the same.
-  return d.toLocaleString(locale, opts).replace(/\s/g, ' ');
+  return format.format(d).replace(/\s/g, ' ');
 }
 
 /** The tooltip: the exact time, and for a reply how long its words took to come. */
