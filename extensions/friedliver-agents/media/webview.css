@@ -688,6 +688,17 @@ button.count-item .icon {
   text-overflow: ellipsis;
   color: var(--fg-2);
 }
+/* The heading and its count stay whole; the task's name takes what is left. Under 480px the count goes: the
+   cards below are the count. */
+.compare-head h2,
+.compare-head > .hint {
+  flex: none;
+}
+@media (max-width: 480px) {
+  .compare-head > .hint {
+    display: none;
+  }
+}
 .compare-grid {
   display: grid;
   gap: var(--sp-3);
@@ -885,6 +896,16 @@ td.c-act {
   }
   /* The task's name before its branch: the chip was taking half of a title that no longer fits. */
   .chat-table .cell-title > .fl-pill {
+    display: none;
+  }
+}
+/* A side bar: the buttons' column is as wide as its widest pair (Answer and More), not the page's 150px, and
+   the second line is the activity alone; its relation chip was leaving both a few letters each. */
+@media (max-width: 420px) {
+  .chat-table .c-act {
+    width: 112px;
+  }
+  .chat-table .cell-line > .mini-badge {
     display: none;
   }
 }
@@ -3956,6 +3977,17 @@ button.file-row .icon {
   font-weight: 600;
   color: var(--fg);
 }
+/* Short of room, the time gives way before the title: who was asked or handed to is what the head is for.
+   In a side bar the "by agent" pill goes too, whole, never cut in half. */
+.link-head > .fl-time {
+  flex-shrink: 1000;
+  min-width: 0;
+}
+@media (max-width: 340px) {
+  .link-head > .fl-pill {
+    display: none;
+  }
+}
 .link-body {
   overflow-wrap: anywhere;
 }
@@ -4700,6 +4732,15 @@ button.new-chat kbd {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
+}
+/* A card with many buttons (a custom agent: Check, Edit, Remove) in a narrow page: the name keeps a readable
+   width and the status and buttons wrap under it, none past the card's edge. */
+.acct-top {
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
+}
+.acct-top > .grow {
+  flex-basis: 9em;
 }
 .acct-top h2 {
   font-size: var(--t-100);

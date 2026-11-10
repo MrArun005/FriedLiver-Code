@@ -1392,6 +1392,9 @@ textarea.fl-input {
   line-height: var(--lh);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* Where a row lets it shrink (min-width: 0), it is cut clean, never drawn over what follows. */
+  overflow: hidden;
+  text-overflow: ellipsis;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
