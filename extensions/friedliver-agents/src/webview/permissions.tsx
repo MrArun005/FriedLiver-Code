@@ -52,7 +52,9 @@ function Permissions() {
                   <th>Where</th>
                   <th>Since</th>
                   <th>Asked by</th>
-                  <th />
+                  <th>
+                    <span class="sr">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>

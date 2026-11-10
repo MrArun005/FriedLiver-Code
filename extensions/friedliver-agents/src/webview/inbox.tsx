@@ -19,7 +19,7 @@ import {
 import type { WebviewMessage } from '../shared/messages';
 import { agentFace, age, formatDuration, type AppState, type ChatView } from '../shared/model';
 import { oneClickQuestion, recommended } from '../shared/questions';
-import { Glyph, Icon, Markdown, isTyping, send, type IconName } from './common';
+import { Glyph, Icon, Markdown, isTyping, ownKey, send, type IconName } from './common';
 import { ApprovalCard, cardKeys } from './approval';
 import { chatTip } from '../shared/names';
 import { Button, ChoiceRow, Pill, Textarea } from './ui';
@@ -85,7 +85,8 @@ export function Inbox({ state, now, onClose }: { state: AppState; now: number; o
   // A layout effect: the keys work from the first frame the Inbox is on screen.
   useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || isTyping(e.target) || (e.target as HTMLElement | null)?.closest?.('.fl-menu')) return;
+      // ownKey: Enter on a focused Deny denies; it used to start the hold that allows.
+      if (e.defaultPrevented || isTyping(e.target) || ownKey(e) || (e.target as HTMLElement | null)?.closest?.('.fl-menu')) return;
       const at = Date.now();
       if (confirming.length >= 2) {
         const answer = confirmKey(e, at - confirm!.at >= KEY_GRACE_MS && selection.armed(box.entries, at));
@@ -294,7 +295,7 @@ function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: {
     setText('');
   };
   return (
-    <aside class="inbox-reply" aria-label={`Or tell ${agentFace(chat.agent).name} instead`}>
+    <section class="inbox-reply" aria-label={`Or tell ${agentFace(chat.agent).name} instead`}>
       <label class="inbox-reply-label" for={`reply-${entry.id}`}>
         Or tell {agentFace(chat.agent).name} instead
       </label>
@@ -319,7 +320,7 @@ function Reply({ entry, chat, box }: { entry: InboxEntry; chat: ChatView; box: {
       <Button disabled={!text.trim()} kbd="⌘⏎" onClick={go}>
         Send and deny
       </Button>
-    </aside>
+    </section>
   );
 }
 

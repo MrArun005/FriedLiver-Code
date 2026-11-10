@@ -135,7 +135,7 @@
   flex: none;
 }
 
-/* ---- Button (§2.1): primary (the ember accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
+/* ---- Button (§2.1): primary (the accent) · secondary · quiet · danger · link · text; sm 22 · md 26 · lg 32 · touch 44; --r-ctl ---- */
 
 .fl-btn {
   --btn-h: var(--h-md);
@@ -185,9 +185,12 @@
 .fl-btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-hover);
   color: var(--btn-fg-hover);
+  transition-duration: 0ms, 0ms, var(--dur-pop);
+}
+/* The hover outline (high contrast only) never replaces the focus ring. */
+.fl-btn:hover:not(:disabled, [aria-disabled='true'], :focus-visible) {
   outline: var(--hover-outline);
   outline-offset: -1px;
-  transition-duration: 0ms, 0ms, var(--dur-pop);
 }
 .fl-btn:active:not(:disabled, [aria-disabled='true']) {
   background: var(--btn-bg-active);
@@ -213,6 +216,9 @@
   --btn-bg-hover: var(--sel-bg);
   --btn-fg: var(--sel-fg);
   --btn-fg-hover: var(--sel-fg);
+}
+/* Its selection outline gives way to the focus ring: a pressed toggle shows keyboard focus like any button. */
+:is(.fl-btn--secondary, .fl-btn--quiet)[aria-pressed='true']:not(:focus-visible) {
   outline: var(--sel-outline);
   outline-offset: -1px;
 }
@@ -220,7 +226,8 @@
   --btn-h: var(--h-sm);
   --btn-px: var(--sp-2);
   --btn-i: var(--i-sm);
-  --btn-fs: var(--t-90);
+  /* --t-90 of the base size, not of the text around it: one small-button size under a reply, in a step row and in a table. */
+  --btn-fs: calc(var(--fs) * 0.9);
 }
 .fl-btn--lg {
   --btn-h: var(--h-lg);
@@ -238,7 +245,7 @@
   display: flex;
   width: 100%;
 }
-/* The one key action on a surface: the ember accent, white ink, a top-edge sheen over a contact shadow.
+/* The one key action on a surface: the accent and its own ink, a top-edge sheen over a contact shadow.
    "brand" was v1's send fill; v2 removes it, so it draws as the primary (the send is the primary's colour). */
 .fl-btn--primary,
 .fl-btn--brand {
@@ -278,6 +285,13 @@
   padding: 0;
   border: 0;
   font-weight: var(--w-regular);
+}
+/* A link is as tall as its letters: the pointer gets the line above and below it, with nothing moved on the
+   page. Not past its ends: a link at a box's edge would widen what that box scrolls. */
+.fl-btn--link::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1)) 0;
 }
 .fl-btn--link:hover:not(:disabled) {
   text-decoration: underline;
@@ -372,7 +386,7 @@
   color: inherit;
   opacity: 0.75;
 }
-/* On the accent the second part keeps full ink (75% of white on ember drops under 4.5:1). */
+/* On the accent the second part keeps full ink (75% of the ink on the accent drops contrast). */
 :is(.fl-btn--primary, .fl-btn--brand) .fl-btn__sub {
   opacity: 1;
   font-weight: var(--w-regular);
@@ -464,7 +478,8 @@
 .fl-pill {
   --pill-h: var(--h-xs);
   --pill-px: var(--sp-2);
-  --pill-fs: var(--t-85);
+  /* --t-85 of the base size, not of the text around it: one pill size in a card head, a step row and a reply. */
+  --pill-fs: calc(var(--fs) * 0.85);
   --pill-c: var(--fg);
   --pill-fill: var(--pill-bg);
   --pill-fill-hover: var(--pill-hover);
@@ -527,7 +542,7 @@
 }
 .fl-pill--md {
   --pill-h: var(--h-sm);
-  --pill-fs: var(--t-90);
+  --pill-fs: calc(var(--fs) * 0.9);
 }
 .fl-pill--mono {
   font-family: var(--mono);
@@ -685,7 +700,8 @@ button.fl-pill:focus-visible {
   border-radius: var(--r-pill);
   background: var(--pill-bg);
   color: var(--fg);
-  font-size: var(--t-85);
+  /* --t-85 of the base size, not of the text around it: one badge size in a heading, a tab and a rail. */
+  font-size: calc(var(--fs) * 0.85);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);
@@ -825,7 +841,7 @@ button.fl-pill:focus-visible {
   box-shadow: inset 0 0 0 var(--line) var(--ctl-border-active);
 }
 .fl-toggle[aria-checked='true']::after {
-  background: var(--thumb);
+  background: var(--toggle-thumb);
   box-shadow: var(--shadow-thumb);
   transform: translateX(calc(var(--tg-w) - var(--tg-k) - var(--tg-inset) * 2));
 }
@@ -1376,6 +1392,9 @@ textarea.fl-input {
   line-height: var(--lh);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* Where a row lets it shrink (min-width: 0), it is cut clean, never drawn over what follows. */
+  overflow: hidden;
+  text-overflow: ellipsis;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
@@ -1534,6 +1553,11 @@ textarea.fl-input {
 .fl-card[data-focus] {
   border-color: var(--fg-2);
   background: color-mix(in srgb, var(--sel-fg) 7%, var(--input-bg));
+}
+/* v3: a decision waiting on you carries the needs-you bar on its leading edge: the one card in the
+   transcript that is about you, told apart from replies and steps without a second colour. */
+.apv.fl-card[data-focus] {
+  box-shadow: var(--rim), var(--zone-needs-bar);
 }
 .fl-card--ghost[data-focus] {
   background: color-mix(in srgb, var(--sel-fg) 7%, transparent);
@@ -2008,6 +2032,8 @@ textarea.fl-input {
 }
 .fl-discuss__rows {
   display: grid;
+  /* One column that never grows past the card: a long no-wrap row truncates instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-half);
 }
 .fl-discuss__group,
@@ -2425,6 +2451,20 @@ summary.fl-discuss__row:hover {
     width: 100%;
   }
 }
+/* A side bar: the positions stack, one under the other, each the card's full width. Side by side there, a
+   column is some 85px and a quote breaks into one letter a line. A tile's head and its quote line wrap too. */
+@media (max-width: 480px) {
+  .fl-discuss__board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fl-discuss__col[data-empty] {
+    align-self: stretch;
+  }
+  .fl-discuss__tile-head,
+  .fl-discuss__sub {
+    flex-wrap: wrap;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .fl-discuss details > summary > .icon:first-child {
     transition: none;
@@ -2593,6 +2633,11 @@ body[data-platform='windows'] .fl-dialog__foot {
 .fl-tab > .fl-dot {
   flex: none;
 }
+/* The status sits --sp-1 from what it follows (the title or a pill), not the tab's full gap: the title keeps
+   the difference, and the open tab its 110px at --tab-open-min. */
+.fl-tab > .fl-dot {
+  margin-left: calc(-1 * var(--sp-1));
+}
 /* A closable tab: the × sits inside its end, shown on hover, on the open tab and on keyboard focus. */
 .fl-tab-wrap {
   position: relative;
@@ -2623,6 +2668,12 @@ body[data-platform='windows'] .fl-dialog__foot {
   color: var(--fg-2);
   opacity: 0;
   cursor: pointer;
+}
+/* The × draws at icon size; the pointer gets the tab's height around it, so a close is not a near miss. */
+.fl-tab__x::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1));
 }
 .fl-tab-wrap:hover > .fl-tab__x,
 .fl-tab-wrap[data-active] > .fl-tab__x,
@@ -2679,11 +2730,24 @@ body[data-platform='windows'] .fl-dialog__foot {
 [data-fit='icon'] > .fl-tab-wrap:not([data-active]) > .fl-tab__x {
   display: none;
 }
-/* The status as a badge on the mark's bottom-right corner, ringed in the page colour. */
+/* The status as a badge on the mark's bottom-right corner, ringed in the page colour: the small status shape,
+   its bottom and right edges --sp-half past the mark's, whatever the shape's size, so the mark stays readable. */
 [data-fit='icon'] > .fl-tab-wrap:not([data-active]) .fl-dot {
+  --dot: 10px;
   position: absolute;
-  top: calc(50% + var(--sp-half));
+  margin-left: 0;
+  top: calc(50% + var(--i-md) / 2 + var(--sp-half) - var(--dot));
   left: calc(var(--sp-1) + var(--i-md) - var(--dot) + var(--sp-half));
+  box-shadow: 0 0 0 var(--sp-half) var(--bg);
+}
+/* The open tab's status is a badge on its mark too: every tab in the strip reads the same way, and the title
+   gets the room (a side bar leaves it little). */
+[data-fit='icon'] > .fl-tab-wrap[data-active] .fl-dot {
+  --dot: 10px;
+  position: absolute;
+  margin-left: 0;
+  top: calc(50% + var(--i-md) / 2 + var(--sp-half) - var(--dot));
+  left: calc(var(--sp-2) + var(--i-md) - var(--dot) + var(--sp-half));
   box-shadow: 0 0 0 var(--sp-half) var(--bg);
 }
 /* The open tab keeps its title: at least --tab-open-min; with marks only it takes all the room the others leave. */
@@ -3001,7 +3065,8 @@ button.fl-row,
   /* A neutral tile: the agent's logo brings its own colour (owner, 2026-10-21). */
   background: var(--pill-bg);
   color: var(--hue);
-  font-size: var(--t-85);
+  /* Of the base size, not of the text around it: a puck is a fixed size, so its initial is too. */
+  font-size: calc(var(--fs) * 0.85);
   font-weight: var(--w-strong);
   line-height: 1;
   outline: var(--line) solid var(--ctl-border);
@@ -3009,15 +3074,15 @@ button.fl-row,
 }
 .fl-avatar--xs {
   --av: var(--i-sm);
-  font-size: var(--t-75);
+  font-size: max(var(--t-min), calc(var(--fs) * 0.75));
 }
 .fl-avatar--sm {
   --av: var(--i-md);
-  font-size: var(--t-75);
+  font-size: max(var(--t-min), calc(var(--fs) * 0.75));
 }
 .fl-avatar--lg {
   --av: 32px;
-  font-size: var(--t-100);
+  font-size: var(--fs);
 }
 /* The /discuss meter's marker (§2.30): 28, between md and lg. */
 .fl-avatar--marker {
@@ -3331,6 +3396,8 @@ button.fl-row,
   font: inherit;
   font-size: var(--t-lg);
   outline: none;
+  /* A placeholder longer than a narrow box ends in an ellipsis, not mid-word. */
+  text-overflow: ellipsis;
 }
 .fl-ask > input::placeholder {
   color: var(--placeholder);
@@ -3386,6 +3453,27 @@ button.fl-row,
    IconButton, Pill (18, pill radius) and Input looks above. It keeps its cc-* names; change it only
    with the owner's sign-off, and change the components above to match. */
 
+/* ---- Around the composer, not of it. The composer's own section below is approved as it stands and frozen
+   (test/composer-frozen.test.ts); these add no look to its controls. A pill's pointer area is the footer row's
+   height, drawn nowhere. The hint line gives way before the pills beside it, and under 640px of composer its
+   second half goes whole before the first is cut. ---- */
+button.cc-pill {
+  position: relative;
+}
+button.cc-pill::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1)) 0;
+}
+.composer-hint {
+  flex: 0 1000 auto;
+}
+@container (max-width: 640px) {
+  .composer-hint-more {
+    display: none;
+  }
+}
+
 /* ---- Composer (§2.1, §2.2): one box, one tone; chips, the message, one row of controls ---- */
 
 .composer-dock {
@@ -3403,10 +3491,12 @@ button.fl-row,
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--input-bg);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-12);
-  box-shadow: var(--rim), var(--shadow-composer);
+  /* v3 prompt zone: the brightest surface on the page, with an edge you can see and a lift over the
+     transcript, so the one place you type is never mistaken for a message or a card. */
+  background: var(--zone-prompt-bg);
+  border: 1px solid var(--zone-prompt-edge);
+  border-radius: var(--r-14);
+  box-shadow: var(--rim), var(--zone-prompt-lift);
 }
 /* v2 (§2.27, owner-authorised restyle): the send is the one accent in every mode (the mode button says the
    mode); focus is the neutral ring at 60% with its halo. */
@@ -3416,8 +3506,8 @@ button.fl-row,
   --mode-send-fg: var(--send-fg);
 }
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
-  box-shadow: var(--rim), var(--shadow-composer), var(--focus-halo);
+  border-color: color-mix(in srgb, var(--mode) 60%, transparent);
+  box-shadow: var(--rim), var(--zone-prompt-lift), 0 0 0 3px color-mix(in srgb, var(--mode) 18%, transparent);
 }
 /* Attachments and code references, above the message: one row that scrolls, fading at its edge. */
 .cc-chips {
@@ -3517,17 +3607,18 @@ button.cc-chip-remove:hover {
 }
 .cc-input textarea {
   flex: 1;
-  min-height: calc(1.5em + 20px);
+  /* Two lines at rest: room that says "type here". */
+  min-height: calc(2lh + 20px);
   /* Eight lines, then it scrolls inside; never more than a quarter of the panel. */
   max-height: min(calc(8lh + 20px), 25vh);
   field-sizing: content;
-  padding: 10px 36px 10px 14px;
+  padding: 10px 40px 10px 16px;
   border: 0;
-  border-radius: var(--r-12);
+  border-radius: var(--r-14);
   background: transparent;
   color: var(--sel-fg);
-  caret-color: var(--fg);
-  font-size: var(--t-100);
+  caret-color: var(--sel-fg);
+  font-size: var(--t-prompt);
   line-height: 1.5;
   resize: none;
   outline: none;
@@ -3560,8 +3651,8 @@ button.cc-mic .icon {
   align-items: center;
   gap: 2px;
   min-width: 0;
-  padding: 5px;
-  border-top: 0.5px solid var(--hairline);
+  padding: 6px;
+  border-top: 0;
   color: var(--fg-2);
 }
 button.cc-icon-btn {
@@ -3652,10 +3743,10 @@ button.cc-mode[data-warn] {
 button.send-btn {
   flex: none;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: 2px;
-  border-radius: var(--r-ctl);
+  width: 30px;
+  height: 30px;
+  margin-left: var(--sp-1);
+  border-radius: var(--r-round);
   color: var(--mode-send-fg);
   background: var(--mode-send);
   box-shadow: var(--sheen), var(--elev-1);
@@ -3717,6 +3808,19 @@ button.send-btn:disabled {
 }
 .banners > * {
   pointer-events: auto;
+}
+/* The 8px between the banners and the prompt is page tone, not a window onto the transcript: without it a
+   line of the reply scrolled under the banners showed through, cut in half. A real box, not a shadow, so it
+   holds in forced colours too (shadows are dropped there; a background becomes Canvas). */
+.banners:not(:empty)::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--sp-2);
+  background: var(--bg);
+  pointer-events: none;
 }
 .banners:empty {
   display: none;
@@ -4121,5 +4225,98 @@ button.cc-more-btn[aria-expanded='true'] > .icon:last-child {
 @keyframes mic-pulse {
   50% {
     opacity: 0.35;
+  }
+}
+
+/* ---- Forced colours (Windows High Contrast and other OS contrast themes; WCAG 1.4.1, 1.4.11) ----
+   The OS replaces every colour with its own and drops box-shadows, so anything drawn only with a fill or a
+   shadow vanished: the selected tab and segment, a switch and its knob, a checkbox's check, the timeline's
+   marks, the plan's progress, the needs-you bar and the composer's focus. Each is redrawn here in system
+   colours: Highlight for on, selected and current, CanvasText and GrayText for marks, ButtonText for edges. */
+@media (forced-colors: active) {
+  /* Selected and pressed: an inner Highlight outline. Not while keyboard-focused, so the focus ring (outside,
+     the theme's focus colour) is never replaced by it. */
+  .fl-tab[aria-selected='true']:not(:focus-visible),
+  .fl-seg__item[aria-selected='true']:not(:focus-visible),
+  .fl-seg__item[aria-checked='true']:not(:focus-visible),
+  [aria-pressed='true']:not(:focus-visible),
+  [role='option'][aria-selected='true']:not(:focus-visible),
+  .inbox-row[aria-selected='true']:not(:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .fl-toggle,
+  .fl-toggle::after,
+  .fl-check__box,
+  .fl-check__box::after,
+  .tl::before,
+  .tl::after,
+  .seg-bar i {
+    forced-color-adjust: none;
+  }
+  .fl-toggle {
+    background: Canvas;
+    box-shadow: inset 0 0 0 1px ButtonText;
+  }
+  .fl-toggle::after {
+    background: ButtonText;
+  }
+  .fl-toggle[aria-checked='true'] {
+    background: Highlight;
+    box-shadow: none;
+  }
+  .fl-toggle[aria-checked='true']::after {
+    background: HighlightText;
+    box-shadow: none;
+  }
+  .fl-toggle:disabled {
+    box-shadow: inset 0 0 0 1px GrayText;
+  }
+  .fl-toggle:disabled::after {
+    background: GrayText;
+  }
+  .fl-check__box {
+    border-color: ButtonText;
+    background: Canvas;
+  }
+  .fl-check__box:checked,
+  .fl-check__box:indeterminate {
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .fl-check__box::after {
+    border-color: HighlightText;
+  }
+  .tl::before {
+    background: CanvasText;
+  }
+  .tl::after {
+    background: GrayText;
+  }
+  .seg-bar i {
+    background: GrayText;
+  }
+  .seg-bar i[data-step='done'],
+  .seg-bar i[data-step='working'] {
+    background: Highlight;
+  }
+  .apv.fl-card[data-focus] {
+    border-left: 3px solid Highlight;
+  }
+  .composer:focus-within,
+  .new-task:focus-within {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+  /* Keyboard focus: a thicker CanvasText ring outside the control, unlike the inner Highlight of selection. */
+  .fl-tab:focus-visible,
+  .fl-seg__item:focus-visible,
+  .fl-btn:focus-visible,
+  .fl-toggle:focus-visible,
+  [aria-pressed]:focus-visible,
+  [role='option']:focus-visible,
+  .inbox-row:focus-visible {
+    outline: 3px solid CanvasText;
+    outline-offset: 2px;
   }
 }

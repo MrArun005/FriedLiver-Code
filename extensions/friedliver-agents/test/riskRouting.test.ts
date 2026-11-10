@@ -2,6 +2,7 @@
 // Always allow, no remembered rule, no notification Allow), lists what a force push would drop, and
 // counts routine requests down only when the user turned that on, with Stop.
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,6 +52,53 @@ describe('careful requests stay one at a time', () => {
     const again = core.send(chat.id, `native-perm execute ${JSON.stringify({ command: 'git push origin main' })}`);
     await again;
     expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({ auto: 'Always allowed: git push …' });
+  });
+
+  it('Edit automatically never answers for secrets, keys or .git: the agent’s question waits; an ordinary file is answered', async () => {
+    const dir = await gitRepo();
+    const core = makeCore(dir, { approvalDefault: () => 'edits' });
+    const chat = await core.createChat('demo');
+    const secret = path.join(dir, '.env');
+    const turn = core.send(chat.id, `native-perm delete ${JSON.stringify({ file_path: secret, locations: [secret] })}`);
+    await waitFor(() => core.decisions().length === 1);
+    expect(perm(core, chat.id)?.auto).toBeUndefined();
+    core.answerPermission(perm(core, chat.id)!.requestId, 'reject');
+    await turn;
+    const plain = path.join(dir, 'notes.txt');
+    await core.send(chat.id, `native-perm delete ${JSON.stringify({ file_path: plain, locations: [plain] })}`);
+    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'permission').at(-1)).toMatchObject({ auto: 'Edit automatically' });
+  });
+
+  it('a write to a secrets file is shown for review under Edit automatically, and Accept all leaves it waiting', async () => {
+    const dir = await gitRepo();
+    const shown: { path: string; careful?: boolean; reviewId: string }[] = [];
+    const core = makeCore(dir, { approvalDefault: () => 'edits', ui: { showReview: (r) => void shown.push(r), closeReview: () => {} } });
+    const chat = await core.createChat('demo');
+    const turn = core.send(chat.id, 'edit .env.local');
+    await waitFor(() => shown.length === 1);
+    expect(shown[0]).toMatchObject({ path: path.join(dir, '.env.local'), careful: true });
+    expect(existsSync(path.join(dir, '.env.local'))).toBe(false);
+    // Accept all decides the ordinary edits; this one is still the user's own yes.
+    expect(core.decideAll(chat.id, 'accept')).toEqual([]);
+    core.decideReview(shown[0].reviewId, true);
+    await turn;
+    expect(existsSync(path.join(dir, '.env.local'))).toBe(true);
+    // An ordinary file is written without a review, as before.
+    await core.send(chat.id, 'edit notes.txt');
+    expect(shown).toHaveLength(1);
+    expect(core.chat(chat.id)!.items.filter((i) => i.kind === 'review').at(-1)).toMatchObject({ state: 'accepted', auto: 'Edit automatically' });
+  });
+
+  it('Auto is full access: it still writes a secrets file without asking', async () => {
+    const dir = await gitRepo();
+    const shown: string[] = [];
+    const core = makeCore(dir, { ui: { showReview: (r) => void shown.push(r.path), closeReview: () => {}, confirmFullAuto: async () => true } });
+    const chat = await core.createChat('demo');
+    await core.setApproval(chat.id, 'full');
+    expect(core.chat(chat.id)!.approval).toBe('full');
+    await core.send(chat.id, 'edit .env.local');
+    expect(shown).toEqual([]);
+    expect(existsSync(path.join(dir, '.env.local'))).toBe(true);
   });
 });
 

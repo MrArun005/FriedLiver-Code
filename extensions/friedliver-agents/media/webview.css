@@ -25,6 +25,9 @@ body {
   line-height: 1.5;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: var(--font-features);
+  font-optical-sizing: auto;
 }
 h1,
 h2,
@@ -91,7 +94,8 @@ h3 {
   height: var(--h-2xs);
   padding: 0 var(--sp-1);
   border-radius: var(--r-pill);
-  font-size: var(--t-85);
+  /* --t-85 of the base size, not of the text around it: one badge size in a heading, a tab and a rail. */
+  font-size: calc(var(--fs) * 0.85);
   font-weight: var(--w-strong);
   font-variant-numeric: tabular-nums;
   line-height: var(--h-2xs);
@@ -338,7 +342,8 @@ button.ref:hover:not(:disabled) {
 }
 button.count-item {
   color: var(--fg-2);
-  font-size: var(--t-90);
+  /* The row's size, not a step below it: "archived" reads as one of the counts. */
+  font-size: inherit;
 }
 button.count-item .icon {
   width: var(--i-sm);
@@ -353,15 +358,18 @@ button.count-item .icon {
 }
 
 /* New task: the composer's material (§2.27): the input tone, a hairline, the rim, r12. */
+/* The board's task box is a prompt zone (v3): the same lifted, edged box as the chat composer. */
 .new-task {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-12);
-  background: var(--input-bg);
+  border: 1px solid var(--zone-prompt-edge);
+  border-radius: var(--r-14);
+  background: var(--zone-prompt-bg);
+  box-shadow: var(--rim), var(--zone-prompt-lift);
 }
 .new-task:focus-within {
-  border-color: color-mix(in srgb, var(--focus) 60%, transparent);
+  border-color: var(--zone-prompt-edge-focus);
+  box-shadow: var(--rim), var(--zone-prompt-lift), var(--zone-prompt-glow);
 }
 .new-task textarea {
   min-height: var(--sp-10);
@@ -680,6 +688,17 @@ button.count-item .icon {
   text-overflow: ellipsis;
   color: var(--fg-2);
 }
+/* The heading and its count stay whole; the task's name takes what is left. Under 480px the count goes: the
+   cards below are the count. */
+.compare-head h2,
+.compare-head > .hint {
+  flex: none;
+}
+@media (max-width: 480px) {
+  .compare-head > .hint {
+    display: none;
+  }
+}
 .compare-grid {
   display: grid;
   gap: var(--sp-3);
@@ -772,7 +791,7 @@ button.count-item .icon {
   padding: 0 var(--sp-3);
   background: var(--menu-bg);
   color: var(--fg-2);
-  font-size: var(--t-85);
+  font-size: var(--t-xs);
   font-weight: 500;
   text-align: left;
   box-shadow: inset 0 -1px var(--border);
@@ -873,6 +892,20 @@ td.c-act {
     font-size: 0;
   }
   .chat-table .c-agent > * {
+    display: none;
+  }
+  /* The task's name before its branch: the chip was taking half of a title that no longer fits. */
+  .chat-table .cell-title > .fl-pill {
+    display: none;
+  }
+}
+/* A side bar: the buttons' column is as wide as its widest pair (Answer and More), not the page's 150px, and
+   the second line is the activity alone; its relation chip was leaving both a few letters each. */
+@media (max-width: 420px) {
+  .chat-table .c-act {
+    width: 112px;
+  }
+  .chat-table .cell-line > .mini-badge {
     display: none;
   }
 }
@@ -1281,25 +1314,32 @@ svg[data-lit] .map-file-line:not(.lit) {
   font-size: var(--t-85);
 }
 .node-dot {
-  fill: transparent;
-  stroke: var(--fg-2);
+  --nd: var(--fg-2);
+}
+.node-dot .nd-line {
+  fill: none;
+  stroke: var(--nd);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.node-dot .nd-idle {
   stroke-width: 1.5;
 }
+.node-dot .nd-fill {
+  fill: var(--nd);
+}
 .node-dot[data-state='working'] {
-  fill: var(--status-working);
-  stroke: none;
+  --nd: var(--status-working);
 }
 .node-dot[data-state='needs-you'] {
-  fill: var(--status-waiting);
-  stroke: none;
+  --nd: var(--status-waiting);
 }
 .node-dot[data-state='done'] {
-  fill: var(--status-done);
-  stroke: none;
+  --nd: var(--status-done);
 }
 .node-dot[data-state='error'] {
-  fill: var(--status-failed);
-  stroke: none;
+  --nd: var(--status-failed);
 }
 .map-file {
   outline: none;
@@ -1333,7 +1373,10 @@ svg[data-lit] .map-file-line:not(.lit) {
   opacity: 0.85;
 }
 .chat-table .group-row th {
-  padding: var(--sp-3) var(--sp-2) var(--sp-1);
+  /* A group's name is the list's heading: the rows' own size and the text colour, with room above it. */
+  padding: var(--sp-4) var(--sp-2) var(--sp-1);
+  color: var(--fg);
+  font-size: calc(var(--fs) * 0.9);
   text-align: left;
   font-weight: 600;
   display: table-cell;
@@ -2123,25 +2166,37 @@ body[data-surface='chat'] {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  container: chat-col / inline-size;
 }
 .ctx-rail {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
+  gap: var(--sp-6);
   min-width: 0;
   overflow-y: auto;
-  padding: var(--sp-4);
-  border-left: var(--line) solid var(--hairline);
+  padding: var(--sp-5) var(--sp-4);
+  border-left: var(--line) solid var(--border);
+  background: var(--zone-shell);
+  font-size: var(--t-step);
+  contain: layout paint;
 }
-.ctx-rail h3 {
+/* Details zone: section names are eyebrows (small caps-style, tracked), so the rail reads as reference,
+   never as conversation. */
+.ctx-rail h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  margin: 0 0 var(--sp-2);
-  color: var(--fg);
-  font-size: var(--t-90);
+  margin: 0 0 var(--sp-3);
+  color: var(--fg-2);
+  font-size: var(--t-eyebrow);
   font-weight: var(--w-strong);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+}
+.ctx-rail section + section {
+  padding-top: var(--sp-5);
+  border-top: var(--line) solid var(--hairline);
 }
 .ctx-rail .fl-row {
   margin: 0 calc(var(--sp-2) * -1);
@@ -2154,7 +2209,7 @@ body[data-surface='chat'] {
 }
 .ctx-l {
   color: var(--fg-2);
-  font-size: var(--t-85);
+  font-size: var(--t-eyebrow);
   font-variant-numeric: tabular-nums;
 }
 .ctx-v {
@@ -2162,7 +2217,11 @@ body[data-surface='chat'] {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  /* Room for a working agent's ring under the label. */
+  margin-top: var(--sp-1);
   color: var(--sel-fg);
+  font-size: var(--fs);
+  font-weight: var(--w-medium);
   font-variant-numeric: tabular-nums;
 }
 .ctx-more,
@@ -2192,7 +2251,7 @@ body[data-surface='chat'] {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 20px;
+  height: var(--zone-prompt-fade);
   background: linear-gradient(to bottom, transparent, var(--bg));
   pointer-events: none;
 }
@@ -2228,17 +2287,24 @@ body[data-surface='chat'] {
 .transcript > * + .user-msg {
   margin-top: var(--turn-gap);
 }
-/* Your message's box spans the transcript, however short, like Claude Code's prompt box. */
+/* You zone (v3): your message is a raised bubble at the right that fits its text, with a tighter corner
+   toward you, so who said what reads at a glance and never looks like the agent's reply or a card. */
+.user-msg {
+  justify-content: flex-end;
+}
 .user-msg .bubble {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: var(--w-bubble);
   margin: var(--sp-1) 0;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-box);
-  background: color-mix(in srgb, var(--sel-fg) 5%, var(--input-bg));
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border: 1px solid var(--zone-you-edge);
+  border-radius: var(--r-bubble) var(--r-bubble) var(--r-bubble-tail) var(--r-bubble);
+  background: var(--zone-you-bg);
   color: var(--sel-fg);
+  font-size: var(--t-reply);
+  line-height: var(--lh-reply);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -2274,6 +2340,13 @@ button.msg-more {
 .transcript > * {
   scroll-margin-top: calc(var(--sp-12) * 2);
 }
+/* Speed: in a long chat, items far off screen skip style, layout and paint until they scroll near
+   (content-visibility); the browser remembers each one's real height (auto), so the scrollbar and
+   scroll anchoring stay true. The last items, where the agent is writing, always render. */
+.transcript > :not(:nth-last-child(-n + 8)):not(.sticky-prompt) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--sp-12);
+}
 .sticky-prompt::after {
   content: '';
   position: absolute;
@@ -2287,10 +2360,13 @@ button.msg-more {
 .sticky-prompt .bubble {
   position: relative;
   margin: var(--sp-1) 0;
-  padding: var(--sp-1) 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-6);
-  background: var(--input-bg);
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--zone-ask-bar);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--t-step);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2335,10 +2411,18 @@ button.rewind-btn {
 }
 
 /* The agent's reply: plain text, Claude Code's paragraph rhythm. */
+/* Reply zone (v3): no box; the largest reading type on the page and a long line height. */
 .prose {
   position: relative;
   padding: var(--sp-2) 0;
   color: var(--fg);
+  font-size: var(--t-reply);
+  line-height: var(--lh-reply);
+}
+@container chat-col (min-width: 720px) {
+  .prose {
+    font-size: var(--t-reply-wide);
+  }
 }
 .md > :first-child {
   margin-top: 0;
@@ -2365,7 +2449,7 @@ button.rewind-btn {
   font-size: var(--t-100);
   font-weight: 600;
 }
-.md h5.md-label {
+.md .md-label {
   margin: 0.6em 0 0.2em;
   font-size: var(--t-85);
   font-weight: 600;
@@ -2452,7 +2536,11 @@ button.rewind-btn {
   text-underline-offset: 3px;
   cursor: copy;
 }
+/* On the code well the link colour sits a shade under AA in a light theme: a little of the text's ink carries it over. */
 .path-link code {
+  color: color-mix(in srgb, var(--link) 85%, var(--fg));
+}
+.path-link.outside code {
   color: inherit;
 }
 /* The reply's time and Copy (§2.32): over the first line's end, on the page tone, only while the reply is
@@ -2568,15 +2656,19 @@ pre.code code {
 }
 
 /* The timeline: tool lines and thinking, a 7px dot at 9px and a 1px spine at 12px joining a run. */
+/* Steps zone (v3): what the agent did is small and secondary on a hairline spine, so it never competes
+   with the reply you read or the prompt you type. */
 .tl {
   position: relative;
-  padding: var(--sp-2) 0 var(--sp-2) 30px;
+  padding: var(--sp-1) 0 var(--sp-1) 30px;
   min-width: 0;
+  font-size: var(--t-step);
+  color: var(--fg-2);
 }
 .tl::before {
   content: '';
   position: absolute;
-  top: 15px;
+  top: 11px;
   left: 9px;
   width: 7px;
   height: 7px;
@@ -2591,7 +2683,7 @@ pre.code code {
   bottom: 0;
   left: 12px;
   width: 1px;
-  background: var(--border);
+  background: var(--zone-step-spine);
 }
 .tl:not(.tl + .tl)::after {
   top: 18px;
@@ -2647,7 +2739,7 @@ button.step-main:active {
 .step-verb {
   flex: none;
   margin-right: var(--sp-1);
-  font-weight: 700;
+  font-weight: var(--w-medium);
   color: var(--fg);
 }
 .step-text {
@@ -2692,7 +2784,7 @@ button.step-main:active {
 .step-image {
   padding-top: var(--sp-1);
 }
-/* A folded run's heading: the label at half strength. */
+/* A folded run's heading: the label at half strength (--fg-50, which still reads at 4.5:1). */
 .tl-group-btn {
   gap: 0;
   font-weight: 700;
@@ -2707,13 +2799,13 @@ button.step-main:active {
 }
 .tl-group-label {
   margin-left: 0.5em;
-  opacity: 0.5;
+  color: var(--fg-50);
 }
 .tl-group-btn:hover .tl-group-label {
-  opacity: 0.8;
+  color: var(--fg-2);
 }
 .tl-group-btn:active .tl-group-label {
-  opacity: 0.65;
+  opacity: 0.8;
 }
 /* A tool's body: IN/OUT rows in a .5px r5 box; each row clipped at 60px until asked. */
 .step-about {
@@ -2743,8 +2835,7 @@ button.step-main:active {
   padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-1);
   font-family: var(--mono);
   font-size: var(--t-85);
-  color: var(--fg-2);
-  opacity: 0.5;
+  color: var(--fg-50);
 }
 .tool-cell {
   position: relative;
@@ -3232,8 +3323,10 @@ button.cc-map-node:hover {
   font-weight: var(--w-strong);
   color: var(--sel-fg);
 }
+/* Short of room, the target is cut before the risk pill beside it: the card below shows the target whole, and
+   the pill is the one place the risk is named. */
 .apv-tg {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3884,6 +3977,17 @@ button.file-row .icon {
   font-weight: 600;
   color: var(--fg);
 }
+/* Short of room, the time gives way before the title: who was asked or handed to is what the head is for.
+   In a side bar the "by agent" pill goes too, whole, never cut in half. */
+.link-head > .fl-time {
+  flex-shrink: 1000;
+  min-width: 0;
+}
+@media (max-width: 340px) {
+  .link-head > .fl-pill {
+    display: none;
+  }
+}
 .link-body {
   overflow-wrap: anywhere;
 }
@@ -3930,12 +4034,17 @@ code.command-line {
   color: var(--fg-2);
 }
 /* A message waiting for the turn to end: your message's box, dashed. */
+/* A queued message is yours too: the you-zone bubble at the right, dashed until it is sent. */
 .bubble.queued {
   position: relative;
-  margin: var(--sp-2) 0;
-  padding: var(--sp-1) 6px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-6);
+  width: fit-content;
+  max-width: var(--w-bubble);
+  margin: var(--sp-2) 0 var(--sp-2) auto;
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px dashed var(--zone-prompt-edge);
+  border-radius: var(--r-bubble) var(--r-bubble) var(--r-bubble-tail) var(--r-bubble);
+  color: var(--fg);
+  font-size: var(--t-reply);
   white-space: pre-wrap;
 }
 .queued-bar {
@@ -3974,6 +4083,7 @@ code.command-line {
   gap: 2px;
   padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--border);
+  background: var(--zone-shell);
   container: switcher / inline-size;
 }
 /* Narrow (§2.18): the trailing cluster folds so the open tab keeps its title; the count and the
@@ -4019,10 +4129,18 @@ button.all-btn {
 .chat-head-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  /* Room for a working agent's ring between its puck and the chat's name. */
+  gap: var(--sp-3);
   min-width: 0;
 }
 /* The chat's name (§2.34): 13/600 in a side bar; on a wide page the page title, 20/600, tracked in. */
+/* The chat's name is the page's heading; the h1 only carries the semantics, the button inside draws it. */
+.chat-head-h {
+  display: flex;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
 button.chat-head-title {
   display: block;
   min-width: 0;
@@ -4056,6 +4174,22 @@ button.chat-head-title:hover {
 .status-pill .fl-dot {
   --dot: 10px;
   margin-right: var(--sp-1);
+}
+/* A side bar: the status keeps its shape and gives its words' room to the chat's name (the tab and the
+   pill's tooltip still say it). */
+@container chat-head (max-width: 340px) {
+  .status-pill .status-words {
+    display: none;
+  }
+  .status-pill .fl-dot {
+    margin-right: 0;
+  }
+}
+/* Accept all and Reject all stay side by side, and wrap under the words together. */
+.edits-actions {
+  display: inline-flex;
+  flex: none;
+  gap: var(--sp-2);
 }
 .chat-head-actions {
   flex: none;
@@ -4139,10 +4273,18 @@ button[aria-pressed='true'] .icon path {
   font-weight: var(--w-strong);
   color: var(--fg);
 }
+/* In the context rail its name is a details-zone eyebrow, like the rail's other section names. */
+.ctx-rail .jump-list b {
+  margin-bottom: var(--sp-3);
+  color: var(--fg-2);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+}
 button.jump-item {
   display: block;
   width: 100%;
-  padding: var(--sp-half) var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
   border-left: 2px solid var(--hairline);
   color: var(--fg-2);
   overflow: hidden;
@@ -4321,7 +4463,7 @@ button.new-chat {
   justify-content: space-between;
   height: 28px;
   padding: 0 var(--sp-2);
-  border-radius: var(--r-5);
+  border-radius: var(--r-ctl);
   background: none;
   color: var(--fg);
 }
@@ -4377,8 +4519,9 @@ button.new-chat kbd {
   }
 }
 /* Manage Permissions (permissions.tsx): the whole width, one table per kind. */
+/* The page's own inset and title are the Agent Manager's and Agents & Accounts' (§2.35). */
 .perms {
-  padding: 20px 24px 32px;
+  padding: var(--sp-5) var(--gutter) var(--sp-8);
 }
 .perms-head {
   display: flex;
@@ -4388,22 +4531,25 @@ button.new-chat kbd {
   margin-bottom: 8px;
 }
 .perms h1 {
-  margin: 0 0 4px;
-  font-size: 1.4em;
-  font-weight: 600;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--t-hero);
+  font-weight: var(--w-strong);
+  letter-spacing: var(--track-title);
+  line-height: var(--lh-tight);
   color: var(--sel-fg);
 }
 .perms h2 {
-  margin: 24px 0 2px;
-  font-size: 1.05em;
-  font-weight: 600;
-}
-.perms h2 .count {
-  color: var(--fg-2);
-  font-weight: normal;
+  margin: var(--sp-6) 0 2px;
+  font-size: var(--t-100);
+  font-weight: var(--w-strong);
+  color: var(--sel-fg);
 }
 .perms .hint {
   margin: 0;
+}
+.perms p.hint {
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .perms table {
   width: 100%;
@@ -4412,11 +4558,12 @@ button.new-chat kbd {
   /* The same columns in every group, so the tables line up. */
   table-layout: fixed;
 }
+/* "Asked by" takes what is left: enough for an agent's name on one line at half an editor's width. */
 .perms th:nth-child(1) {
-  width: 26%;
+  width: 24%;
 }
 .perms th:nth-child(2) {
-  width: 36%;
+  width: 33%;
 }
 .perms th:nth-child(3) {
   width: 17%;
@@ -4427,6 +4574,7 @@ button.new-chat kbd {
 .perms th {
   text-align: left;
   font-weight: normal;
+  white-space: nowrap;
   color: var(--fg-2);
   padding: 4px 12px 4px 0;
   border-bottom: 1px solid var(--border);
@@ -4448,6 +4596,42 @@ button.new-chat kbd {
 }
 .perms td.scope .hint {
   font-family: var(--font);
+  /* A path may break anywhere; the words after it may not. */
+  word-break: normal;
+}
+/* Too narrow for five columns: each rule is a block (what it allows, where, then when and who asked) with Revoke beside it. */
+@media (max-width: 640px) {
+  .perms thead {
+    display: none;
+  }
+  .perms table,
+  .perms tbody {
+    display: block;
+  }
+  .perms tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--sp-half) var(--sp-2);
+    padding: var(--sp-2) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .perms td {
+    grid-column: 1 / 3;
+    padding: 0;
+    border: 0;
+  }
+  .perms td:nth-child(3) {
+    grid-column: 1;
+  }
+  .perms td:nth-child(4) {
+    grid-column: 2;
+    color: var(--fg-2);
+  }
+  .perms td.act {
+    grid-column: 3;
+    grid-row: 1 / 4;
+    align-self: center;
+  }
 }
 .perms .empty {
   margin-top: 24px;
@@ -4512,6 +4696,8 @@ button.new-chat kbd {
 }
 .acct-head p {
   margin: var(--sp-1) 0 var(--sp-4);
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .acct-card {
   margin-bottom: var(--sp-3);
@@ -4536,6 +4722,8 @@ button.new-chat kbd {
 }
 .acct-links .hint {
   margin: 2px 0 0;
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .acct-card[data-focused] {
   border-color: var(--focus);
@@ -4544,6 +4732,15 @@ button.new-chat kbd {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
+}
+/* A card with many buttons (a custom agent: Check, Edit, Remove) in a narrow page: the name keeps a readable
+   width and the status and buttons wrap under it, none past the card's edge. */
+.acct-top {
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
+}
+.acct-top > .grow {
+  flex-basis: 9em;
 }
 .acct-top h2 {
   font-size: var(--t-100);
@@ -4593,6 +4790,8 @@ button.new-chat kbd {
 }
 .acct-block p {
   margin: var(--sp-1) 0 0;
+  max-width: var(--w-prose);
+  text-wrap: pretty;
 }
 .acct-kind {
   font-size: var(--t-85);
@@ -4729,7 +4928,8 @@ button.new-chat kbd {
   gap: 6px;
   padding: var(--sp-1) var(--sp-3);
   font-size: var(--t-85);
-  color: var(--fg-50);
+  font-weight: var(--w-strong);
+  color: var(--fg-2);
 }
 .inbox-lane-dot {
   width: 6px;

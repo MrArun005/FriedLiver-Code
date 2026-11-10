@@ -48,7 +48,7 @@ import {
 import { answerSummary, checkAnswer, questionFields, type QuestionField } from '../shared/questions';
 import { ESCALATING, claudeMeta, commandOf, planOf, type PermissionDetail } from '../shared/tools';
 import { approvalOf, type Approvable } from '../shared/approval';
-import { autoRoutineCommand, commandRisk, forcePush, type DroppedCommits } from '../shared/risk';
+import { autoRoutineCommand, commandRisk, filesRisk, forcePush, type DroppedCommits } from '../shared/risk';
 import { chatRef } from '../shared/names';
 import {
   agentFace,
@@ -134,6 +134,8 @@ export interface PendingReview {
   before: string | null;
   proposed: string;
   agentLabel: string;
+  /** Secrets, keys or .git: decided on its own, never by Accept all. */
+  careful?: boolean;
 }
 
 /** What the editor shows around the core: diff editors, notifications. */
@@ -1963,7 +1965,8 @@ export class AgentCore {
     if (!once) return undefined;
     // Accept all never covers a careful edit (secrets, keys, .git): that one is held and allowed on its own.
     if (edit && all === 'accept' && !careful) return { option: once, reason: 'Accept all' };
-    if (edit && level !== 'ask') return { option: once, reason: APPROVAL_NAMES[level] };
+    // Nor does "Edit automatically": secrets, keys and .git ask every time. Only Auto, the user's full access, answers them.
+    if (edit && level !== 'ask' && !(careful && level === 'edits')) return { option: once, reason: APPROVAL_NAMES[level] };
     const outside = detail.command?.cwd !== undefined && insideRoots(detail.command.cwd, this.roots()) === null;
     if (level === 'full' && !outside) return { option: once, reason: APPROVAL_NAMES.full };
     // A careful request asks every time: no remembered rule answers it.
@@ -2169,7 +2172,9 @@ export class AgentCore {
       ...(Object.keys(detail).length ? { detail } : {}),
     };
     const risk = approvalOf(item as Approvable, chat ?? { agent: 'demo', label: '', cwd: '' }).risk;
-    const careful = risk.tone === 'careful' || !!guard;
+    // A delete or move shows no diff, so the card's risk can't see its files: the paths the request names count too.
+    const secrets = files.access === 'write' && filesRisk(files.paths, 'write', chat?.cwd).tone === 'careful';
+    const careful = risk.tone === 'careful' || !!guard || secrets;
     const auto = this.autoAnswer(chat, kind, detail, options, files, careful);
     if (auto) {
       this.items(chatId, [{ ...item, answer: auto.option.name, auto: auto.reason }]);
@@ -2330,7 +2335,7 @@ export class AgentCore {
       const option = p.options.find((o) => (action === 'accept' ? o.kind === 'allow_once' && !ESCALATING.test(o.name) : o.kind === 'reject_once'));
       if (option) this.answerPermission(id, option.optionId);
     }
-    return [...this.reviews.values()].filter((r) => r.chatId === chatId).map((r) => r.reviewId);
+    return [...this.reviews.values()].filter((r) => r.chatId === chatId && !(action === 'accept' && r.careful)).map((r) => r.reviewId);
   }
 
   /**
@@ -2345,6 +2350,8 @@ export class AgentCore {
     const before = await readIfExists(file);
     const reviewId = this.id('review');
     const chat = chatId ? this.chat(chatId) : undefined;
+    // Secrets, keys and .git are shown and decided every time: as on a permission card, only Auto or a yes to this very content writes them.
+    const careful = filesRisk([file], 'write', chat?.cwd).tone === 'careful';
     if (chatId && chat) {
       this.reported.get(chatId)?.add(file);
       this.trail.add(chatId, file);
@@ -2359,9 +2366,9 @@ export class AgentCore {
       const folder = this.options.permissions?.folder(file, 'write');
       const reason = approved
         ? 'Approved above'
-        : all === 'accept'
+        : all === 'accept' && !careful
           ? 'Accept all'
-          : level !== 'ask'
+          : level === 'full' || (level === 'edits' && !careful)
             ? APPROVAL_NAMES[level]
             : folder
               ? `Always allowed: ${describeGrant(folder.grant).scope}`
@@ -2377,7 +2384,7 @@ export class AgentCore {
         return;
       }
     }
-    const review: PendingReview = { reviewId, chatId, path: file, before, proposed: req.content, agentLabel: chat?.label ?? 'Agent', auto: true };
+    const review: PendingReview = { reviewId, chatId, path: file, before, proposed: req.content, agentLabel: chat?.label ?? 'Agent', auto: true, ...(careful ? { careful } : {}) };
     const decision = await new Promise<{ accept: boolean; content?: string }>((resolve) => {
       this.reviews.set(reviewId, {
         ...review,

@@ -1,6 +1,6 @@
 # FriedLiver components: the spec (Design System v2, "Beacon")
 
-Date: 2026-10-20. Status: **law** (owner's rule), v2. v1 (2026-10-18) is kept unchanged as `COMPONENTS.v1.md`; where an entry below says "as v1 §x", that v1 text still applies word for word. Every surface draws only these components: the stock workbench (§6), the chat, the Agent Manager, the inbox, images, the permissions and accounts pages, the welcome page, the phone app. No button, pill, field or menu with its own radius, height, border, fill, glass or motion.
+Date: 2026-10-20. Status: **law** (owner's rule), v2, with the v3 "Mono" amendment of 2026-11-03 (§0.2: neutral palette, zones), which wins where the two differ. v1 (2026-10-18) is kept unchanged as `COMPONENTS.v1.md`; where an entry below says "as v1 §x", that v1 text still applies word for word. Every surface draws only these components: the stock workbench (§6), the chat, the Agent Manager, the inbox, images, the permissions and accounts pages, the welcome page, the phone app. No button, pill, field or menu with its own radius, height, border, fill, glass or motion.
 
 **Where it lives.** Repo `~/code/FriedLiver-Code`, branch `design/v2-system` (draft PR "Design System v2"); a mirror of this file is `docs/design/COMPONENTS.md`.
 
@@ -49,6 +49,43 @@ Load order is unchanged: `tokens.css` → `webview.css` → `components.css`.
 | Warp, Notion, Claude/ChatGPT desktop, Things 3, Arc | Steps as first-class units; warm neutrals; delight in empty states and small motion | Steps as rows with durations; warm graphite; voiced empty states; steam on the mark |
 
 ---
+
+### 0.2 v3 Mono zones (2026-11-03)
+
+**Owner's brief (2026-11-03).** "All the places look the same and equal, no difference between a place to prompt and the details." Black and grey by default, rich type, the best rules from the design world.
+
+**What changed.** The palette loses its warm tint (FriedLiver Dark and Light are zero-chroma OKLCH; the four older themes are untouched), and the ember accent becomes white with black ink in dark (16.6:1) and black with white ink in light (18.1:1), as Vercel and Linear do on neutral greys. The FriedLiver mark keeps its orange `--brand`; needs-you keeps its blue. Then every place in a chat gets its own look: its own tone, edge and type size, so no two kinds of place share a style.
+
+| Zone | What it is | How it looks | Tokens |
+|---|---|---|---|
+| **Prompt** | the composer, the board's task box | the brightest surface on the page (.235 + 5% ink), a visible 16% edge, a lift shadow over the transcript, a 40px fade above it, 14px radius, two lines tall at rest, a round send; focus brings the edge to the focus ring at 60% with a 3px halo | `--zone-prompt-*` |
+| **You** | your messages, queued ones dashed | a bubble at the right, fitted to its text (max 80%), 16px corners with a 6px corner toward you, one step up in type | `--zone-you-*`, `--w-bubble`, `--r-bubble*` |
+| **Reply** | the agent's words | no box; the base size + 1px (+2px on a page 720px or wider), line height 1.65 | `--t-reply*`, `--lh-reply` |
+| **Steps** | what the agent did | the base size − 1px in the secondary colour, medium-weight verbs, a 22% hairline spine | `--t-step`, `--zone-step-spine` |
+| **Needs you** | a decision waiting on you | the focused card gets a 3px decision-blue bar on its leading edge | `--zone-needs-bar` |
+| **Details** | the context rail, the chat tab strip | recessed to the shell tone (.15), uppercase eyebrow labels tracked +0.07em, hairlines between sections, values at the base size, weight 500 | `--zone-shell`, `--t-eyebrow`, `--track-eyebrow` |
+
+**The rules it applies** (each one comes from a source the design world agrees on):
+1. *Figure and ground* (Gestalt): a region stands out by tone and edge, so the prompt is the one lifted, edged surface and the details recede.
+2. *Common region and alignment* (Gestalt): your words on the right, the agent's on the left, as every messaging app does, so who said what reads before the words do.
+3. *Typographic hierarchy* (Bringhurst; Material type scale): three sizes a step apart (reply > prompt and you > steps and details) and one weight for labels; eyebrows only for reference labels.
+4. *Hierarchy by contrast, not colour* (Refactoring UI): secondary means grey, not smaller and lighter and coloured at once; colour is kept for state (needs-you blue, done green, failed red).
+5. *60/30/10* stays: one accent per surface.
+6. *User-scalable type* (WCAG 1.4.4): every zone size is relative to `--fs`, so Cmd/Ctrl + = - 0 scales them all.
+
+**Type.** Geist and Geist Mono stay (bundled, OFL). Body text turns on kerning and contextual alternates (`font-feature-settings: var(--font-features)`), optical sizing and `text-rendering: optimizeLegibility`; numbers stay tabular.
+
+**Speed.** Transcript items far off screen skip style, layout and paint (`content-visibility: auto` with remembered intrinsic sizes; the last eight items always render), the context rail is a layout and paint containment boundary, and the composer's focus snaps without animating its large shadow, which would repaint on every frame.
+
+**Gates.** `scripts/ui-v2.mjs`: 68 renders, 0 failures (contrast 4.5:1, accent groups, the 2px grid, nothing outside the window, 24px hit boxes). The light theme's secondary text went from .475 to .455 and `--fg-50` from 62% to 66%, so key hints stay at 4.5:1 with no warm tint.
+
+**Keyboard and assistive tech (2026-11-04).** Found by running every surface as a website (`scripts/web-export.mjs`) through axe-core 4.10 (WCAG 2.2 AA and best practices), a Tab walk, Reflow at 320px, forced colours and reduced motion:
+- *A focused control does what it says.* A waiting decision's keys work from the whole view, so Enter on a focused **Deny** approved the request (chat, approval cards; in the Inbox it started the hold that allows). Enter, Space and Tab on a control now belong to the control (`ownKey`, `src/webview/common.tsx`).
+- *No keyboard trap* (WCAG 2.1.2). In the message box Shift+Tab changes the mode and, while a request waits, Tab its scope, so Tab could not leave it. **Ctrl+M** (macOS **Ctrl+Shift+M**), VS Code's own "Toggle Tab Key Moves Focus", hands Tab back until pressed again; the box says so in its hint and to screen readers (`aria-description`, `aria-keyshortcuts`).
+- *Structure.* The chat's name is the page's `h1`, the transcript column and the Agent Manager are `main`, the tab strip is a `nav`, the rail's section names are `h2`, and a reply's headings sit under the page at levels 2–4 (`aria-level`). The conflict mark is an `img` with its label, the permissions tables' action column has a header, the Inbox's reply box is a `section`, and the `/discuss` jump links are 28px tall (WCAG 2.5.8). axe: 234 violation nodes before, 0 after, on all 31 pages.
+- *Forced colours* (Windows High Contrast). The OS drops shadows and replaces fills, so the selected tab and segment, every switch, the checkbox check, the timeline marks, the plan's progress, the needs-you bar and the composer's focus all vanished. A `@media (forced-colors: active)` layer at the end of `components.css` redraws each in system colours: Highlight for selected and on (an inner outline, never on a keyboard-focused item), a 3px CanvasText ring for focus, CanvasText and GrayText for marks.
+- *Unchanged and fine:* contrast (0 axe findings), Reflow at 320 and 480px (no sideways page on any surface), reduced motion (no animation runs), layout shift (≤ 0.0075 on every page; 0.1 is the limit).
+
 
 ## 1. Tokens
 

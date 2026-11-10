@@ -176,6 +176,14 @@ export function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable="true"]');
 }
 
+/** A control the keyboard is on (a button, link, tab, switch…): its own Enter, Space and Tab win over a view's
+ *  shortcuts. Without this, Enter on a focused Deny approved the request the view was waiting on. */
+export function isControl(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest('button, a[href], summary, select, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [tabindex]:not([tabindex="-1"])');
+}
+/** Enter, Space or Tab pressed on a control: the view's shortcut stands aside. */
+export const ownKey = (e: KeyboardEvent): boolean => (e.key === 'Enter' || e.key === ' ' || e.key === 'Tab') && isControl(e.target);
+
 /** The host's state, kept in step by folding the same actions with the same reducer. */
 let nextKey = 0;
 
@@ -358,9 +366,10 @@ const MarkdownBlock = memo(
       case 'p':
         return <p>{inline(b.inline, cwd)}</p>;
       case 'h':
-        return b.level === 1 ? <h3>{inline(b.inline, cwd)}</h3> : <h4>{inline(b.inline, cwd)}</h4>;
+        // A reply's headings sit under the page's (the chat's name, h1): level 2 and 3, whatever size they draw at.
+        return b.level === 1 ? <h3 aria-level={2}>{inline(b.inline, cwd)}</h3> : <h4 aria-level={3}>{inline(b.inline, cwd)}</h4>;
       case 'label':
-        return <h5 class="md-label">{inline(b.inline, cwd)}</h5>;
+        return <h5 class="md-label" aria-level={2}>{inline(b.inline, cwd)}</h5>;
       case 'ul':
       case 'ol':
         return <List list={b} cwd={cwd} />;
@@ -589,7 +598,9 @@ export function ClampedText({ text, onMore }: { text: string; onMore?: () => voi
     const el = box.current;
     if (!el) return;
     const measure = () => setOver(open || el.scrollHeight > el.clientHeight + 1);
-    measure();
+    // Measured by the observer alone: it reports once on observing, after the page's own layout and before paint.
+    // Measuring here as well forced a layout per message as each mounted, and laid out messages far off screen
+    // that the transcript otherwise skips (content-visibility).
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     const expand = () => setOpen(true);

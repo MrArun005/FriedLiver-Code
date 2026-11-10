@@ -189,7 +189,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                 <text class="node-title" x="40" y="31">
                   Claude Code · outside
                 </text>
-                <circle class="node-dot" data-state={o.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                <NodeStatus state={o.state} />
               </g>
             ))}
             {map.subs.map((n) => {
@@ -224,7 +224,7 @@ function MapCanvasView({ map, tip, sel, roving, waiting, chats, setTip, setSel, 
                   <text class="node-title" x="40" y="31">
                     {agentFace(n.agent).name}
                   </text>
-                  <circle class="node-dot" data-state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+                  <NodeStatus state={n.state === 'failed' ? 'error' : n.state === 'quiet' ? 'idle' : n.state} />
                 </g>
               );
             })}
@@ -376,7 +376,7 @@ function Node({ node, dim, tabbable, onTip, onFocus }: { node: MapNode; dim: boo
       <text class="node-title" x="40" y="31">
         {agentFace(chat.agent).name}
       </text>
-      <circle class="node-dot" data-state={status} cx={MAP.nodeW - 14} cy={MAP.nodeH / 2} r="4" />
+      <NodeStatus state={status} />
       {chat.approval === 'full' && (
         <g class="node-auto" transform={`translate(${MAP.nodeW - 30} 4)`} aria-label="Auto">
           <title>Auto: edits and commands go through without asking</title>
@@ -576,5 +576,34 @@ function Legend({ still, working }: { still: boolean; working: boolean }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * A node's status as the status mark's own shape (§2.23), drawn in SVG: a bullseye needs you, an open arc is
+ * working, a tick is done, a crossed ring a problem, a hollow ring idle. As in the legend above the map, the
+ * colour is the second channel, never the only one.
+ */
+function NodeStatus({ state }: { state: string }) {
+  return (
+    <g class="node-dot" data-state={state} transform={`translate(${MAP.nodeW - 14} ${MAP.nodeH / 2})`}>
+      {state === 'needs-you' ? (
+        <>
+          <circle class="nd-line" r="4.5" />
+          <circle class="nd-fill" r="2" />
+        </>
+      ) : state === 'working' ? (
+        <path class="nd-line" d="M 3.2 -3.2 A 4.5 4.5 0 1 0 3.2 3.2" />
+      ) : state === 'done' ? (
+        <path class="nd-line" d="M -4 0.4 L -1.3 3.1 L 4 -3" />
+      ) : state === 'error' ? (
+        <>
+          <circle class="nd-line" r="4.5" />
+          <path class="nd-line" d="M -1.7 -1.7 L 1.7 1.7 M 1.7 -1.7 L -1.7 1.7" />
+        </>
+      ) : (
+        <circle class="nd-line nd-idle" r="4.5" />
+      )}
+    </g>
   );
 }

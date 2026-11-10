@@ -253,8 +253,9 @@ function page(params) {
             window.postMessage({ type: m.type, path: m.path, ...(src ? { src } : {}) }, '*');
           });
         }
-        // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none).
-        if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && !location.search.includes('firstRun=1')) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
+        // The Welcome page's recent folders (?surface=welcome; &firstRun=1 sends none). Decided here, not from the
+        // page's address: an exported page has no query string.
+        if (m && m.type === 'ready' && document.body.dataset.surface === 'welcome' && ${params.get('firstRun') !== '1'}) setTimeout(() => window.postMessage({ type: 'recent', items: [{ name: 'shop', path: '~/code/shop', current: true }, { name: 'editor-bench', path: '~/code/editor-bench' }, { name: 'reportwright', path: '~/code/reportwright' }, { name: 'folkgrove', path: '~/HRMS' }, { name: 'dotfiles', path: '~/dotfiles' }, { name: 'pagewright', path: '~/Documents/pw-stress' }] }, '*'), 0);
         if (m && m.type === 'ready' && outside) setTimeout(() => window.postMessage({ type: 'claudeImages', sessions: outside }, '*'), 0);
         // Agents & Accounts' Test connection, answered as the host would for a Qwen Code install not signed in.
         if (m && m.type === 'testAgent') setTimeout(() => window.postMessage({ type: 'agentTest', result: { ok: true, agent: 'Qwen Code 0.12.0', signIn: ['Qwen OAuth', 'API key'], needsSignIn: false, models: ['Qwen3 Coder Plus', 'Qwen3 Coder Flash'], modelCount: 2, modes: ['Default', 'Auto edit', 'Plan', 'YOLO'] } }, '*'), 300);
@@ -490,7 +491,7 @@ async function shoot() {
     const p = await open('surface=accounts&focus=gemini', 900, 700);
     await p.waitForTimeout(50);
     check(await p.evaluate(() => document.activeElement?.id === 'card-gemini'), 'opened on a card, the page focuses it');
-    check((await p.locator('.acct-card[id^="card-"]').count()) === 4, 'a card per agent, Demo included when shown');
+    check((await p.locator('.acct-card[id^="card-"]').count()) === 5, 'a card per agent: Demo when shown, and the custom agent');
     const codex = p.locator('#card-codex');
     check((await codex.locator('.acct-status').innerText()).includes('Needs sign-in'), 'Codex says it needs a sign-in');
     await codex.locator('button:has-text("ChatGPT")').click();
@@ -816,6 +817,42 @@ async function shoot() {
     await linux.close();
   }
   {
+    // A focused control does what it says. While a decision waits its keys work from the whole view, and Enter on a
+    // focused Deny used to approve the request (in the chat, on an approval card and in the Inbox, where it started
+    // the hold that allows). And Tab, which changes the request's scope, made the message box a keyboard trap.
+    const answer = (p) => p.evaluate(() => window.__posted.filter((m) => m && (m.type === 'bridge' || m.type === 'permission')).map((m) => m.answer ?? m.optionId));
+    for (const [query, sel, want] of [
+      ['surface=chat&theme=dark&select=chat-c1', '.apv .apv-act button.fl-btn--quiet', 'deny'],
+      ['surface=chat&theme=dark&fixture=approvals', '.apv-act button.fl-btn--quiet', 'reject'],
+      ['surface=tasks&theme=dark&fixture=inbox&view=inbox', 'button:has-text("Deny")', 'deny'],
+    ]) {
+      const p = await open(query, 1440, 900);
+      await p.waitForTimeout(300);
+      await p.locator(sel).first().focus();
+      await p.evaluate(() => (window.__posted.length = 0));
+      await p.keyboard.press('Enter');
+      await p.waitForTimeout(200);
+      const got = await answer(p);
+      check(got.length === 1 && got[0] === want, `${query.split('&').filter((q) => /surface|fixture/.test(q)).join(' ')}: Enter on a focused Deny answers ${want} [${got}]`);
+      await p.close();
+    }
+    const p = await open('surface=chat&theme=dark&select=chat-c1', 1440, 900);
+    await p.waitForTimeout(300);
+    const at = () => p.evaluate(() => document.activeElement?.tagName);
+    await p.click('.composer textarea');
+    await p.keyboard.press('Tab');
+    check((await at()) === 'TEXTAREA', 'while a request waits, Tab in the message box changes its scope');
+    await p.keyboard.press('Control+Shift+M');
+    const hint = await p.locator('.composer-hint').allInnerTexts();
+    await p.keyboard.press('Tab');
+    const out = await at();
+    await p.keyboard.press('Tab');
+    check(hint.some((h) => h.startsWith('Tab moves focus')) && out === 'BUTTON' && (await at()) === 'BUTTON', `Ctrl+Shift+M (Ctrl+M off macOS) makes Tab move focus out of the message box and on [${hint} · ${out}]`);
+    const described = await p.locator('.composer textarea').getAttribute('aria-description');
+    check(!!described && described.includes('Tab move focus'), 'the message box tells a screen reader how to make Tab move focus');
+    await p.close();
+  }
+  {
     // Text size: Cmd/Ctrl + = - 0 in a tab, that tab only, kept in its own webview state, and never reaching the window's zoom.
     const p = await open('surface=chat&theme=black-blue&select=chat-c5', 1200, 800);
     await p.evaluate(() => {
@@ -825,15 +862,16 @@ async function shoot() {
     const size = async () => (await p.waitForTimeout(50), p.evaluate(() => window.getComputedStyle(document.querySelector('.composer textarea')).fontSize));
     check((await size()) === '13px', 'the chat starts at 13px');
     await p.click('.composer textarea');
-    await p.keyboard.press('ControlOrMeta+Equal');
-    await p.keyboard.press('ControlOrMeta+Equal');
+    // The page is drawn as macOS (data-platform), so the size keys are Cmd's on every machine that runs this.
+    await p.keyboard.press('Meta+Equal');
+    await p.keyboard.press('Meta+Equal');
     check((await size()) === '15px', 'Cmd/Ctrl + = grows this tab by 1px a press');
     check(await p.locator('.text-size-toast:has-text("Text 15px")').isVisible(), 'the new size shows briefly');
     check((await p.evaluate(() => window.__forwarded)) === 0, 'the zoom keys don’t reach the window');
     check((await p.evaluate(() => window.__vscodeState()?.textSize)) === 15, 'the size is kept in this webview’s state');
-    await p.keyboard.press('ControlOrMeta+Minus');
+    await p.keyboard.press('Meta+Minus');
     check((await size()) === '14px', 'Cmd/Ctrl + - shrinks it');
-    await p.keyboard.press('ControlOrMeta+Digit0');
+    await p.keyboard.press('Meta+Digit0');
     check((await size()) === '13px', 'Cmd/Ctrl + 0 resets it');
     await p.close();
     const restored = await open('surface=chat&theme=black-blue&select=chat-c5&textSize=17', 1200, 800);
@@ -994,8 +1032,17 @@ async function shoot() {
       d.remove();
       return c;
     }, v);
-    // Auto (Full auto): the mode's colour is errorForeground, as in Claude Code; Manual's is the orange accent.
-    check(idle !== focused && focused === (await tone('--error')), `focus turns the border the mode's colour (${idle} → ${focused})`);
+    // v2 (COMPONENTS.md §2.27): focus is the neutral ring at 60% in every mode (the mode button says the mode, and
+    // red is kept for errors), so the edge turns --focus at 60%, never the error colour.
+    const ring60 = await p.evaluate(() => {
+      const d = document.createElement('div');
+      d.style.color = 'color-mix(in srgb, var(--focus) 60%, transparent)';
+      document.querySelector('.composer').appendChild(d);
+      const c = window.getComputedStyle(d).color;
+      d.remove();
+      return c;
+    });
+    check(idle !== focused && focused === ring60 && focused !== (await tone('--error')), `focus turns the border the neutral focus ring (${idle} → ${focused})`);
     const ring = await p.evaluate(() => window.getComputedStyle(document.querySelector('.composer')).boxShadow);
     check(/ 0px 0px 3px/.test(ring) && !ring.includes('rgb(0, 120'), `a 3px halo in the mode's colour, no blue ring [${ring}]`);
     await p.evaluate(() => window.postMessage({ type: 'action', action: { t: 'approval', chatId: 'chat-c6', level: 'ask' } }, '*'));
@@ -1195,7 +1242,11 @@ async function shoot() {
             others.every((x) => {
               const r = x.getBoundingClientRect();
               const m = x.querySelector('.fl-mark').getBoundingClientRect();
-              const d = x.querySelector('.fl-dot').getBoundingClientRect();
+              // The shape's own box about its centre: a working arc turns, and a turned square's bounds are wider than it.
+              const dot = x.querySelector('.fl-dot');
+              const b = dot.getBoundingClientRect();
+              const [cx, cy, half] = [(b.left + b.right) / 2, (b.top + b.bottom) / 2, dot.offsetWidth / 2];
+              const d = { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half };
               return r.width <= 27 && d.left >= m.left && d.right <= m.right + 3 && d.top >= m.top && d.bottom <= m.bottom + 3;
             }),
           openInView: ob.left >= lo - 1 && ob.right <= hi + 1,
@@ -1255,7 +1306,7 @@ async function shoot() {
       const shown = await tip.evaluate(() => {
         const s = document.querySelector('.tabs').getBoundingClientRect();
         const o = document.querySelector('.tabs [aria-selected="true"]').getBoundingClientRect();
-        return o.left >= s.left && o.right <= s.right;
+        return o.left >= s.left - 1 && o.right <= s.right + 1;
       });
       check(!!t && shown && t.below && t.inside && / · (Idle|Working|Needs you|Done|Problem)/.test(t.text) && t.text === name, `hovering a mark-only tab shows its tooltip at once, below, in view [${JSON.stringify(t)} vs ${name}]`);
       await tip.close();
@@ -1398,8 +1449,13 @@ async function shoot() {
   }
   {
     // Nothing spills out of a card, list row or map node, at any card width: pills shrink, wrap or cut with an ellipsis.
+    // Measured with animations paused: a working status ring spins, and a rotated square's bounding box is up to
+    // 41% wider than the square, which read as a 1-2px spill on some frames and not others.
     const spills = (p, container) =>
       p.evaluate((sel) => {
+        const freeze = document.createElement('style');
+        freeze.textContent = '*, *::before, *::after { animation-play-state: paused !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; animation-duration: 0s !important; }';
+        document.head.appendChild(freeze);
         const out = [];
         for (const box of document.querySelectorAll(sel)) {
           const r = box.getBoundingClientRect();
@@ -1411,6 +1467,7 @@ async function shoot() {
             if (e.left < inner.left - 0.5 || e.right > inner.right + 0.5) out.push(`${el.className || el.tagName} in ${box.getAttribute('data-nav') ?? sel} by ${Math.round(Math.max(inner.left - e.left, e.right - inner.right))}px`);
           }
         }
+        freeze.remove();
         return out;
       }, container);
     for (const width of [280, 360, 480]) {
@@ -1991,7 +2048,8 @@ async function subagentDetailChecks({ open, check, posted }) {
       const p = await open('surface=tasks&theme=dark-2026&view=map', width, height, 2);
       await p.evaluate((s) => window.postMessage({ type: 'claudeSessions', sessions: [s] }, '*'), fx.session);
       // The outside session's lane is the last: its fold of done agents.
-      if (state === 'done') await p.locator('.map-fold').last().click();
+      // The map is a tree now: a done agent shows without unfolding (a fold, where one is drawn, is opened).
+      if (state === 'done' && (await p.locator('.map-fold').count())) await p.locator('.map-fold').last().click();
       const node = p.locator(`.map-sub[aria-label="Subagent: ${title}"]`);
       await node.waitFor();
       await node.click();
@@ -2084,6 +2142,10 @@ function overflowFixture(now) {
 /** Run in the page: what escapes its box inside each element `sel` matches, and whether the page scrolls sideways.
     A box may scroll sideways only when that is its job (the map's canvas, code blocks, diffs, tables). */
 function overflowProbe(sel) {
+  // Animations paused while measuring: a spinning status ring's box is up to 41% wider than the ring.
+  const freeze = document.createElement('style');
+  freeze.textContent = '*, *::before, *::after { animation-play-state: paused !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; animation-duration: 0s !important; }';
+  document.head.appendChild(freeze);
   const SCROLLERS = '.map-scroll, pre, .diff, table';
   const vw = window.innerWidth;
   const name = (el) => el.tagName.toLowerCase() + [...el.classList].slice(0, 2).map((c) => `.${c}`).join('');
@@ -2112,11 +2174,14 @@ function overflowProbe(sel) {
       if (cs.display !== 'inline' && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && !el.matches(SCROLLERS)) {
         const ox = cs.overflowX;
         if (ox === 'auto' || ox === 'scroll') bad.push(`${name(el)} scrolls sideways ${el.scrollWidth - el.clientWidth}px`);
+        // A working avatar's ring is drawn around it on purpose (§ avatar): not content that ran out of its box.
+        else if (ox === 'visible' && el.matches('.fl-avatar[data-working]')) continue;
         else if (ox === 'visible') bad.push(`${name(el)} spills ${el.scrollWidth - el.clientWidth}px`);
         else if (cs.textOverflow !== 'ellipsis' && cs.webkitLineClamp === 'none') bad.push(`${name(el)} cut ${el.scrollWidth - el.clientWidth}px`);
       }
     }
   }
+  freeze.remove();
   return { page, bad: [...new Set(bad)] };
 }
 
@@ -2203,7 +2268,7 @@ async function managerOverflowChecks({ open, check }) {
           ['outside-done', p.locator(`.map-sub[aria-label^="Subagent: ${done.title.slice(0, 20)}"]`)],
         ];
         for (const [kind, node] of sheets) {
-          if (kind === 'outside-done') await p.locator('.map-fold').last().click();
+          if (kind === 'outside-done' && (await p.locator('.map-fold').count())) await p.locator('.map-fold').last().click();
           await node.click();
           await p.waitForSelector('.map-detail');
           if (kind !== 'chat-subagent') await p.waitForSelector('.sd-timeline .tl-step');
@@ -2625,7 +2690,10 @@ async function agentErrorsChecks({ open, check }) {
       await gemini.close();
       if (width !== 900) continue;
       const main = await open(`surface=chat&theme=${theme}&fixture=agent-errors&select=chat-main`, width, 700, 2);
-      const install = main.locator('.notice code.notice-detail');
+      // An error with something after it is not in the transcript (it toasted): the chat's menu reopens it.
+      await main.getByRole('button', { name: 'More' }).first().click();
+      await main.getByRole('menuitem', { name: '2 errors' }).click();
+      const install = main.locator('.fl-toast code.notice-detail');
       check((await install.innerText()) === 'npm install -g @google/gemini-cli' && /mono|courier|menlo/i.test(await install.evaluate((e) => e.ownerDocument.defaultView.getComputedStyle(e).fontFamily)), `${tone}: an install command stays code, in the editor's font`);
       await main.getByRole('button', { name: 'More' }).first().click();
       await main.waitForSelector('[role="menuitem"]');
@@ -2682,7 +2750,7 @@ async function approvalsChecks({ open, check }) {
   check((await p.locator('#item-perm-edit .fl-split').count()) === 1 && (await p.locator('#item-perm-edit[data-focus]').count()) === 1, 'the edit is a card with the split Allow, ringed as the one the keys act on');
   for (const id of ['perm-push', 'perm-env', 'bridge-click'])
     check((await p.locator(`#item-${id}[data-risk="careful"] .fl-btn--hold`).count()) === 1 && (await p.locator(`#item-${id} .fl-split`).count()) === 0, `${id}: careful, hold to allow, no scope menu`);
-  check((await p.locator('.fl-btn--brand:not(.fl-split-caret)').count()) === 1, 'one brand primary on screen (its split caret aside)');
+  check((await p.locator('.fl-btn--primary:not(.fl-split-caret)').count()) === 1, 'one primary on screen (its split caret aside)');
   check((await p.locator('#item-perm-push .apv-commit').count()) === 3 && (await p.locator('#item-perm-push').innerText()).includes('Safer:'), 'the force push lists the commits it would drop and the safer way');
 
   // The Allow menu names each rule; picking one allows with it.

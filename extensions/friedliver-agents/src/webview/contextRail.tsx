@@ -32,7 +32,7 @@ export function ContextRail({ chat }: { chat: ChatView }) {
   return (
     <aside class="ctx-rail" aria-label="This chat">
       <section>
-        <h3>This chat</h3>
+        <h2>This chat</h2>
         <div class="ctx-facts">
           <div>
             <div class="ctx-l">Agent</div>
@@ -60,23 +60,23 @@ export function ContextRail({ chat }: { chat: ChatView }) {
       <section id="ctx-jump" class="ctx-jump" />
       {f.changed.length > 0 && (
         <section>
-          <h3>
+          <h2>
             Files changed <Count n={f.changed.length} />
-          </h3>
+          </h2>
           <FileRows chat={chat} files={f.changed} />
         </section>
       )}
       {f.read.length > 0 && (
         <section>
-          <h3>
+          <h2>
             Files read <Count n={f.read.length} />
-          </h3>
+          </h2>
           <FileRows chat={chat} files={f.read} />
         </section>
       )}
       {f.rewind.length > 0 && (
         <section>
-          <h3>Rewind points</h3>
+          <h2>Rewind points</h2>
           {f.rewind.slice(0, 6).map((r) => (
             <Row key={r.checkpoint} icon="history" title="Rewind to here" meta={r.at ? clock(r.at) : undefined} onPress={() => send({ type: 'rewind', chatId: chat.id, turnId: r.checkpoint })}>
               {r.label}

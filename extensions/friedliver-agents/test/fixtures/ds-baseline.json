@@ -14,7 +14,7 @@
     },
     "webview.css": {
       "colour": 8,
-      "px": 74,
+      "px": 68,
       "effect": 4,
       "restyle": [
         ".acct-tag",
@@ -37,7 +37,6 @@
         ".map-you .you-badge-text",
         ".mini-badge",
         ".new-task textarea",
-        ".perms h2 .count",
         ".reopen .fl-menu__title",
         ".rewind-btn:focus-visible",
         ".search",
@@ -115,9 +114,9 @@
   },
   "totals": {
     "colour": 9,
-    "px": 150,
+    "px": 144,
     "effect": 5,
-    "restyle": 82,
+    "restyle": 81,
     "rawControls": 57
   }
 }

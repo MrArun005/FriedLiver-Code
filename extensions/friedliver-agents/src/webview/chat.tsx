@@ -61,7 +61,7 @@ import { applyFile, hashQuery, nextInCycle, slashOptions, slashQuery } from '../
 import { questionGroups } from '../shared/questions';
 import { inbox } from '../shared/inbox';
 import { foldApprovals } from '../shared/steps';
-import { AddAgentItem, ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
+import { AddAgentItem, ClampedText, CopyButton, itemKey, useNow, useTabStrip, DOT_LABEL, Dot, Glyph, Icon, ImageThumb, LiveState, Markdown, Popover, SignInMark, basename, isTyping, memo, ownKey, OpenImage, scrollBehavior, send, useAgentDefaults, useHost, usePersisted, useRoster, useWidth } from './common';
 import { Viewer } from './viewer';
 import { ContextRail } from './contextRail';
 
@@ -69,7 +69,7 @@ import { ContextRail } from './contextRail';
 const RAIL_MIN = 1100;
 import { chatGallery } from '../shared/gallery';
 import { AskMenu, HandoffTargets, PipeTargets } from './connect';
-import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp } from './controls';
+import { AutoBadge, syncDecisionTarget, usageSamples, EditsBar, PermissionCard, QuestionCard, QueueList, WaitingCard, decisionKey, decisionKeyUp, decisionTarget } from './controls';
 import { Steps } from './steps';
 import { TextSize } from './textSize';
 import { chatImages } from '../shared/stepImages';
@@ -77,7 +77,7 @@ import { RunningAgents, SubagentCard } from './subagents';
 import { AgentMap, AttachmentChip, ComposerPills, ModeButton, ModelMenu, ModesMenu, SlashMenu, currentMode, type ComposerMenu } from './composerMenus';
 import { RefChip, RefList, refsOf, sameRef } from './refs';
 import { AgentMark, Avatar, BrandMark, Banner, Button, Card, CardHead, ChipButton, FileRef, IconButton, MenuItem, Pill, Tab, Timestamp, Toast, ToastRegion } from './ui';
-import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, type NoticeItem } from '../shared/toasts';
+import { MAX_TOASTS, TOAST_SECONDS, addToasts, isToastNotice, standingError, type NoticeItem } from '../shared/toasts';
 import { agentOverride } from '../shared/session';
 
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/;
@@ -85,6 +85,9 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** The mic button: dictation through the app's macOS speech helper (host/dictation.ts). */
 const MAC = document.body.dataset.platform === 'mac';
 /** The OS's own dictation keys, for the mic's fallback hint; none on Linux, where the hint isn't shown. */
+const TAB_FOCUS_KEY = MAC ? 'Ctrl+Shift+M' : 'Ctrl+M';
+/** A waiting request whose Allow has a scope (once, this chat, always), which Tab changes from the message box. */
+const scopedRequest = (i: Item | undefined): boolean => i?.kind === 'permission' || (i?.kind === 'bridge' && !i.once);
 const DICTATE_HINT = MAC ? 'Press Fn twice to dictate' : document.body.dataset.platform === 'windows' ? 'Press Win+H to dictate' : undefined;
 /** This webview is the side bar's chat list, not a chat tab. */
 const LIST = document.body.dataset.view === 'list';
@@ -221,7 +224,7 @@ function App() {
           <>
             <ChatHeader chat={chat} state={state} onSelect={select} onShowErrors={toasts.reopen} />
             <div class="chat-body" data-rail={rail ? '' : undefined}>
-            <div class="chat-col">
+            <main class="chat-col">
             <Transcript
               chat={chat}
               state={state}
@@ -243,7 +246,7 @@ function App() {
               found={found?.chatId === chat.id ? found : null}
               linked={state.chats.filter((c) => c.origin?.chatId === chat.id && !c.archived)}
             />
-            </div>
+            </main>
             {rail && <ContextRail chat={chat} />}
             </div>
           </>
@@ -289,7 +292,10 @@ function useErrorToasts(chat: ChatView | undefined, resync: { current: boolean }
     }
     const fresh = errors.filter((e) => !known.current.keys.has(itemKey(e)));
     for (const e of fresh) known.current.keys.add(itemKey(e));
-    if (fresh.length) setShown((s) => addToasts(s, fresh));
+    // The one the chat stands on is in the transcript (standingError): no toast beside it.
+    const standing = chat && standingError(chat.items);
+    const pop = fresh.filter((e) => e !== standing);
+    if (pop.length) setShown((s) => addToasts(s, pop));
   }, [chat?.id, errors]);
   return {
     shown,
@@ -327,7 +333,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
   const open = openChats(state.chats);
   const needs = open.filter(needsYou).length;
   return (
-    <div class="switcher">
+    <nav class="switcher" aria-label="Chats">
       <div class="tabs" ref={box} role="tablist" aria-label="Open chats" data-fit={fit} data-overflow={over ? '' : undefined} onKeyDown={onKeys}>
         {strip.map((c) => (
           <Tab
@@ -409,7 +415,7 @@ function Switcher({ state, active, onSelect, tabs, onClose }: { state: AppState;
         }}
       </Popover>
       <IconButton icon="tasks" label="Agent Manager" muted title="Agent Manager" class="manager-btn" onClick={() => send({ type: 'openTasks' })} />
-    </div>
+    </nav>
   );
 }
 
@@ -533,6 +539,7 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
   const errors = useMemo(() => chat.items.filter(isToastNotice).length, [chat.items]);
   const status = statusOf(chat);
   const discussing = discussingLabel(chat.items);
+  const statusWords = chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status];
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
   // The banner covers where this chat came from, and a handoff has its card in the transcript; chips cover the rest.
@@ -544,9 +551,11 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
         <div class="chat-head-text">
           <div class="chat-head-row">
             <Avatar agent={chat.agent} working={chat.busy} />
-            <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
-              {chat.title}
-            </button>
+            <h1 class="chat-head-h">
+              <button class="chat-head-title" title={`${chatTip(chat)} · click to rename`} onClick={() => send({ type: 'renameChat', chatId: chat.id })}>
+                {chat.title}
+              </button>
+            </h1>
             {chat.branch && (
               <span class="fl-pill branch-chip" data-tone="muted" title={`${chat.branch}\n${chat.cwd}`}>
                 <Icon name="branch" />
@@ -595,9 +604,9 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
             )}
           </Popover>
         )}
-        <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
+        <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'} title={statusWords}>
           <Dot state={status} still={status !== 'working'} />
-          {chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status]}
+          <span class="status-words">{statusWords}</span>
         </Pill>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />
@@ -779,8 +788,32 @@ function revealIds(i: Item): string[] {
   return ids.filter((x): x is string => typeof x === 'string');
 }
 
-/** Groups shown at first, and added each time you scroll up to the earliest one shown. */
+/**
+ * "In this chat": every message of yours, to jump to. A long chat has a thousand; it is drawn again only when
+ * that list or the message in view changes, not on every word the agent writes or every lot of earlier
+ * messages scrolled in.
+ */
+const JumpList = memo(function JumpList({ asks, current, rail, onShow }: { asks: { key: string; text: string; label: string }[]; current: string; rail: boolean; onShow(key: string): void }) {
+  return (
+    <nav class="jump-list" aria-label="In this chat" data-rail={rail ? '' : undefined}>
+      <b>In this chat</b>
+      {asks.map((a) => (
+        <button key={a.key} class="jump-item" title={a.text} aria-current={current === `msg-${a.key}` ? 'true' : undefined} onClick={() => onShow(a.key)}>
+          {a.label}
+        </button>
+      ))}
+    </nav>
+  );
+});
+
+/** Groups shown at first. */
 const WINDOW = 120;
+/**
+ * Groups added each time you scroll up to the earliest one shown. Fewer than the first window: 120 at once held
+ * the page for 60 to 100ms (445ms on a four-times-slower machine) in the middle of a scroll; a third of that is
+ * under two frames, and the next lot is asked for as soon as this one is in.
+ */
+const EARLIER = 40;
 
 function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, onSelect, rail }: TranscriptProps) {
   // With the context rail, "In this chat" draws in the rail's slot (§2.34) instead of beside the transcript.
@@ -794,7 +827,10 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
     stick.current = true;
     setLimit(WINDOW);
   }, [chat.id]);
-  const { items, approvals } = useMemo(() => foldApprovals(withoutDiscussionTurns(chat.items).filter((i) => !isToastNotice(i))), [chat.items]);
+  const { items, approvals } = useMemo(() => {
+    const standing = standingError(chat.items);
+    return foldApprovals(withoutDiscussionTurns(chat.items).filter((i) => !isToastNotice(i) || i === standing));
+  }, [chat.items]);
   // The marked decision card moves on when it is answered: its hint and outline follow.
   useEffect(() => syncDecisionTarget(chat), [chat.items]);
   const groups = useMemo(() => {
@@ -828,7 +864,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       ([e]) => {
         if (!e.isIntersecting || !box.current) return;
         anchor.current = { height: box.current.scrollHeight, top: box.current.scrollTop };
-        setLimit((n) => n + WINDOW);
+        setLimit((n) => n + EARLIER);
       },
       { root: box.current, rootMargin: '400px 0px 0px 0px' },
     );
@@ -851,7 +887,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   const waitingKey = [...waiting].join('\n');
   const waitingNow = waitingItems(chat.items).length > 0;
 
-  const asks = groups.flatMap((g) => (g.kind === 'one' && g.item.kind === 'user' && g.item.text.trim() ? [{ key: g.key, text: g.item.text, at: g.at }] : []));
+  const asks = useMemo(() => groups.flatMap((g) => (g.kind === 'one' && g.item.kind === 'user' && g.item.text.trim() ? [{ key: g.key, text: g.item.text, at: g.at, label: clip(g.item.text, 60) }] : [])), [groups]);
   const jump = asks.length >= 2;
   // The message whose turn you are reading, once it has scrolled out of view: its copy sticks at the top.
   // An IntersectionObserver tells which messages have gone above the view; nothing reads boxes on scroll.
@@ -873,6 +909,9 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
   }, [asks.length, shownFrom, chat.id]);
   const pastText = past === undefined ? undefined : asks.find((a) => a.key === past)?.text;
   const seen = useInView(box, jump ? asks.filter((a) => a.at >= (groups[shownFrom]?.at ?? 0)).map((a) => `msg-${a.key}`) : []);
+  // The jump list keeps one handler for the chat's life, so it redraws only when its messages or the one in view change.
+  const showNow = useRef<(key: string) => void>(() => {});
+  const jumpTo = useCallback((key: string) => showNow.current(key), []);
   const show = (key: string, expand?: boolean) => {
     const go = () => (expand ? openMessage(key) : scrollToMessage(key));
     if (document.getElementById(`msg-${key}`)) go();
@@ -881,6 +920,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       requestAnimationFrame(go);
     }
   };
+  showNow.current = show;
   return (
     <div class="transcript-wrap" data-jump={jump && !rail ? "" : undefined}>
     <div
@@ -933,16 +973,7 @@ function TranscriptView({ chat, state, roster, conflicts, conflictKey, reveal, o
       )}
       {jump &&
         (() => {
-          const nav = (
-            <nav class="jump-list" aria-label="In this chat" data-rail={railSlot ? '' : undefined}>
-              <b>In this chat</b>
-              {asks.map((a) => (
-                <button key={a.key} class="jump-item" title={a.text} aria-current={(seen ?? `msg-${asks[0].key}`) === `msg-${a.key}` ? 'true' : undefined} onClick={() => show(a.key)}>
-                  {clip(a.text, 60)}
-                </button>
-              ))}
-            </nav>
-          );
+          const nav = <JumpList asks={asks} current={seen ?? `msg-${asks[0].key}`} rail={!!railSlot} onShow={jumpTo} />;
           return railSlot ? createPortal(nav, railSlot) : rail ? null : nav;
         })()}
     </div>
@@ -1359,6 +1390,12 @@ function Composer({
   const [shut, setShut] = useState(false);
   /** The /discuss mention the picker is settling (its chip pressed, or Send pressed while it was unsettled). */
   const [fixing, setFixing] = useState(false);
+  // Tab and Shift+Tab are the decision's scope and the mode while you type (as in Claude Code), so the box would be a
+  // keyboard trap (WCAG 2.1.2). Ctrl+M (macOS: Ctrl+Shift+M), VS Code's own "Toggle Tab Key Moves Focus", hands
+  // Tab back to the browser until pressed again.
+  const [tabMoves, setTabMoves] = useState(false);
+  const tabMovesNow = useRef(false);
+  tabMovesNow.current = tabMoves;
   const area = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
   useEffect(() => area.current?.focus(), [chat.id, focusTick]);
@@ -1426,7 +1463,11 @@ function Composer({
   const picked = menu[Math.min(pick, menu.length - 1)];
   const asking = mentionedAgent(text);
   const question = parseMention(text);
-  const hint = commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined);
+  const hint = (tabMoves ? `Tab moves focus · ${TAB_FOCUS_KEY} turns it off` : undefined) ?? commands.find((c) => c.hint && text === `/${c.name} `)?.hint ?? (chat.busy && text.trim() ? 'Sends after this turn · Esc stops' : undefined) ?? (!text.trim() && scopedRequest(decisionTarget(chat)) ? (
+      <>
+        Tab: once, this chat or always<span class="composer-hint-more">· {TAB_FOCUS_KEY}: Tab moves focus</span>
+      </>
+    ) : undefined);
 
   const reset = () => {
     setText('');
@@ -1487,6 +1528,10 @@ function Composer({
     const onKey = (e: KeyboardEvent) => {
       // The box handles its own keys; other fields keep theirs.
       if (e.defaultPrevented || isTyping(e.target)) return;
+      // A focused control does what it says: Enter or Space on Deny denies (it used to approve), and Tab moves
+      // on from it (it used to change the scope, so the view was a keyboard trap). The keys still work from
+      // the page itself, and Tab never once Ctrl+M has handed it back.
+      if ((e.key === 'Tab' && tabMovesNow.current) || ownKey(e)) return;
       decisionKey(e, live.current, true);
     };
     // Enter let go anywhere (the message box included) ends a hold that hasn't finished.
@@ -1744,6 +1789,8 @@ function Composer({
               value={text}
               rows={1}
               aria-label={`Message ${agentName(chat.agent)}`}
+              aria-description={`Shift+Tab changes the mode; while a request waits, Tab changes its scope. ${TAB_FOCUS_KEY} makes Tab move focus.`}
+              aria-keyshortcuts={TAB_FOCUS_KEY.replace('Ctrl', 'Control')}
               aria-autocomplete="list"
               aria-controls={picking ? listId : undefined}
               aria-activedescendant={picking && picked ? `${listId}-${picked.key}` : undefined}
@@ -1792,6 +1839,13 @@ function Composer({
                     return;
                   }
                 }
+                if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'm' && e.shiftKey === MAC) {
+                  e.preventDefault();
+                  setTabMoves((on) => !on);
+                  return;
+                }
+                // Tab moves focus: the browser's own Tab, before any shortcut can take it.
+                if (tabMoves && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) return;
                 if (decisionKey(e, chat, !text.trim())) return;
                 if (e.key === 'Tab' && e.shiftKey) {
                   // Shift+Tab, as in Claude Code: Ask → Auto-accept edits → Plan.
