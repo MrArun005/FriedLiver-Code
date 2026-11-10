@@ -226,12 +226,15 @@ export function EditsBar({ chat }: { chat: ChatView }) {
         {waiting} edit{waiting === 1 ? '' : 's'} waiting
       </span>
       <span class="spacer" />
-      <Button size="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' })}>
-        Accept all
-      </Button>
-      <Button size="sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
-        Reject all
-      </Button>
+      {/* One group: in a narrow side bar the two wrap together, never one beside the words and one below. */}
+      <span class="edits-actions">
+        <Button size="sm" title="Accept these and the rest of this turn's edits (Ctrl+Alt+Shift+Y)" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'accept' })}>
+          Accept all
+        </Button>
+        <Button size="sm" title="Reject these and the rest of this turn's edits" onClick={() => send({ type: 'reviewAll', chatId: chat.id, action: 'reject' })}>
+          Reject all
+        </Button>
+      </span>
     </div>
   );
 }

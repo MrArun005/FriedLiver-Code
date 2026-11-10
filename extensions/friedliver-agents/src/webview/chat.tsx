@@ -539,6 +539,7 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
   const errors = useMemo(() => chat.items.filter(isToastNotice).length, [chat.items]);
   const status = statusOf(chat);
   const discussing = discussingLabel(chat.items);
+  const statusWords = chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status];
   const parent = chat.origin && state.chats.find((c) => c.id === chat.origin!.chatId);
   // The banner covers where this chat came from; chips cover the rest.
   // The banner covers where this chat came from, and a handoff has its card in the transcript; chips cover the rest.
@@ -603,9 +604,9 @@ function ChatHeader({ chat, state, onSelect, onShowErrors }: { chat: ChatView; s
             )}
           </Popover>
         )}
-        <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'}>
+        <Pill class="status-pill" tone={status === 'needs-you' ? 'waiting' : 'muted'} title={statusWords}>
           <Dot state={status} still={status !== 'working'} />
-          {chat.session?.starting && status === 'idle' ? 'Starting' : (status !== 'needs-you' && discussing) || DOT_LABEL[status]}
+          <span class="status-words">{statusWords}</span>
         </Pill>
         <div class="chat-head-actions">
           <AskMenu chat={chat} compact />

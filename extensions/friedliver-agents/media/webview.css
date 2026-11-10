@@ -4143,6 +4143,22 @@ button.chat-head-title:hover {
   --dot: 10px;
   margin-right: var(--sp-1);
 }
+/* A side bar: the status keeps its shape and gives its words' room to the chat's name (the tab and the
+   pill's tooltip still say it). */
+@container chat-head (max-width: 340px) {
+  .status-pill .status-words {
+    display: none;
+  }
+  .status-pill .fl-dot {
+    margin-right: 0;
+  }
+}
+/* Accept all and Reject all stay side by side, and wrap under the words together. */
+.edits-actions {
+  display: inline-flex;
+  flex: none;
+  gap: var(--sp-2);
+}
 .chat-head-actions {
   flex: none;
   display: flex;

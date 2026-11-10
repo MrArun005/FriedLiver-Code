@@ -2448,6 +2448,20 @@ summary.fl-discuss__row:hover {
     width: 100%;
   }
 }
+/* A side bar: the positions stack, one under the other, each the card's full width. Side by side there, a
+   column is some 85px and a quote breaks into one letter a line. A tile's head and its quote line wrap too. */
+@media (max-width: 480px) {
+  .fl-discuss__board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fl-discuss__col[data-empty] {
+    align-self: stretch;
+  }
+  .fl-discuss__tile-head,
+  .fl-discuss__sub {
+    flex-wrap: wrap;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .fl-discuss details > summary > .icon:first-child {
     transition: none;
