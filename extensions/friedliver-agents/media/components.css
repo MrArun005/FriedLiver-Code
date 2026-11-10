@@ -3453,6 +3453,27 @@ button.fl-row,
    IconButton, Pill (18, pill radius) and Input looks above. It keeps its cc-* names; change it only
    with the owner's sign-off, and change the components above to match. */
 
+/* ---- Around the composer, not of it. The composer's own section below is approved as it stands and frozen
+   (test/composer-frozen.test.ts); these add no look to its controls. A pill's pointer area is the footer row's
+   height, drawn nowhere. The hint line gives way before the pills beside it, and under 640px of composer its
+   second half goes whole before the first is cut. ---- */
+button.cc-pill {
+  position: relative;
+}
+button.cc-pill::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--sp-1)) 0;
+}
+.composer-hint {
+  flex: 0 1000 auto;
+}
+@container (max-width: 640px) {
+  .composer-hint-more {
+    display: none;
+  }
+}
+
 /* ---- Composer (§2.1, §2.2): one box, one tone; chips, the message, one row of controls ---- */
 
 .composer-dock {
@@ -3610,7 +3631,7 @@ button.cc-mic {
   width: 26px;
   height: 26px;
   margin-right: 5px;
-  border-radius: var(--r-ctl);
+  border-radius: var(--r-5);
   color: var(--mic-fg);
   background: var(--mic-bg);
 }
@@ -3664,15 +3685,6 @@ button.cc-pill {
   line-height: 18px;
   white-space: nowrap;
 }
-/* The pill stays slim; the pointer gets the footer row's height. */
-button.cc-pill {
-  position: relative;
-}
-button.cc-pill::after {
-  content: '';
-  position: absolute;
-  inset: calc(-1 * var(--sp-1)) 0;
-}
 button.cc-pill:hover {
   background: var(--pill-hover);
 }
@@ -3696,8 +3708,6 @@ button.cc-agents .dot {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  /* Short of room, the hint gives way first: the agent and model pills beside it keep their names. */
-  flex: 0 1000 auto;
   min-width: 0;
   margin-left: 6px;
   overflow: hidden;
@@ -3763,12 +3773,6 @@ button.send-btn:disabled {
   background: var(--pill-bg);
   color: var(--fg-2);
   box-shadow: none;
-}
-/* The hint's second half goes whole before the first is cut. */
-@container (max-width: 640px) {
-  .composer-hint-more {
-    display: none;
-  }
 }
 /* Narrow: labels go before anything overlaps (the controls keep their tooltips). */
 @container (max-width: 420px) {
