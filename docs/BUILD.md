@@ -6,8 +6,8 @@ the agent core and the scripts. Upstream
 [microsoft/vscode](https://github.com/microsoft/vscode) (MIT) is cloned at build
 time. See the [README](../README.md) for the layout.
 
-Pinned upstream: **1.142.0** (`d956e8a6ac5d904486557eea07e1d6bd62a4d36f`). On
-2026-10-16 this was the newest version on `update.code.visualstudio.com/api/releases/stable`.
+Pinned upstream: **1.144.0** (`2c33b50b16c472efe58357d1d2a8a5414bc23fbf`). On
+2026-11-02 this was the newest version on `update.code.visualstudio.com/api/releases/stable`.
 
 ## Quick start (any OS)
 
