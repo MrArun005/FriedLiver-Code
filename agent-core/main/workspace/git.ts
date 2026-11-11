@@ -11,7 +11,7 @@ const run = promisify(execFile);
  * Git by absolute path on Windows: started by bare name with the repository as
  * its working folder, Windows would run a `git.exe` the repository contains.
  */
-function gitProgram(): string {
+export function gitProgram(): string {
   if (process.platform !== 'win32') return 'git';
   const found = findOnWindowsPath('git.exe');
   if (!found) throw new Error('Git is not installed (git.exe is not on PATH).');

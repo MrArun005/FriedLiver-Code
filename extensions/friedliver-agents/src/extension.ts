@@ -50,6 +50,9 @@ import { chatOfSession, clip, linkResumeChats, needsYou, panelTitle, statusOf } 
 import { agentName, chatPick, statusTexts, turnEndedText, chatRef } from './shared/names';
 import { linkDestination, linkTarget } from './shared/links';
 import { codexModelVisibility } from './host/codexModels';
+import { Companion, characterFor, type CharacterSetting } from './host/companion';
+import { CharacterRepo, PULL_EVERY_MS } from './host/characterRepo';
+import { gitProgram } from '@friedliver/main/workspace/git';
 
 /** friedliver.links.openIn: where web links you click open. */
 const linkMode = () => vscode.workspace.getConfiguration('friedliver.links').get('openIn');
@@ -169,7 +172,8 @@ export class Controller {
   private readonly asked = new Set<string>();
   /** Decisions with a notification of their own still open; later ones are counted in one summary. */
   private readonly toasts = new Set<string>();
-  private summaryOpen = false;
+  /** The open "N decisions waiting" notification's count, while it is open. */
+  private summary: ((count: number) => void) | undefined;
   /** Commands whose open notification offers Run; its Run button approves nothing else. */
   private readonly runnable = new Set<string>();
   /** Actions on their way to the webviews, sent in batches while agents stream. */
@@ -418,8 +422,16 @@ export class Controller {
       this.batcher.push(action);
       this.stateFile?.schedule();
       if (action.t === 'turnUsage') this.checkUsage(state);
+      this.companionSoon();
     });
     context.subscriptions.push({ dispose: unsubscribe });
+    command('friedliver.agents.companionAnswer', (id: unknown, choiceId: unknown) => this.companion.answer(id, choiceId));
+    command('friedliver.companion.updateCharacters', () => this.characterRepo.sync(this.characterRepoUrl()));
+    void this.characterRepo.sync(this.characterRepoUrl());
+    const pullCharacters = setInterval(() => void this.characterRepo.sync(this.characterRepoUrl()), PULL_EVERY_MS);
+    context.subscriptions.push({ dispose: () => clearInterval(pullCharacters) });
+    command('friedliver.agents.companionMediaFailed', (key: unknown) => this.companion.videoFailed(key));
+    command('friedliver.agents.openChat', (chatId: unknown) => typeof chatId === 'string' && this.core.chat(chatId) && this.showChat(chatId));
 
     command('friedliver.newChat', (agent?: unknown) => this.newChat(isAgentKey(agent) ? agent : undefined));
     // The editor title's chat button (every tab, beside Split Editor): the same "New chat with…" picker.
@@ -536,7 +548,76 @@ export class Controller {
     if (added) await this.openRuleFile(PROJECT_RULES);
   }
 
+  // ---- The companion (host/companion.ts; drawn by patches/0310-companion.patch) ----
+
+  private readonly companion = new Companion({
+    // A plain VS Code has no workbench patch, so no companion and nothing to say. In FriedLiver a missing
+    // command means patch 0310 didn't load: said once in the log, so it doesn't fail silently again.
+    run: (command, arg) =>
+      void vscode.commands.executeCommand(command, arg).then(undefined, (err: unknown) => {
+        if (this.companionBroken || !/friedliver/i.test(vscode.env.appName)) return;
+        this.companionBroken = true;
+        this.log.error(`Companion: ${command} failed, so agent requests won't show in the window (is patch 0310 in this build?): ${err instanceof Error ? err.message : String(err)}`);
+      }),
+    // The same calls the chat's cards reach through handle(): permission, command, review, bridge, question.
+    answer: (m) => {
+      if (m.type === 'permission') this.core.answerPermission(m.requestId, m.optionId);
+      else if (m.type === 'command') this.core.decideCommand(m.commandId, m.approve);
+      else if (m.type === 'review' && m.action === 'accept') this.reviews.accept(m.reviewId);
+      else if (m.type === 'review' && m.action === 'reject') this.reviews.reject(m.reviewId);
+      else if (m.type === 'bridge') this.core.answerBridge(m.requestId, m.answer);
+      else if (m.type === 'answerQuestion') this.core.answerQuestion(m.requestId, m.action, m.values);
+    },
+    enabled: () => vscode.workspace.getConfiguration('friedliver.companion').get<boolean>('enabled', true),
+    state: () => this.core.snapshot,
+    videoFailed: (file) => {
+      const message = `${path.basename(file)} can't play in FriedLiver — save it as .webm (VP9) or a GIF.`;
+      this.log.warn(`Companion: ${message} (${file})`);
+      void vscode.window.showWarningMessage(plainText(message));
+    },
+    character: (agentId, failed) => {
+      const config = vscode.workspace.getConfiguration('friedliver.companion');
+      // The user's own settings only: a repository must not point these at files.
+      // Your own entries only: the manifest's default map is the built-ins, which must not outrank your folder or repository.
+      const characters = config.inspect<Record<string, CharacterSetting>>('characters')?.globalValue;
+      const folder = userSetting(config.inspect<string>('folder')).value;
+      return characterFor(agentId, {
+        builtinDir: path.join(this.context.extensionPath, 'media', 'characters'),
+        characters: characters && typeof characters === 'object' ? characters : undefined,
+        folder: typeof folder === 'string' ? folder : undefined,
+        repoDir: this.characterRepo.dir(this.characterRepoUrl()),
+        failed,
+      });
+    },
+  });
+  private companionTimer: ReturnType<typeof setTimeout> | undefined;
+  private companionBroken = false;
+  private readonly characterRepo = new CharacterRepo({
+    storage: () => this.context.globalStorageUri.fsPath,
+    git: gitProgram,
+    warn: (message) => {
+      this.log.warn(`Companion: ${message}`);
+      void vscode.window.showWarningMessage(plainText(message));
+    },
+  });
+
+  /** friedliver.companion.repo, from your user settings only: a repository must not point it anywhere. */
+  private characterRepoUrl(): string | undefined {
+    const url = userSetting(vscode.workspace.getConfiguration('friedliver.companion').inspect<string>('repo')).value;
+    return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+  }
+
+  /** ponytail: coalesces the state's bursts (streaming) into one check per 50 ms; a click re-checks at once. */
+  private companionSoon(): void {
+    this.companionTimer ??= setTimeout(() => {
+      this.companionTimer = undefined;
+      this.companion.update(this.core.snapshot);
+    }, 50);
+  }
+
   async dispose(): Promise<void> {
+    clearTimeout(this.companionTimer);
+    this.companion.clear();
     // Save before the core shuts down: stopping cancels running turns, and a
     // restored chat should read "stopped when the window closed", not "cancelled".
     await this.stateFile?.flush();
@@ -1573,6 +1654,8 @@ export class Controller {
    */
   private notifyDecision(id: string, chatId: string | undefined, message: string, buttons: { title: string; run(): void }[]): void {
     if (!vscode.workspace.getConfiguration('friedliver.notify').get<boolean>('decisions', true) || this.onScreen(chatId)) return;
+    // The companion brings every ask a chat holds to the window: its card and the chat's are enough.
+    if (chatId && this.companionShows()) return;
     if (this.toasts.size > 0) {
       this.notifySummary();
       return;
@@ -1587,14 +1670,38 @@ export class Controller {
     });
   }
 
+  /**
+   * "N decisions waiting": a notification that follows the count and closes itself at zero (a plain
+   * message can't be closed or changed once shown).
+   */
   private notifySummary(): void {
-    if (this.summaryOpen) return;
-    this.summaryOpen = true;
     const n = this.core.decisions().length;
-    void vscode.window.showWarningMessage(`${n} decision${n === 1 ? '' : 's'} waiting`, 'Show').then((picked) => {
-      this.summaryOpen = false;
-      if (picked) void this.nextDecision();
-    });
+    if (this.summary) {
+      this.summary(n);
+      return;
+    }
+    void vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Waiting for you', cancellable: true }, (progress, token) =>
+      new Promise<void>((resolve) => {
+        let last = -1;
+        const done = () => {
+          this.summary = undefined;
+          resolve();
+        };
+        this.summary = (count) => {
+          if (count === 0) return done();
+          if (count === last) return;
+          last = count;
+          progress.report({ message: `${count} decision${count === 1 ? '' : 's'} [Show](command:friedliver.nextDecision)` });
+        };
+        token.onCancellationRequested(done);
+        this.summary(n);
+      }),
+    );
+  }
+
+  /** Whether the companion (patch 0310) shows the asks: on, in FriedLiver, and its command answered. */
+  private companionShows(): boolean {
+    return !this.companionBroken && /friedliver/i.test(vscode.env.appName) && vscode.workspace.getConfiguration('friedliver.companion').get<boolean>('enabled', true);
   }
 
   /** Commands wait in the chat; a notification offers Run only when it shows the whole command exactly as it will run. */
@@ -1671,6 +1778,7 @@ export class Controller {
 
   /** Decisions made in a view, the board or the diff editor no longer hold their notification's place. */
   private closeAnswered(): void {
+    this.summary?.(this.core.decisions().length);
     if (this.toasts.size === 0 && this.runnable.size === 0) return;
     const open = new Set(this.core.decisions().map((d) => d.id));
     for (const id of [...this.toasts]) if (!open.has(id)) this.toasts.delete(id);
@@ -2107,6 +2215,12 @@ export class Controller {
     if (e.affectsConfiguration('friedliver.discuss.layout')) {
       const message: HostMessage = { type: 'discussLayout', layout: this.discussLayout() };
       for (const s of this.surfaces) post(s, message);
+    }
+    if (e.affectsConfiguration('friedliver.companion.repo')) void this.characterRepo.sync(this.characterRepoUrl());
+    // On or off, or other characters: at once. A new look re-shows what waits (it runs in again).
+    if (e.affectsConfiguration('friedliver.companion')) {
+      if (!e.affectsConfiguration('friedliver.companion.enabled')) this.companion.clear();
+      this.companion.update(this.core.snapshot);
     }
     if (e.affectsConfiguration('friedliver.images')) void this.tidyImages().finally(() => this.postImageStore());
     if (e.affectsConfiguration('friedliver.restoreChats')) {
